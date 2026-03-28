@@ -1,0 +1,211 @@
+<section class="page">
+  <header>
+    <div>
+      <h1>Reportes de mantenimiento</h1>
+      <p>Solicitudes, reportes y firmas por equipo.</p>
+    </div>
+    <div class="header-actions">
+      <a class="back" routerLink="/dashboard">Regresar</a>
+      <button (click)="loadData()" [disabled]="loading">Recargar</button>
+    </div>
+  </header>
+
+  <div class="card filters-card" *ngIf="!auth.currentUser()?.clientId">
+    <div class="filters-top" *ngIf="clients.length">
+      <div class="filters">
+        <label>
+          Buscar cliente
+          <input type="text" [(ngModel)]="clientSearchTerm" placeholder="Escribe para filtrar..." />
+        </label>
+        <label>
+          Cliente
+          <select [(ngModel)]="selectedClientId" (change)="onClientChange()">
+            <option *ngFor="let client of filteredClients" [value]="client.id">{{ client.name }}</option>
+          </select>
+        </label>
+      </div>
+      <div class="client-preview" *ngIf="selectedClientInfo">
+        <div class="client-preview-info">
+          <div><strong>{{ selectedClientInfo.name }}</strong></div>
+          <div *ngIf="selectedClientInfo.nit">NIT: {{ selectedClientInfo.nit }}</div>
+          <div *ngIf="selectedClientInfo.city">Ciudad: {{ selectedClientInfo.city }}</div>
+          <div *ngIf="selectedClientInfo.address">Dirección: {{ selectedClientInfo.address }}</div>
+          <div *ngIf="selectedClientInfo.email">Correo: {{ selectedClientInfo.email }}</div>
+        </div>
+        <img *ngIf="clientLogoUrl(selectedClientInfo)" [src]="clientLogoUrl(selectedClientInfo)!" alt="Logo cliente" />
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-bar">
+    <button
+      type="button"
+      class="tab"
+      [class.active]="viewMode === 'solicitudes'"
+      (click)="viewMode = 'solicitudes'"
+    >
+      Solicitudes
+    </button>
+    <button
+      type="button"
+      class="tab"
+      [class.active]="viewMode === 'reportes'"
+      (click)="viewMode = 'reportes'"
+    >
+      Reportes
+    </button>
+    <button
+      type="button"
+      class="tab"
+      [class.active]="viewMode === 'equipos'"
+      (click)="viewMode = 'equipos'"
+    >
+      Datos del equipo
+    </button>
+  </div>
+
+  <ng-container *ngIf="viewMode === 'solicitudes'">
+    <div class="grid">
+      <div class="card" *ngIf="auth.hasPermission('maintenance:request:create')">
+        <h2>Nueva solicitud</h2>
+        <form (ngSubmit)="createRequest()">
+          <label>
+            Tipo
+            <select [(ngModel)]="requestType" name="requestType">
+              <option value="correctivo">Correctivo</option>
+              <option
+                value="preventivo"
+                *ngIf="!auth.hasRole('lector') && !auth.hasRole('almacenista')"
+              >
+                Preventivo
+              </option>
+            </select>
+          </label>
+          <label>
+            Equipo
+            <select [(ngModel)]="requestAssetId" name="requestAssetId">
+              <option *ngFor="let asset of assets" [value]="asset.id">{{ asset.code }} - {{ asset.name }}</option>
+            </select>
+          </label>
+          <label>
+            Descripción
+            <textarea [(ngModel)]="requestDescription" name="requestDescription" rows="3"></textarea>
+          </label>
+          <button type="submit" [disabled]="loading">Crear solicitud</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Solicitudes</h2>
+      <p *ngIf="loading">Cargando...</p>
+      <div class="table" *ngIf="!loading">
+        <div class="row header">
+          <span>Equipo</span>
+          <span>Tipo</span>
+          <span>Estado</span>
+          <span>Acciones</span>
+        </div>
+        <div class="row" *ngFor="let request of requests">
+          <span>{{ assetLabel(request.asset_id) }}</span>
+          <span>{{ request.type }}</span>
+          <span>{{ request.status }}</span>
+          <span>
+            <button *ngIf="canTakeRequest(request)" type="button" (click)="takeRequest(request.id)">
+              Tomar
+            </button>
+            <button
+              *ngIf="auth.hasRole('superuser')"
+              type="button"
+              class="danger"
+              (click)="deleteRequest(request.id)"
+            >
+              Eliminar
+            </button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="viewMode === 'reportes'">
+    <div class="grid">
+      <div class="card" *ngIf="auth.hasPermission('maintenance:report:create')">
+        <h2>Crear reporte</h2>
+        <form (ngSubmit)="createReport()">
+          <label>
+            Solicitud
+            <select [(ngModel)]="reportRequestId" name="reportRequestId">
+              <option *ngFor="let request of requests" [value]="request.id">
+                {{ request.type }} · {{ assetLabel(request.asset_id) }}
+              </option>
+            </select>
+          </label>
+          <label>
+            Resumen
+            <textarea [(ngModel)]="reportSummary" name="reportSummary" rows="2"></textarea>
+          </label>
+          <label>
+            Hallazgos
+            <textarea [(ngModel)]="reportFindings" name="reportFindings" rows="2"></textarea>
+          </label>
+          <label>
+            Acciones realizadas
+            <textarea [(ngModel)]="reportActions" name="reportActions" rows="2"></textarea>
+          </label>
+          <button type="submit" [disabled]="loading">Guardar reporte</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Reportes</h2>
+      <div class="table">
+        <div class="row header">
+          <span>Equipo</span>
+          <span>Tipo</span>
+          <span>Estado</span>
+          <span>Acciones</span>
+        </div>
+        <div class="row" *ngFor="let report of reports">
+          <span>{{ assetLabel(report.asset_id) }}</span>
+          <span>{{ report.type }}</span>
+          <span>{{ report.request_status || 'reportado' }}</span>
+          <span>
+            <button type="button" (click)="downloadReport(report.id)">PDF</button>
+            <button *ngIf="canSignReport(report)" type="button" (click)="signReport(report.id)">
+              Firmar
+            </button>
+            <button
+              *ngIf="auth.hasRole('superuser')"
+              type="button"
+              class="danger"
+              (click)="deleteReport(report.id)"
+            >
+              Eliminar
+            </button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="viewMode === 'equipos'">
+    <div class="card">
+      <h2>Datos del equipo</h2>
+      <div class="table">
+        <div class="row header">
+          <span>Código</span>
+          <span>Equipo</span>
+        </div>
+        <div class="row" *ngFor="let asset of assets">
+          <span>{{ asset.code }}</span>
+          <span>{{ asset.name }}</span>
+        </div>
+      </div>
+    </div>
+  </ng-container>
+
+  <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+  <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+</section>

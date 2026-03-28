@@ -1,0 +1,199 @@
+<section class="page">
+  <header>
+    <div>
+      <h1>Usuarios</h1>
+      <p>Solo superuser puede crear o administrar usuarios.</p>
+    </div>
+    <div class="header-actions">
+      <a class="back" routerLink="/dashboard">Regresar</a>
+      <button (click)="load()" [disabled]="loading">Recargar</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Crear usuario</h2>
+      <form (ngSubmit)="onCreateUser()">
+        <label>
+          Usuario
+          <input type="text" name="username" [(ngModel)]="username" required />
+        </label>
+
+        <label>
+          Nombre visible
+          <input type="text" name="displayName" [(ngModel)]="displayName" required />
+        </label>
+
+        <label>
+          Correo
+          <input type="email" name="email" [(ngModel)]="email" required />
+        </label>
+
+        <label>
+          Contraseña
+          <input type="password" name="password" [(ngModel)]="password" required />
+        </label>
+
+        <label>
+          Rol
+          <select name="role" [(ngModel)]="role">
+            <option *ngFor="let roleOption of roles" [value]="roleOption">{{ roleOption }}</option>
+          </select>
+        </label>
+
+        <label *ngIf="requiresSignature(role)">
+          Firma digital (imagen)
+          <input type="file" accept="image/*" (change)="onSignatureSelected($event)" />
+        </label>
+
+        <label *ngIf="isClientScopedRole(role)">
+          Cliente asignado
+          <select name="clientId" [(ngModel)]="clientId">
+            <option *ngFor="let client of clients" [value]="client.id">{{ client.name }}</option>
+          </select>
+        </label>
+
+        <button type="submit">Crear usuario</button>
+      </form>
+      <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+      <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+    </div>
+
+    <div class="card">
+      <h2>Listado</h2>
+      <label>
+        Buscar
+        <input type="text" [(ngModel)]="searchTerm" placeholder="Nombre, usuario o correo..." />
+      </label>
+      <p *ngIf="loading">Cargando...</p>
+      <div class="list" *ngIf="!loading">
+        <div class="client-card" *ngFor="let group of groupedUsers; trackBy: trackByGroup">
+          <button type="button" class="client-toggle" (click)="toggleClientOpen(group.id)">
+            <div>
+              <strong>{{ group.name }}</strong>
+              <span>{{ group.users.length }} usuarios</span>
+            </div>
+            <span class="chevron">{{ openClientId === group.id ? '▴' : '▾' }}</span>
+          </button>
+          <div class="client-body" *ngIf="openClientId === group.id">
+            <div class="user-row" *ngFor="let user of (group.users || []); trackBy: trackByUser">
+              <div class="info">
+                <strong>{{ user.displayName }}</strong>
+                <span>{{ user.username }}</span>
+                <span>{{ user.email }}</span>
+              </div>
+              <div class="meta">
+                <select [ngModel]="user.roles[0]" (ngModelChange)="onChangeRole(user, $event)">
+                  <option *ngFor="let roleOption of roles" [value]="roleOption">{{ roleOption }}</option>
+                </select>
+                <button type="button" (click)="onToggleActive(user)">
+                  {{ user.isActive ? 'Bloquear' : 'Activar' }}
+                </button>
+                <button type="button" class="ghost" (click)="startEditUser(user)">Editar</button>
+                <button type="button" class="danger" (click)="removeUser(user)">Eliminar</button>
+              </div>
+              <div class="edit-form" *ngIf="editingUserId === user.id">
+                <label>
+                  Nombre visible
+                  <input type="text" [(ngModel)]="editUser.displayName" />
+                </label>
+                <label>
+                  Correo
+                  <input type="email" [(ngModel)]="editUser.email" />
+                </label>
+                <label *ngIf="requiresSignature(user.roles[0] || 'viewer')">
+                  Firma digital (imagen)
+                  <input type="file" accept="image/*" (change)="onEditSignatureSelected($event)" />
+                </label>
+                <label *ngIf="!isClientScopedRole(user.roles[0] || 'viewer')">
+                  Cliente
+                  <select [(ngModel)]="editUser.clientId">
+                    <option value="">Sin cliente</option>
+                    <option *ngFor="let client of clients" [value]="client.id">{{ client.name }}</option>
+                  </select>
+                </label>
+                <div class="client-fixed" *ngIf="isClientScopedRole(user.roles[0] || 'viewer')">
+                  <strong>Cliente asignado</strong>
+                  <span>{{ user.clientName || 'Sin cliente' }}</span>
+                </div>
+                <div class="reader-access" *ngIf="isReader(user) && (user.clientId || editUser.clientId)">
+                  <h4>Accesos del lector (áreas y ubicaciones)</h4>
+                  <div class="reader-grid">
+                    <div>
+                      <strong>Áreas</strong>
+                      <div class="reader-list">
+                        <p class="muted" *ngIf="readerAreas.length === 0">Sin áreas creadas.</p>
+                        <label *ngFor="let area of readerAreas">
+                          <input
+                            type="checkbox"
+                            [checked]="readerAreaIds.has(area.id)"
+                            (change)="toggleReaderArea(area.id)"
+                          />
+                          {{ area.name }}
+                        </label>
+                      </div>
+                    </div>
+                    <div>
+                      <strong>Ubicaciones</strong>
+                      <div class="reader-list">
+                        <p class="muted" *ngIf="readerLocations.length === 0">Sin ubicaciones creadas.</p>
+                        <label *ngFor="let location of readerLocations">
+                          <input
+                            type="checkbox"
+                            [checked]="readerLocationIds.has(location.id)"
+                            (change)="toggleReaderLocation(location.id)"
+                          />
+                          {{ location.name }}
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="edit-actions">
+                  <button type="button" (click)="saveUser(user)">Guardar</button>
+                  <button type="button" class="ghost" (click)="cancelEditUser()">Cancelar</button>
+                </div>
+              </div>
+              <div class="password">
+                <input type="password" placeholder="Nueva contraseña" #pwdInput />
+                <button type="button" (click)="onChangePassword(user, pwdInput.value); pwdInput.value=''">
+                  Cambiar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+      <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+    </div>
+  </div>
+
+  <div class="roles">
+    <button type="button" class="collapsible-toggle" (click)="rolesOpen = !rolesOpen">
+      Roles y permisos
+      <span class="chevron">{{ rolesOpen ? '▴' : '▾' }}</span>
+    </button>
+    <div *ngIf="rolesOpen">
+      <p>Activa o desactiva permisos por rol.</p>
+      <div class="roles-grid">
+        <div class="role-card" *ngFor="let roleOption of roles">
+          <h3>{{ roleOption }}</h3>
+          <div class="perm-list">
+            <label *ngFor="let permission of permissions">
+              <input
+                type="checkbox"
+                [checked]="rolePermissions[roleIds.get(roleOption) ?? 0]?.includes(permission)"
+                (change)="togglePermission(roleIds.get(roleOption) ?? 0, permission)"
+              />
+              {{ permission }}
+            </label>
+          </div>
+          <button type="button" (click)="saveRolePermissions(roleIds.get(roleOption) ?? 0)">
+            Guardar permisos
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

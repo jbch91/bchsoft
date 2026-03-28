@@ -1,0 +1,108 @@
+<section class="page">
+  <header>
+    <div>
+      <h1>Calibraciones</h1>
+      <p>Cronograma y certificados de calibración.</p>
+    </div>
+    <div class="header-actions">
+      <a class="back" routerLink="/dashboard">Regresar</a>
+      <button (click)="loadSchedules()" [disabled]="loading">Recargar</button>
+    </div>
+  </header>
+
+  <div class="card filters-card" *ngIf="!auth.currentUser()?.clientId">
+    <div class="filters-top" *ngIf="clients.length">
+      <div class="filters">
+        <label>
+          Buscar cliente
+          <input type="text" [(ngModel)]="clientSearchTerm" placeholder="Escribe para filtrar..." />
+        </label>
+        <label>
+          Cliente
+          <select [(ngModel)]="selectedClientId" (change)="onClientChange()">
+            <option *ngFor="let client of filteredClients" [value]="client.id">{{ client.name }}</option>
+          </select>
+        </label>
+      </div>
+      <div class="client-preview" *ngIf="selectedClientInfo">
+        <div class="client-preview-info">
+          <div><strong>{{ selectedClientInfo.name }}</strong></div>
+          <div *ngIf="selectedClientInfo.nit">NIT: {{ selectedClientInfo.nit }}</div>
+          <div *ngIf="selectedClientInfo.city">Ciudad: {{ selectedClientInfo.city }}</div>
+          <div *ngIf="selectedClientInfo.address">Dirección: {{ selectedClientInfo.address }}</div>
+          <div *ngIf="selectedClientInfo.email">Correo: {{ selectedClientInfo.email }}</div>
+        </div>
+        <img *ngIf="clientLogoUrl(selectedClientInfo)" [src]="clientLogoUrl(selectedClientInfo)!" alt="Logo cliente" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card" *ngIf="schedules.length">
+    <label>
+      Cronograma
+      <select [(ngModel)]="selectedScheduleId" (change)="loadItems()">
+        <option *ngFor="let schedule of schedules" [value]="schedule.id">
+          {{ schedule.year }} · {{ schedule.start_date | date: 'dd/MM/yyyy' }}
+        </option>
+      </select>
+    </label>
+  </div>
+
+  <div class="card" *ngIf="selectedScheduleId">
+    <h2>Detalle de calibraciones</h2>
+    <div class="items-table">
+      <div class="item-row header">
+        <span>Código</span>
+        <span>Equipo</span>
+        <span>Área</span>
+        <span>Inicio</span>
+        <span>Fin</span>
+        <span>Estado</span>
+        <span>Acta</span>
+      </div>
+      <div class="item-row" *ngFor="let item of items">
+        <span>{{ item.code }}</span>
+        <span>{{ item.name }}</span>
+        <span>{{ item.area_name || '-' }}</span>
+        <span>{{ item.planned_date | date: 'dd/MM/yyyy' }}</span>
+        <span>{{ item.deadline_date | date: 'dd/MM/yyyy' }}</span>
+        <span>{{ itemStatus(item) }}</span>
+        <span class="actions">
+          <button
+            *ngIf="item.pdf_path"
+            type="button"
+            class="ghost"
+            (click)="openPdf(item)"
+          >
+            Ver PDF
+          </button>
+          <button
+            *ngIf="item.pdf_path && auth.hasRole('superuser')"
+            type="button"
+            class="danger"
+            (click)="deletePdf(item)"
+          >
+            Eliminar
+          </button>
+          <button
+            type="button"
+            class="upload-btn"
+            *ngIf="!item.pdf_path"
+            [disabled]="!canUploadCalibration(item)"
+            (click)="fileInput.click()"
+          >
+            Subir Acta
+          </button>
+          <input
+            #fileInput
+            class="upload-input"
+            type="file"
+            accept="application/pdf"
+            [disabled]="!canUploadCalibration(item)"
+            (change)="uploadPdf(item, $event)"
+          />
+        </span>
+      </div>
+    </div>
+  </div>
+</section>

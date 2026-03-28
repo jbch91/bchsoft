@@ -1,0 +1,93 @@
+<section class="dashboard">
+  <header>
+    <div class="header-left">
+      <div class="client-inline" *ngIf="clientInfo">
+        <div class="client-info">
+          <strong>{{ clientInfo.name }}</strong>
+          <span>NIT: {{ clientInfo.nit }}</span>
+          <span>Ciudad: {{ clientInfo.city }}</span>
+          <span *ngIf="clientInfo.address">Dirección: {{ clientInfo.address }}</span>
+          <span>Correo: {{ clientInfo.email }}</span>
+        </div>
+        <div class="client-logo" *ngIf="clientLogoUrl()">
+          <img [src]="clientLogoUrl()!" alt="Logo cliente" />
+        </div>
+      </div>
+      <p>Bienvenido, {{ auth.currentUser()?.displayName }}</p>
+    </div>
+    <button (click)="auth.logout()" routerLink="/login">Salir</button>
+  </header>
+
+  <div class="cards">
+    <a
+      routerLink="/clientes"
+      class="card"
+      *ngIf="auth.hasRole('superuser') && canShow('clientes')"
+    >
+      <h2>Clientes</h2>
+      <p>Ver y administrar la base de clientes.</p>
+    </a>
+    <a
+      routerLink="/usuarios"
+      class="card"
+      *ngIf="auth.hasRole('superuser') && canShow('usuarios')"
+    >
+      <h2>Usuarios</h2>
+      <p>Crear y administrar cuentas.</p>
+    </a>
+
+    <a
+      routerLink="/auditoria"
+      class="card"
+      *ngIf="auth.hasPermission('users:manage') && canShow('auditoria')"
+    >
+      <h2>Auditoría</h2>
+      <p>Historial de cambios del sistema.</p>
+    </a>
+
+    <a
+      routerLink="/hojas-de-vida"
+      class="card"
+      *ngIf="!auth.hasRole('lector') && (auth.hasPermission('hb:create') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('hojas_de_vida')"
+    >
+      <h2>Hojas de vida</h2>
+      <p>Equipos biomédicos por cliente.</p>
+    </a>
+
+    <a
+      routerLink="/inventario"
+      class="card"
+      *ngIf="(auth.hasPermission('hb:create') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('inventario')"
+    >
+      <h2>Inventario</h2>
+      <p>Listado básico de equipos.</p>
+    </a>
+
+    <a
+      routerLink="/mantenimiento"
+      class="card"
+      *ngIf="(auth.hasPermission('maintenance:request:create') || auth.hasPermission('maintenance:report:create') || auth.hasPermission('maintenance:report:sign') || auth.hasPermission('read:all')) && canShow('reportes_mantenimiento')"
+    >
+      <h2>Reportes de mantenimiento</h2>
+      <p>Solicitudes, reportes y firmas.</p>
+    </a>
+
+    <a
+      routerLink="/cronogramas"
+      class="card"
+      *ngIf="auth.hasPermission('schedules:manage') && canShow('cronogramas')"
+    >
+      <h2>Cronogramas y Capacitaciones</h2>
+      <p>Plan anual de preventivos y capacitaciones.</p>
+    </a>
+
+    <a
+      routerLink="/calibraciones"
+      class="card"
+      *ngIf="(auth.hasPermission('calibration:schedule:manage') || auth.hasPermission('calibration:report:upload') || auth.hasPermission('read:all')) && canShow('calibraciones')"
+    >
+      <h2>Calibraciones</h2>
+      <p>Cronograma y certificados de calibración.</p>
+    </a>
+  </div>
+</section>

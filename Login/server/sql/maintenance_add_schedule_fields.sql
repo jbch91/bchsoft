@@ -1,0 +1,4 @@
+ALTER TABLE maintenance_requests
+ADD COLUMN IF NOT EXISTS planned_date DATE,
+ADD COLUMN IF NOT EXISTS deadline_date DATE,
+ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual';

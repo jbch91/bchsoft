@@ -1,0 +1,194 @@
+<section class="page">
+  <header>
+    <div>
+      <h1>Inventario</h1>
+      <p>Listado de equipos biomédicos.</p>
+    </div>
+    <div class="header-actions">
+      <a class="back" routerLink="/dashboard">Regresar</a>
+      <button (click)="loadItems()" [disabled]="loading">Recargar</button>
+    </div>
+  </header>
+
+  <div class="card filters-card">
+    <div class="filters-top" *ngIf="clients.length">
+      <div class="filters">
+        <label>
+          Buscar cliente
+          <input type="text" [(ngModel)]="clientSearchTerm" placeholder="Escribe para filtrar..." />
+        </label>
+        <label>
+          Cliente
+          <select [(ngModel)]="selectedClientId" (change)="loadItems()">
+            <option *ngFor="let client of filteredClients" [value]="client.id">{{ client.name }}</option>
+          </select>
+        </label>
+      </div>
+      <div class="client-preview" *ngIf="selectedClientInfo">
+        <div class="client-preview-info">
+          <div><strong>{{ selectedClientInfo.name }}</strong></div>
+          <div *ngIf="selectedClientInfo.nit">NIT: {{ selectedClientInfo.nit }}</div>
+          <div *ngIf="selectedClientInfo.city">Ciudad: {{ selectedClientInfo.city }}</div>
+          <div *ngIf="selectedClientInfo.address">Dirección: {{ selectedClientInfo.address }}</div>
+          <div *ngIf="selectedClientInfo.email">Correo: {{ selectedClientInfo.email }}</div>
+        </div>
+        <img *ngIf="clientLogoUrl(selectedClientInfo)" [src]="clientLogoUrl(selectedClientInfo)!" alt="Logo cliente" />
+      </div>
+    </div>
+
+    <div class="filters-grid">
+      <label>
+        Búsqueda
+        <input type="text" [(ngModel)]="searchTerm" placeholder="Código, nombre, marca, serie..." />
+      </label>
+      <label>
+        Área
+        <select [(ngModel)]="filterArea">
+          <option value="">Todas</option>
+          <option *ngFor="let area of areaOptions" [value]="area">{{ area }}</option>
+        </select>
+      </label>
+      <label>
+        Ubicación
+        <select [(ngModel)]="filterLocation">
+          <option value="">Todas</option>
+          <option *ngFor="let location of locationOptions" [value]="location">{{ location }}</option>
+        </select>
+      </label>
+      <label>
+        Estado operativo
+        <select [(ngModel)]="filterStatus">
+          <option value="">Todos</option>
+          <option *ngFor="let status of statusOptions" [value]="status">{{ status }}</option>
+        </select>
+      </label>
+      <label>
+        Exportar como
+        <select [(ngModel)]="exportFormat">
+          <option value="xlsx">Excel (.xlsx)</option>
+          <option value="csv">CSV (.csv)</option>
+          <option value="pdf">PDF (.pdf)</option>
+        </select>
+      </label>
+      <button type="button" class="ghost" (click)="clearFilters()">Limpiar</button>
+      <button type="button" class="ghost" (click)="exportInventory(true)">Exportar filtrado</button>
+      <button type="button" class="ghost" (click)="exportInventory(false)">Exportar todo</button>
+    </div>
+
+    <div class="filter-summary">
+      <span>Mostrando {{ filteredCount }} de {{ totalCount }} equipos</span>
+      <div class="filter-chips" *ngIf="activeFilters.length">
+        <button
+          type="button"
+          class="chip"
+          *ngFor="let filter of activeFilters"
+          (click)="clearFilter(filter.key)"
+        >
+          {{ filter.label }} ✕
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <p *ngIf="loading">Cargando...</p>
+  <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+
+  <div class="card table-card" *ngIf="!loading">
+    <div class="table">
+    <div class="row header">
+      <span>Código</span>
+      <span>Equipo</span>
+      <span>Marca</span>
+      <span>Modelo</span>
+      <span>Serial</span>
+      <span>Área</span>
+      <span>Ubicación</span>
+      <span>Acciones</span>
+    </div>
+    <ng-container *ngFor="let item of filteredItems">
+      <div class="row">
+        <span data-label="Código">{{ item.code }}</span>
+        <span data-label="Equipo">{{ item.name }}</span>
+        <span data-label="Marca">{{ item.brand || '-' }}</span>
+        <span data-label="Modelo">{{ item.model || '-' }}</span>
+        <span data-label="Serial">{{ item.serial || '-' }}</span>
+        <span data-label="Área">{{ item.areaName || '-' }}</span>
+        <span data-label="Ubicación">{{ item.locationName || '-' }}</span>
+        <span class="actions">
+          <button type="button" (click)="toggleHistory(item)">Ver hoja de vida</button>
+          <button type="button" *ngIf="auth.hasPermission('hb:create')" (click)="goEdit(item)">
+            Editar
+          </button>
+          <button
+            type="button"
+            class="danger"
+            *ngIf="auth.hasPermission('hb:create')"
+            (click)="deleteItem(item)"
+          >
+            Eliminar
+          </button>
+        </span>
+      </div>
+      <div class="history-inline" *ngIf="expandedAssetId === item.id" [attr.id]="'history-' + item.id">
+        <div class="history-inline-header">
+          <div class="history-inline-title">
+            <strong>Historial del equipo</strong>
+            <button type="button" class="hide-btn" (click)="toggleHistory(item)">Ocultar</button>
+          </div>
+          <div class="history-inline-filters">
+            <label>
+              Desde
+              <input type="date" [(ngModel)]="historyFrom" (change)="loadHistory()" />
+            </label>
+            <label>
+              Hasta
+              <input type="date" [(ngModel)]="historyTo" (change)="loadHistory()" />
+            </label>
+            <button type="button" class="ghost" (click)="loadHistory()">Buscar</button>
+          </div>
+        </div>
+
+        <div class="history-list">
+        <p class="muted" *ngIf="historyLoading">Cargando mantenimientos...</p>
+        <p class="muted" *ngIf="!historyLoading && historyCalibrationLoading">Cargando calibraciones...</p>
+        <div class="history-row header">
+          <span>Tipo</span>
+          <span>Fecha</span>
+          <span>Resumen</span>
+          <span>Acciones</span>
+        </div>
+        <div class="history-row">
+          <span>Hoja de vida</span>
+          <span>-</span>
+          <span>PDF de hoja de vida del equipo</span>
+          <span><button type="button" class="history-btn" (click)="openHistoryHv()">VER</button></span>
+        </div>
+        <div class="history-row" *ngFor="let report of historyReports">
+          <span>{{ report.type }}</span>
+          <span>{{ report.created_at | date: 'dd/MM/yyyy' }}</span>
+          <span>{{ report.summary || 'Reporte de mantenimiento' }}</span>
+          <span><button type="button" class="history-btn" (click)="openReportPdf(report.id)">VER</button></span>
+        </div>
+        <div class="history-row" *ngFor="let report of historyCalibration">
+          <span>Calibración</span>
+          <span>{{ (report.completed_at || report.planned_date) | date: 'dd/MM/yyyy' }}</span>
+          <span>Certificado de calibración</span>
+          <span><button type="button" class="history-btn" (click)="openCalibrationPdf(report.id)">VER</button></span>
+        </div>
+        <p class="muted" *ngIf="!historyLoading && historyReports.length === 0 && historyCalibration.length === 0">
+          Sin reportes en el rango seleccionado.
+        </p>
+        <div class="history-more">
+          <button type="button" class="ghost" [disabled]="historyLoading || historyOffset === 0" (click)="prevHistoryPage()">
+            Anterior
+          </button>
+          <button type="button" class="ghost" [disabled]="historyLoading || (!historyHasMoreMaintenance && !historyHasMoreCalibration)" (click)="nextHistoryPage()">
+            Siguiente
+          </button>
+        </div>
+      </div>
+      </div>
+    </ng-container>
+  </div>
+  </div>
+</section>

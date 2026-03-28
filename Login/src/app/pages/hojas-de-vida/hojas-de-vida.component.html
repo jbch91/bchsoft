@@ -1,0 +1,536 @@
+<section class="page">
+  <header>
+    <div>
+      <h1>Hojas de vida</h1>
+      <p>Registro de equipos biomédicos por cliente.</p>
+    </div>
+    <div class="header-actions">
+      <a class="back" routerLink="/dashboard">Regresar</a>
+      <button (click)="loadAssets()" [disabled]="loading">Recargar</button>
+    </div>
+  </header>
+
+  <div class="card filters-card" *ngIf="clients.length">
+    <div class="filters-top">
+      <div class="filters">
+        <label>
+          Buscar cliente
+          <input type="text" [(ngModel)]="clientSearchTerm" placeholder="Escribe para filtrar..." />
+        </label>
+        <label>
+          Cliente
+          <select [(ngModel)]="selectedClientId" (change)="loadAssets(); loadAreas()">
+            <option *ngFor="let client of filteredClients" [value]="client.id">{{ client.name }}</option>
+          </select>
+        </label>
+      </div>
+      <div class="client-preview" *ngIf="selectedClientInfo">
+        <div class="client-preview-info">
+          <div><strong>{{ selectedClientInfo.name }}</strong></div>
+          <div *ngIf="selectedClientInfo.nit">NIT: {{ selectedClientInfo.nit }}</div>
+          <div *ngIf="selectedClientInfo.city">Ciudad: {{ selectedClientInfo.city }}</div>
+          <div *ngIf="selectedClientInfo.address">Dirección: {{ selectedClientInfo.address }}</div>
+          <div *ngIf="selectedClientInfo.email">Correo: {{ selectedClientInfo.email }}</div>
+        </div>
+        <img *ngIf="clientLogoUrl(selectedClientInfo)" [src]="clientLogoUrl(selectedClientInfo)!" alt="Logo cliente" />
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-bar">
+    <button
+      type="button"
+      class="tab"
+      [class.active]="viewMode === 'inventory'"
+      (click)="viewMode = 'inventory'"
+    >
+      Inventario
+    </button>
+    <button
+      type="button"
+      class="tab"
+      *ngIf="auth.hasPermission('hb:create')"
+      [class.active]="viewMode === 'form'"
+      (click)="viewMode = 'form'"
+    >
+      Crear/Editar hoja de vida
+    </button>
+    <button
+      type="button"
+      class="tab"
+      *ngIf="auth.hasPermission('areas:manage')"
+      [class.active]="viewMode === 'areas'"
+      (click)="viewMode = 'areas'"
+    >
+      Áreas y ubicaciones
+    </button>
+  </div>
+
+  <div class="admin-tools" *ngIf="auth.hasPermission('areas:manage') && viewMode === 'areas'">
+    <div class="sub-tabs">
+      <button
+        type="button"
+        class="sub-tab"
+        [class.active]="areasView === 'list'"
+        (click)="areasView = 'list'"
+      >
+        Listado
+      </button>
+      <button
+        type="button"
+        class="sub-tab"
+        [class.active]="areasView === 'create-area'"
+        (click)="areasView = 'create-area'"
+      >
+        Crear área
+      </button>
+      <button
+        type="button"
+        class="sub-tab"
+        [class.active]="areasView === 'create-location'"
+        (click)="areasView = 'create-location'"
+      >
+        Crear ubicación
+      </button>
+    </div>
+
+    <div class="tool-card" *ngIf="areasView === 'list'">
+      <h3>Áreas y ubicaciones</h3>
+      <div class="tree">
+        <div class="tree-item" *ngFor="let area of areas; trackBy: trackByAreaId">
+          <div class="tree-row">
+            <strong>{{ area.name }}</strong>
+            <div class="tree-actions">
+              <button type="button" class="tiny" (click)="startEditArea(area.id)">Editar</button>
+              <button type="button" class="tiny danger" (click)="onDeleteArea(area.id)">Eliminar</button>
+            </div>
+          </div>
+          <div class="tree-edit" *ngIf="editingAreaId === area.id">
+            <input type="text" [(ngModel)]="areaEdits[area.id]" />
+            <button type="button" class="tiny" (click)="onUpdateArea(area.id)">Guardar</button>
+            <button type="button" class="tiny ghost" (click)="cancelEditArea()">Cancelar</button>
+          </div>
+
+          <div class="tree-children">
+            <div class="tree-row child" *ngFor="let location of locationsByArea(area.id); trackBy: trackByLocationId">
+              <span>{{ location.name }}</span>
+              <div class="tree-actions">
+                <button type="button" class="tiny" (click)="startEditLocation(location.id)">Editar</button>
+                <button type="button" class="tiny danger" (click)="onDeleteLocation(location.id)">Eliminar</button>
+              </div>
+            </div>
+            <div class="tree-edit child" *ngIf="isEditingLocationInArea(area.id)">
+              <input type="text" [(ngModel)]="locationEdits[editingLocationId!]" />
+              <button type="button" class="tiny" (click)="onUpdateLocation(editingLocationId!)">Guardar</button>
+              <button type="button" class="tiny ghost" (click)="cancelEditLocation()">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tool-card" *ngIf="areasView === 'create-area'">
+      <h3>Crear área</h3>
+      <div class="row">
+        <input type="text" [(ngModel)]="newAreaName" placeholder="Nombre del área" />
+        <button type="button" (click)="onCreateArea()">Agregar</button>
+      </div>
+      <div class="tree compact-list">
+        <div class="tree-item" *ngFor="let area of areas; trackBy: trackByAreaId">
+          <div class="tree-row">
+            <strong>{{ area.name }}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="tool-card" *ngIf="areasView === 'create-location'">
+      <h3>Crear ubicación</h3>
+      <div class="row compact">
+        <select [(ngModel)]="areaId" (change)="loadLocationsForForm()">
+          <option *ngFor="let area of areas" [value]="area.id">{{ area.name }}</option>
+        </select>
+        <input type="text" [(ngModel)]="newLocationName" placeholder="Nombre de la ubicación" />
+        <button type="button" (click)="onCreateLocation()">Agregar</button>
+      </div>
+      <div class="tree compact-list">
+        <div class="tree-item" *ngFor="let area of areas; trackBy: trackByAreaId">
+          <div class="tree-row">
+            <strong>{{ area.name }}</strong>
+          </div>
+          <div class="tree-children">
+            <div class="tree-row child" *ngFor="let location of locationsByArea(area.id); trackBy: trackByLocationId">
+              <span>{{ location.name }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid" *ngIf="viewMode === 'inventory'">
+    <div class="card">
+      <h2>Inventario (listado básico)</h2>
+      <p *ngIf="loading">Cargando...</p>
+      <div class="table" *ngIf="!loading">
+        <div class="row header">
+          <span>Código</span>
+          <span>Equipo</span>
+          <span>Marca</span>
+          <span>Modelo</span>
+          <span>Serial</span>
+          <span>Área</span>
+          <span>Ubicación</span>
+          <span>Acciones</span>
+        </div>
+        <div class="row" *ngFor="let asset of assets">
+          <span data-label="Código">{{ asset.code }}</span>
+          <span data-label="Equipo">{{ asset.name }}</span>
+          <span data-label="Marca">{{ asset.brand || '-' }}</span>
+          <span data-label="Modelo">{{ asset.model || '-' }}</span>
+          <span data-label="Serial">{{ asset.serial || '-' }}</span>
+          <span data-label="Área">{{ asset.areaName || '-' }}</span>
+          <span data-label="Ubicación">{{ asset.locationName || '-' }}</span>
+          <span class="actions">
+            <button type="button" (click)="downloadPdf(asset)">PDF</button>
+            <button type="button" *ngIf="auth.hasPermission('hb:create')" (click)="startEdit(asset)">
+              Editar
+            </button>
+            <button
+              type="button"
+              class="danger"
+              *ngIf="auth.hasPermission('hb:create')"
+              (click)="deleteAsset(asset)"
+            >
+              Eliminar
+            </button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid" *ngIf="viewMode === 'form'">
+    <div class="card full" *ngIf="auth.hasPermission('hb:create'); else readOnlyNotice">
+      <h2>{{ editingAssetId ? 'Editar hoja de vida' : 'Crear hoja de vida' }}</h2>
+      <form (ngSubmit)="onCreateAsset()">
+        <div class="form-section" *ngIf="showSection(0)">
+          <h3>DATOS DEL EQUIPO</h3>
+          <div class="section-grid">
+            <label>
+              Foto del equipo
+              <div class="file-field">
+                <input type="file" accept="image/*" (change)="onPhotoSelected($event)" />
+              </div>
+              <div class="photo-preview" *ngIf="photoPreviewUrl">
+                <img [src]="photoPreviewUrl" alt="Vista previa" />
+                <span>{{ photo?.name }}</span>
+              </div>
+            </label>
+            <label class="required">
+              <span class="label-line"><span class="label-text">Nombre</span><span class="required-star">*</span></span>
+              <input type="text" name="name" [(ngModel)]="name" required />
+            </label>
+            <label class="required">
+              <span class="label-line"><span class="label-text">Marca</span><span class="required-star">*</span></span>
+              <input type="text" name="brand" [(ngModel)]="brand" required />
+            </label>
+            <label class="required">
+              <span class="label-line"><span class="label-text">Modelo</span><span class="required-star">*</span></span>
+              <input type="text" name="model" [(ngModel)]="model" required />
+            </label>
+            <label class="required">
+              <span class="label-line"><span class="label-text">Serie</span><span class="required-star">*</span></span>
+              <input type="text" name="serial" [(ngModel)]="serial" required />
+            </label>
+            <label class="required">
+              <span class="label-line"><span class="label-text">Área</span><span class="required-star">*</span></span>
+              <select [(ngModel)]="areaId" name="areaId" (change)="loadLocationsForForm()" required>
+                <option *ngFor="let area of areas" [value]="area.id">{{ area.name }}</option>
+              </select>
+            </label>
+            <label class="required">
+              <span class="label-line"><span class="label-text">Ubicación</span><span class="required-star">*</span></span>
+              <select [(ngModel)]="locationId" name="locationId" required>
+                <option *ngFor="let location of locations" [value]="location.id">{{ location.name }}</option>
+              </select>
+            </label>
+            <label class="required">
+              <span class="label-line"><span class="label-text">Código</span><span class="required-star">*</span></span>
+              <input type="text" name="code" [(ngModel)]="code" required />
+            </label>
+            <label class="required">
+              <span class="label-line"><span class="label-text">Registro Invima</span><span class="required-star">*</span></span>
+              <input type="text" name="invimaReg" [(ngModel)]="invimaReg" required />
+            </label>
+            <label class="required">
+              <span class="label-line"><span class="label-text">Riesgo</span><span class="required-star">*</span></span>
+              <select [(ngModel)]="riskClass" name="riskClass" required>
+                <option>Clase I</option>
+                <option>Clase IIA</option>
+                <option>Clase IIB</option>
+                <option>Clase III</option>
+              </select>
+            </label>
+            <label>
+              Tipo de equipo
+              <select [(ngModel)]="isMobile" name="isMobile">
+                <option [ngValue]="false">Fijo</option>
+                <option [ngValue]="true">Móvil</option>
+              </select>
+            </label>
+            <label>
+              Fabricante
+              <input type="text" name="manufacturer" [(ngModel)]="manufacturer" />
+            </label>
+            <label>
+              Tipo alimentación eléctrica
+              <select [(ngModel)]="powerType" name="powerType">
+                <option>AC</option>
+                <option>DC</option>
+                <option>No aplica</option>
+              </select>
+            </label>
+            <label>
+              Voltaje
+              <input type="text" name="voltage" [(ngModel)]="voltage" />
+            </label>
+            <div class="range">
+              <label>
+                Temp. mín de operación
+                <input type="number" name="tempMin" [(ngModel)]="tempMin" />
+              </label>
+              <label>
+                Temp. máx de operación
+                <input type="number" name="tempMax" [(ngModel)]="tempMax" />
+              </label>
+            </div>
+            <div class="range">
+              <label>
+                Humedad mín de operación
+                <input type="number" name="humidityMin" [(ngModel)]="humidityMin" />
+              </label>
+              <label>
+                Humedad máx de operación
+                <input type="number" name="humidityMax" [(ngModel)]="humidityMax" />
+              </label>
+    </div>
+  </div>
+        </div>
+
+        <div class="form-section" *ngIf="showSection(1)">
+          <h3>DATOS DE ADQUISICION</h3>
+          <div class="section-grid">
+            <label>
+              Forma de adquisición
+              <select [(ngModel)]="acquisitionType" name="acquisitionType">
+                <option>COMPRA DIRECTA</option>
+                <option>DONACION</option>
+              </select>
+            </label>
+            <label>
+              Contrato
+              <input type="text" name="contractText" [(ngModel)]="contractText" />
+            </label>
+            <label>
+              Fecha de adquisición
+              <input type="date" name="acquisitionDate" [(ngModel)]="acquisitionDate" />
+            </label>
+            <label>
+              Vida útil (años)
+              <input type="number" name="usefulLifeYears" [(ngModel)]="usefulLifeYears" />
+            </label>
+            <label>
+              Garantía (años)
+              <select [(ngModel)]="warrantyYears" name="warrantyYears">
+                <option [ngValue]="null">-</option>
+                <option [ngValue]="1">1</option>
+                <option [ngValue]="2">2</option>
+                <option [ngValue]="3">3</option>
+              </select>
+            </label>
+            <label>
+              Proveedor
+              <input type="text" name="supplierName" [(ngModel)]="supplierName" />
+            </label>
+            <label>
+              Teléfono proveedor
+              <input type="text" name="supplierPhone" [(ngModel)]="supplierPhone" />
+            </label>
+            <label>
+              Correo proveedor
+              <input type="email" name="supplierEmail" [(ngModel)]="supplierEmail" />
+            </label>
+          </div>
+        </div>
+
+        <div class="form-section" *ngIf="showSection(2)">
+          <h3>DATOS DE MANTENIMIENTO Y CALIBRACION</h3>
+          <div class="section-grid">
+            <label>
+              Frecuencia de mantenimiento
+              <select [(ngModel)]="maintenanceFrequency" name="maintenanceFrequency">
+                <option>mensual</option>
+                <option>bimensual</option>
+                <option>trimestral</option>
+                <option>cuatrimestral</option>
+                <option>semestral</option>
+                <option>anual</option>
+              </select>
+            </label>
+            <label>
+              Requiere calibración
+              <select [(ngModel)]="requiresCalibration" name="requiresCalibration">
+                <option [ngValue]="false">No</option>
+                <option [ngValue]="true">Sí</option>
+              </select>
+            </label>
+            <label *ngIf="requiresCalibration">
+              Frecuencia calibración
+              <select [(ngModel)]="calibrationFrequency" name="calibrationFrequency">
+                <option>mensual</option>
+                <option>bimensual</option>
+                <option>trimestral</option>
+                <option>cuatrimestral</option>
+                <option>semestral</option>
+                <option>anual</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-section" *ngIf="showSection(3)">
+          <h3>COMPONENTES DEL EQUIPO</h3>
+          <div class="section-grid">
+            <div class="list-section">
+              <h4>Accesorios</h4>
+              <button type="button" class="ghost" (click)="addAccessory()">Agregar accesorio</button>
+              <div class="list" *ngFor="let acc of accessories; let i = index">
+                <input type="text" [(ngModel)]="acc.name" name="accName{{i}}" placeholder="Nombre" />
+                <input type="number" [(ngModel)]="acc.quantity" name="accQty{{i}}" placeholder="Cant." />
+                <input type="text" [(ngModel)]="acc.brand" name="accBrand{{i}}" placeholder="Marca" />
+                <input type="text" [(ngModel)]="acc.serial" name="accSerial{{i}}" placeholder="Serial" />
+                <button type="button" class="tiny danger" (click)="removeAccessory(i)">Quitar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section" *ngIf="showSection(4)">
+          <h3>DOCUMENTACION TECNICA</h3>
+          <div class="section-grid">
+            <label>
+              Manual de operación (PDF)
+              <div class="file-field">
+                <input type="file" accept="application/pdf" (change)="onManualOperacionSelected($event)" />
+              </div>
+            </label>
+            <label>
+              Manual de servicio (PDF)
+              <div class="file-field">
+                <input type="file" accept="application/pdf" (change)="onManualServicioSelected($event)" />
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-section" *ngIf="showSection(5)">
+          <h3>GUIA DE LIMPIEZA Y DESINFECCION</h3>
+          <div class="section-grid">
+            <div class="list-section">
+              <h4>Limpieza y desinfección</h4>
+              <button type="button" class="ghost" (click)="addCleaning()">Agregar</button>
+              <div class="list" *ngFor="let item of cleaning; let i = index">
+                <input type="text" [(ngModel)]="item.procedure" name="cleanProc{{i}}" placeholder="Procedimiento" />
+                <input type="text" [(ngModel)]="item.frequency" name="cleanFreq{{i}}" placeholder="Frecuencia" />
+                <input type="text" [(ngModel)]="item.responsible" name="cleanResp{{i}}" placeholder="Responsable" />
+                <button type="button" class="tiny danger" (click)="removeCleaning(i)">Quitar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section" *ngIf="showSection(6)">
+          <h3>RECOMENDACIONES DEL FABRICANTE</h3>
+          <div class="section-grid">
+            <div class="list-section">
+              <h4>Recomendaciones</h4>
+              <button type="button" class="ghost" (click)="addRecommendation()">Agregar</button>
+              <div class="list" *ngFor="let rec of recommendations; let i = index">
+                <input type="text" [(ngModel)]="rec.text" name="recText{{i}}" placeholder="Recomendación" />
+                <button type="button" class="tiny danger" (click)="removeRecommendation(i)">Quitar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section" *ngIf="showSection(7)">
+          <h3>RESUMEN</h3>
+          <div class="summary-grid">
+            <div>
+              <h4>Equipo</h4>
+              <p><strong>Nombre:</strong> {{ name || '-' }}</p>
+              <p><strong>Marca:</strong> {{ brand || '-' }}</p>
+              <p><strong>Modelo:</strong> {{ model || '-' }}</p>
+              <p><strong>Serie:</strong> {{ serial || '-' }}</p>
+              <p><strong>Código:</strong> {{ code || '-' }}</p>
+              <p><strong>Registro Invima:</strong> {{ invimaReg || '-' }}</p>
+              <p><strong>Riesgo:</strong> {{ riskClass || '-' }}</p>
+              <p><strong>Área:</strong> {{ getSelectedAreaName() }}</p>
+              <p><strong>Ubicación:</strong> {{ getSelectedLocationName() }}</p>
+            </div>
+            <div>
+              <h4>Adquisición</h4>
+              <p><strong>Forma:</strong> {{ acquisitionType || '-' }}</p>
+              <p><strong>Contrato:</strong> {{ contractText || '-' }}</p>
+              <p><strong>Fecha:</strong> {{ acquisitionDate || '-' }}</p>
+              <p><strong>Vida útil:</strong> {{ usefulLifeYears || '-' }}</p>
+              <p><strong>Garantía:</strong> {{ warrantyYears || '-' }}</p>
+              <p><strong>Proveedor:</strong> {{ supplierName || '-' }}</p>
+              <p><strong>Teléfono:</strong> {{ supplierPhone || '-' }}</p>
+              <p><strong>Correo:</strong> {{ supplierEmail || '-' }}</p>
+            </div>
+            <div>
+              <h4>Mantenimiento</h4>
+              <p><strong>Frecuencia:</strong> {{ maintenanceFrequency || '-' }}</p>
+              <p><strong>Requiere calibración:</strong> {{ requiresCalibration ? 'Sí' : 'No' }}</p>
+              <p *ngIf="requiresCalibration"><strong>Frecuencia calibración:</strong> {{ calibrationFrequency || '-' }}</p>
+            </div>
+          </div>
+          <p class="summary-note">Revisa este resumen antes de crear la hoja de vida.</p>
+        </div>
+
+        <div class="wizard-nav" *ngIf="formMode === 'wizard'">
+          <div class="wizard-steps">
+            Paso {{ wizardStep + 1 }} de {{ wizardSteps.length }} · {{ wizardSteps[wizardStep] }}
+            <span class="wizard-hint" *ngIf="!canProceedStep()">
+              Completa Nombre, Código, Área y Ubicación para continuar.
+            </span>
+          </div>
+          <div class="wizard-actions">
+            <button type="button" class="ghost" (click)="prevStep()" [disabled]="wizardStep === 0">
+              Anterior
+            </button>
+            <button type="button" class="primary" (click)="nextStep()" *ngIf="!isLastStep()" [disabled]="!canProceedStep()">
+              Siguiente
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" *ngIf="formMode === 'full' || isLastStep()">
+          {{ editingAssetId ? 'Guardar cambios' : 'Crear' }}
+        </button>
+        <button type="button" class="ghost" *ngIf="editingAssetId" (click)="cancelEdit()">Cancelar</button>
+      </form>
+      <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+      <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+    </div>
+
+  </div>
+
+  <ng-template #readOnlyNotice>
+    <div class="card full">
+      <h2>Solo lectura</h2>
+      <p>Tu rol no tiene permisos para crear o editar hojas de vida.</p>
+    </div>
+  </ng-template>
+</section>

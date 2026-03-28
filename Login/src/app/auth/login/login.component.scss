@@ -1,0 +1,192 @@
+.login {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 32px 24px;
+  background: #e2e8f0;
+  position: relative;
+  overflow: hidden;
+}
+
+.login::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url('/assets/bch-logo.png') no-repeat center;
+  background-size: contain;
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 20px 40px rgba(30, 41, 59, 0.15);
+  width: min(420px, 100%);
+  position: relative;
+  z-index: 1;
+}
+
+.link {
+  margin-top: 16px;
+  background: none;
+  border: none;
+  color: #1d4ed8;
+  cursor: pointer;
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.alert {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-weight: 600;
+  border: 1px solid #fecaca;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: alert-in 220ms ease-out;
+}
+
+.alert::before {
+  content: '!';
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #dc2626;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+@keyframes alert-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.recovery {
+  margin-top: 16px;
+  background: #ffffff;
+  padding: 20px;
+  border-radius: 16px;
+  box-shadow: 0 14px 24px rgba(15, 23, 42, 0.08);
+  width: min(420px, 100%);
+  display: grid;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.recovery button {
+  background: #0f172a;
+  color: #ffffff;
+  border: none;
+  padding: 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 8px 0;
+}
+
+.message {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.title {
+  position: absolute;
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 112px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: rgba(15, 23, 42, 0.25);
+  text-align: center;
+  z-index: 0;
+  text-transform: uppercase;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.card h1 {
+  text-align: center;
+}
+
+.brand {
+  display: grid;
+  place-items: center;
+  margin-bottom: 12px;
+}
+
+.brand img {
+  width: 140px;
+  height: auto;
+  object-fit: contain;
+}
+
+.subtitle {
+  margin-top: 4px;
+  color: #475569;
+}
+
+form {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+input {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #cbd5f5;
+  font-size: 14px;
+}
+
+button {
+  background: #0f172a;
+  color: #ffffff;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.error {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .card {
+    padding: 28px;
+  }
+
+  .title {
+    font-size: 56px;
+  }
+}

@@ -1,0 +1,61 @@
+<section class="page">
+  <header>
+    <div>
+      <h1>Auditoría</h1>
+      <p>Registro de cambios (solo superuser).</p>
+    </div>
+    <div class="header-actions">
+      <a class="back" routerLink="/dashboard">Regresar</a>
+      <button (click)="load()" [disabled]="loading">Recargar</button>
+    </div>
+  </header>
+
+  <div class="filters">
+    <label>
+      Actor
+      <select [(ngModel)]="selectedActor" (change)="applyFilters()">
+        <option *ngFor="let actor of actors" [value]="actor">{{ actor }}</option>
+      </select>
+    </label>
+
+    <label>
+      Acción
+      <select [(ngModel)]="selectedAction" (change)="applyFilters()">
+        <option *ngFor="let action of actions" [value]="action">{{ action }}</option>
+      </select>
+    </label>
+
+    <label>
+      Desde
+      <input type="date" [(ngModel)]="dateFrom" (change)="applyFilters()" />
+    </label>
+
+    <label>
+      Hasta
+      <input type="date" [(ngModel)]="dateTo" (change)="applyFilters()" />
+    </label>
+  </div>
+
+  <p *ngIf="loading">Cargando...</p>
+  <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+  <p class="empty" *ngIf="!loading && !errorMessage && filteredLogs.length === 0">
+    Sin registros por ahora.
+  </p>
+
+  <div class="table" *ngIf="!loading && filteredLogs.length">
+    <div class="row header">
+      <span>Fecha</span>
+      <span>Actor</span>
+      <span>Acción</span>
+      <span>Objetivo</span>
+      <span>Detalles</span>
+    </div>
+    <div class="row" *ngFor="let log of filteredLogs">
+      <span>{{ log.when }}</span>
+      <span>{{ log.actor }}</span>
+      <span>{{ log.action }}</span>
+      <span>{{ log.target }}</span>
+      <span>{{ log.details }}</span>
+    </div>
+  </div>
+</section>

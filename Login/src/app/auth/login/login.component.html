@@ -1,0 +1,74 @@
+<section class="login">
+  <div class="title">BCHSOFT</div>
+  <div class="card">
+    <div class="brand">
+      <img src="/assets/bch-logo.png" alt="BCH Biomedical Solutions" />
+    </div>
+    <h1>LOGIN</h1>
+
+    <form (ngSubmit)="onSubmit()">
+      <label>
+        Usuario
+        <input type="text" name="username" [(ngModel)]="username" required />
+      </label>
+
+      <label>
+        Contraseña
+        <input type="password" name="password" [(ngModel)]="password" required />
+      </label>
+
+      <button type="submit" [disabled]="isSubmitting">
+        {{ isSubmitting ? 'Validando...' : 'Entrar' }}
+      </button>
+    </form>
+
+    <div class="alert" *ngIf="errorMessage" aria-live="polite">{{ errorMessage }}</div>
+
+    <button type="button" class="link" (click)="toggleRecovery()">
+      ¿Olvidaste tu contraseña?
+    </button>
+  </div>
+
+  <div class="recovery" *ngIf="showRecovery">
+    <h2>Recuperar contraseña</h2>
+    <p>Ingresa tu correo para recibir un código de 6 dígitos.</p>
+
+    <label>
+      Correo
+      <input
+        type="email"
+        name="recoveryEmail"
+        [(ngModel)]="recoveryEmail"
+        [ngModelOptions]="{ standalone: true }"
+      />
+    </label>
+
+    <button type="button" (click)="onRequestCode()">Enviar código</button>
+
+    <div class="divider"></div>
+
+    <label>
+      Código
+      <input
+        type="text"
+        name="recoveryCode"
+        [(ngModel)]="recoveryCode"
+        [ngModelOptions]="{ standalone: true }"
+      />
+    </label>
+
+    <label>
+      Nueva contraseña
+      <input
+        type="password"
+        name="recoveryPassword"
+        [(ngModel)]="recoveryPassword"
+        [ngModelOptions]="{ standalone: true }"
+      />
+    </label>
+
+    <button type="button" (click)="onResetPassword()">Cambiar contraseña</button>
+
+    <p class="message" *ngIf="recoveryMessage">{{ recoveryMessage }}</p>
+  </div>
+</section>
