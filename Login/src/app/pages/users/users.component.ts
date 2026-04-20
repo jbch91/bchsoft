@@ -5,6 +5,8 @@ import { FormsModule } from '@angular/forms';
 import { AdminService } from '../../admin/admin.service';
 import { Role } from '../../auth/models';
 
+type UserDocumentType = 'cedula_ciudadania' | 'cedula_extranjeria' | 'pasaporte';
+
 interface UserView {
   id: string;
   username: string;
@@ -14,6 +16,9 @@ interface UserView {
   roles: Role[];
   clientName?: string | null;
   clientId?: string | null;
+  documentType?: string | null;
+  documentNumber?: string | null;
+  invimaRegistration?: string | null;
 }
 
 @Component({
@@ -36,7 +41,14 @@ export class UsersComponent implements OnInit {
   searchTerm = '';
   openClientId: string | null = null;
   editingUserId: string | null = null;
-  editUser = { displayName: '', email: '', clientId: '' };
+  editUser = {
+    displayName: '',
+    email: '',
+    clientId: '',
+    documentType: 'cedula_ciudadania' as UserDocumentType,
+    documentNumber: '',
+    invimaRegistration: ''
+  };
   editSignatureFile: File | null = null;
   rolesOpen = false;
   readerAreas: { id: string; name: string }[] = [];
@@ -52,6 +64,14 @@ export class UsersComponent implements OnInit {
   role: Role = 'viewer';
   clientId = '';
   signatureFile: File | null = null;
+  documentType: UserDocumentType = 'cedula_ciudadania';
+  documentNumber = '';
+  invimaRegistration = '';
+  documentTypes: { value: UserDocumentType; label: string }[] = [
+    { value: 'cedula_ciudadania', label: 'Cédula ciudadanía' },
+    { value: 'cedula_extranjeria', label: 'Cédula extranjería' },
+    { value: 'pasaporte', label: 'Pasaporte' }
+  ];
 
   private readonly clientScopedRoles: Role[] = [
     'almacenista',
@@ -91,7 +111,10 @@ export class UsersComponent implements OnInit {
         isActive: user.is_active,
         roles: user.roles,
         clientName: user.client_name ?? null,
-        clientId: user.client_id ?? null
+        clientId: user.client_id ?? null,
+        documentType: user.document_type ?? null,
+        documentNumber: user.document_number ?? null,
+        invimaRegistration: user.invima_registration ?? null
       }));
       await this.loadRolePermissions();
       try {
@@ -136,6 +159,12 @@ export class UsersComponent implements OnInit {
       this.errorMessage = 'Debes cargar la firma digital para este rol.';
       return;
     }
+    if (this.requiresBiomedicalCredentials(this.role)) {
+      if (!this.documentType || !this.documentNumber.trim() || !this.invimaRegistration.trim()) {
+        this.errorMessage = 'Completa tipo de documento, número de documento y registro INVIMA para el ingeniero biomédico.';
+        return;
+      }
+    }
 
     this.errorMessage = '';
     this.successMessage = '';
@@ -147,7 +176,10 @@ export class UsersComponent implements OnInit {
         password: this.password,
         role: this.role,
         clientId: this.isClientScopedRole(this.role) ? this.clientId : undefined,
-        signatureFile: this.signatureFile
+        signatureFile: this.signatureFile,
+        documentType: this.requiresBiomedicalCredentials(this.role) ? this.documentType : null,
+        documentNumber: this.requiresBiomedicalCredentials(this.role) ? this.documentNumber.trim() : null,
+        invimaRegistration: this.requiresBiomedicalCredentials(this.role) ? this.invimaRegistration.trim() : null
       });
       this.username = '';
       this.displayName = '';
@@ -156,6 +188,9 @@ export class UsersComponent implements OnInit {
       this.role = this.roles[0] ?? 'viewer';
       this.clientId = this.clients[0]?.id ?? '';
       this.signatureFile = null;
+      this.documentType = 'cedula_ciudadania';
+      this.documentNumber = '';
+      this.invimaRegistration = '';
       await this.load();
     } catch (error: any) {
       console.error(error);
@@ -200,7 +235,10 @@ export class UsersComponent implements OnInit {
     this.editUser = {
       displayName: user.displayName,
       email: user.email,
-      clientId: user.clientId ?? ''
+      clientId: user.clientId ?? '',
+      documentType: this.toDocumentType(user.documentType),
+      documentNumber: user.documentNumber ?? '',
+      invimaRegistration: user.invimaRegistration ?? ''
     };
     this.editSignatureFile = null;
     const targetClientId = user.clientId ?? this.editUser.clientId;
@@ -222,10 +260,30 @@ export class UsersComponent implements OnInit {
   }
 
   async saveUser(user: UserView): Promise<void> {
+    if (this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')) {
+      if (
+        !this.editUser.documentType ||
+        !this.editUser.documentNumber.trim() ||
+        !this.editUser.invimaRegistration.trim()
+      ) {
+        this.errorMessage = 'Completa tipo de documento, número de documento y registro INVIMA.';
+        return;
+      }
+    }
+
     await this.admin.updateUserProfile(user.id, {
       displayName: this.editUser.displayName.trim(),
       email: this.editUser.email.trim(),
-      clientId: this.editUser.clientId || null
+      clientId: this.editUser.clientId || null,
+      documentType: this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')
+        ? this.editUser.documentType
+        : null,
+      documentNumber: this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')
+        ? this.editUser.documentNumber.trim()
+        : null,
+      invimaRegistration: this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')
+        ? this.editUser.invimaRegistration.trim()
+        : null
     });
     if (this.editSignatureFile && this.requiresSignature(user.roles[0] || 'viewer')) {
       await this.admin.updateUserSignature(user.id, this.editSignatureFile);
@@ -254,6 +312,20 @@ export class UsersComponent implements OnInit {
 
   requiresSignature(role: Role): boolean {
     return this.signatureRoles.includes(role);
+  }
+
+  requiresBiomedicalCredentials(role: Role): boolean {
+    return role === 'ingeniero_biomedico';
+  }
+
+  documentTypeLabel(value?: string | null): string {
+    return this.documentTypes.find((item) => item.value === value)?.label ?? 'Sin tipo';
+  }
+
+  private toDocumentType(value?: string | null): UserDocumentType {
+    return this.documentTypes.some((item) => item.value === value)
+      ? (value as UserDocumentType)
+      : 'cedula_ciudadania';
   }
 
   onSignatureSelected(event: Event): void {

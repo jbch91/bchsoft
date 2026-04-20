@@ -9,7 +9,7 @@ export async function listRoles() {
 export async function listUsers() {
   const { rows } = await query(
     `SELECT u.id, u.username, u.display_name, u.email, u.is_active, u.client_id,
-            u.signature_path,
+            u.signature_path, u.document_type, u.document_number, u.invima_registration,
             c.name AS client_name,
             ARRAY_REMOVE(ARRAY_AGG(r.name), NULL) AS roles
      FROM users u
@@ -24,7 +24,9 @@ export async function listUsers() {
 
 export async function getUserById(userId) {
   const { rows } = await query(
-    'SELECT id, username, email, signature_path FROM users WHERE id = $1',
+    `SELECT id, username, email, signature_path, document_type, document_number,
+            invima_registration
+     FROM users WHERE id = $1`,
     [userId]
   );
   return rows[0];
@@ -102,7 +104,17 @@ export async function updateRolePermissions(roleId, permissions) {
   }
 }
 
-export async function createUser({ username, displayName, email, password, role, clientId }) {
+export async function createUser({
+  username,
+  displayName,
+  email,
+  password,
+  role,
+  clientId,
+  documentType,
+  documentNumber,
+  invimaRegistration
+}) {
   const { rows: existing } = await query(
     'SELECT username, email FROM users WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)',
     [username, email]
@@ -113,8 +125,20 @@ export async function createUser({ username, displayName, email, password, role,
 
   const passwordHash = await bcrypt.hash(password, 12);
   const { rows } = await query(
-    'INSERT INTO users (username, display_name, email, password_hash, client_id) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-    [username, displayName, email, passwordHash, clientId ?? null]
+    `INSERT INTO users (
+       username, display_name, email, password_hash, client_id,
+       document_type, document_number, invima_registration
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [
+      username,
+      displayName,
+      email,
+      passwordHash,
+      clientId ?? null,
+      documentType ?? null,
+      documentNumber ?? null,
+      invimaRegistration ?? null
+    ]
   );
 
   const userId = rows[0].id;
@@ -156,10 +180,25 @@ export async function updateUserPassword(userId, password) {
 }
 
 export async function updateUserProfile(userId, payload) {
-  const { displayName, email, clientId } = payload;
+  const { displayName, email, clientId, documentType, documentNumber, invimaRegistration } = payload;
   await query(
-    'UPDATE users SET display_name = $1, email = $2, client_id = $3 WHERE id = $4',
-    [displayName, email, clientId ?? null, userId]
+    `UPDATE users
+     SET display_name = $1,
+         email = $2,
+         client_id = $3,
+         document_type = $4,
+         document_number = $5,
+         invima_registration = $6
+     WHERE id = $7`,
+    [
+      displayName,
+      email,
+      clientId ?? null,
+      documentType ?? null,
+      documentNumber ?? null,
+      invimaRegistration ?? null,
+      userId
+    ]
   );
 }
 

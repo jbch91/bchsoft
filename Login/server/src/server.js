@@ -153,6 +153,7 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 const upload = multer({ storage: multer.memoryStorage() });
+const BIOMED_DOCUMENT_TYPES = ['cedula_ciudadania', 'cedula_extranjeria', 'pasaporte'];
 const uploadAssetFiles = upload.fields([
   { name: 'photo', maxCount: 1 },
   { name: 'manualOperacion', maxCount: 1 },
@@ -411,7 +412,17 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
   if (!req.user.roles?.includes('superuser')) {
     return res.status(403).json({ message: 'Solo superuser.' });
   }
-  const { username, displayName, email, password, role, clientId } = req.body || {};
+  const {
+    username,
+    displayName,
+    email,
+    password,
+    role,
+    clientId,
+    documentType,
+    documentNumber,
+    invimaRegistration
+  } = req.body || {};
   if (!username || !displayName || !email || !password || !role) {
     return res.status(400).json({ message: 'Datos incompletos.' });
   }
@@ -422,9 +433,30 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
   if (clientScopedRoles.includes(role) && !clientId) {
     return res.status(400).json({ message: 'Debes seleccionar un cliente para este rol.' });
   }
+  const cleanDocumentType = documentType?.trim?.() || null;
+  const cleanDocumentNumber = documentNumber?.trim?.() || null;
+  const cleanInvimaRegistration = invimaRegistration?.trim?.() || null;
+  if (cleanDocumentType && !BIOMED_DOCUMENT_TYPES.includes(cleanDocumentType)) {
+    return res.status(400).json({ message: 'Tipo de documento inválido.' });
+  }
+  if (role === 'ingeniero_biomedico' && (!cleanDocumentType || !cleanDocumentNumber || !cleanInvimaRegistration)) {
+    return res.status(400).json({
+      message: 'Tipo de documento, número de documento y registro INVIMA son obligatorios para el ingeniero biomédico.'
+    });
+  }
 
   try {
-    const result = await createUser({ username, displayName, email, password, role, clientId });
+    const result = await createUser({
+      username,
+      displayName,
+      email,
+      password,
+      role,
+      clientId,
+      documentType: cleanDocumentType,
+      documentNumber: cleanDocumentNumber,
+      invimaRegistration: cleanInvimaRegistration
+    });
     if (result?.error === 'DUPLICATE') {
       return res.status(409).json({ message: 'Usuario o correo ya existe.' });
     }
@@ -439,7 +471,13 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       actorUsername: req.user.username,
       action: 'USER_CREATE',
       targetUsername: username,
-      details: { role, email, clientId: clientId ?? null }
+      details: {
+        role,
+        email,
+        clientId: clientId ?? null,
+        documentType: documentType ?? null,
+        hasInvimaRegistration: Boolean(invimaRegistration)
+      }
     });
     return res.status(201).json(result);
   } catch (error) {
@@ -1202,17 +1240,34 @@ app.patch('/admin/users/:id', requireAuth, requirePermission('users:manage'), as
   if (!req.user.roles?.includes('superuser')) {
     return res.status(403).json({ message: 'Solo superuser.' });
   }
-  const { displayName, email, clientId } = req.body || {};
+  const { displayName, email, clientId, documentType, documentNumber, invimaRegistration } = req.body || {};
   if (!displayName || !email) {
     return res.status(400).json({ message: 'Datos incompletos.' });
   }
-  await updateUserProfile(req.params.id, { displayName, email, clientId });
+  const cleanDocumentType = documentType?.trim?.() || null;
+  if (cleanDocumentType && !BIOMED_DOCUMENT_TYPES.includes(cleanDocumentType)) {
+    return res.status(400).json({ message: 'Tipo de documento inválido.' });
+  }
+  await updateUserProfile(req.params.id, {
+    displayName,
+    email,
+    clientId,
+    documentType: cleanDocumentType,
+    documentNumber: documentNumber?.trim?.() || null,
+    invimaRegistration: invimaRegistration?.trim?.() || null
+  });
   await logAudit({
     actorUserId: req.user.sub,
     actorUsername: req.user.username,
     action: 'USER_UPDATE',
     targetUserId: req.params.id,
-    details: { displayName, email, clientId: clientId ?? null }
+    details: {
+      displayName,
+      email,
+      clientId: clientId ?? null,
+      documentType: documentType ?? null,
+      hasInvimaRegistration: Boolean(invimaRegistration)
+    }
   });
   return res.json({ ok: true });
 });

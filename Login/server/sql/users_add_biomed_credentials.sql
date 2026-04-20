@@ -1,0 +1,4 @@
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS document_type TEXT,
+ADD COLUMN IF NOT EXISTS document_number TEXT,
+ADD COLUMN IF NOT EXISTS invima_registration TEXT;

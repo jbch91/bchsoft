@@ -78,6 +78,31 @@ li span {
   font-size: 12px;
 }
 
+.biomed-fields {
+  border: 1px solid color-mix(in srgb, var(--brand-500) 28%, var(--border));
+  border-radius: 14px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--brand-50) 72%, #ffffff);
+  display: grid;
+  gap: 10px;
+}
+
+.biomed-fields h3,
+.biomed-fields h4 {
+  margin: 0;
+  color: var(--brand-700);
+  font-size: 14px;
+}
+
+.edit-biomed {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.edit-biomed h4 {
+  grid-column: 1 / -1;
+}
+
 .password {
   display: flex;
   gap: 8px;

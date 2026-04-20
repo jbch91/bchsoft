@@ -15,6 +15,7 @@ const MIGRATIONS = [
   'clients_add_address.sql',
   'users_add_client.sql',
   'users_add_signature.sql',
+  'users_add_biomed_credentials.sql',
   'modules.sql',
   'audit_logs.sql',
   'maintenance.sql',
@@ -98,4 +99,3 @@ run().catch((err) => {
   console.error(err);
   process.exitCode = 1;
 });
-

@@ -56,6 +56,9 @@ interface UserDto {
   client_name?: string | null;
   client_id?: string | null;
   signature_path?: string | null;
+  document_type?: string | null;
+  document_number?: string | null;
+  invima_registration?: string | null;
 }
 
 interface ReaderAccessDto {
@@ -110,6 +113,9 @@ export class AdminService {
     role: Role;
     clientId?: string;
     signatureFile?: File | null;
+    documentType?: string | null;
+    documentNumber?: string | null;
+    invimaRegistration?: string | null;
   }): Promise<void> {
     if (payload.signatureFile) {
       const form = new FormData();
@@ -120,6 +126,15 @@ export class AdminService {
       form.append('role', payload.role);
       if (payload.clientId) {
         form.append('clientId', payload.clientId);
+      }
+      if (payload.documentType) {
+        form.append('documentType', payload.documentType);
+      }
+      if (payload.documentNumber) {
+        form.append('documentNumber', payload.documentNumber);
+      }
+      if (payload.invimaRegistration) {
+        form.append('invimaRegistration', payload.invimaRegistration);
       }
       form.append('signature', payload.signatureFile);
       await firstValueFrom(this.http.post(`${this.apiBase}/admin/users`, form));
@@ -143,7 +158,14 @@ export class AdminService {
     );
   }
 
-  async updateUserProfile(userId: string, payload: { displayName: string; email: string; clientId?: string | null }): Promise<void> {
+  async updateUserProfile(userId: string, payload: {
+    displayName: string;
+    email: string;
+    clientId?: string | null;
+    documentType?: string | null;
+    documentNumber?: string | null;
+    invimaRegistration?: string | null;
+  }): Promise<void> {
     await firstValueFrom(this.http.patch(`${this.apiBase}/admin/users/${userId}`, payload));
   }
 

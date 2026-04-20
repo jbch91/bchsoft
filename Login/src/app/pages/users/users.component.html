@@ -41,6 +41,40 @@
           </select>
         </label>
 
+        <div class="biomed-fields" *ngIf="requiresBiomedicalCredentials(role)">
+          <h3>Credenciales del ingeniero biomédico</h3>
+          <label>
+            Tipo de documento
+            <select name="documentType" [(ngModel)]="documentType" required>
+              <option *ngFor="let option of documentTypes" [value]="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+
+          <label>
+            Número de documento
+            <input
+              type="text"
+              name="documentNumber"
+              [(ngModel)]="documentNumber"
+              placeholder="Ej: 1234567890"
+              required
+            />
+          </label>
+
+          <label>
+            Registro INVIMA
+            <input
+              type="text"
+              name="invimaRegistration"
+              [(ngModel)]="invimaRegistration"
+              placeholder="Registro que habilita la actividad biomédica"
+              required
+            />
+          </label>
+        </div>
+
         <label *ngIf="requiresSignature(role)">
           Firma digital (imagen)
           <input type="file" accept="image/*" (change)="onSignatureSelected($event)" />
@@ -81,6 +115,12 @@
                 <strong>{{ user.displayName }}</strong>
                 <span>{{ user.username }}</span>
                 <span>{{ user.email }}</span>
+                <span *ngIf="requiresBiomedicalCredentials(user.roles[0] || 'viewer')">
+                  {{ documentTypeLabel(user.documentType) }}: {{ user.documentNumber || 'Sin documento' }}
+                </span>
+                <span *ngIf="requiresBiomedicalCredentials(user.roles[0] || 'viewer')">
+                  Registro INVIMA: {{ user.invimaRegistration || 'Sin registro' }}
+                </span>
               </div>
               <div class="meta">
                 <select [ngModel]="user.roles[0]" (ngModelChange)="onChangeRole(user, $event)">
@@ -101,6 +141,25 @@
                   Correo
                   <input type="email" [(ngModel)]="editUser.email" />
                 </label>
+                <div class="biomed-fields edit-biomed" *ngIf="requiresBiomedicalCredentials(user.roles[0] || 'viewer')">
+                  <h4>Credenciales del ingeniero biomédico</h4>
+                  <label>
+                    Tipo de documento
+                    <select [(ngModel)]="editUser.documentType">
+                      <option *ngFor="let option of documentTypes" [value]="option.value">
+                        {{ option.label }}
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    Número de documento
+                    <input type="text" [(ngModel)]="editUser.documentNumber" />
+                  </label>
+                  <label>
+                    Registro INVIMA
+                    <input type="text" [(ngModel)]="editUser.invimaRegistration" />
+                  </label>
+                </div>
                 <label *ngIf="requiresSignature(user.roles[0] || 'viewer')">
                   Firma digital (imagen)
                   <input type="file" accept="image/*" (change)="onEditSignatureSelected($event)" />
