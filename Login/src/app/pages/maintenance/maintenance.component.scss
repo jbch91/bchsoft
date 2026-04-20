@@ -1,29 +1,15 @@
 .page {
-  padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
 header {
-  display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
 }
 
 .header-actions {
-  display: flex;
   gap: 10px;
-  align-items: center;
-}
-
-.back {
-  text-decoration: none;
-  padding: 8px 14px;
-  border-radius: 10px;
-  background: #eef2f7;
-  color: #1b2b3a;
 }
 
 .filters-card {

@@ -1,51 +1,8 @@
-.page {
-  padding: 32px 24px;
-}
-
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-}
-
-header .header-actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-header .back {
-  text-decoration: none;
-  background: var(--card);
-  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
-  color: var(--ink);
-  padding: 8px 12px;
-  border-radius: 10px;
-  font-weight: 600;
-}
-
-header button {
-  background: var(--brand-600);
-  color: #ffffff;
-  border: none;
-  padding: 10px 16px;
-  border-radius: 10px;
-  cursor: pointer;
-}
-
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px;
   margin-top: 24px;
-}
-
-.card {
-  background: var(--card);
-  border-radius: 16px;
-  padding: 20px;
-  box-shadow: 0 14px 24px rgba(15, 23, 42, 0.08);
 }
 
 form {
@@ -107,12 +64,12 @@ li span {
 .meta select {
   padding: 6px 8px;
   border-radius: 8px;
-  border: 1px solid #cbd5f5;
-  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
+  background: var(--card);
 }
 
 .meta button {
-  background: #0f172a;
+  background: var(--ink);
   color: #ffffff;
   border: none;
   padding: 6px 10px;
@@ -133,11 +90,11 @@ li span {
   min-width: 180px;
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid #cbd5f5;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
 }
 
 .password button {
-  background: #1d4ed8;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 8px 12px;

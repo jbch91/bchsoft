@@ -1,39 +1,6 @@
 .page {
-  padding: 32px 24px;
   display: grid;
   gap: 16px;
-}
-
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-}
-
-.header-actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.back {
-  text-decoration: none;
-  background: #ffffff;
-  border: 1px solid #cbd5f5;
-  color: #0f172a;
-  padding: 8px 12px;
-  border-radius: 10px;
-  font-weight: 600;
-}
-
-.card {
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 20px;
-  box-shadow: 0 14px 24px rgba(15, 23, 42, 0.08);
-  display: grid;
-  gap: 12px;
 }
 
 .filters-card {
@@ -86,8 +53,8 @@ header {
 }
 
 .tab {
-  background: #e2e8f0;
-  color: #0f172a;
+  background: var(--border);
+  color: var(--ink);
   border: 1px solid transparent;
   padding: 10px 14px;
   border-radius: 999px;
@@ -96,7 +63,7 @@ header {
 }
 
 .tab.active {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
 }
 
@@ -167,7 +134,7 @@ button {
 
 .schedule-row.header,
 .item-row.header {
-  background: #0f172a;
+  background: var(--ink);
   color: #ffffff;
   font-weight: 600;
 }
