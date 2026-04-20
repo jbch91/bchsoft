@@ -1,9 +1,23 @@
 @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;600&display=swap');
 
 :root {
+  /* INBIHOSPITALARIO palette (sampled from logo) */
+  --brand-50: #fff1f2;
+  --brand-100: #ffe4e6;
+  --brand-500: #b64f54;
+  --brand-600: #a64045;
+  --brand-700: #8f3237;
+
+  --ink: #0f172a;
+  --muted: #475569;
+  --border: #e2e8f0;
+  --card: #ffffff;
+  --bg-a: #fff5f5;
+  --bg-b: #f8fafc;
+
   font-family: 'Rubik', sans-serif;
-  background: linear-gradient(120deg, #e2e8f0, #f8fafc);
-  color: #0f172a;
+  background: linear-gradient(120deg, var(--bg-a), var(--bg-b));
+  color: var(--ink);
 }
 
 body {
@@ -14,4 +28,8 @@ body {
 
 * {
   box-sizing: border-box;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--brand-100) 70%, transparent);
 }
