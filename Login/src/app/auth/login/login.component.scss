@@ -12,8 +12,8 @@
   content: '';
   position: absolute;
   inset: 0;
-  /* Use the icon-only asset as watermark so it doesn't repeat the text */
-  background: url('/assets/inbi-favicon.png') no-repeat center;
+  /* Watermark */
+  background: url('/assets/inbi-logo.png') no-repeat center;
   background-size: contain;
   opacity: 0.2;
   pointer-events: none;
