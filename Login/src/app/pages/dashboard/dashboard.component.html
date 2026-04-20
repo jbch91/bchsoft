@@ -15,13 +15,13 @@
       </div>
       <p>Bienvenido, {{ auth.currentUser()?.displayName }}</p>
     </div>
-    <button (click)="auth.logout()" routerLink="/login">Salir</button>
+    <button class="btn btn-warning" (click)="auth.logout()" routerLink="/login">Salir</button>
   </header>
 
   <div class="cards">
     <a
       routerLink="/clientes"
-      class="card"
+      class="ui-card module-card"
       *ngIf="auth.hasRole('superuser') && canShow('clientes')"
     >
       <h2>Clientes</h2>
@@ -29,7 +29,7 @@
     </a>
     <a
       routerLink="/usuarios"
-      class="card"
+      class="ui-card module-card"
       *ngIf="auth.hasRole('superuser') && canShow('usuarios')"
     >
       <h2>Usuarios</h2>
@@ -38,7 +38,7 @@
 
     <a
       routerLink="/auditoria"
-      class="card"
+      class="ui-card module-card"
       *ngIf="auth.hasPermission('users:manage') && canShow('auditoria')"
     >
       <h2>Auditoría</h2>
@@ -47,7 +47,7 @@
 
     <a
       routerLink="/hojas-de-vida"
-      class="card"
+      class="ui-card module-card"
       *ngIf="!auth.hasRole('lector') && (auth.hasPermission('hb:create') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('hojas_de_vida')"
     >
       <h2>Hojas de vida</h2>
@@ -56,7 +56,7 @@
 
     <a
       routerLink="/inventario"
-      class="card"
+      class="ui-card module-card"
       *ngIf="(auth.hasPermission('hb:create') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('inventario')"
     >
       <h2>Inventario</h2>
@@ -65,7 +65,7 @@
 
     <a
       routerLink="/mantenimiento"
-      class="card"
+      class="ui-card module-card"
       *ngIf="(auth.hasPermission('maintenance:request:create') || auth.hasPermission('maintenance:report:create') || auth.hasPermission('maintenance:report:sign') || auth.hasPermission('read:all')) && canShow('reportes_mantenimiento')"
     >
       <h2>Reportes de mantenimiento</h2>
@@ -74,7 +74,7 @@
 
     <a
       routerLink="/cronogramas"
-      class="card"
+      class="ui-card module-card"
       *ngIf="auth.hasPermission('schedules:manage') && canShow('cronogramas')"
     >
       <h2>Cronogramas y Capacitaciones</h2>
@@ -83,7 +83,7 @@
 
     <a
       routerLink="/calibraciones"
-      class="card"
+      class="ui-card module-card"
       *ngIf="(auth.hasPermission('calibration:schedule:manage') || auth.hasPermission('calibration:report:upload') || auth.hasPermission('read:all')) && canShow('calibraciones')"
     >
       <h2>Calibraciones</h2>
