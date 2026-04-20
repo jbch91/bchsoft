@@ -17,16 +17,16 @@ header .header-actions {
 
 header .back {
   text-decoration: none;
-  background: #ffffff;
-  border: 1px solid #cbd5f5;
-  color: #0f172a;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
+  color: var(--ink);
   padding: 8px 12px;
   border-radius: 10px;
   font-weight: 600;
 }
 
 header button {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 10px 16px;
@@ -42,8 +42,8 @@ header button {
 }
 
 .tab {
-  background: #e2e8f0;
-  color: #0f172a;
+  background: var(--border);
+  color: var(--ink);
   border: 1px solid transparent;
   padding: 10px 14px;
   border-radius: 999px;
@@ -52,7 +52,7 @@ header button {
 }
 
 .tab.active {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
 }
 
@@ -69,12 +69,12 @@ header button {
 }
 
 .client-preview {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: color-mix(in srgb, var(--bg-b) 70%, var(--brand-50));
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 12px;
-  color: #475569;
+  color: var(--muted);
   display: flex;
   gap: 12px;
   align-items: center;
@@ -82,7 +82,7 @@ header button {
 }
 
 .client-preview strong {
-  color: #0f172a;
+  color: var(--ink);
 }
 
 .client-preview img {
@@ -107,8 +107,8 @@ header button {
 }
 
 .sub-tab {
-  background: #e2e8f0;
-  color: #0f172a;
+  background: var(--border);
+  color: var(--ink);
   border: 1px solid transparent;
   padding: 8px 12px;
   border-radius: 999px;
@@ -118,7 +118,7 @@ header button {
 }
 
 .sub-tab.active {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
 }
 
@@ -137,13 +137,13 @@ header button {
   margin: 16px 0;
   padding: 10px 12px;
   border-radius: 10px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: color-mix(in srgb, var(--bg-b) 70%, var(--brand-50));
+  border: 1px solid var(--border);
 }
 
 .wizard-steps {
   font-size: 12px;
-  color: #475569;
+  color: var(--muted);
   font-weight: 600;
 }
 
@@ -164,13 +164,13 @@ header button {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
   font-size: 12px;
-  color: #475569;
+  color: var(--muted);
 }
 
 .summary-grid h4 {
   margin: 0 0 6px;
   font-size: 12px;
-  color: #0f172a;
+  color: var(--ink);
 }
 
 .summary-grid p {
@@ -180,7 +180,7 @@ header button {
 .summary-note {
   margin: 0;
   font-size: 12px;
-  color: #0f172a;
+  color: var(--ink);
   font-weight: 600;
 }
 
@@ -191,7 +191,7 @@ header button {
 }
 
 .tool-card {
-  background: #ffffff;
+  background: var(--card);
   border-radius: 12px;
   padding: 12px;
   box-shadow: 0 12px 20px rgba(15, 23, 42, 0.06);
@@ -205,9 +205,9 @@ header button {
 }
 
 .tree-item {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #f8fafc;
+  background: color-mix(in srgb, var(--bg-b) 70%, var(--brand-50));
   padding: 6px 8px;
 }
 
@@ -223,19 +223,19 @@ header button {
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
-  background: #ffffff;
+  background: var(--card);
   border-radius: 8px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
 }
 
 .tree-row strong {
   font-size: 12px;
-  color: #0f172a;
+  color: var(--ink);
 }
 
 .tree-row.child {
   margin-top: 4px;
-  background: #f1f5f9;
+  background: color-mix(in srgb, var(--bg-b) 70%, var(--brand-50));
 }
 
 .tree-actions {
@@ -253,7 +253,7 @@ header button {
 .tree-edit input {
   padding: 6px 8px;
   border-radius: 8px;
-  border: 1px solid #cbd5f5;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
   font-size: 12px;
 }
 
@@ -285,7 +285,7 @@ header button {
 }
 
 .tool-card button {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 8px 12px;
@@ -354,19 +354,19 @@ select,
 input {
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid #cbd5f5;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
 }
 
 .file-field input[type='file'] {
-  border: 1px dashed #cbd5f5;
-  background: #f8fafc;
+  border: 1px dashed color-mix(in srgb, var(--border) 70%, var(--ink));
+  background: color-mix(in srgb, var(--bg-b) 70%, var(--brand-50));
   padding: 10px;
   border-radius: 10px;
   cursor: pointer;
 }
 
 .file-field input[type='file']::file-selector-button {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 8px 12px;
@@ -380,7 +380,7 @@ input {
   display: grid;
   gap: 6px;
   font-size: 12px;
-  color: #475569;
+  color: var(--muted);
 }
 
 .photo-preview img {
@@ -388,8 +388,8 @@ input {
   height: 140px;
   object-fit: contain;
   border-radius: 10px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--card);
+  border: 1px solid var(--border);
   padding: 6px;
 }
 
@@ -587,7 +587,7 @@ form .ghost {
 }
 
 button[type='submit'] {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 10px;
@@ -597,8 +597,8 @@ button[type='submit'] {
 
 .ghost {
   background: transparent;
-  border: 1px solid #cbd5f5;
-  color: #0f172a;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
+  color: var(--ink);
   padding: 10px;
   border-radius: 10px;
   cursor: pointer;
@@ -613,7 +613,7 @@ ul {
 }
 
 li {
-  background: #f8fafc;
+  background: color-mix(in srgb, var(--bg-b) 70%, var(--brand-50));
   border-radius: 12px;
   padding: 12px;
   display: grid;
@@ -627,7 +627,7 @@ li {
 }
 
 .actions button {
-  background: #0f172a;
+  background: var(--ink);
   color: #ffffff;
   border: none;
   padding: 6px 8px;
@@ -637,13 +637,14 @@ li {
 }
 
 .danger {
-  background: #dc2626 !important;
+  background: #dc2626;
+  color: #ffffff;
 }
 
 li span {
   display: block;
   font-size: 12px;
-  color: #475569;
+  color: var(--muted);
 }
 
 .error {

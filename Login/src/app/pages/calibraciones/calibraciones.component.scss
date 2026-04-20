@@ -117,11 +117,11 @@ input,
 select {
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid #cbd5f5;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
 }
 
 button {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 10px 12px;
@@ -130,17 +130,18 @@ button {
 }
 
 .primary {
-  background: #1d4ed8;
+  background: var(--brand-600);
 }
 
 .ghost {
   background: transparent;
-  border: 1px solid #cbd5f5;
-  color: #0f172a;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
+  color: var(--ink);
 }
 
 .danger {
   background: #dc2626;
+  color: #ffffff;
 }
 
 .schedule-list,

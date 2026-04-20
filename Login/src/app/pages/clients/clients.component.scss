@@ -17,16 +17,16 @@ header .header-actions {
 
 header .back {
   text-decoration: none;
-  background: #ffffff;
-  border: 1px solid #cbd5f5;
-  color: #0f172a;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
+  color: var(--ink);
   padding: 8px 12px;
   border-radius: 10px;
   font-weight: 600;
 }
 
 header button {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 10px 16px;
@@ -62,11 +62,11 @@ label {
 input {
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid #cbd5f5;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
 }
 
 button[type='submit'] {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 10px;
@@ -155,7 +155,7 @@ button[type='submit'] {
 }
 
 .edit-actions button {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 8px 12px;
@@ -166,8 +166,8 @@ button[type='submit'] {
 
 .edit-actions .ghost {
   background: transparent;
-  border: 1px solid #cbd5f5;
-  color: #0f172a;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
+  color: var(--ink);
 }
 
 .modules {
@@ -202,7 +202,7 @@ button[type='submit'] {
 }
 
 .modules button {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 8px 12px;
@@ -213,8 +213,8 @@ button[type='submit'] {
 
 .ghost {
   background: transparent;
-  border: 1px solid #cbd5f5;
-  color: #0f172a;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
+  color: var(--ink);
   padding: 8px 12px;
   border-radius: 8px;
   cursor: pointer;
@@ -222,7 +222,7 @@ button[type='submit'] {
 }
 
 .danger {
-  background: #dc2626 !important;
+  background: #dc2626;
   color: #ffffff;
 }
 

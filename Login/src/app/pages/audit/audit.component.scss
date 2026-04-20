@@ -17,16 +17,16 @@ header .header-actions {
 
 header .back {
   text-decoration: none;
-  background: #ffffff;
-  border: 1px solid #cbd5f5;
-  color: #0f172a;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
+  color: var(--ink);
   padding: 8px 12px;
   border-radius: 10px;
   font-weight: 600;
 }
 
 header button {
-  background: #0f172a;
+  background: var(--brand-600);
   color: #ffffff;
   border: none;
   padding: 10px 16px;
@@ -45,7 +45,7 @@ header button {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
-  background: #ffffff;
+  background: var(--card);
   padding: 12px;
   border-radius: 12px;
   box-shadow: 0 10px 18px rgba(15, 23, 42, 0.06);
@@ -61,7 +61,7 @@ header button {
 .filters input {
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid #cbd5f5;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
 }
 
 .row {
@@ -76,7 +76,7 @@ header button {
 }
 
 .row.header {
-  background: #0f172a;
+  background: var(--ink);
   color: #ffffff;
   font-weight: 600;
 }
