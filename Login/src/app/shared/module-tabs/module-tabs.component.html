@@ -1,0 +1,10 @@
+<nav class="module-tabs" *ngIf="visibleTabs.length > 1" aria-label="Navegación de módulos">
+  <a
+    *ngFor="let tab of visibleTabs"
+    [routerLink]="tab.route"
+    routerLinkActive="active"
+    [routerLinkActiveOptions]="{ exact: true }"
+  >
+    {{ tab.label }}
+  </a>
+</nav>

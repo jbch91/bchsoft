@@ -6,6 +6,8 @@ import { BiomedService } from '../../biomed/biomed.service';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
 import { getApiBase, getPublicBase, joinBase } from '../../core/api-base';
+import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 
 interface ClientOption {
   id: string;
@@ -40,7 +42,7 @@ interface AssetView {
 @Component({
   selector: 'app-hojas-de-vida',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
   templateUrl: './hojas-de-vida.component.html',
   styleUrl: './hojas-de-vida.component.scss'
 })

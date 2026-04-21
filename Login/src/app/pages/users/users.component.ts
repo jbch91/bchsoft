@@ -4,8 +4,11 @@ import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AdminService } from '../../admin/admin.service';
 import { Role } from '../../auth/models';
+import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 
 type UserDocumentType = 'cedula_ciudadania' | 'cedula_extranjeria' | 'pasaporte';
+type UserTab = 'list' | 'create' | 'roles';
 
 interface UserView {
   id: string;
@@ -24,7 +27,7 @@ interface UserView {
 @Component({
   selector: 'app-users',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
   templateUrl: './users.component.html',
   styleUrl: './users.component.scss'
 })
@@ -33,12 +36,15 @@ export class UsersComponent implements OnInit {
   roleIds = new Map<Role, number>();
   permissions: string[] = [];
   rolePermissions: Record<number, string[]> = {};
+  editingRoleId: number | null = null;
+  permissionDraft = new Set<string>();
   users: UserView[] = [];
   loading = false;
   errorMessage = '';
   successMessage = '';
   clients: { id: string; name: string }[] = [];
   searchTerm = '';
+  activeUserTab: UserTab = 'list';
   openClientId: string | null = null;
   editingUserId: string | null = null;
   editUser = {
@@ -50,7 +56,6 @@ export class UsersComponent implements OnInit {
     invimaRegistration: ''
   };
   editSignatureFile: File | null = null;
-  rolesOpen = false;
   readerAreas: { id: string; name: string }[] = [];
   readerLocations: { id: string; name: string; area_id: string | null }[] = [];
   readerAreaIds = new Set<string>();
@@ -159,11 +164,13 @@ export class UsersComponent implements OnInit {
       this.errorMessage = 'Debes cargar la firma digital para este rol.';
       return;
     }
-    if (this.requiresBiomedicalCredentials(this.role)) {
-      if (!this.documentType || !this.documentNumber.trim() || !this.invimaRegistration.trim()) {
-        this.errorMessage = 'Completa tipo de documento, número de documento y registro INVIMA para el ingeniero biomédico.';
-        return;
-      }
+    if (!this.documentType || !this.documentNumber.trim()) {
+      this.errorMessage = 'Completa tipo de documento y número de documento.';
+      return;
+    }
+    if (this.requiresBiomedicalCredentials(this.role) && !this.invimaRegistration.trim()) {
+      this.errorMessage = 'Completa el registro INVIMA para el ingeniero biomédico.';
+      return;
     }
 
     this.errorMessage = '';
@@ -177,8 +184,8 @@ export class UsersComponent implements OnInit {
         role: this.role,
         clientId: this.isClientScopedRole(this.role) ? this.clientId : undefined,
         signatureFile: this.signatureFile,
-        documentType: this.requiresBiomedicalCredentials(this.role) ? this.documentType : null,
-        documentNumber: this.requiresBiomedicalCredentials(this.role) ? this.documentNumber.trim() : null,
+        documentType: this.documentType,
+        documentNumber: this.documentNumber.trim(),
         invimaRegistration: this.requiresBiomedicalCredentials(this.role) ? this.invimaRegistration.trim() : null
       });
       this.username = '';
@@ -191,6 +198,8 @@ export class UsersComponent implements OnInit {
       this.documentType = 'cedula_ciudadania';
       this.documentNumber = '';
       this.invimaRegistration = '';
+      this.successMessage = 'Usuario creado.';
+      this.activeUserTab = 'list';
       await this.load();
     } catch (error: any) {
       console.error(error);
@@ -216,6 +225,22 @@ export class UsersComponent implements OnInit {
       }
     }
     return Array.from(map.values()).filter((g) => g.users.length);
+  }
+
+  get filteredUsersCount(): number {
+    return this.groupedUsers.reduce((total, group) => total + group.users.length, 0);
+  }
+
+  setUserTab(tab: UserTab): void {
+    this.activeUserTab = tab;
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.cancelEditUser();
+    this.cancelRolePermissionsEdit();
+  }
+
+  clearSearch(): void {
+    this.searchTerm = '';
   }
 
   toggleClientOpen(clientId: string): void {
@@ -260,27 +285,21 @@ export class UsersComponent implements OnInit {
   }
 
   async saveUser(user: UserView): Promise<void> {
-    if (this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')) {
-      if (
-        !this.editUser.documentType ||
-        !this.editUser.documentNumber.trim() ||
-        !this.editUser.invimaRegistration.trim()
-      ) {
-        this.errorMessage = 'Completa tipo de documento, número de documento y registro INVIMA.';
-        return;
-      }
+    if (!this.editUser.documentType || !this.editUser.documentNumber.trim()) {
+      this.errorMessage = 'Completa tipo de documento y número de documento.';
+      return;
+    }
+    if (this.requiresBiomedicalCredentials(user.roles[0] || 'viewer') && !this.editUser.invimaRegistration.trim()) {
+      this.errorMessage = 'Completa el registro INVIMA para el ingeniero biomédico.';
+      return;
     }
 
     await this.admin.updateUserProfile(user.id, {
       displayName: this.editUser.displayName.trim(),
       email: this.editUser.email.trim(),
       clientId: this.editUser.clientId || null,
-      documentType: this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')
-        ? this.editUser.documentType
-        : null,
-      documentNumber: this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')
-        ? this.editUser.documentNumber.trim()
-        : null,
+      documentType: this.editUser.documentType,
+      documentNumber: this.editUser.documentNumber.trim(),
       invimaRegistration: this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')
         ? this.editUser.invimaRegistration.trim()
         : null
@@ -407,6 +426,17 @@ export class UsersComponent implements OnInit {
   }
 
   async onChangeRole(user: UserView, role: Role): Promise<void> {
+    if (!user.documentType || !user.documentNumber) {
+      this.errorMessage = 'Antes de cambiar el rol, edita el usuario y completa su documento de identidad.';
+      this.cdr.detectChanges();
+      return;
+    }
+    if (this.requiresBiomedicalCredentials(role) && !user.invimaRegistration) {
+      this.errorMessage = 'Antes de asignar el rol ingeniero biomédico, edita el usuario y completa su registro INVIMA.';
+      this.cdr.detectChanges();
+      return;
+    }
+
     try {
       await this.admin.updateUserRole(user.id, role);
       user.roles = [role];
@@ -437,21 +467,47 @@ export class UsersComponent implements OnInit {
     }
   }
 
+  permissionCount(role: Role): number {
+    const roleId = this.roleIds.get(role);
+    return roleId ? this.rolePermissions[roleId]?.length ?? 0 : 0;
+  }
+
+  isEditingRole(role: Role): boolean {
+    const roleId = this.roleIds.get(role);
+    return !!roleId && this.editingRoleId === roleId;
+  }
+
+  startEditRolePermissions(role: Role): void {
+    const roleId = this.roleIds.get(role);
+    if (!roleId) return;
+    this.editingRoleId = roleId;
+    this.permissionDraft = new Set(this.rolePermissions[roleId] ?? []);
+    this.errorMessage = '';
+    this.successMessage = '';
+  }
+
+  cancelRolePermissionsEdit(): void {
+    this.editingRoleId = null;
+    this.permissionDraft.clear();
+  }
+
   togglePermission(roleId: number, permission: string): void {
-    const current = new Set(this.rolePermissions[roleId] ?? []);
-    if (current.has(permission)) {
-      current.delete(permission);
+    if (this.editingRoleId !== roleId) return;
+    if (this.permissionDraft.has(permission)) {
+      this.permissionDraft.delete(permission);
     } else {
-      current.add(permission);
+      this.permissionDraft.add(permission);
     }
-    this.rolePermissions[roleId] = Array.from(current);
   }
 
   async saveRolePermissions(roleId: number): Promise<void> {
     this.errorMessage = '';
     this.successMessage = '';
     try {
-      await this.admin.updateRolePermissions(roleId, this.rolePermissions[roleId] ?? []);
+      const permissions = Array.from(this.permissionDraft);
+      await this.admin.updateRolePermissions(roleId, permissions);
+      this.rolePermissions[roleId] = permissions;
+      this.cancelRolePermissionsEdit();
       this.successMessage = 'Permisos guardados.';
     } catch (error) {
       console.error(error);

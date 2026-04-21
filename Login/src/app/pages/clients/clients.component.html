@@ -1,18 +1,48 @@
 <section class="page">
+  <app-user-menu></app-user-menu>
   <header>
     <div>
       <h1>Clientes</h1>
   <p>Disponible solo para superuser.</p>
     </div>
     <div class="header-actions">
-      <a class="back" routerLink="/dashboard">Regresar</a>
-      <button (click)="load()" [disabled]="loading">Recargar</button>
+      <a class="back" routerLink="/dashboard">Menú</a>
     </div>
   </header>
 
-  <div class="grid">
-    <div class="card">
-      <h2>Crear cliente</h2>
+  <app-module-tabs></app-module-tabs>
+
+  <nav class="client-tabs" aria-label="Secciones de clientes">
+    <button
+      type="button"
+      [class.active]="activeClientTab === 'list'"
+      (click)="setClientTab('list')"
+    >
+      Listado clientes
+      <span>{{ clients.length }}</span>
+    </button>
+    <button
+      type="button"
+      [class.active]="activeClientTab === 'create'"
+      (click)="setClientTab('create')"
+    >
+      Crear cliente
+    </button>
+  </nav>
+
+  <div class="tab-notices" *ngIf="errorMessage || successMessage">
+    <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+    <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+  </div>
+
+  <div class="create-layout" *ngIf="activeClientTab === 'create'">
+    <div class="card create-card">
+      <div class="create-title">
+        <span>Nuevo cliente</span>
+        <h2>Crear cliente</h2>
+        <p class="form-intro">Registra la información base del cliente. Luego podrás habilitar módulos desde el listado.</p>
+      </div>
+
       <form (ngSubmit)="onCreateClient()">
         <label>
           Nombre
@@ -44,29 +74,96 @@
           <input type="email" name="email" [(ngModel)]="email" required />
         </label>
 
-        <button type="submit">Crear cliente</button>
+        <div class="create-logo-field">
+          <div>
+            <strong>Logo del cliente</strong>
+            <span>Opcional al crear. Se ajustará automáticamente para los formatos y encabezados.</span>
+          </div>
+          <div class="create-logo-control">
+            <label class="file-button">
+              Seleccionar logo
+              <input
+                #createLogoInput
+                type="file"
+                accept="image/*"
+                (change)="onSelectCreateLogo($event)"
+              />
+            </label>
+            <button
+              type="button"
+              class="ghost"
+              *ngIf="logoFile"
+              (click)="clearCreateLogo(createLogoInput)"
+            >
+              Quitar
+            </button>
+          </div>
+          <div class="create-logo-preview" *ngIf="logoPreviewUrl">
+            <img [src]="logoPreviewUrl" alt="Vista previa logo cliente" />
+            <span>{{ logoFile?.name }}</span>
+          </div>
+        </div>
+
+        <button type="submit" class="primary">Crear cliente</button>
       </form>
-      <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
-      <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
     </div>
 
+    <aside class="create-helper">
+      <div class="helper-logo">
+        <img src="/assets/inbi-logo.png" alt="INBIHOSPITALARIO" />
+      </div>
+      <h3>Configuración inicial del cliente</h3>
+      <p>
+        Aquí se crea la clínica u hospital. Después, desde el listado, se habilitan los módulos que
+        ese cliente tendrá disponibles.
+      </p>
+      <div class="helper-steps">
+        <span>1. Datos legales y contacto</span>
+        <span>2. Logo institucional opcional</span>
+        <span>3. Módulos contratados</span>
+      </div>
+    </aside>
   </div>
 
-  <section class="list-section">
+  <section class="list-section" *ngIf="activeClientTab === 'list'">
     <header class="list-header">
       <div>
         <h2>Listado clientes</h2>
-        <p>Busca y administra módulos por cliente.</p>
+        <p>Busca, filtra y administra cada cliente sin tocar módulos por accidente.</p>
       </div>
-      <label>
-        Buscar
-        <input type="text" [(ngModel)]="searchTerm" placeholder="Nombre, NIT, ciudad..." />
-      </label>
+      <div class="list-tools">
+        <label>
+          Buscar
+          <input type="text" [(ngModel)]="searchTerm" placeholder="Nombre, NIT, ciudad..." />
+        </label>
+        <label>
+          Ciudad
+          <select [(ngModel)]="filterCity">
+            <option value="todos">Todas</option>
+            <option *ngFor="let cityOption of cityOptions" [value]="cityOption">{{ cityOption }}</option>
+          </select>
+        </label>
+        <label>
+          Módulo
+          <select [(ngModel)]="filterModule">
+            <option value="todos">Todos</option>
+            <option *ngFor="let module of modules" [value]="module.key">{{ module.name }}</option>
+          </select>
+        </label>
+        <button type="button" class="ghost" (click)="clearListFilters()">Limpiar</button>
+      </div>
     </header>
 
     <p *ngIf="loading">Cargando...</p>
     <div class="list" *ngIf="!loading">
-      <div class="client-card" *ngFor="let client of filteredClients">
+      <ng-container *ngIf="filteredClients as visibleClients">
+      <p class="result-count">
+        {{ visibleClients.length }} cliente{{ visibleClients.length === 1 ? '' : 's' }} encontrado{{ visibleClients.length === 1 ? '' : 's' }}
+      </p>
+      <p class="empty-list" *ngIf="visibleClients.length === 0">
+        No hay clientes con esos filtros. Prueba limpiar la búsqueda o cambiar el módulo.
+      </p>
+      <div class="client-card" *ngFor="let client of visibleClients">
         <button type="button" class="client-toggle" (click)="toggleClientOpen(client.id)">
           <div>
             <strong>{{ client.name }}</strong>
@@ -112,31 +209,71 @@
               <input type="email" [(ngModel)]="editClient.email" />
             </label>
             <div class="edit-actions">
-              <button type="button" (click)="saveClient(client.id)">Guardar</button>
+              <button type="button" class="primary" (click)="saveClient(client.id)">Guardar</button>
               <button type="button" class="ghost" (click)="cancelEditClient()">Cancelar</button>
             </div>
           </div>
 
           <div class="modules">
-            <h4>Módulos habilitados</h4>
-            <div class="module-list">
-              <label *ngFor="let module of modules">
-                <input
-                  type="checkbox"
-                  [checked]="clientModules[client.id]?.has(module.key)"
-                  (change)="toggleClientModule(client.id, module.key)"
-                />
-                {{ module.name }}
-              </label>
+            <div class="modules-header">
+              <div>
+                <h4>Módulos habilitados</h4>
+                <p>Primero revisa; solo se modifican al presionar editar.</p>
+              </div>
+              <span class="module-summary">
+                {{ enabledModulesFor(client.id).length }} de {{ modules.length }} activos
+              </span>
+              <button
+                type="button"
+                class="ghost"
+                *ngIf="editingModulesClientId !== client.id"
+                (click)="startEditModules(client.id)"
+              >
+                Editar módulos
+              </button>
             </div>
+
+            <div class="module-pills" *ngIf="editingModulesClientId !== client.id">
+              <span *ngFor="let module of enabledModulesFor(client.id)">{{ module.name }}</span>
+              <span class="empty" *ngIf="enabledModulesFor(client.id).length === 0">Sin módulos habilitados</span>
+            </div>
+
+            <div class="module-edit" *ngIf="editingModulesClientId === client.id">
+              <div class="module-list">
+                <label *ngFor="let module of modules">
+                  <input
+                    type="checkbox"
+                    [checked]="moduleDraft.has(module.key)"
+                    (change)="toggleClientModule(client.id, module.key)"
+                  />
+                  <span>
+                    <strong>{{ module.name }}</strong>
+                    <small *ngIf="module.description">{{ module.description }}</small>
+                  </span>
+                </label>
+              </div>
+              <div class="module-actions">
+                <button
+                  type="button"
+                  class="primary"
+                  [disabled]="savingModulesClientId === client.id"
+                  (click)="saveClientModules(client.id)"
+                >
+                  {{ savingModulesClientId === client.id ? 'Guardando...' : 'Guardar módulos' }}
+                </button>
+                <button type="button" class="ghost" (click)="cancelEditModules()">Cancelar</button>
+              </div>
+            </div>
+
             <div class="logo">
+              <strong>Logo del cliente</strong>
               <img *ngIf="logoUrl(client)" [src]="logoUrl(client)!" alt="Logo" />
               <input type="file" accept="image/*" (change)="onUploadLogo(client, $event)" />
             </div>
-            <button type="button" (click)="saveClientModules(client.id)">Guardar módulos</button>
           </div>
         </div>
       </div>
+      </ng-container>
     </div>
   </section>
 </section>

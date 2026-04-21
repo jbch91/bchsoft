@@ -7,6 +7,8 @@ import { AuthService } from '../../auth/auth.service';
 import { BiomedService } from '../../biomed/biomed.service';
 import { MaintenanceService, MaintenanceReportDto, MaintenanceRequestDto } from '../../maintenance/maintenance.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
+import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 
 interface ClientLite {
   id: string;
@@ -27,7 +29,7 @@ interface AssetLite {
 @Component({
   selector: 'app-maintenance',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
   templateUrl: './maintenance.component.html',
   styleUrl: './maintenance.component.scss'
 })

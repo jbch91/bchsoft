@@ -1,0 +1,25 @@
+<div class="session-bar" *ngIf="auth.currentUser() as user">
+  <details class="user-menu">
+    <summary>
+      <span class="avatar">{{ initials() }}</span>
+      <span class="user-copy">
+        <strong>{{ user.displayName }}</strong>
+        <small>{{ roleLabel() }}</small>
+      </span>
+    </summary>
+
+    <div class="user-panel">
+      <p class="panel-title">Sesión activa</p>
+      <strong>{{ user.displayName }}</strong>
+      <span>Usuario: {{ user.username }}</span>
+      <span>Rol: {{ roleLabel() }}</span>
+      <span *ngIf="user.clientId">Cliente asignado</span>
+
+      <div class="panel-actions">
+        <a routerLink="/dashboard">Menú principal</a>
+        <button type="button" class="secondary" disabled>Configuración</button>
+        <button type="button" (click)="auth.logout()" routerLink="/login">Salir</button>
+      </div>
+    </div>
+  </details>
+</div>

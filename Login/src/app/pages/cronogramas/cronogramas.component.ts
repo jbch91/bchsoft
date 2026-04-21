@@ -18,6 +18,8 @@ import {
   CalibrationScheduleDto,
   CalibrationItemDto
 } from '../../calibration/calibration.service';
+import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 
 interface ClientOption {
   id: string;
@@ -36,7 +38,7 @@ interface AreaOption {
 @Component({
   selector: 'app-cronogramas',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
   templateUrl: './cronogramas.component.html',
   styleUrl: './cronogramas.component.scss'
 })

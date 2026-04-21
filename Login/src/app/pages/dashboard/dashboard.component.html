@@ -1,4 +1,6 @@
 <section class="dashboard">
+  <app-user-menu></app-user-menu>
+
   <header>
     <div class="header-left">
       <div class="client-inline" *ngIf="clientInfo">
@@ -13,9 +15,8 @@
           <img [src]="clientLogoUrl()!" alt="Logo cliente" />
         </div>
       </div>
-      <p>Bienvenido, {{ auth.currentUser()?.displayName }}</p>
+      <p>Selecciona el módulo con el que quieres trabajar.</p>
     </div>
-    <button class="btn btn-warning" (click)="auth.logout()" routerLink="/login">Salir</button>
   </header>
 
   <div class="cards">

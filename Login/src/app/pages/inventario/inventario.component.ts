@@ -8,6 +8,8 @@ import { AuthService } from '../../auth/auth.service';
 import { MaintenanceService, MaintenanceReportDto } from '../../maintenance/maintenance.service';
 import { CalibrationService, CalibrationReportDto } from '../../calibration/calibration.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
+import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -37,7 +39,7 @@ interface InventoryItem {
 @Component({
   selector: 'app-inventario',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
   templateUrl: './inventario.component.html',
   styleUrl: './inventario.component.scss'
 })

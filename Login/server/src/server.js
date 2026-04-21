@@ -439,9 +439,12 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
   if (cleanDocumentType && !BIOMED_DOCUMENT_TYPES.includes(cleanDocumentType)) {
     return res.status(400).json({ message: 'Tipo de documento inválido.' });
   }
-  if (role === 'ingeniero_biomedico' && (!cleanDocumentType || !cleanDocumentNumber || !cleanInvimaRegistration)) {
+  if (!cleanDocumentType || !cleanDocumentNumber) {
+    return res.status(400).json({ message: 'Tipo de documento y número de documento son obligatorios.' });
+  }
+  if (role === 'ingeniero_biomedico' && !cleanInvimaRegistration) {
     return res.status(400).json({
-      message: 'Tipo de documento, número de documento y registro INVIMA son obligatorios para el ingeniero biomédico.'
+      message: 'Registro INVIMA obligatorio para el ingeniero biomédico.'
     });
   }
 
@@ -490,12 +493,47 @@ async function saveUserSignature(userId, buffer) {
   const dir = path.join(process.cwd(), 'uploads', 'users', userId);
   await fs.promises.mkdir(dir, { recursive: true });
   const filename = path.join(dir, 'signature.png');
-  await sharp(buffer)
+  const normalized = sharp(buffer)
+    .rotate()
+    .flatten({ background: '#ffffff' })
+    .trim({ background: '#ffffff', threshold: 22 })
+    .resize(420, 180, {
+      fit: 'inside',
+      withoutEnlargement: true
+    })
+    .ensureAlpha();
+  const { data, info } = await normalized.raw().toBuffer({ resolveWithObject: true });
+
+  for (let i = 0; i < data.length; i += info.channels) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const average = (r + g + b) / 3;
+    const colorSpread = Math.max(r, g, b) - Math.min(r, g, b);
+    const isWhitePaper = average >= 238 && colorSpread <= 24;
+    const isSoftPaperShadow = average >= 224 && colorSpread <= 16;
+
+    if (isWhitePaper) {
+      data[i + 3] = 0;
+    } else if (isSoftPaperShadow) {
+      const opacity = Math.max(0, Math.min(255, Math.round((238 - average) * 18)));
+      data[i + 3] = Math.min(data[i + 3], opacity);
+    }
+  }
+
+  await sharp(data, {
+    raw: {
+      width: info.width,
+      height: info.height,
+      channels: info.channels
+    }
+  })
+    .trim({ background: { r: 255, g: 255, b: 255, alpha: 0 }, threshold: 1 })
     .resize(420, 220, {
       fit: 'contain',
       background: { r: 255, g: 255, b: 255, alpha: 0 }
     })
-    .png()
+    .png({ compressionLevel: 9 })
     .toFile(filename);
   const publicPath = `/${path.join('uploads', 'users', userId, 'signature.png')}`;
   return publicPath.replace(/\\/g, '/');
@@ -510,6 +548,110 @@ function parseJsonArray(value) {
   } catch {
     return [];
   }
+}
+
+function assetLabel(asset) {
+  if (!asset) return 'Equipo';
+  const code = asset.code ? `${asset.code} - ` : '';
+  return `${code}${asset.name || 'Equipo sin nombre'}`;
+}
+
+function assetSnapshot(asset) {
+  if (!asset) return null;
+  return {
+    id: asset.id,
+    code: asset.code ?? null,
+    name: asset.name ?? null,
+    brand: asset.brand ?? null,
+    model: asset.model ?? null,
+    serial: asset.serial ?? null,
+    area: asset.area_name ?? null,
+    location: asset.location_name ?? asset.location ?? null,
+    status: asset.status ?? null,
+    riskClass: asset.risk_class ?? null,
+    maintenanceFrequency: asset.maintenance_frequency ?? null,
+    requiresCalibration: asset.requires_calibration ?? null,
+    calibrationFrequency: asset.calibration_frequency ?? null
+  };
+}
+
+function changedAssetFields(before, after) {
+  if (!before || !after) return [];
+  const fields = [
+    ['code', 'Código'],
+    ['name', 'Nombre'],
+    ['brand', 'Marca'],
+    ['model', 'Modelo'],
+    ['serial', 'Serie'],
+    ['area_id', 'Área'],
+    ['location_id', 'Ubicación'],
+    ['risk_class', 'Riesgo'],
+    ['status', 'Estado'],
+    ['maintenance_frequency', 'Frecuencia mantenimiento'],
+    ['requires_calibration', 'Requiere calibración'],
+    ['calibration_frequency', 'Frecuencia calibración']
+  ];
+  return fields
+    .filter(([key]) => String(before[key] ?? '') !== String(after[key] ?? ''))
+    .map(([key, label]) => ({
+      field: key,
+      label,
+      before: before[key] ?? null,
+      after: after[key] ?? null
+    }));
+}
+
+async function logEquipmentAudit(req, {
+  action,
+  clientId,
+  assetId,
+  asset,
+  description,
+  details = {}
+}) {
+  try {
+    const [client, resolvedAsset] = await Promise.all([
+      clientId ? getClientById(clientId).catch(() => null) : Promise.resolve(null),
+      asset ? Promise.resolve(asset) : assetId && clientId ? getAssetById(clientId, assetId).catch(() => null) : Promise.resolve(null)
+    ]);
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action,
+      targetUserId: resolvedAsset?.id ?? assetId ?? clientId ?? null,
+      targetUsername: assetLabel(resolvedAsset),
+      details: {
+        category: 'equipment',
+        description,
+        actorDisplayName: req.user.displayName ?? req.user.username,
+        actorUsername: req.user.username,
+        actorRoles: req.user.roles ?? [],
+        clientId: clientId ?? null,
+        clientName: client?.name ?? null,
+        asset: assetSnapshot(resolvedAsset),
+        ...details
+      }
+    });
+  } catch (error) {
+    console.error('No se pudo registrar auditoría de equipo', error);
+  }
+}
+
+async function saveClientLogoBuffer(clientId, buffer) {
+  await ensureClientLogoDir(clientId);
+  const filename = path.join('uploads', 'clients', clientId, 'logo.png');
+  const fullPath = path.join(process.cwd(), filename);
+
+  await sharp(buffer)
+    .resize(320, 160, {
+      fit: 'contain',
+      background: { r: 255, g: 255, b: 255, alpha: 0 }
+    })
+    .png()
+    .toFile(fullPath);
+
+  const publicPath = `/${filename}`.replace(/\\/g, '/');
+  return updateClientLogo(clientId, publicPath);
 }
 
 app.get('/admin/clients', requireAuth, requirePermission('clients:manage'), async (req, res) => {
@@ -546,7 +688,7 @@ app.get('/admin/clients/:id/locations', requireAuth, requirePermission('users:ma
   }
 });
 
-app.post('/admin/clients', requireAuth, requirePermission('clients:manage'), async (req, res) => {
+app.post('/admin/clients', requireAuth, requirePermission('clients:manage'), upload.single('logo'), async (req, res) => {
   if (!req.user.roles?.includes('superuser')) {
     return res.status(403).json({ message: 'Solo superuser.' });
   }
@@ -554,18 +696,30 @@ app.post('/admin/clients', requireAuth, requirePermission('clients:manage'), asy
   if (!name || !nit || !city || !email || !address) {
     return res.status(400).json({ message: 'Datos incompletos.' });
   }
+  if (req.file) {
+    try {
+      await sharp(req.file.buffer).metadata();
+    } catch {
+      return res.status(400).json({ message: 'El logo debe ser una imagen válida.' });
+    }
+  }
 
   try {
     const result = await createClient({ name, nit, city, address, habilitationCode, email });
+    let logoPath = null;
+    if (req.file) {
+      const updatedLogo = await saveClientLogoBuffer(result.id, req.file.buffer);
+      logoPath = updatedLogo?.logo_path ?? null;
+    }
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,
       action: 'CLIENT_CREATE',
       targetUserId: result.id,
       targetUsername: name,
-      details: { nit, city, address }
+      details: { nit, city, address, logo: logoPath }
     });
-    return res.status(201).json(result);
+    return res.status(201).json({ ...result, logo_path: logoPath });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'No se pudo crear el cliente.' });
@@ -618,20 +772,7 @@ app.post(
       return res.status(400).json({ message: 'Logo requerido.' });
     }
 
-    const dir = await ensureClientLogoDir(req.params.id);
-    const filename = path.join('uploads', 'clients', req.params.id, 'logo.png');
-    const fullPath = path.join(process.cwd(), filename);
-
-    const image = sharp(req.file.buffer);
-    await image
-      .resize(320, 160, {
-        fit: 'contain',
-        background: { r: 255, g: 255, b: 255, alpha: 0 }
-      })
-      .png()
-      .toFile(fullPath);
-
-    const updated = await updateClientLogo(req.params.id, `/${filename}`);
+    const updated = await saveClientLogoBuffer(req.params.id, req.file.buffer);
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,
@@ -793,12 +934,21 @@ app.post(
       if (cleaningList.length) await replaceCleaning(clientId, result.id, cleaningList);
       if (recommendationsList.length) await replaceRecommendations(clientId, result.id, recommendationsList);
 
-      await logAudit({
-        actorUserId: req.user.sub,
-        actorUsername: req.user.username,
+      const createdAsset = await getAssetById(clientId, result.id);
+      await logEquipmentAudit(req, {
         action: 'ASSET_CREATE',
-        targetUserId: clientId,
-        details: { code, name }
+        clientId,
+        assetId: result.id,
+        asset: createdAsset,
+        description: `Creación de hoja de vida del equipo ${assetLabel(createdAsset)}.`,
+        details: {
+          eventType: 'hoja_vida_creada',
+          uploadedFiles: {
+            photo: Boolean(req.files?.photo?.[0]),
+            manualOperacion: Boolean(req.files?.manualOperacion?.[0]),
+            manualServicio: Boolean(req.files?.manualServicio?.[0])
+          }
+        }
       });
       return res.status(201).json(result);
     } catch (error) {
@@ -856,6 +1006,7 @@ app.put(
       return res.status(400).json({ message: 'Código y nombre son requeridos.' });
     }
     try {
+      const beforeAsset = await getAssetById(clientId, assetId);
       await updateAsset(clientId, assetId, {
         code,
         name,
@@ -930,12 +1081,22 @@ app.put(
       await replaceCleaning(clientId, assetId, cleaningList);
       await replaceRecommendations(clientId, assetId, recommendationsList);
 
-      await logAudit({
-        actorUserId: req.user.sub,
-        actorUsername: req.user.username,
+      const updatedAsset = await getAssetById(clientId, assetId);
+      await logEquipmentAudit(req, {
         action: 'ASSET_UPDATE',
-        targetUserId: clientId,
-        details: { assetId }
+        clientId,
+        assetId,
+        asset: updatedAsset,
+        description: `Edición de hoja de vida del equipo ${assetLabel(updatedAsset)}.`,
+        details: {
+          eventType: 'hoja_vida_editada',
+          changedFields: changedAssetFields(beforeAsset, updatedAsset),
+          uploadedFiles: {
+            photo: Boolean(req.files?.photo?.[0]),
+            manualOperacion: Boolean(req.files?.manualOperacion?.[0]),
+            manualServicio: Boolean(req.files?.manualServicio?.[0])
+          }
+        }
       });
       return res.json({ ok: true });
     } catch (error) {
@@ -954,13 +1115,18 @@ app.delete(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
+    const asset = await getAssetById(clientId, assetId);
     await deleteAsset(clientId, assetId);
-    await logAudit({
-      actorUserId: req.user.sub,
-      actorUsername: req.user.username,
+    await logEquipmentAudit(req, {
       action: 'ASSET_DELETE',
-      targetUserId: clientId,
-      details: { assetId }
+      clientId,
+      assetId,
+      asset,
+      description: `Eliminación del equipo ${assetLabel(asset)} y su hoja de vida.`,
+      details: {
+        eventType: 'hoja_vida_eliminada',
+        deletedAsset: assetSnapshot(asset)
+      }
     });
     return res.json({ ok: true });
   }
@@ -1220,6 +1386,14 @@ app.patch('/admin/users/:id/role', requireAuth, requirePermission('users:manage'
   }
 
   try {
+    if (role === 'ingeniero_biomedico') {
+      const targetUser = await getUserById(req.params.id);
+      if (!targetUser?.document_type || !targetUser?.document_number || !targetUser?.invima_registration) {
+        return res.status(400).json({
+          message: 'Para asignar ingeniero biomédico, primero completa documento e INVIMA del usuario.'
+        });
+      }
+    }
     const { before } = await updateUserRole(req.params.id, role);
     await logAudit({
       actorUserId: req.user.sub,
@@ -1245,16 +1419,32 @@ app.patch('/admin/users/:id', requireAuth, requirePermission('users:manage'), as
     return res.status(400).json({ message: 'Datos incompletos.' });
   }
   const cleanDocumentType = documentType?.trim?.() || null;
+  const cleanDocumentNumber = documentNumber?.trim?.() || null;
+  const cleanInvimaRegistration = invimaRegistration?.trim?.() || null;
   if (cleanDocumentType && !BIOMED_DOCUMENT_TYPES.includes(cleanDocumentType)) {
     return res.status(400).json({ message: 'Tipo de documento inválido.' });
+  }
+  if (!cleanDocumentType || !cleanDocumentNumber) {
+    return res.status(400).json({ message: 'Tipo de documento y número de documento son obligatorios.' });
+  }
+  const { rows: roleRows } = await query(
+    `SELECT r.name
+     FROM roles r
+     JOIN user_roles ur ON ur.role_id = r.id
+     WHERE ur.user_id = $1`,
+    [req.params.id]
+  );
+  const isBiomedicalEngineer = roleRows.some((row) => row.name === 'ingeniero_biomedico');
+  if (isBiomedicalEngineer && !cleanInvimaRegistration) {
+    return res.status(400).json({ message: 'Registro INVIMA obligatorio para el ingeniero biomédico.' });
   }
   await updateUserProfile(req.params.id, {
     displayName,
     email,
     clientId,
     documentType: cleanDocumentType,
-    documentNumber: documentNumber?.trim?.() || null,
-    invimaRegistration: invimaRegistration?.trim?.() || null
+    documentNumber: cleanDocumentNumber,
+    invimaRegistration: isBiomedicalEngineer ? cleanInvimaRegistration : null
   });
   await logAudit({
     actorUserId: req.user.sub,
@@ -1317,16 +1507,23 @@ app.post(
     if (!req.file) {
       return res.status(400).json({ message: 'Firma requerida.' });
     }
-    const signaturePath = await saveUserSignature(req.params.id, req.file.buffer);
-    await updateUserSignature(req.params.id, signaturePath);
-    await logAudit({
-      actorUserId: req.user.sub,
-      actorUsername: req.user.username,
-      action: 'USER_SIGNATURE_UPDATE',
-      targetUserId: req.params.id,
-      details: { signaturePath }
-    });
-    return res.json({ ok: true, signaturePath });
+    try {
+      const signaturePath = await saveUserSignature(req.params.id, req.file.buffer);
+      await updateUserSignature(req.params.id, signaturePath);
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'USER_SIGNATURE_UPDATE',
+        targetUserId: req.params.id,
+        details: { signaturePath }
+      });
+      return res.json({ ok: true, signaturePath });
+    } catch (error) {
+      console.error(error);
+      return res.status(400).json({
+        message: 'No se pudo procesar la firma. Sube una imagen clara con fondo blanco.'
+      });
+    }
   }
 );
 
@@ -1397,7 +1594,7 @@ app.patch(
 );
 
 app.get('/admin/audit', requireAuth, requirePermission('users:manage'), async (_req, res) => {
-  const logs = await listAuditLogs(200);
+  const logs = await listAuditLogs(500);
   return res.json(logs);
 });
 
@@ -1448,6 +1645,21 @@ app.post(
       type,
       description,
       requestedBy: req.user.sub
+    });
+
+    const requestedAsset = await getAssetById(clientId, assetId);
+    await logEquipmentAudit(req, {
+      action: 'MAINTENANCE_REQUEST_CREATE',
+      clientId,
+      assetId,
+      asset: requestedAsset,
+      description: `Solicitud de mantenimiento ${type} creada para ${assetLabel(requestedAsset)}.`,
+      details: {
+        eventType: 'solicitud_mantenimiento_creada',
+        requestId: result.id,
+        maintenanceType: type,
+        requestDescription: description ?? null
+      }
     });
 
     const engineers = await listUsersByRoleAndClient('ingeniero_biomedico', clientId);
@@ -1569,6 +1781,23 @@ app.post(
       createdBy: req.user.sub
     });
 
+    const reportAsset = await getAssetById(request.client_id, request.asset_id);
+    await logEquipmentAudit(req, {
+      action: 'MAINTENANCE_REPORT_CREATE',
+      clientId: request.client_id,
+      assetId: request.asset_id,
+      asset: reportAsset,
+      description: `Reporte de mantenimiento ${request.type} creado para ${assetLabel(reportAsset)}.`,
+      details: {
+        eventType: 'reporte_mantenimiento_creado',
+        reportId: result.id,
+        requestId,
+        maintenanceType: request.type,
+        summary: summary ?? null,
+        findings: findings ?? null
+      }
+    });
+
     const engineer = await getUserById(req.user.sub);
     if (engineer?.signature_path) {
       await signMaintenanceReport({
@@ -1648,6 +1877,22 @@ app.post(
       signaturePath: user.signature_path
     });
 
+    const signedAsset = await getAssetById(report.client_id, report.asset_id);
+    await logEquipmentAudit(req, {
+      action: 'MAINTENANCE_REPORT_SIGN',
+      clientId: report.client_id,
+      assetId: report.asset_id,
+      asset: signedAsset,
+      description: `Firma de reporte de mantenimiento para ${assetLabel(signedAsset)}.`,
+      details: {
+        eventType: 'reporte_mantenimiento_firmado',
+        reportId: report.id,
+        requestId: report.request_id,
+        signerRole: req.user.roles?.[0] ?? 'user',
+        signatureId: result?.id ?? null
+      }
+    });
+
     const signatures = await listReportSignatures(report.id);
     const hasEngineer = signatures.some((sig) => sig.role === 'ingeniero_biomedico');
     const hasRequester = signatures.some((sig) => sig.user_id === report.requested_by);
@@ -1667,6 +1912,18 @@ app.post(
     const hasRequesterFinal = signaturesAfter.some((sig) => sig.user_id === report.requested_by);
     if (hasEngineerFinal && hasRequesterFinal) {
       await updateMaintenanceRequestStatus(report.request_id, 'firmado');
+      await logEquipmentAudit(req, {
+        action: 'MAINTENANCE_REPORT_FINALIZED',
+        clientId: report.client_id,
+        assetId: report.asset_id,
+        asset: signedAsset,
+        description: `Reporte de mantenimiento finalizado para ${assetLabel(signedAsset)}.`,
+        details: {
+          eventType: 'reporte_mantenimiento_finalizado',
+          reportId: report.id,
+          requestId: report.request_id
+        }
+      });
     }
 
     const client = await getClientById(report.client_id);
@@ -1748,12 +2005,19 @@ app.delete(
       return res.status(404).json({ message: 'Reporte no encontrado.' });
     }
     await deleteMaintenanceReport(report.id);
-    await logAudit({
-      actorUserId: req.user.sub,
-      actorUsername: req.user.username,
+    const reportAsset = await getAssetById(report.client_id, report.asset_id);
+    await logEquipmentAudit(req, {
       action: 'MAINTENANCE_REPORT_DELETE',
-      targetUserId: report.client_id,
-      details: { reportId: report.id, requestId: report.request_id }
+      clientId: report.client_id,
+      assetId: report.asset_id,
+      asset: reportAsset,
+      description: `Eliminación de reporte de mantenimiento para ${assetLabel(reportAsset)}.`,
+      details: {
+        eventType: 'reporte_mantenimiento_eliminado',
+        reportId: report.id,
+        requestId: report.request_id,
+        maintenanceType: report.type ?? null
+      }
     });
     return res.json({ ok: true });
   }
@@ -2368,6 +2632,27 @@ app.post(
     await fs.promises.writeFile(filename, req.file.buffer);
     const publicPath = `/${path.join('uploads', 'clients', item.client_id, 'trainings', `capacitacion-${item.id}.pdf`)}`.replace(/\\/g, '/');
     await setTrainingItemPdf(item.id, publicPath);
+    const client = await getClientById(item.client_id);
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'TRAINING_RECORD_UPLOAD',
+      targetUserId: item.client_id,
+      targetUsername: client?.name ?? 'Cliente',
+      details: {
+        category: 'training',
+        eventType: 'acta_capacitacion_cargada',
+        description: `Carga de acta de capacitación para ${client?.name ?? 'cliente'}.`,
+        actorDisplayName: req.user.displayName ?? req.user.username,
+        actorUsername: req.user.username,
+        clientId: item.client_id,
+        clientName: client?.name ?? null,
+        trainingItemId: item.id,
+        scheduleId: item.schedule_id,
+        areaId: item.area_id,
+        pdfPath: publicPath
+      }
+    });
     return res.json({ ok: true, pdfPath: publicPath });
   }
 );
@@ -2671,6 +2956,20 @@ app.post(
     await fs.promises.writeFile(filename, req.file.buffer);
     const publicPath = `/${path.join('uploads', 'clients', item.client_id, 'calibrations', `calibracion-${item.id}.pdf`)}`.replace(/\\/g, '/');
     await setCalibrationItemPdf(item.id, publicPath);
+    const calibratedAsset = await getAssetById(item.client_id, item.asset_id);
+    await logEquipmentAudit(req, {
+      action: 'CALIBRATION_CERTIFICATE_UPLOAD',
+      clientId: item.client_id,
+      assetId: item.asset_id,
+      asset: calibratedAsset,
+      description: `Carga de certificado de calibración para ${assetLabel(calibratedAsset)}.`,
+      details: {
+        eventType: 'certificado_calibracion_cargado',
+        calibrationItemId: item.id,
+        scheduleId: item.schedule_id,
+        pdfPath: publicPath
+      }
+    });
     return res.json({ ok: true, pdfPath: publicPath });
   }
 );
@@ -2800,12 +3099,18 @@ app.delete(
       return res.status(404).json({ message: 'Solicitud no encontrada.' });
     }
     await deleteMaintenanceRequest(request.id);
-    await logAudit({
-      actorUserId: req.user.sub,
-      actorUsername: req.user.username,
+    const requestAsset = await getAssetById(request.client_id, request.asset_id);
+    await logEquipmentAudit(req, {
       action: 'MAINTENANCE_REQUEST_DELETE',
-      targetUserId: request.client_id,
-      details: { requestId: request.id, assetId: request.asset_id }
+      clientId: request.client_id,
+      assetId: request.asset_id,
+      asset: requestAsset,
+      description: `Eliminación de solicitud de mantenimiento para ${assetLabel(requestAsset)}.`,
+      details: {
+        eventType: 'solicitud_mantenimiento_eliminada',
+        requestId: request.id,
+        maintenanceType: request.type ?? null
+      }
     });
     return res.json({ ok: true });
   }

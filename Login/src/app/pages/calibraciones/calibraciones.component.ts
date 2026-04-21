@@ -10,6 +10,8 @@ import {
   CalibrationScheduleDto,
   CalibrationItemDto
 } from '../../calibration/calibration.service';
+import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 
 interface ClientOption {
   id: string;
@@ -24,7 +26,7 @@ interface ClientOption {
 @Component({
   selector: 'app-calibraciones',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
   templateUrl: './calibraciones.component.html',
   styleUrl: './calibraciones.component.scss'
 })

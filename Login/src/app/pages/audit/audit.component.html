@@ -1,14 +1,16 @@
 <section class="page">
+  <app-user-menu></app-user-menu>
   <header>
     <div>
       <h1>Auditoría</h1>
       <p>Registro de cambios (solo superuser).</p>
     </div>
     <div class="header-actions">
-      <a class="back" routerLink="/dashboard">Regresar</a>
-      <button (click)="load()" [disabled]="loading">Recargar</button>
+      <a class="back" routerLink="/dashboard">Menú</a>
     </div>
   </header>
+
+  <app-module-tabs></app-module-tabs>
 
   <div class="filters">
     <label>
@@ -21,7 +23,9 @@
     <label>
       Acción
       <select [(ngModel)]="selectedAction" (change)="applyFilters()">
-        <option *ngFor="let action of actions" [value]="action">{{ action }}</option>
+        <option *ngFor="let action of actions" [value]="action">
+          {{ action === 'todos' ? 'Todos' : labelAction(action) }}
+        </option>
       </select>
     </label>
 
@@ -47,15 +51,17 @@
       <span>Fecha</span>
       <span>Actor</span>
       <span>Acción</span>
+      <span>Tipo</span>
       <span>Objetivo</span>
       <span>Detalles</span>
     </div>
     <div class="row" *ngFor="let log of filteredLogs">
-      <span>{{ log.when }}</span>
-      <span>{{ log.actor }}</span>
-      <span>{{ log.action }}</span>
-      <span>{{ log.target }}</span>
-      <span>{{ log.details }}</span>
+      <span data-label="Fecha">{{ log.when }}</span>
+      <span data-label="Actor">{{ log.actor }}</span>
+      <span data-label="Acción"><strong class="action-pill">{{ log.action }}</strong></span>
+      <span data-label="Tipo">{{ log.category }}</span>
+      <span data-label="Objetivo">{{ log.target }}</span>
+      <span data-label="Detalles" class="details-text">{{ log.details }}</span>
     </div>
   </div>
 </section>

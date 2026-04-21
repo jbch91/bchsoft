@@ -234,8 +234,25 @@ export class AdminService {
     address: string;
     habilitationCode?: string;
     email: string;
+    logoFile?: File | null;
   }): Promise<{ id: string; schema_name: string }> {
-    return firstValueFrom(this.http.post<{ id: string; schema_name: string }>(`${this.apiBase}/admin/clients`, payload));
+    if (payload.logoFile) {
+      const form = new FormData();
+      form.append('name', payload.name);
+      form.append('nit', payload.nit);
+      form.append('city', payload.city);
+      form.append('address', payload.address);
+      form.append('email', payload.email);
+      if (payload.habilitationCode) {
+        form.append('habilitationCode', payload.habilitationCode);
+      }
+      form.append('logo', payload.logoFile);
+      return firstValueFrom(
+        this.http.post<{ id: string; schema_name: string }>(`${this.apiBase}/admin/clients`, form)
+      );
+    }
+    const { logoFile, ...body } = payload;
+    return firstValueFrom(this.http.post<{ id: string; schema_name: string }>(`${this.apiBase}/admin/clients`, body));
   }
 
   async uploadClientLogo(clientId: string, file: File): Promise<ClientDto> {

@@ -6,17 +6,19 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  background: linear-gradient(
-    120deg,
-    var(--ink) 0%,
-    color-mix(in srgb, var(--ink) 72%, var(--brand-700)) 58%,
-    var(--bg-b) 58%,
-    var(--bg-b) 100%
-  );
-  color: #f8fafc;
+  background:
+    radial-gradient(
+      700px 260px at 12% 0%,
+      color-mix(in srgb, var(--brand-500) 28%, transparent),
+      transparent 62%
+    ),
+    linear-gradient(135deg, #ffffff, color-mix(in srgb, var(--brand-50) 62%, #ffffff));
+  color: var(--ink);
   padding: 24px;
-  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--brand-500) 18%, var(--border));
+  border-radius: 22px;
   gap: 16px;
+  box-shadow: 0 20px 40px rgba(80, 25, 30, 0.1);
 }
 
 .header-left {
@@ -28,10 +30,11 @@ header {
   display: flex;
   align-items: center;
   gap: 16px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid color-mix(in srgb, var(--brand-500) 18%, var(--border));
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 16px;
+  box-shadow: 0 14px 24px rgba(80, 25, 30, 0.08);
 }
 
 .client-info {
@@ -41,19 +44,20 @@ header {
 }
 
 .client-info strong {
-  font-size: 14px;
-  color: #ffffff;
+  font-size: 16px;
+  color: var(--brand-700);
 }
 
 .client-info span {
-  color: #e2e8f0;
+  color: var(--muted);
 }
 
 .client-logo img {
   width: 120px;
   height: auto;
   object-fit: contain;
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--brand-500) 16%, var(--border));
+  border-radius: 12px;
   background: #ffffff;
   padding: 6px;
 }
@@ -69,7 +73,6 @@ header {
   header {
     flex-direction: column;
     align-items: stretch;
-    background: linear-gradient(135deg, var(--ink), color-mix(in srgb, var(--ink) 65%, var(--brand-700)));
   }
 
   .client-inline {
@@ -83,6 +86,11 @@ header {
   color: var(--ink);
   position: relative;
   overflow: hidden;
+  border-color: color-mix(in srgb, var(--brand-500) 16%, var(--border));
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .module-card::before {
@@ -101,9 +109,19 @@ header {
 
 .module-card:hover {
   border-color: var(--brand-600);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 20px 42px rgba(80, 25, 30, 0.13);
+  transform: translateY(-2px);
 }
 
 .module-card:hover::before {
   opacity: 1;
+}
+
+.module-card h2 {
+  color: var(--brand-700);
+  margin-top: 0;
+}
+
+.module-card p {
+  color: var(--muted);
 }

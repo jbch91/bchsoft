@@ -1,14 +1,16 @@
 <section class="page">
+  <app-user-menu></app-user-menu>
   <header>
     <div>
       <h1>Cronogramas y Capacitaciones</h1>
       <p>Cronograma anual de mantenimiento preventivo.</p>
     </div>
     <div class="header-actions">
-      <a class="back" routerLink="/dashboard">Regresar</a>
-      <button (click)="loadSchedules()" [disabled]="loading">Recargar</button>
+      <a class="back" routerLink="/dashboard">Menú</a>
     </div>
   </header>
+
+  <app-module-tabs></app-module-tabs>
 
   <div class="card header-card" *ngIf="!auth.currentUser()?.clientId">
     <div class="client-selector">

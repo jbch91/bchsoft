@@ -1,14 +1,16 @@
 <section class="page">
+  <app-user-menu></app-user-menu>
   <header>
     <div>
       <h1>Inventario</h1>
       <p>Listado de equipos biomédicos.</p>
     </div>
     <div class="header-actions">
-      <a class="back" routerLink="/dashboard">Regresar</a>
-      <button (click)="loadItems()" [disabled]="loading">Recargar</button>
+      <a class="back" routerLink="/dashboard">Menú</a>
     </div>
   </header>
+
+  <app-module-tabs></app-module-tabs>
 
   <div class="card filters-card">
     <div class="filters-top" *ngIf="clients.length">

@@ -1,5 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { LoginResult, Permission, Role, User } from './models';
 import { getApiBase } from '../core/api-base';
@@ -21,14 +22,24 @@ interface LoginResponse {
 export class AuthService {
   private readonly storageKey = 'auth_user_v1';
   private readonly tokenKey = 'auth_tokens_v1';
+  private readonly lastActivityKey = 'auth_last_activity_v1';
   private readonly apiBase = getApiBase();
+  private readonly idleTimeoutMs = 15 * 60 * 1000;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private activityListenersAttached = false;
+  private readonly activityEvents = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
 
   readonly currentUser = signal<User | null>(this.loadStoredUser());
   readonly tokens = signal<{ accessToken: string; refreshToken: string } | null>(
     this.loadStoredTokens()
   );
 
-  constructor(private readonly http: HttpClient) {}
+  constructor(
+    private readonly http: HttpClient,
+    private readonly router: Router
+  ) {
+    this.initializeIdleControl();
+  }
 
   isAuthenticated(): boolean {
     return this.currentUser() !== null;
@@ -64,6 +75,8 @@ export class AuthService {
         this.tokenKey,
         JSON.stringify({ accessToken: response.accessToken, refreshToken: response.refreshToken })
       );
+      this.markActivity();
+      this.startIdleTimer();
 
       return { ok: true };
     } catch (error: any) {
@@ -75,7 +88,7 @@ export class AuthService {
     }
   }
 
-  logout(): void {
+  logout(redirectToLogin = false): void {
     const refreshToken = this.tokens()?.refreshToken;
     if (refreshToken) {
       void firstValueFrom(
@@ -83,10 +96,16 @@ export class AuthService {
       ).catch(() => {});
     }
 
+    this.stopIdleTimer();
     this.currentUser.set(null);
     this.tokens.set(null);
     localStorage.removeItem(this.storageKey);
     localStorage.removeItem(this.tokenKey);
+    localStorage.removeItem(this.lastActivityKey);
+
+    if (redirectToLogin) {
+      void this.router.navigateByUrl('/login');
+    }
   }
 
   async refreshSession(): Promise<boolean> {
@@ -121,11 +140,13 @@ export class AuthService {
         this.tokenKey,
         JSON.stringify({ accessToken: response.accessToken, refreshToken: response.refreshToken })
       );
+      this.markActivity();
+      this.startIdleTimer();
 
       return true;
     } catch (error) {
       console.error(error);
-      this.logout();
+      this.logout(true);
       return false;
     }
   }
@@ -174,6 +195,82 @@ export class AuthService {
     } catch {
       return null;
     }
+  }
+
+  private initializeIdleControl(): void {
+    this.attachActivityListeners();
+    if (!this.currentUser()) return;
+
+    if (this.isIdleExpired()) {
+      this.logout(true);
+      return;
+    }
+
+    if (!localStorage.getItem(this.lastActivityKey)) {
+      this.markActivity();
+    }
+    this.startIdleTimer();
+  }
+
+  private attachActivityListeners(): void {
+    if (this.activityListenersAttached || typeof window === 'undefined') return;
+    this.activityListenersAttached = true;
+    for (const eventName of this.activityEvents) {
+      window.addEventListener(eventName, this.handleActivity, { passive: true });
+    }
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
+  }
+
+  private readonly handleActivity = (): void => {
+    if (!this.currentUser()) return;
+    if (this.isIdleExpired()) {
+      this.logout(true);
+      return;
+    }
+    this.markActivity();
+    this.startIdleTimer();
+  };
+
+  private readonly handleVisibilityChange = (): void => {
+    if (document.visibilityState !== 'visible' || !this.currentUser()) return;
+    if (this.isIdleExpired()) {
+      this.logout(true);
+      return;
+    }
+    this.markActivity();
+    this.startIdleTimer();
+  };
+
+  private markActivity(): void {
+    localStorage.setItem(this.lastActivityKey, String(Date.now()));
+  }
+
+  private isIdleExpired(): boolean {
+    const raw = localStorage.getItem(this.lastActivityKey);
+    if (!raw) return false;
+    const lastActivity = Number(raw);
+    if (!Number.isFinite(lastActivity)) return false;
+    return Date.now() - lastActivity >= this.idleTimeoutMs;
+  }
+
+  private startIdleTimer(): void {
+    this.stopIdleTimer();
+    if (!this.currentUser()) return;
+
+    const raw = localStorage.getItem(this.lastActivityKey);
+    const lastActivity = raw ? Number(raw) : Date.now();
+    const elapsed = Number.isFinite(lastActivity) ? Date.now() - lastActivity : 0;
+    const remaining = Math.max(0, this.idleTimeoutMs - elapsed);
+
+    this.idleTimer = setTimeout(() => {
+      this.logout(true);
+    }, remaining);
+  }
+
+  private stopIdleTimer(): void {
+    if (!this.idleTimer) return;
+    clearTimeout(this.idleTimer);
+    this.idleTimer = null;
   }
 
   async requestPasswordReset(email: string): Promise<boolean> {

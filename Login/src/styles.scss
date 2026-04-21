@@ -133,10 +133,47 @@ body {
 }
 
 .page > header {
+  position: relative;
+  overflow: hidden;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
+  background:
+    radial-gradient(circle at 92% 12%, rgba(166, 64, 69, 0.16), transparent 30%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 241, 242, 0.88));
+  border: 1px solid color-mix(in srgb, var(--brand-100) 76%, var(--border));
+  border-radius: 22px;
+  padding: 22px;
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.08);
+}
+
+.page > header::after {
+  content: '';
+  position: absolute;
+  right: -46px;
+  bottom: -58px;
+  width: 190px;
+  height: 190px;
+  border: 24px solid rgba(166, 64, 69, 0.08);
+  border-radius: 50%;
+}
+
+.page > header h1,
+.page > header p,
+.page > header .header-actions {
+  position: relative;
+  z-index: 1;
+}
+
+.page > header h1 {
+  margin: 0 0 4px;
+  letter-spacing: -0.03em;
+}
+
+.page > header p {
+  margin: 0;
+  color: var(--muted);
 }
 
 .page > header .header-actions {
@@ -148,12 +185,21 @@ body {
 .page > header .back,
 .page > header .header-actions .back {
   text-decoration: none;
-  background: var(--card);
-  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid color-mix(in srgb, var(--brand-100) 70%, var(--border));
   color: var(--ink);
-  padding: 8px 12px;
-  border-radius: 10px;
-  font-weight: 700;
+  padding: 9px 13px;
+  border-radius: 12px;
+  font-weight: 900;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.06);
+  transition: border-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 120ms ease;
+}
+
+.page > header .back:hover,
+.page > header .header-actions .back:hover {
+  border-color: var(--brand-600);
+  color: var(--brand-700);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-100) 70%, transparent);
 }
 
 .page > header button {
@@ -168,6 +214,17 @@ body {
 
 .page > header button:hover:not(:disabled) {
   background: var(--brand-700);
+}
+
+@media (max-width: 900px) {
+  .page {
+    padding: 24px 18px;
+  }
+
+  .page > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .card {

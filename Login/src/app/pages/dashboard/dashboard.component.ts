@@ -5,11 +5,12 @@ import { AuthService } from '../../auth/auth.service';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { getApiBase, getPublicBase, joinBase } from '../../core/api-base';
+import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  imports: [CommonModule, RouterLink, UserMenuComponent],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss'
 })

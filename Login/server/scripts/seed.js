@@ -7,6 +7,7 @@ dotenv.config();
 async function seedSuperUser() {
   const username = 'bch';
   const displayName = 'Super Usuario BCH';
+  const email = process.env.SEED_SUPERUSER_EMAIL || 'bch@bchsoft.local';
   const password = 'bch';
   const passwordHash = await bcrypt.hash(password, 12);
 
@@ -18,10 +19,12 @@ async function seedSuperUser() {
   let userId;
   if (existing.length) {
     userId = existing[0].id;
+    // Backfill email if an older row existed without it.
+    await query('UPDATE users SET email = COALESCE(email, $2) WHERE id = $1', [userId, email]);
   } else {
     const { rows } = await query(
-      'INSERT INTO users (username, display_name, password_hash) VALUES ($1,$2,$3) RETURNING id',
-      [username, displayName, passwordHash]
+      'INSERT INTO users (username, display_name, email, password_hash) VALUES ($1,$2,$3,$4) RETURNING id',
+      [username, displayName, email, passwordHash]
     );
     userId = rows[0].id;
   }

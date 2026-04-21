@@ -17,6 +17,7 @@ const MIGRATIONS = [
   'users_add_signature.sql',
   'users_add_biomed_credentials.sql',
   'modules.sql',
+  'modules_normalize_inbi.sql',
   'audit_logs.sql',
   'maintenance.sql',
   'maintenance_add_pdf.sql',

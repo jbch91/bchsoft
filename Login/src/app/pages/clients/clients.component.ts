@@ -4,6 +4,8 @@ import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AdminService } from '../../admin/admin.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
+import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 
 interface ClientView {
   id: string;
@@ -17,10 +19,12 @@ interface ClientView {
   schemaName: string;
 }
 
+type ClientTab = 'list' | 'create';
+
 @Component({
   selector: 'app-clients',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
   templateUrl: './clients.component.html',
   styleUrl: './clients.component.scss'
 })
@@ -30,8 +34,14 @@ export class ClientsComponent implements OnInit {
   modules: { key: string; name: string; description?: string | null }[] = [];
   clientModules: Record<string, Set<string>> = {};
   searchTerm = '';
+  filterCity = 'todos';
+  filterModule = 'todos';
+  activeClientTab: ClientTab = 'list';
   openClientId: string | null = null;
   editingClientId: string | null = null;
+  editingModulesClientId: string | null = null;
+  savingModulesClientId: string | null = null;
+  moduleDraft = new Set<string>();
   editClient: { name: string; nit: string; city: string; address: string; habilitationCode: string; email: string } = {
     name: '',
     nit: '',
@@ -50,6 +60,8 @@ export class ClientsComponent implements OnInit {
   address = '';
   habilitationCode = '';
   email = '';
+  logoFile: File | null = null;
+  logoPreviewUrl: string | null = null;
 
   constructor(private readonly admin: AdminService, private readonly cdr: ChangeDetectorRef) {}
 
@@ -105,7 +117,8 @@ export class ClientsComponent implements OnInit {
         city: this.city.trim(),
         address: this.address.trim(),
         habilitationCode: this.habilitationCode.trim() || undefined,
-        email: this.email.trim()
+        email: this.email.trim(),
+        logoFile: this.logoFile
       });
       this.name = '';
       this.nit = '';
@@ -113,7 +126,9 @@ export class ClientsComponent implements OnInit {
       this.address = '';
       this.habilitationCode = '';
       this.email = '';
+      this.clearCreateLogo();
       this.successMessage = 'Cliente creado.';
+      this.activeClientTab = 'list';
       await this.load();
     } catch (error: any) {
       console.error(error);
@@ -134,19 +149,44 @@ export class ClientsComponent implements OnInit {
   }
 
   toggleClientModule(clientId: string, moduleKey: string): void {
-    const current = new Set(this.clientModules[clientId] ?? []);
-    if (current.has(moduleKey)) {
-      current.delete(moduleKey);
+    if (this.editingModulesClientId !== clientId) return;
+    if (this.moduleDraft.has(moduleKey)) {
+      this.moduleDraft.delete(moduleKey);
     } else {
-      current.add(moduleKey);
+      this.moduleDraft.add(moduleKey);
     }
-    this.clientModules[clientId] = current;
   }
 
   async saveClientModules(clientId: string): Promise<void> {
-    const modules = Array.from(this.clientModules[clientId] ?? []);
-    await this.admin.updateClientModules(clientId, modules);
-    this.successMessage = 'Módulos actualizados.';
+    const modules = Array.from(this.moduleDraft);
+    this.savingModulesClientId = clientId;
+    this.errorMessage = '';
+    this.successMessage = '';
+    try {
+      await this.admin.updateClientModules(clientId, modules);
+      this.clientModules[clientId] = new Set(modules);
+      this.editingModulesClientId = null;
+      this.moduleDraft.clear();
+      this.successMessage = 'Módulos actualizados.';
+    } catch (error) {
+      console.error(error);
+      this.errorMessage = 'No se pudieron actualizar los módulos del cliente.';
+    } finally {
+      this.savingModulesClientId = null;
+      this.cdr.detectChanges();
+    }
+  }
+
+  startEditModules(clientId: string): void {
+    this.editingModulesClientId = clientId;
+    this.moduleDraft = new Set(this.clientModules[clientId] ?? []);
+    this.successMessage = '';
+    this.errorMessage = '';
+  }
+
+  cancelEditModules(): void {
+    this.editingModulesClientId = null;
+    this.moduleDraft.clear();
   }
 
   startEditClient(client: ClientView): void {
@@ -186,15 +226,68 @@ export class ClientsComponent implements OnInit {
 
   get filteredClients(): ClientView[] {
     const term = this.searchTerm.toLowerCase().trim();
-    if (!term) return this.clients;
     return this.clients.filter((client) => {
       const hay = `${client.name} ${client.nit} ${client.city} ${client.address ?? ''} ${client.email}`.toLowerCase();
-      return hay.includes(term);
+      const matchesTerm = !term || hay.includes(term);
+      const matchesCity = this.filterCity === 'todos' || client.city === this.filterCity;
+      const matchesModule = this.filterModule === 'todos' || this.clientModules[client.id]?.has(this.filterModule);
+      return matchesTerm && matchesCity && matchesModule;
     });
   }
 
+  get cityOptions(): string[] {
+    return Array.from(new Set(this.clients.map((client) => client.city).filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b)
+    );
+  }
+
+  enabledModulesFor(clientId: string): { key: string; name: string }[] {
+    const enabled = this.clientModules[clientId] ?? new Set<string>();
+    return this.modules.filter((module) => enabled.has(module.key));
+  }
+
+  clearListFilters(): void {
+    this.searchTerm = '';
+    this.filterCity = 'todos';
+    this.filterModule = 'todos';
+  }
+
+  setClientTab(tab: ClientTab): void {
+    this.activeClientTab = tab;
+    this.errorMessage = '';
+    this.successMessage = '';
+    if (tab === 'create') {
+      this.cancelEditModules();
+      this.editingClientId = null;
+    }
+  }
+
+  onSelectCreateLogo(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    this.logoFile = file;
+    if (this.logoPreviewUrl) {
+      URL.revokeObjectURL(this.logoPreviewUrl);
+    }
+    this.logoPreviewUrl = file ? URL.createObjectURL(file) : null;
+  }
+
+  clearCreateLogo(input?: HTMLInputElement): void {
+    if (this.logoPreviewUrl) {
+      URL.revokeObjectURL(this.logoPreviewUrl);
+    }
+    this.logoPreviewUrl = null;
+    this.logoFile = null;
+    if (input) {
+      input.value = '';
+    }
+  }
+
   toggleClientOpen(clientId: string): void {
-    this.openClientId = this.openClientId === clientId ? null : clientId;
+    const wasOpen = this.openClientId === clientId;
+    this.openClientId = wasOpen ? null : clientId;
+    this.cancelEditModules();
+    this.editingClientId = null;
   }
 
   async onUploadLogo(client: ClientView, event: Event): Promise<void> {
