@@ -36,8 +36,10 @@ const MIGRATIONS = [
   'seed_users_permission.sql',
   'admin_clients_permission.sql',
   'superuser_all_permissions.sql',
+  'hv_import_permission.sql',
   'tenant_hv_migration.sql',
   'tenant_hv_part2.sql',
+  'tenant_sites.sql',
   'history_indexes.sql'
 ];
 

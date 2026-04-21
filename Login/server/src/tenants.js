@@ -3,8 +3,16 @@ import { query } from './db.js';
 const TABLES_SQL = (schema) => `
 CREATE SCHEMA IF NOT EXISTS "${schema}";
 
+CREATE TABLE IF NOT EXISTS "${schema}".sites (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL,
+  address TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS "${schema}".areas (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  site_id UUID REFERENCES "${schema}".sites(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -26,6 +34,7 @@ CREATE TABLE IF NOT EXISTS "${schema}".assets (
   location TEXT,
   photo_path TEXT,
   invima_reg TEXT,
+  site_id UUID REFERENCES "${schema}".sites(id) ON DELETE SET NULL,
   area_id UUID REFERENCES "${schema}".areas(id) ON DELETE SET NULL,
   location_id UUID REFERENCES "${schema}".locations(id) ON DELETE SET NULL,
   risk_class TEXT,
@@ -140,6 +149,10 @@ CREATE TABLE IF NOT EXISTS "${schema}".asset_documents (
   doc_type TEXT NOT NULL,
   file_path TEXT NOT NULL
 );
+
+INSERT INTO "${schema}".sites (name)
+SELECT 'Sede principal'
+WHERE NOT EXISTS (SELECT 1 FROM "${schema}".sites);
 
 `;
 

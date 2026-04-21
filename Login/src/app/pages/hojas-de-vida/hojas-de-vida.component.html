@@ -21,7 +21,7 @@
         </label>
         <label>
           Cliente
-          <select [(ngModel)]="selectedClientId" (change)="loadAssets(); loadAreas()">
+          <select [(ngModel)]="selectedClientId" (change)="onClientChange()">
             <option *ngFor="let client of filteredClients" [value]="client.id">{{ client.name }}</option>
           </select>
         </label>
@@ -51,11 +51,11 @@
     <button
       type="button"
       class="tab"
-      *ngIf="auth.hasPermission('hb:create')"
+      *ngIf="canOpenFormTab"
       [class.active]="viewMode === 'form'"
       (click)="viewMode = 'form'"
     >
-      Crear/Editar hoja de vida
+      Crear/Importar hoja de vida
     </button>
     <button
       type="button"
@@ -81,6 +81,14 @@
       <button
         type="button"
         class="sub-tab"
+        [class.active]="areasView === 'create-site'"
+        (click)="areasView = 'create-site'"
+      >
+        Crear sede
+      </button>
+      <button
+        type="button"
+        class="sub-tab"
         [class.active]="areasView === 'create-area'"
         (click)="areasView = 'create-area'"
       >
@@ -95,37 +103,78 @@
         Crear ubicación
       </button>
     </div>
+    <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
 
     <div class="tool-card" *ngIf="areasView === 'list'">
-      <h3>Áreas y ubicaciones</h3>
+      <h3>Sedes, áreas y ubicaciones</h3>
+      <p class="muted" *ngIf="!sites.length">Aún no hay sedes creadas para este cliente.</p>
       <div class="tree">
-        <div class="tree-item" *ngFor="let area of areas; trackBy: trackByAreaId">
-          <div class="tree-row">
-            <strong>{{ area.name }}</strong>
+        <div class="tree-item site-item" *ngFor="let site of sites; trackBy: trackBySiteId">
+          <div class="tree-row site-row">
+            <div>
+              <strong>{{ site.name }}</strong>
+              <small *ngIf="site.address">{{ site.address }}</small>
+            </div>
             <div class="tree-actions">
-              <button type="button" class="tiny" (click)="startEditArea(area.id)">Editar</button>
-              <button type="button" class="tiny danger" (click)="onDeleteArea(area.id)">Eliminar</button>
+              <button type="button" class="tiny" (click)="startEditSite(site.id)">Editar</button>
+              <button type="button" class="tiny danger" (click)="onDeleteSite(site.id)">Eliminar</button>
             </div>
           </div>
-          <div class="tree-edit" *ngIf="editingAreaId === area.id">
-            <input type="text" [(ngModel)]="areaEdits[area.id]" />
-            <button type="button" class="tiny" (click)="onUpdateArea(area.id)">Guardar</button>
-            <button type="button" class="tiny ghost" (click)="cancelEditArea()">Cancelar</button>
+          <div class="tree-edit" *ngIf="editingSiteId === site.id">
+            <input type="text" [(ngModel)]="siteEdits[site.id]" placeholder="Nombre de la sede" />
+            <input type="text" [(ngModel)]="siteAddressEdits[site.id]" placeholder="Dirección o referencia" />
+            <button type="button" class="tiny" (click)="onUpdateSite(site.id)">Guardar</button>
+            <button type="button" class="tiny ghost" (click)="cancelEditSite()">Cancelar</button>
           </div>
 
           <div class="tree-children">
-            <div class="tree-row child" *ngFor="let location of locationsByArea(area.id); trackBy: trackByLocationId">
-              <span>{{ location.name }}</span>
-              <div class="tree-actions">
-                <button type="button" class="tiny" (click)="startEditLocation(location.id)">Editar</button>
-                <button type="button" class="tiny danger" (click)="onDeleteLocation(location.id)">Eliminar</button>
+            <div class="tree-item" *ngFor="let area of areasBySite(site.id); trackBy: trackByAreaId">
+              <div class="tree-row">
+                <strong>{{ area.name }}</strong>
+                <div class="tree-actions">
+                  <button type="button" class="tiny" (click)="startEditArea(area.id)">Editar</button>
+                  <button type="button" class="tiny danger" (click)="onDeleteArea(area.id)">Eliminar</button>
+                </div>
+              </div>
+              <div class="tree-edit" *ngIf="editingAreaId === area.id">
+                <input type="text" [(ngModel)]="areaEdits[area.id]" />
+                <button type="button" class="tiny" (click)="onUpdateArea(area.id)">Guardar</button>
+                <button type="button" class="tiny ghost" (click)="cancelEditArea()">Cancelar</button>
+              </div>
+
+              <div class="tree-children">
+                <div class="tree-row child" *ngFor="let location of locationsByArea(area.id); trackBy: trackByLocationId">
+                  <span>{{ location.name }}</span>
+                  <div class="tree-actions">
+                    <button type="button" class="tiny" (click)="startEditLocation(location.id)">Editar</button>
+                    <button type="button" class="tiny danger" (click)="onDeleteLocation(location.id)">Eliminar</button>
+                  </div>
+                </div>
+                <div class="tree-edit child" *ngIf="isEditingLocationInArea(area.id)">
+                  <input type="text" [(ngModel)]="locationEdits[editingLocationId!]" />
+                  <button type="button" class="tiny" (click)="onUpdateLocation(editingLocationId!)">Guardar</button>
+                  <button type="button" class="tiny ghost" (click)="cancelEditLocation()">Cancelar</button>
+                </div>
               </div>
             </div>
-            <div class="tree-edit child" *ngIf="isEditingLocationInArea(area.id)">
-              <input type="text" [(ngModel)]="locationEdits[editingLocationId!]" />
-              <button type="button" class="tiny" (click)="onUpdateLocation(editingLocationId!)">Guardar</button>
-              <button type="button" class="tiny ghost" (click)="cancelEditLocation()">Cancelar</button>
-            </div>
+            <p class="muted" *ngIf="!areasBySite(site.id).length">Sin áreas registradas en esta sede.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tool-card" *ngIf="areasView === 'create-site'">
+      <h3>Crear sede</h3>
+      <div class="row compact">
+        <input type="text" [(ngModel)]="newSiteName" placeholder="Nombre de la sede" />
+        <input type="text" [(ngModel)]="newSiteAddress" placeholder="Dirección o referencia" />
+        <button type="button" (click)="onCreateSite()">Agregar</button>
+      </div>
+      <div class="tree compact-list">
+        <div class="tree-item" *ngFor="let site of sites; trackBy: trackBySiteId">
+          <div class="tree-row">
+            <strong>{{ site.name }}</strong>
+            <span>{{ site.address || 'Sin dirección' }}</span>
           </div>
         </div>
       </div>
@@ -133,14 +182,22 @@
 
     <div class="tool-card" *ngIf="areasView === 'create-area'">
       <h3>Crear área</h3>
-      <div class="row">
+      <div class="row compact">
+        <select [(ngModel)]="siteId" (change)="onSiteForFormChange()">
+          <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
+        </select>
         <input type="text" [(ngModel)]="newAreaName" placeholder="Nombre del área" />
         <button type="button" (click)="onCreateArea()">Agregar</button>
       </div>
       <div class="tree compact-list">
-        <div class="tree-item" *ngFor="let area of areas; trackBy: trackByAreaId">
+        <div class="tree-item" *ngFor="let site of sites; trackBy: trackBySiteId">
           <div class="tree-row">
-            <strong>{{ area.name }}</strong>
+            <strong>{{ site.name }}</strong>
+          </div>
+          <div class="tree-children two-column-list">
+            <div class="tree-row child text-only" *ngFor="let area of areasBySite(site.id); trackBy: trackByAreaId">
+              <span>{{ area.name }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -148,20 +205,30 @@
     <div class="tool-card" *ngIf="areasView === 'create-location'">
       <h3>Crear ubicación</h3>
       <div class="row compact">
+        <select [(ngModel)]="siteId" (change)="onSiteForFormChange()">
+          <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
+        </select>
         <select [(ngModel)]="areaId" (change)="loadLocationsForForm()">
-          <option *ngFor="let area of areas" [value]="area.id">{{ area.name }}</option>
+          <option *ngFor="let area of areasForSelectedSite()" [value]="area.id">{{ area.name }}</option>
         </select>
         <input type="text" [(ngModel)]="newLocationName" placeholder="Nombre de la ubicación" />
         <button type="button" (click)="onCreateLocation()">Agregar</button>
       </div>
       <div class="tree compact-list">
-        <div class="tree-item" *ngFor="let area of areas; trackBy: trackByAreaId">
+        <div class="tree-item" *ngFor="let site of sites; trackBy: trackBySiteId">
           <div class="tree-row">
-            <strong>{{ area.name }}</strong>
+            <strong>{{ site.name }}</strong>
           </div>
           <div class="tree-children">
-            <div class="tree-row child" *ngFor="let location of locationsByArea(area.id); trackBy: trackByLocationId">
-              <span>{{ location.name }}</span>
+            <div class="tree-item" *ngFor="let area of areasBySite(site.id); trackBy: trackByAreaId">
+              <div class="tree-row child">
+                <strong>{{ area.name }}</strong>
+              </div>
+              <div class="tree-children two-column-list">
+                <div class="tree-row child text-only" *ngFor="let location of locationsByArea(area.id); trackBy: trackByLocationId">
+                  <span>{{ location.name }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -169,50 +236,89 @@
     </div>
   </div>
 
-  <div class="grid" *ngIf="viewMode === 'inventory'">
-    <div class="card">
-      <h2>Inventario (listado básico)</h2>
-      <p *ngIf="loading">Cargando...</p>
-      <div class="table" *ngIf="!loading">
-        <div class="row header">
+  <app-inventory-panel
+    *ngIf="viewMode === 'inventory'"
+    [items]="assets"
+    [selectedClientId]="selectedClientId"
+    [loading]="loading"
+    [errorMessage]="errorMessage"
+    [canEdit]="auth.hasPermission('hb:create')"
+    title="Inventario de hojas de vida"
+    (editItem)="startEdit($event)"
+    (deleteItem)="deleteAsset($event)"
+  ></app-inventory-panel>
+
+  <div class="grid" *ngIf="viewMode === 'form'">
+    <div class="card full import-card" *ngIf="auth.hasPermission('hb:import')">
+      <div class="import-header">
+        <div>
+          <h2>Importación masiva</h2>
+          <p>
+            Primero crea las sedes, áreas y ubicaciones. Luego descarga la plantilla,
+            completa los equipos y valida el archivo antes de crear las hojas de vida.
+          </p>
+        </div>
+        <span class="import-badge">Excel validado antes de guardar</span>
+      </div>
+      <div class="import-actions">
+        <button type="button" class="ghost" (click)="downloadHvImportTemplate()">Descargar plantilla</button>
+        <label class="file-import-button">
+          Seleccionar Excel
+          <input type="file" accept=".xlsx,.xls,.csv" (change)="onHvImportFileSelected($event)" />
+        </label>
+        <button
+          type="button"
+          class="primary"
+          [disabled]="importLoading || importHasErrors || !importValidRowsCount"
+          (click)="confirmHvImport()"
+        >
+          {{ importLoading ? 'Importando...' : 'Importar hojas de vida' }}
+        </button>
+        <button type="button" class="ghost danger-ghost" *ngIf="importHasErrors" (click)="downloadHvImportErrors()">
+          Descargar errores
+        </button>
+        <button type="button" class="ghost" *ngIf="importHasRows || importMessage" (click)="clearHvImport()">Limpiar</button>
+      </div>
+      <p class="muted" *ngIf="importFileName">Archivo seleccionado: {{ importFileName }}</p>
+      <p class="success" *ngIf="importMessage && importMessageType === 'success'">{{ importMessage }}</p>
+      <p class="error" *ngIf="importMessage && importMessageType === 'error'">{{ importMessage }}</p>
+      <p class="muted" *ngIf="importMessage && importMessageType === 'info'">{{ importMessage }}</p>
+      <div class="import-stats" *ngIf="importHasRows">
+        <span class="ok">{{ importValidRowsCount }} listas para importar</span>
+        <span class="bad" *ngIf="importErrorRowsCount">{{ importErrorRowsCount }} con errores</span>
+      </div>
+      <p class="error" *ngIf="importHasErrors">
+        Corrige los errores del archivo antes de importar. Ningún equipo se guardará hasta que confirmes.
+      </p>
+
+      <div class="import-preview" *ngIf="importHasRows">
+        <div class="import-preview-row header">
+          <span>Fila</span>
           <span>Código</span>
           <span>Equipo</span>
-          <span>Marca</span>
-          <span>Modelo</span>
-          <span>Serial</span>
+          <span>Sede</span>
           <span>Área</span>
           <span>Ubicación</span>
-          <span>Acciones</span>
+          <span>Validación</span>
         </div>
-        <div class="row" *ngFor="let asset of assets">
-          <span data-label="Código">{{ asset.code }}</span>
-          <span data-label="Equipo">{{ asset.name }}</span>
-          <span data-label="Marca">{{ asset.brand || '-' }}</span>
-          <span data-label="Modelo">{{ asset.model || '-' }}</span>
-          <span data-label="Serial">{{ asset.serial || '-' }}</span>
-          <span data-label="Área">{{ asset.areaName || '-' }}</span>
-          <span data-label="Ubicación">{{ asset.locationName || '-' }}</span>
-          <span class="actions">
-            <button type="button" (click)="downloadPdf(asset)">Ver PDF</button>
-            <button type="button" *ngIf="auth.hasPermission('hb:create')" (click)="startEdit(asset)">
-              Editar
-            </button>
-            <button
-              type="button"
-              class="danger"
-              *ngIf="auth.hasPermission('hb:create')"
-              (click)="deleteAsset(asset)"
-            >
-              Eliminar
-            </button>
+        <div class="import-preview-row" [class.has-import-errors]="row.errors.length > 0" *ngFor="let row of importPreviewRows">
+          <span data-label="Fila">{{ row.rowNumber }}</span>
+          <span data-label="Código">{{ row.code || '-' }}</span>
+          <span data-label="Equipo">{{ row.name || '-' }}</span>
+          <span data-label="Sede">{{ row.siteName || '-' }}</span>
+          <span data-label="Área">{{ row.areaName || '-' }}</span>
+          <span data-label="Ubicación">{{ row.locationName || '-' }}</span>
+          <span data-label="Validación">
+            <span class="import-status ok" *ngIf="!row.errors.length">Lista para importar</span>
+            <ul class="import-error-list" *ngIf="row.errors.length">
+              <li *ngFor="let error of row.errors">{{ error }}</li>
+            </ul>
           </span>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="grid" *ngIf="viewMode === 'form'">
-    <div class="card full" *ngIf="auth.hasPermission('hb:create'); else readOnlyNotice">
+    <div class="card full" *ngIf="auth.hasPermission('hb:create')">
       <h2>{{ editingAssetId ? 'Editar hoja de vida' : 'Crear hoja de vida' }}</h2>
       <form (ngSubmit)="onCreateAsset()">
         <div class="form-section" *ngIf="showSection(0)">
@@ -245,9 +351,15 @@
               <input type="text" name="serial" [(ngModel)]="serial" required />
             </label>
             <label class="required">
+              <span class="label-line"><span class="label-text">Sede</span><span class="required-star">*</span></span>
+              <select [(ngModel)]="siteId" name="siteId" (change)="onSiteForFormChange()" required>
+                <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
+              </select>
+            </label>
+            <label class="required">
               <span class="label-line"><span class="label-text">Área</span><span class="required-star">*</span></span>
               <select [(ngModel)]="areaId" name="areaId" (change)="loadLocationsForForm()" required>
-                <option *ngFor="let area of areas" [value]="area.id">{{ area.name }}</option>
+                <option *ngFor="let area of areasForSelectedSite()" [value]="area.id">{{ area.name }}</option>
               </select>
             </label>
             <label class="required">
@@ -477,6 +589,7 @@
               <p><strong>Código:</strong> {{ code || '-' }}</p>
               <p><strong>Registro Invima:</strong> {{ invimaReg || '-' }}</p>
               <p><strong>Riesgo:</strong> {{ riskClass || '-' }}</p>
+              <p><strong>Sede:</strong> {{ getSelectedSiteName() }}</p>
               <p><strong>Área:</strong> {{ getSelectedAreaName() }}</p>
               <p><strong>Ubicación:</strong> {{ getSelectedLocationName() }}</p>
             </div>
@@ -505,7 +618,7 @@
           <div class="wizard-steps">
             Paso {{ wizardStep + 1 }} de {{ wizardSteps.length }} · {{ wizardSteps[wizardStep] }}
             <span class="wizard-hint" *ngIf="!canProceedStep()">
-              Completa Nombre, Código, Área y Ubicación para continuar.
+              Completa Nombre, Código, Sede, Área y Ubicación para continuar.
             </span>
           </div>
           <div class="wizard-actions">
@@ -529,10 +642,8 @@
 
   </div>
 
-  <ng-template #readOnlyNotice>
-    <div class="card full">
-      <h2>Solo lectura</h2>
-      <p>Tu rol no tiene permisos para crear o editar hojas de vida.</p>
-    </div>
-  </ng-template>
+  <div class="card full" *ngIf="viewMode === 'form' && !canOpenFormTab">
+    <h2>Solo lectura</h2>
+    <p>Tu rol no tiene permisos para crear, editar o importar hojas de vida.</p>
+  </div>
 </section>

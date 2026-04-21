@@ -11,26 +11,88 @@ export async function listAreas(clientId) {
     throw new Error('Cliente no encontrado');
   }
   const { rows } = await query(
-    `SELECT id, name FROM "${schema}".areas ORDER BY name`
+    `SELECT ar.id, ar.name, ar.site_id, s.name AS site_name
+     FROM "${schema}".areas ar
+     LEFT JOIN "${schema}".sites s ON s.id = ar.site_id
+     ORDER BY s.name NULLS FIRST, ar.name`
   );
   return rows;
 }
 
-export async function createArea(clientId, name) {
+export async function listSites(clientId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { rows } = await query(
+    `SELECT id, name, address FROM "${schema}".sites ORDER BY name`
+  );
+  return rows;
+}
+
+export async function createSite(clientId, name, address) {
   const schema = await getSchemaByClientId(clientId);
   if (!schema) {
     throw new Error('Cliente no encontrado');
   }
   const { rows: existing } = await query(
-    `SELECT id FROM "${schema}".areas WHERE LOWER(name) = LOWER($1)`,
+    `SELECT id FROM "${schema}".sites WHERE LOWER(name) = LOWER($1)`,
     [name]
+  );
+  if (existing.length) {
+    throw new Error('Sede ya existe');
+  }
+  const { rows } = await query(
+    `INSERT INTO "${schema}".sites (name, address) VALUES ($1,$2) RETURNING id`,
+    [name, address || null]
+  );
+  return rows[0];
+}
+
+export async function updateSite(clientId, siteId, payload) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  await query(`UPDATE "${schema}".sites SET name = $1, address = $2 WHERE id = $3`, [
+    payload.name,
+    payload.address || null,
+    siteId
+  ]);
+}
+
+export async function deleteSite(clientId, siteId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { rows } = await query(
+    `SELECT
+       (SELECT COUNT(*)::int FROM "${schema}".areas WHERE site_id = $1) AS areas_count,
+       (SELECT COUNT(*)::int FROM "${schema}".assets WHERE site_id = $1) AS assets_count`,
+    [siteId]
+  );
+  if ((rows[0]?.areas_count || 0) > 0 || (rows[0]?.assets_count || 0) > 0) {
+    throw new Error('SITE_IN_USE');
+  }
+  await query(`DELETE FROM "${schema}".sites WHERE id = $1`, [siteId]);
+}
+
+export async function createArea(clientId, name, siteId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { rows: existing } = await query(
+    `SELECT id FROM "${schema}".areas WHERE LOWER(name) = LOWER($1) AND site_id IS NOT DISTINCT FROM $2`,
+    [name, siteId || null]
   );
   if (existing.length) {
     throw new Error('Área ya existe');
   }
   const { rows } = await query(
-    `INSERT INTO "${schema}".areas (name) VALUES ($1) RETURNING id`,
-    [name]
+    `INSERT INTO "${schema}".areas (site_id, name) VALUES ($1,$2) RETURNING id`,
+    [siteId || null, name]
   );
   return rows[0];
 }
@@ -42,13 +104,22 @@ export async function listLocations(clientId, areaId) {
   }
   if (areaId) {
     const { rows } = await query(
-      `SELECT id, name, area_id FROM "${schema}".locations WHERE area_id = $1 ORDER BY name`,
+      `SELECT lo.id, lo.name, lo.area_id, ar.site_id, s.name AS site_name
+       FROM "${schema}".locations lo
+       LEFT JOIN "${schema}".areas ar ON ar.id = lo.area_id
+       LEFT JOIN "${schema}".sites s ON s.id = ar.site_id
+       WHERE lo.area_id = $1
+       ORDER BY lo.name`,
       [areaId]
     );
     return rows;
   }
   const { rows } = await query(
-    `SELECT id, name, area_id FROM "${schema}".locations ORDER BY name`
+    `SELECT lo.id, lo.name, lo.area_id, ar.site_id, s.name AS site_name
+     FROM "${schema}".locations lo
+     LEFT JOIN "${schema}".areas ar ON ar.id = lo.area_id
+     LEFT JOIN "${schema}".sites s ON s.id = ar.site_id
+     ORDER BY s.name NULLS FIRST, ar.name NULLS FIRST, lo.name`
   );
   return rows;
 }
@@ -65,12 +136,16 @@ export async function createLocation(clientId, areaId, name) {
   return rows[0];
 }
 
-export async function updateArea(clientId, areaId, name) {
+export async function updateArea(clientId, areaId, payload) {
   const schema = await getSchemaByClientId(clientId);
   if (!schema) {
     throw new Error('Cliente no encontrado');
   }
-  await query(`UPDATE "${schema}".areas SET name = $1 WHERE id = $2`, [name, areaId]);
+  await query(`UPDATE "${schema}".areas SET name = $1, site_id = $2 WHERE id = $3`, [
+    payload.name,
+    payload.siteId || null,
+    areaId
+  ]);
 }
 
 export async function deleteArea(clientId, areaId) {
@@ -113,8 +188,9 @@ export async function listAssets(clientId) {
             a.supplier_name, a.supplier_phone, a.supplier_email, a.power_type, a.voltage,
             a.temp_min, a.temp_max, a.humidity_min, a.humidity_max,
             a.maintenance_frequency, a.requires_calibration, a.calibration_frequency,
-            a.area_id, a.location_id, ar.name AS area_name, lo.name AS location_name
+            a.site_id, s.name AS site_name, a.area_id, a.location_id, ar.name AS area_name, lo.name AS location_name
      FROM "${schema}".assets a
+     LEFT JOIN "${schema}".sites s ON s.id = a.site_id
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
      ORDER BY created_at DESC`
@@ -157,8 +233,9 @@ export async function listAssetsForReader(clientId, userId) {
             a.supplier_name, a.supplier_phone, a.supplier_email, a.power_type, a.voltage,
             a.temp_min, a.temp_max, a.humidity_min, a.humidity_max,
             a.maintenance_frequency, a.requires_calibration, a.calibration_frequency,
-            a.area_id, a.location_id, ar.name AS area_name, lo.name AS location_name
+            a.site_id, s.name AS site_name, a.area_id, a.location_id, ar.name AS area_name, lo.name AS location_name
      FROM "${schema}".assets a
+     LEFT JOIN "${schema}".sites s ON s.id = a.site_id
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
      WHERE 1=1 ${where}
@@ -212,8 +289,9 @@ export async function getAssetById(clientId, assetId) {
     throw new Error('Cliente no encontrado');
   }
   const { rows } = await query(
-    `SELECT a.*, ar.name AS area_name, lo.name AS location_name
+    `SELECT a.*, s.name AS site_name, ar.name AS area_name, lo.name AS location_name
      FROM "${schema}".assets a
+     LEFT JOIN "${schema}".sites s ON s.id = a.site_id
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
      WHERE a.id = $1`,
@@ -263,6 +341,7 @@ export async function createAsset(clientId, payload) {
     model,
     serial,
     invimaReg,
+    siteId,
     areaId,
     locationId,
     riskClass,
@@ -288,12 +367,12 @@ export async function createAsset(clientId, payload) {
   } = payload;
   const { rows } = await query(
     `INSERT INTO "${schema}".assets
-     (code, name, brand, model, serial, invima_reg, area_id, location_id, risk_class, is_mobile, manufacturer,
+     (code, name, brand, model, serial, invima_reg, site_id, area_id, location_id, risk_class, is_mobile, manufacturer,
       acquisition_type, contract_text, acquisition_date, useful_life_years, warranty_years,
       supplier_name, supplier_phone, supplier_email, power_type, voltage, temp_min, temp_max,
       humidity_min, humidity_max, maintenance_frequency, requires_calibration, calibration_frequency)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
-             $12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+             $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
      RETURNING id`,
     [
       code,
@@ -302,6 +381,7 @@ export async function createAsset(clientId, payload) {
       model,
       serial,
       invimaReg,
+      siteId,
       areaId,
       locationId,
       riskClass,
@@ -352,6 +432,7 @@ export async function updateAsset(clientId, assetId, payload) {
     model,
     serial,
     invimaReg,
+    siteId,
     areaId,
     locationId,
     riskClass,
@@ -378,14 +459,14 @@ export async function updateAsset(clientId, assetId, payload) {
   await query(
     `UPDATE "${schema}".assets
      SET code = $1, name = $2, brand = $3, model = $4, serial = $5,
-         invima_reg = $6, area_id = $7, location_id = $8, risk_class = $9,
-         is_mobile = $10, manufacturer = $11,
-         acquisition_type = $12, contract_text = $13, acquisition_date = $14,
-         useful_life_years = $15, warranty_years = $16, supplier_name = $17,
-         supplier_phone = $18, supplier_email = $19, power_type = $20, voltage = $21,
-         temp_min = $22, temp_max = $23, humidity_min = $24, humidity_max = $25,
-         maintenance_frequency = $26, requires_calibration = $27, calibration_frequency = $28
-     WHERE id = $29`,
+         invima_reg = $6, site_id = $7, area_id = $8, location_id = $9, risk_class = $10,
+         is_mobile = $11, manufacturer = $12,
+         acquisition_type = $13, contract_text = $14, acquisition_date = $15,
+         useful_life_years = $16, warranty_years = $17, supplier_name = $18,
+         supplier_phone = $19, supplier_email = $20, power_type = $21, voltage = $22,
+         temp_min = $23, temp_max = $24, humidity_min = $25, humidity_max = $26,
+         maintenance_frequency = $27, requires_calibration = $28, calibration_frequency = $29
+     WHERE id = $30`,
     [
       code,
       name,
@@ -393,6 +474,7 @@ export async function updateAsset(clientId, assetId, payload) {
       model,
       serial,
       invimaReg,
+      siteId || null,
       areaId || null,
       locationId || null,
       riskClass,

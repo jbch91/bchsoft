@@ -8,6 +8,8 @@ import { AuthService } from '../../auth/auth.service';
 import { getApiBase, getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
+import { InventoryPanelComponent, InventoryPanelItem } from '../../shared/inventory-panel/inventory-panel.component';
+import * as XLSX from 'xlsx';
 
 interface ClientOption {
   id: string;
@@ -19,14 +21,71 @@ interface ClientOption {
   logoPath?: string | null;
 }
 
-interface AssetView {
+interface SiteOption {
+  id: string;
+  name: string;
+  address?: string | null;
+}
+
+interface AreaOption {
+  id: string;
+  name: string;
+  siteId: string | null;
+  siteName?: string | null;
+}
+
+interface LocationOption {
+  id: string;
+  name: string;
+  areaId: string | null;
+  siteId?: string | null;
+  siteName?: string | null;
+}
+
+interface AssetImportPayload {
+  code: string;
+  name: string;
+  brand: string;
+  model: string;
+  serial: string;
+  invimaReg: string;
+  siteId: string;
+  areaId: string;
+  locationId: string;
+  riskClass: string;
+  isMobile?: boolean;
+  manufacturer?: string;
+  acquisitionType?: string;
+  acquisitionDate?: string;
+  usefulLifeYears?: number;
+  warrantyYears?: number;
+  supplierName?: string;
+  supplierPhone?: string;
+  supplierEmail?: string;
+  maintenanceFrequency?: string;
+  requiresCalibration?: boolean;
+  calibrationFrequency?: string;
+}
+
+interface ImportPreviewRow {
+  rowNumber: number;
+  code: string;
+  name: string;
+  siteName: string;
+  areaName: string;
+  locationName: string;
+  errors: string[];
+  payload?: AssetImportPayload;
+}
+
+interface AssetView extends InventoryPanelItem {
   id: string;
   code: string;
   name: string;
   brand: string | null;
   model: string | null;
   serial: string | null;
-  location: string | null;
+  location?: string | null;
   status: string;
   photoPath?: string | null;
   invimaReg?: string | null;
@@ -35,6 +94,8 @@ interface AssetView {
   manufacturer?: string | null;
   areaName?: string | null;
   locationName?: string | null;
+  siteName?: string | null;
+  siteId?: string | null;
   areaId?: string | null;
   locationId?: string | null;
 }
@@ -42,7 +103,7 @@ interface AssetView {
 @Component({
   selector: 'app-hojas-de-vida',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
+  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent, InventoryPanelComponent],
   templateUrl: './hojas-de-vida.component.html',
   styleUrl: './hojas-de-vida.component.scss'
 })
@@ -51,18 +112,23 @@ export class HojasDeVidaComponent {
   private readonly publicBase = getPublicBase();
   private readonly maxImageSizeMb = 5;
   private readonly maxPdfSizeMb = 10;
+  private readonly maxImportRows = 500;
+  private readonly maxImportFileSizeMb = 10;
   clients: ClientOption[] = [];
   clientSearchTerm = '';
   selectedClientId = '';
   assets: AssetView[] = [];
-  areas: { id: string; name: string }[] = [];
-  locations: { id: string; name: string; areaId: string | null }[] = [];
-  locationsAll: { id: string; name: string; areaId: string | null }[] = [];
+  sites: SiteOption[] = [];
+  areas: AreaOption[] = [];
+  locations: LocationOption[] = [];
+  locationsAll: LocationOption[] = [];
+  siteEdits: Record<string, string> = {};
+  siteAddressEdits: Record<string, string> = {};
   areaEdits: Record<string, string> = {};
   locationEdits: Record<string, string> = {};
   areasOpen = true;
   areasFormOpen = false;
-  areasView: 'list' | 'create-area' | 'create-location' = 'list';
+  areasView: 'list' | 'create-site' | 'create-area' | 'create-location' = 'list';
   loading = false;
   errorMessage = '';
   successMessage = '';
@@ -79,8 +145,38 @@ export class HojasDeVidaComponent {
     'Recomendaciones',
     'Resumen'
   ];
+  readonly importHeaders = [
+    'Código*',
+    'Nombre*',
+    'Marca*',
+    'Modelo*',
+    'Serie*',
+    'Sede*',
+    'Área*',
+    'Ubicación*',
+    'Registro Invima*',
+    'Riesgo*',
+    'Fabricante',
+    'Tipo equipo',
+    'Forma adquisición',
+    'Fecha adquisición',
+    'Vida útil años',
+    'Garantía años',
+    'Proveedor',
+    'Teléfono proveedor',
+    'Correo proveedor',
+    'Frecuencia mantenimiento',
+    'Requiere calibración',
+    'Frecuencia calibración'
+  ];
+  readonly acquisitionTypes = ['COMPRA DIRECTA', 'DONACION'];
+  readonly riskClasses = ['Clase I', 'Clase IIA', 'Clase IIB', 'Clase III'];
+  readonly frequencyOptions = ['mensual', 'bimensual', 'trimestral', 'cuatrimestral', 'semestral', 'anual'];
+  readonly equipmentTypeOptions = ['Fijo', 'Móvil'];
+  readonly warrantyYearOptions = [1, 2, 3];
 
   editingAreaId: string | null = null;
+  editingSiteId: string | null = null;
   editingLocationId: string | null = null;
   editingAssetId: string | null = null;
   code = '';
@@ -106,6 +202,7 @@ export class HojasDeVidaComponent {
   maintenanceFrequency = 'mensual';
   requiresCalibration = false;
   calibrationFrequency = 'anual';
+  siteId = '';
   areaId = '';
   locationId = '';
   riskClass = 'Clase I';
@@ -119,8 +216,15 @@ export class HojasDeVidaComponent {
   accessories: { name: string; quantity: number; brand?: string; serial?: string }[] = [];
   cleaning: { procedure: string; frequency?: string; responsible?: string }[] = [];
   recommendations: { text: string }[] = [];
+  importPreviewRows: ImportPreviewRow[] = [];
+  importFileName = '';
+  importMessage = '';
+  importMessageType: 'info' | 'success' | 'error' = 'info';
+  importLoading = false;
 
   newAreaName = '';
+  newSiteName = '';
+  newSiteAddress = '';
   newLocationName = '';
 
   constructor(
@@ -141,6 +245,10 @@ export class HojasDeVidaComponent {
 
   trackByAreaId(_index: number, area: { id: string }): string {
     return area.id;
+  }
+
+  trackBySiteId(_index: number, site: { id: string }): string {
+    return site.id;
   }
 
   trackByLocationId(_index: number, location: { id: string }): string {
@@ -166,6 +274,7 @@ export class HojasDeVidaComponent {
           this.brand &&
           this.model &&
           this.serial &&
+          this.siteId &&
           this.areaId &&
           this.locationId &&
           this.code &&
@@ -196,8 +305,7 @@ export class HojasDeVidaComponent {
     const userClient = this.auth.currentUser()?.clientId ?? '';
     if (userClient) {
       this.selectedClientId = userClient;
-      await this.loadAssets();
-      await this.loadAreas();
+      await this.onClientChange();
       return;
     }
 
@@ -214,8 +322,7 @@ export class HojasDeVidaComponent {
       }));
       this.selectedClientId = this.clients[0]?.id ?? '';
       if (this.selectedClientId) {
-        await this.loadAssets();
-        await this.loadAreas();
+        await this.onClientChange();
       }
     }
   }
@@ -232,6 +339,16 @@ export class HojasDeVidaComponent {
     return this.clients.find((client) => client.id === this.selectedClientId) ?? null;
   }
 
+  async onClientChange(): Promise<void> {
+    await this.loadSites();
+    await this.loadAreas();
+    await this.loadAssets();
+  }
+
+  getSelectedSiteName(): string {
+    return this.sites.find((site) => site.id === this.siteId)?.name ?? '-';
+  }
+
   getSelectedAreaName(): string {
     return this.areas.find((area) => area.id === this.areaId)?.name ?? '-';
   }
@@ -244,6 +361,610 @@ export class HojasDeVidaComponent {
     if (!client?.logoPath) return null;
     if (client.logoPath.startsWith('http')) return client.logoPath;
     return joinBase(this.publicBase, client.logoPath);
+  }
+
+  get importHasRows(): boolean {
+    return this.importPreviewRows.length > 0;
+  }
+
+  get importHasErrors(): boolean {
+    return this.importPreviewRows.some((row) => row.errors.length > 0);
+  }
+
+  get importValidRowsCount(): number {
+    return this.importPreviewRows.filter((row) => row.payload && !row.errors.length).length;
+  }
+
+  get importErrorRowsCount(): number {
+    return this.importPreviewRows.filter((row) => row.errors.length > 0).length;
+  }
+
+  get canOpenFormTab(): boolean {
+    return this.auth.hasPermission('hb:create') || this.auth.hasPermission('hb:import');
+  }
+
+  async downloadHvImportTemplate(): Promise<void> {
+    if (!this.selectedClientId) {
+      this.setImportMessage('Selecciona primero un cliente para descargar la plantilla.', 'error');
+      return;
+    }
+
+    await this.loadSites();
+    await this.loadAreas();
+    await this.loadLocationsAll();
+
+    const ExcelJS = await import('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'INBIHOSPITALARIO';
+    workbook.created = new Date();
+
+    const worksheet = workbook.addWorksheet('Hojas de vida', {
+      views: [{ state: 'frozen', ySplit: 1 }]
+    });
+    const catalogSheet = workbook.addWorksheet('Catalogos');
+    const guideSheet = workbook.addWorksheet('Instrucciones');
+
+    const unique = (values: string[]): string[] => Array.from(new Set(values.filter(Boolean))).sort();
+    const siteNames = unique(this.sites.map((site) => site.name));
+    const areaNames = unique(this.areas.map((area) => area.name));
+    const locationNames = unique(this.locationsAll.map((location) => location.name));
+    const warrantyOptions = ['1', '2', '3'];
+    const yesNoOptions = ['Sí', 'No'];
+    const equipmentTypeOptions = ['Fijo', 'Móvil'];
+
+    const headers = this.importHeaders;
+    worksheet.columns = headers.map((header) => ({
+      header,
+      key: header,
+      width: Math.min(Math.max(header.length + 4, 15), 28)
+    }));
+    worksheet.getRow(1).height = 28;
+    worksheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFA64045' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF8F343A' } },
+        left: { style: 'thin', color: { argb: 'FF8F343A' } },
+        bottom: { style: 'thin', color: { argb: 'FF8F343A' } },
+        right: { style: 'thin', color: { argb: 'FF8F343A' } }
+      };
+    });
+
+    worksheet.addRow({
+      'Código*': 'EQ-001',
+      'Nombre*': 'Monitor de signos vitales',
+      'Marca*': 'Marca ejemplo',
+      'Modelo*': 'Modelo ejemplo',
+      'Serie*': 'SER-001',
+      'Sede*': siteNames[0] ?? 'Sede principal',
+      'Área*': areaNames[0] ?? 'Urgencias',
+      'Ubicación*': locationNames[0] ?? 'Consultorio 1',
+      'Registro Invima*': 'INVIMA-000',
+      'Riesgo*': 'Clase IIA',
+      Fabricante: 'Fabricante ejemplo',
+      'Tipo equipo': 'Fijo',
+      'Forma adquisición': 'COMPRA DIRECTA',
+      'Fecha adquisición': '2026-01-15',
+      'Vida útil años': 10,
+      'Garantía años': 1,
+      Proveedor: 'Proveedor ejemplo',
+      'Teléfono proveedor': '3000000000',
+      'Correo proveedor': 'proveedor@correo.com',
+      'Frecuencia mantenimiento': 'trimestral',
+      'Requiere calibración': 'No',
+      'Frecuencia calibración': 'anual'
+    });
+    worksheet.getRow(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF1F2' } };
+    worksheet.getRow(2).eachCell((cell) => {
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+      };
+    });
+    worksheet.autoFilter = { from: 'A1', to: 'V1' };
+    worksheet.getColumn(14).numFmt = 'yyyy-mm-dd';
+    worksheet.getColumn(15).numFmt = '0';
+    worksheet.getColumn(16).numFmt = '0';
+
+    catalogSheet.columns = [
+      { header: 'Sedes', key: 'sites', width: 28 },
+      { header: 'Áreas', key: 'areas', width: 28 },
+      { header: 'Ubicaciones', key: 'locations', width: 28 },
+      { header: 'Riesgos', key: 'risks', width: 18 },
+      { header: 'Frecuencias', key: 'frequencies', width: 20 },
+      { header: 'Adquisición', key: 'acquisition', width: 22 },
+      { header: 'Tipo equipo', key: 'equipmentType', width: 16 },
+      { header: 'Garantía', key: 'warranty', width: 14 },
+      { header: 'Sí/No', key: 'yesNo', width: 12 }
+    ];
+    const catalogColumns = [
+      siteNames,
+      areaNames,
+      locationNames,
+      this.riskClasses,
+      this.frequencyOptions,
+      this.acquisitionTypes,
+      equipmentTypeOptions,
+      warrantyOptions,
+      yesNoOptions
+    ];
+    const maxCatalogRows = Math.max(...catalogColumns.map((items) => items.length), 1);
+    for (let rowIndex = 0; rowIndex < maxCatalogRows; rowIndex += 1) {
+      catalogSheet.addRow(catalogColumns.map((items) => items[rowIndex] ?? ''));
+    }
+    catalogSheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5F1F25' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+
+    guideSheet.columns = [{ width: 36 }, { width: 90 }];
+    guideSheet.addRows([
+      ['Cómo usar la plantilla', 'Selecciona valores desde las listas desplegables cuando el campo lo permita.'],
+      ['Orden correcto', 'Primero crea sedes, áreas y ubicaciones en el sistema; luego descarga esta plantilla.'],
+      ['Campos obligatorios', 'Todos los encabezados con * son obligatorios.'],
+      ['Sede, Área y Ubicación', 'Deben existir previamente en el cliente seleccionado. El sistema validará la relación antes de importar.'],
+      ['Fechas', 'Usa formato yyyy-mm-dd o selecciona la fecha desde Excel.'],
+      ['Validación final', 'Aunque Excel permita escribir manualmente, el software vuelve a validar todo antes de guardar.']
+    ]);
+    guideSheet.getRow(1).font = { bold: true, color: { argb: 'FFA64045' } };
+    guideSheet.eachRow((row) => {
+      row.eachCell((cell) => {
+        cell.alignment = { vertical: 'middle', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        };
+      });
+    });
+
+    const listFormula = (columnLetter: string, values: string[]): string => {
+      const endRow = Math.max(values.length + 1, 2);
+      return `Catalogos!$${columnLetter}$2:$${columnLetter}$${endRow}`;
+    };
+    const addListValidation = (columnNumber: number, formula: string, prompt: string): void => {
+      for (let rowNumber = 2; rowNumber <= 501; rowNumber += 1) {
+        worksheet.getCell(rowNumber, columnNumber).dataValidation = {
+          type: 'list',
+          allowBlank: true,
+          formulae: [formula],
+          showErrorMessage: true,
+          errorStyle: 'error',
+          errorTitle: 'Valor no permitido',
+          error: 'Selecciona un valor de la lista desplegable.',
+          showInputMessage: true,
+          promptTitle: 'Selecciona de la lista',
+          prompt
+        };
+      }
+    };
+
+    addListValidation(6, listFormula('A', siteNames), 'Selecciona la sede creada para este cliente.');
+    addListValidation(7, listFormula('B', areaNames), 'Selecciona el área creada para este cliente.');
+    addListValidation(8, listFormula('C', locationNames), 'Selecciona la ubicación creada para este cliente.');
+    addListValidation(10, listFormula('D', this.riskClasses), 'Selecciona la clase de riesgo del equipo.');
+    addListValidation(12, listFormula('G', equipmentTypeOptions), 'Selecciona si el equipo es fijo o móvil.');
+    addListValidation(13, listFormula('F', this.acquisitionTypes), 'Selecciona la forma de adquisición.');
+    addListValidation(16, listFormula('H', warrantyOptions), 'Selecciona los años de garantía si aplica.');
+    addListValidation(20, listFormula('E', this.frequencyOptions), 'Selecciona la frecuencia de mantenimiento.');
+    addListValidation(21, listFormula('I', yesNoOptions), 'Indica si el equipo requiere calibración.');
+    addListValidation(22, listFormula('E', this.frequencyOptions), 'Selecciona la frecuencia de calibración si aplica.');
+
+    for (let rowNumber = 2; rowNumber <= 501; rowNumber += 1) {
+      worksheet.getCell(rowNumber, 15).dataValidation = {
+        type: 'whole',
+        operator: 'between',
+        allowBlank: true,
+        formulae: [0, 50],
+        showErrorMessage: true,
+        errorTitle: 'Vida útil no válida',
+        error: 'Ingresa un número entre 0 y 50.'
+      };
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer as BlobPart], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'plantilla-hojas-de-vida.xlsx';
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async onHvImportFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files && input.files[0] ? input.files[0] : null;
+    this.importPreviewRows = [];
+    this.setImportMessage('', 'info');
+    this.importFileName = file?.name ?? '';
+    if (!file) {
+      return;
+    }
+
+    if (!this.selectedClientId) {
+      this.setImportMessage('Selecciona primero un cliente.', 'error');
+      input.value = '';
+      return;
+    }
+
+    const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+    if (!['xlsx', 'xls', 'csv'].includes(extension)) {
+      this.setImportMessage('El archivo debe ser Excel (.xlsx, .xls) o CSV.', 'error');
+      input.value = '';
+      return;
+    }
+
+    if (file.size > this.maxImportFileSizeMb * 1024 * 1024) {
+      this.setImportMessage(`El archivo supera ${this.maxImportFileSizeMb} MB. Divide la carga en archivos más pequeños.`, 'error');
+      input.value = '';
+      return;
+    }
+
+    try {
+      await this.loadSites();
+      await this.loadAreas();
+      await this.loadLocationsAll();
+
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        this.setImportMessage('El archivo no tiene hojas para leer.', 'error');
+        return;
+      }
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
+      const rows = rawRows.filter((row) => this.rowHasAnyValue(row));
+      if (rows.length > this.maxImportRows) {
+        this.setImportMessage(`El archivo tiene ${rows.length} filas. Importa máximo ${this.maxImportRows} equipos por archivo.`, 'error');
+        return;
+      }
+
+      this.importPreviewRows = this.buildImportPreview(rows);
+      if (!rows.length) {
+        this.setImportMessage('El archivo no tiene filas para importar.', 'error');
+      } else if (this.importHasErrors) {
+        this.setImportMessage(`Archivo leído con ${this.importErrorRowsCount} fila(s) con errores y ${this.importValidRowsCount} lista(s).`, 'error');
+      } else {
+        this.setImportMessage(`Archivo leído: ${this.importValidRowsCount} equipo(s) listos para importar.`, 'success');
+      }
+    } catch (error) {
+      console.error(error);
+      this.setImportMessage('No se pudo leer el archivo. Verifica que sea una plantilla válida de hojas de vida.', 'error');
+    } finally {
+      input.value = '';
+    }
+  }
+
+  async confirmHvImport(): Promise<void> {
+    if (!this.selectedClientId || this.importHasErrors || !this.importValidRowsCount) {
+      return;
+    }
+    this.importLoading = true;
+    this.setImportMessage('', 'info');
+    try {
+      const validRows = this.importPreviewRows.filter((row) => row.payload && !row.errors.length);
+      const result = await this.biomed.importAssets(this.selectedClientId, validRows.map((row) => row.payload!));
+      this.setImportMessage(`Importación completada: ${result.imported} hoja(s) de vida creadas.`, 'success');
+      this.importPreviewRows = [];
+      this.importFileName = '';
+      await this.loadAssets();
+      this.resetForm();
+      this.viewMode = 'inventory';
+    } catch (error) {
+      console.error(error);
+      this.setImportMessage(
+        this.extractErrorMessage(error) || 'No se pudo completar la importación. Revisa duplicados o datos obligatorios.',
+        'error'
+      );
+    } finally {
+      this.importLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  clearHvImport(): void {
+    this.importPreviewRows = [];
+    this.importFileName = '';
+    this.setImportMessage('', 'info');
+  }
+
+  private setImportMessage(message: string, type: 'info' | 'success' | 'error'): void {
+    this.importMessage = message;
+    this.importMessageType = type;
+  }
+
+  downloadHvImportErrors(): void {
+    const errorRows = this.importPreviewRows.filter((row) => row.errors.length > 0);
+    if (!errorRows.length) {
+      return;
+    }
+
+    const worksheet = XLSX.utils.json_to_sheet(
+      errorRows.map((row) => ({
+        Fila: row.rowNumber,
+        Código: row.code || '',
+        Equipo: row.name || '',
+        Sede: row.siteName || '',
+        Área: row.areaName || '',
+        Ubicación: row.locationName || '',
+        Errores: row.errors.join(' | ')
+      }))
+    );
+    worksheet['!cols'] = [
+      { wch: 8 },
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 90 }
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Errores');
+    const baseName = this.importFileName.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '');
+    XLSX.writeFile(workbook, `errores-importacion-${baseName || 'hojas-de-vida'}.xlsx`);
+  }
+
+  private buildImportPreview(rows: Record<string, unknown>[]): ImportPreviewRow[] {
+    const existingCodes = new Set(this.assets.map((asset) => this.normalizeText(asset.code)));
+    const fileCodes = new Set<string>();
+    return rows.map((row, index) => {
+      const code = this.rowValue(row, 'Código*', 'Código', 'Codigo*', 'Codigo');
+      const name = this.rowValue(row, 'Nombre*', 'Nombre');
+      const brand = this.rowValue(row, 'Marca*', 'Marca');
+      const model = this.rowValue(row, 'Modelo*', 'Modelo');
+      const serial = this.rowValue(row, 'Serie*', 'Serie', 'Serial*', 'Serial');
+      const siteName = this.rowValue(row, 'Sede*', 'Sede');
+      const areaName = this.rowValue(row, 'Área*', 'Área', 'Area*', 'Area');
+      const locationName = this.rowValue(row, 'Ubicación*', 'Ubicación', 'Ubicacion*', 'Ubicacion');
+      const invimaReg = this.rowValue(row, 'Registro Invima*', 'Registro Invima');
+      const riskClass = this.rowValue(row, 'Riesgo*', 'Riesgo');
+      const manufacturer = this.rowValue(row, 'Fabricante');
+      const equipmentTypeRaw = this.rowValue(row, 'Tipo equipo');
+      const acquisitionTypeRaw = this.rowValue(row, 'Forma adquisición', 'Forma adquisicion');
+      const acquisitionDateRaw = this.valueFromRow(row, 'Fecha adquisición', 'Fecha adquisicion');
+      const usefulLifeRaw = this.rowValue(row, 'Vida útil años', 'Vida util años');
+      const warrantyRaw = this.rowValue(row, 'Garantía años', 'Garantia años');
+      const supplierName = this.rowValue(row, 'Proveedor');
+      const supplierPhone = this.rowValue(row, 'Teléfono proveedor', 'Telefono proveedor');
+      const supplierEmail = this.rowValue(row, 'Correo proveedor');
+      const maintenanceFrequencyRaw = this.rowValue(row, 'Frecuencia mantenimiento');
+      const requiresCalibrationRaw = this.rowValue(row, 'Requiere calibración', 'Requiere calibracion');
+      const calibrationFrequencyRaw = this.rowValue(row, 'Frecuencia calibración', 'Frecuencia calibracion');
+      const errors: string[] = [];
+
+      const required = [
+        ['Código', code],
+        ['Nombre', name],
+        ['Marca', brand],
+        ['Modelo', model],
+        ['Serie', serial],
+        ['Sede', siteName],
+        ['Área', areaName],
+        ['Ubicación', locationName],
+        ['Registro Invima', invimaReg],
+        ['Riesgo', riskClass]
+      ];
+      required.forEach(([label, value]) => {
+        if (!String(value).trim()) errors.push(`${label} es obligatorio`);
+      });
+
+      const normalizedCode = this.normalizeText(code);
+      if (code && code.length > 80) {
+        errors.push('Código no puede superar 80 caracteres');
+      }
+      if (normalizedCode && existingCodes.has(normalizedCode)) {
+        errors.push('El código ya existe en el inventario');
+      }
+      if (normalizedCode && fileCodes.has(normalizedCode)) {
+        errors.push('El código está repetido en el Excel');
+      }
+      if (normalizedCode) {
+        fileCodes.add(normalizedCode);
+      }
+
+      const site = this.sites.find((item) => this.normalizeText(item.name) === this.normalizeText(siteName));
+      const area = site
+        ? this.areas.find((item) => item.siteId === site.id && this.normalizeText(item.name) === this.normalizeText(areaName))
+        : null;
+      const location = area
+        ? this.locationsAll.find((item) => item.areaId === area.id && this.normalizeText(item.name) === this.normalizeText(locationName))
+        : null;
+
+      if (siteName && !site) errors.push('La sede no existe; créala antes de importar');
+      if (areaName && site && !area) errors.push('El área no existe en esa sede');
+      if (locationName && area && !location) errors.push('La ubicación no existe en esa área');
+
+      const matchedRiskClass = this.matchAllowedValue(riskClass, this.riskClasses);
+      if (riskClass && !matchedRiskClass) {
+        errors.push(`Riesgo no permitido. Usa: ${this.riskClasses.join(', ')}`);
+      }
+
+      const matchedEquipmentType = this.matchAllowedValue(equipmentTypeRaw, this.equipmentTypeOptions);
+      if (equipmentTypeRaw && !matchedEquipmentType) {
+        errors.push('Tipo equipo no permitido. Usa: Fijo o Móvil');
+      }
+
+      const matchedAcquisitionType = this.matchAllowedValue(acquisitionTypeRaw, this.acquisitionTypes);
+      if (acquisitionTypeRaw && !matchedAcquisitionType) {
+        errors.push('Forma de adquisición no permitida. Usa: COMPRA DIRECTA o DONACION');
+      }
+
+      const acquisitionDate = this.parseExcelDate(acquisitionDateRaw);
+      if (this.hasCellValue(acquisitionDateRaw) && !acquisitionDate) {
+        errors.push('Fecha adquisición no válida. Usa formato día/mes/año');
+      }
+
+      const usefulLifeYears = this.parseOptionalNumber(usefulLifeRaw);
+      if (usefulLifeRaw && usefulLifeYears === undefined) {
+        errors.push('Vida útil debe ser un número mayor a 0');
+      }
+
+      const warrantyYears = this.parseOptionalNumber(warrantyRaw);
+      const warrantyIsValid = warrantyYears !== undefined && Number.isInteger(warrantyYears) && this.warrantyYearOptions.includes(warrantyYears);
+      if (warrantyRaw && !warrantyIsValid) {
+        errors.push('Garantía debe ser 1, 2 o 3 años');
+      }
+
+      if (supplierEmail && !this.isValidEmail(supplierEmail)) {
+        errors.push('Correo proveedor no tiene un formato válido');
+      }
+
+      const maintenanceFrequency = this.normalizeFrequency(maintenanceFrequencyRaw);
+      if (maintenanceFrequency && !this.frequencyOptions.includes(maintenanceFrequency)) {
+        errors.push(`Frecuencia de mantenimiento no permitida. Usa: ${this.frequencyOptions.join(', ')}`);
+      }
+      const requiresCalibrationResult = this.parseBooleanText(requiresCalibrationRaw);
+      if (!requiresCalibrationResult.valid) {
+        errors.push('Requiere calibración debe ser Sí o No');
+      }
+      const requiresCalibration = requiresCalibrationResult.value;
+      const calibrationFrequency = this.normalizeFrequency(calibrationFrequencyRaw) || 'anual';
+      if ((requiresCalibration || calibrationFrequencyRaw) && !this.frequencyOptions.includes(calibrationFrequency)) {
+        errors.push(`Frecuencia de calibración no permitida. Usa: ${this.frequencyOptions.join(', ')}`);
+      }
+
+      const payload = site && area && location && !errors.length
+        ? {
+            code: code.trim(),
+            name: name.trim(),
+            brand: brand.trim(),
+            model: model.trim(),
+            serial: serial.trim(),
+            invimaReg: invimaReg.trim(),
+            siteId: site.id,
+            areaId: area.id,
+            locationId: location.id,
+            riskClass: matchedRiskClass || 'Clase I',
+            isMobile: this.normalizeText(matchedEquipmentType || equipmentTypeRaw).includes('movil'),
+            manufacturer: manufacturer || undefined,
+            acquisitionType: matchedAcquisitionType || 'COMPRA DIRECTA',
+            acquisitionDate: acquisitionDate || undefined,
+            usefulLifeYears,
+            warrantyYears,
+            supplierName: supplierName || undefined,
+            supplierPhone: supplierPhone || undefined,
+            supplierEmail: supplierEmail || undefined,
+            maintenanceFrequency: maintenanceFrequency || 'mensual',
+            requiresCalibration,
+            calibrationFrequency: requiresCalibration ? calibrationFrequency : undefined
+          }
+        : undefined;
+
+      return {
+        rowNumber: index + 2,
+        code,
+        name,
+        siteName,
+        areaName,
+        locationName,
+        errors,
+        payload
+      };
+    });
+  }
+
+  private rowValue(row: Record<string, unknown>, ...keys: string[]): string {
+    const value = this.valueFromRow(row, ...keys);
+    if (value instanceof Date) {
+      return this.formatDateForInput(value);
+    }
+    return String(value ?? '').trim();
+  }
+
+  private valueFromRow(row: Record<string, unknown>, ...keys: string[]): unknown {
+    const normalizedKeys = keys.map((key) => this.normalizeText(key.replace('*', '')));
+    const match = Object.entries(row).find(([key]) => normalizedKeys.includes(this.normalizeText(key.replace('*', ''))));
+    return match?.[1] ?? '';
+  }
+
+  private rowHasAnyValue(row: Record<string, unknown>): boolean {
+    return Object.values(row).some((value) => this.hasCellValue(value));
+  }
+
+  private hasCellValue(value: unknown): boolean {
+    if (value instanceof Date) {
+      return true;
+    }
+    return String(value ?? '').trim().length > 0;
+  }
+
+  private normalizeText(value: unknown): string {
+    return String(value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+  }
+
+  private normalizeFrequency(value: string): string {
+    return this.normalizeText(value);
+  }
+
+  private matchAllowedValue(value: string, allowed: string[]): string | null {
+    return allowed.find((item) => this.normalizeText(item) === this.normalizeText(value)) ?? null;
+  }
+
+  private parseBooleanText(value: string): { value: boolean; valid: boolean } {
+    const normalized = this.normalizeText(value);
+    if (!normalized) {
+      return { value: false, valid: true };
+    }
+    if (['si', 'true', '1', 'x'].includes(normalized)) {
+      return { value: true, valid: true };
+    }
+    if (['no', 'false', '0'].includes(normalized)) {
+      return { value: false, valid: true };
+    }
+    return { value: false, valid: false };
+  }
+
+  private parseOptionalNumber(value: string): number | undefined {
+    const parsed = Number(String(value || '').replace(',', '.'));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  private isValidEmail(value: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+  }
+
+  private extractErrorMessage(error: unknown): string | null {
+    if (typeof error === 'object' && error && 'error' in error) {
+      const nested = (error as { error?: { message?: string } }).error;
+      return nested?.message ?? null;
+    }
+    return null;
+  }
+
+  private parseExcelDate(value: unknown): string | null {
+    if (!value) return null;
+    if (value instanceof Date) return this.formatDateForInput(value);
+    if (typeof value === 'number') {
+      const parsed = XLSX.SSF.parse_date_code(value);
+      if (parsed) {
+        return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
+      }
+    }
+    const text = String(value).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    const dateMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dateMatch) {
+      return `${dateMatch[3]}-${dateMatch[2].padStart(2, '0')}-${dateMatch[1].padStart(2, '0')}`;
+    }
+    return null;
+  }
+
+  private formatDateForInput(date: Date): string {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   }
 
   async loadAssets(): Promise<void> {
@@ -269,6 +990,8 @@ export class HojasDeVidaComponent {
         riskClass: row.risk_class ?? null,
         isMobile: row.is_mobile ?? false,
         manufacturer: row.manufacturer ?? null,
+        siteName: row.site_name ?? null,
+        siteId: row.site_id ?? null,
         areaName: row.area_name ?? null,
         locationName: row.location_name ?? null,
         areaId: row.area_id ?? null,
@@ -283,15 +1006,45 @@ export class HojasDeVidaComponent {
     }
   }
 
+  async loadSites(): Promise<void> {
+    if (!this.selectedClientId) {
+      return;
+    }
+    try {
+      const rows = await this.biomed.listSites(this.selectedClientId);
+      this.sites = rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        address: row.address ?? null
+      }));
+      this.siteEdits = Object.fromEntries(this.sites.map((site) => [site.id, site.name]));
+      this.siteAddressEdits = Object.fromEntries(this.sites.map((site) => [site.id, site.address ?? '']));
+      if (!this.sites.find((site) => site.id === this.siteId)) {
+        this.siteId = this.sites[0]?.id ?? '';
+      }
+    } catch (error) {
+      console.error(error);
+      this.sites = [];
+    }
+  }
+
   async loadAreas(): Promise<void> {
     if (!this.selectedClientId) {
       return;
     }
     try {
       const rows = await this.biomed.listAreas(this.selectedClientId);
-      this.areas = rows.map((row) => ({ id: row.id, name: row.name }));
+      this.areas = rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        siteId: row.site_id ?? null,
+        siteName: row.site_name ?? null
+      }));
       this.areaEdits = Object.fromEntries(this.areas.map((area) => [area.id, area.name]));
-      this.areaId = this.areas[0]?.id ?? '';
+      const visibleAreas = this.areasForSelectedSite();
+      if (!visibleAreas.find((area) => area.id === this.areaId)) {
+        this.areaId = visibleAreas[0]?.id ?? this.areas[0]?.id ?? '';
+      }
       await this.loadLocationsAll();
       await this.loadLocationsForForm();
     } catch (error) {
@@ -304,7 +1057,13 @@ export class HojasDeVidaComponent {
       return;
     }
     const rows = await this.biomed.listLocations(this.selectedClientId);
-    this.locationsAll = rows.map((row) => ({ id: row.id, name: row.name, areaId: row.area_id ?? null }));
+    this.locationsAll = rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      areaId: row.area_id ?? null,
+      siteId: row.site_id ?? null,
+      siteName: row.site_name ?? null
+    }));
     this.locationEdits = Object.fromEntries(this.locationsAll.map((loc) => [loc.id, loc.name]));
   }
 
@@ -312,25 +1071,105 @@ export class HojasDeVidaComponent {
     if (!this.selectedClientId) {
       return;
     }
+    if (!this.areaId) {
+      this.locations = [];
+      this.locationId = '';
+      return;
+    }
     const rows = await this.biomed.listLocations(this.selectedClientId, this.areaId || undefined);
-    this.locations = rows.map((row) => ({ id: row.id, name: row.name, areaId: row.area_id ?? null }));
+    this.locations = rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      areaId: row.area_id ?? null,
+      siteId: row.site_id ?? null,
+      siteName: row.site_name ?? null
+    }));
     if (!this.locations.find((loc) => loc.id === this.locationId)) {
       this.locationId = this.locations[0]?.id ?? '';
     }
   }
 
+  areasForSelectedSite(): AreaOption[] {
+    return this.siteId ? this.areas.filter((area) => area.siteId === this.siteId) : this.areas;
+  }
+
+  areasBySite(siteId: string): AreaOption[] {
+    return this.areas.filter((area) => area.siteId === siteId);
+  }
+
+  locationsByArea(areaId: string): LocationOption[] {
+    return this.locationsAll.filter((loc) => loc.areaId === areaId);
+  }
+
+  async onSiteForFormChange(): Promise<void> {
+    const siteAreas = this.areasForSelectedSite();
+    this.areaId = siteAreas[0]?.id ?? '';
+    this.locationId = '';
+    await this.loadLocationsForForm();
+  }
+
+  async onCreateSite(): Promise<void> {
+    if (!this.newSiteName || !this.selectedClientId) {
+      return;
+    }
+    const name = this.newSiteName.trim();
+    if (this.sites.some((site) => site.name.toLowerCase() === name.toLowerCase())) {
+      this.errorMessage = 'Esta sede ya existe para este cliente.';
+      this.newSiteName = '';
+      alert('Esta sede ya existe para este cliente.');
+      return;
+    }
+    await this.biomed.createSite(this.selectedClientId, name, this.newSiteAddress.trim() || undefined);
+    this.newSiteName = '';
+    this.newSiteAddress = '';
+    await this.loadSites();
+    this.cdr.detectChanges();
+  }
+
+  async onUpdateSite(siteId: string): Promise<void> {
+    const name = this.siteEdits[siteId]?.trim();
+    if (!name || !this.selectedClientId) {
+      return;
+    }
+    await this.biomed.updateSite(this.selectedClientId, siteId, {
+      name,
+      address: this.siteAddressEdits[siteId]?.trim() || null
+    });
+    this.editingSiteId = null;
+    await this.loadSites();
+    await this.loadAreas();
+    this.cdr.detectChanges();
+  }
+
+  async onDeleteSite(siteId: string): Promise<void> {
+    if (!this.selectedClientId) return;
+    try {
+      await this.biomed.deleteSite(this.selectedClientId, siteId);
+      if (this.siteId === siteId) {
+        this.siteId = '';
+      }
+      await this.loadSites();
+      await this.loadAreas();
+      await this.loadAssets();
+    } catch (error) {
+      console.error(error);
+      this.errorMessage = 'No se puede eliminar una sede con áreas o equipos asociados.';
+    }
+    this.cdr.detectChanges();
+  }
+
   async onCreateArea(): Promise<void> {
-    if (!this.newAreaName || !this.selectedClientId) {
+    if (!this.newAreaName || !this.selectedClientId || !this.siteId) {
       return;
     }
     const name = this.newAreaName.trim();
-    if (this.areas.some((area) => area.name.toLowerCase() === name.toLowerCase())) {
-      this.errorMessage = 'Esta área ya existe para este cliente.';
+    if (this.areas.some((area) => area.siteId === this.siteId && area.name.toLowerCase() === name.toLowerCase())) {
+      this.errorMessage = 'Esta área ya existe para esta sede.';
       this.newAreaName = '';
-      alert('Esta área ya existe para este cliente.');
+      alert('Esta área ya existe para esta sede.');
       return;
     }
-    await this.biomed.createArea(this.selectedClientId, name);
+    await this.biomed.createArea(this.selectedClientId, name, this.siteId);
     this.newAreaName = '';
     await this.loadAreas();
     this.cdr.detectChanges();
@@ -352,7 +1191,8 @@ export class HojasDeVidaComponent {
     if (!name || !this.selectedClientId) {
       return;
     }
-    await this.biomed.updateArea(this.selectedClientId, areaId, name);
+    const area = this.areas.find((item) => item.id === areaId);
+    await this.biomed.updateArea(this.selectedClientId, areaId, name, area?.siteId ?? this.siteId ?? null);
     this.editingAreaId = null;
     await this.loadAreas();
     this.cdr.detectChanges();
@@ -370,7 +1210,8 @@ export class HojasDeVidaComponent {
     if (!name || !this.selectedClientId) {
       return;
     }
-    await this.biomed.updateLocation(this.selectedClientId, locationId, { name, areaId: this.areaId || null });
+    const location = this.locationsAll.find((item) => item.id === locationId);
+    await this.biomed.updateLocation(this.selectedClientId, locationId, { name, areaId: location?.areaId ?? this.areaId ?? null });
     this.editingLocationId = null;
     await this.loadLocationsAll();
     await this.loadLocationsForForm();
@@ -389,6 +1230,14 @@ export class HojasDeVidaComponent {
     this.editingAreaId = areaId;
   }
 
+  startEditSite(siteId: string): void {
+    this.editingSiteId = siteId;
+  }
+
+  cancelEditSite(): void {
+    this.editingSiteId = null;
+  }
+
   cancelEditArea(): void {
     this.editingAreaId = null;
   }
@@ -399,10 +1248,6 @@ export class HojasDeVidaComponent {
 
   cancelEditLocation(): void {
     this.editingLocationId = null;
-  }
-
-  locationsByArea(areaId: string): { id: string; name: string; areaId: string | null }[] {
-    return this.locationsAll.filter((loc) => loc.areaId === areaId);
   }
 
   isEditingLocationInArea(areaId: string): boolean {
@@ -446,6 +1291,7 @@ export class HojasDeVidaComponent {
           maintenanceFrequency: this.maintenanceFrequency,
           requiresCalibration: this.requiresCalibration,
           calibrationFrequency: this.requiresCalibration ? this.calibrationFrequency : undefined,
+          siteId: this.siteId || undefined,
           areaId: this.areaId || undefined,
           locationId: this.locationId || undefined,
           riskClass: this.riskClass,
@@ -484,6 +1330,7 @@ export class HojasDeVidaComponent {
           maintenanceFrequency: this.maintenanceFrequency,
           requiresCalibration: this.requiresCalibration,
           calibrationFrequency: this.requiresCalibration ? this.calibrationFrequency : undefined,
+          siteId: this.siteId || undefined,
           areaId: this.areaId || undefined,
           locationId: this.locationId || undefined,
           riskClass: this.riskClass,
@@ -507,8 +1354,9 @@ export class HojasDeVidaComponent {
     }
   }
 
-  startEdit(asset: AssetView): void {
+  startEdit(asset: InventoryPanelItem): void {
     void this.loadAssetDetails(asset.id);
+    this.viewMode = 'form';
   }
 
   cancelEdit(): void {
@@ -541,6 +1389,10 @@ export class HojasDeVidaComponent {
     this.maintenanceFrequency = 'mensual';
     this.requiresCalibration = false;
     this.calibrationFrequency = 'anual';
+    this.siteId = this.sites[0]?.id ?? '';
+    const siteAreas = this.areasForSelectedSite();
+    this.areaId = siteAreas[0]?.id ?? this.areas[0]?.id ?? '';
+    void this.loadLocationsForForm();
     this.manufacturer = '';
     this.isMobile = false;
     this.photo = null;
@@ -581,11 +1433,13 @@ export class HojasDeVidaComponent {
     this.humidityMax = data.humidity_max ?? null;
     this.maintenanceFrequency = data.maintenance_frequency ?? 'mensual';
     this.requiresCalibration = data.requires_calibration ?? false;
-    this.calibrationFrequency = data.calibration_frequency ?? 'mensual';
+    this.calibrationFrequency = data.calibration_frequency ?? 'anual';
     this.riskClass = data.risk_class ?? 'Clase I';
     this.isMobile = data.is_mobile ?? false;
     this.manufacturer = data.manufacturer ?? '';
+    this.siteId = data.site_id ?? this.siteId;
     this.areaId = data.area_id ?? this.areaId;
+    await this.loadLocationsForForm();
     this.locationId = data.location_id ?? this.locationId;
     this.accessories = (data.accessories ?? []).map((a: any) => ({
       name: a.name,
@@ -651,7 +1505,7 @@ export class HojasDeVidaComponent {
     this.recommendations.splice(index, 1);
   }
 
-  async deleteAsset(asset: AssetView): Promise<void> {
+  async deleteAsset(asset: InventoryPanelItem): Promise<void> {
     if (!this.selectedClientId) return;
     await this.biomed.deleteAsset(this.selectedClientId, asset.id);
     await this.loadAssets();

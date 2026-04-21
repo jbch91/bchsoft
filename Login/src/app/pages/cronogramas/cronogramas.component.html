@@ -12,7 +12,7 @@
 
   <app-module-tabs></app-module-tabs>
 
-  <div class="card header-card" *ngIf="!auth.currentUser()?.clientId">
+  <div class="card header-card client-filter-card" *ngIf="!auth.currentUser()?.clientId">
     <div class="client-selector">
       <div class="filters">
         <label>

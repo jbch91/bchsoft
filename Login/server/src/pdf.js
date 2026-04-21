@@ -222,6 +222,7 @@ export function buildAssetPdf(doc, { client, asset }) {
     ['Marca', safeText(asset.brand)],
     ['Modelo', safeText(asset.model)],
     ['Serie', safeText(asset.serial)],
+    ['Sede', safeText(asset.site_name)],
     ['Área', safeText(asset.area_name)],
     ['Ubicación', safeText(asset.location_name)],
     ['Código', safeText(asset.code)],
@@ -400,6 +401,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     ['Marca', safeText(asset.brand)],
     ['Modelo', safeText(asset.model)],
     ['Serie', safeText(asset.serial)],
+    ['Sede', safeText(asset.site_name)],
     ['Área', safeText(asset.area_name)],
     ['Ubicación', safeText(asset.location_name)]
   ];

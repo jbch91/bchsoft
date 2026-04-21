@@ -342,7 +342,7 @@
 
         <div class="role-permission-preview" *ngIf="!isEditingRole(roleOption)">
           <span *ngFor="let permission of (rolePermissions[roleIds.get(roleOption) ?? 0] || []).slice(0, 4)">
-            {{ permission }}
+            {{ permissionLabel(permission) }}
           </span>
           <span class="more" *ngIf="permissionCount(roleOption) > 4">
             +{{ permissionCount(roleOption) - 4 }} más
@@ -362,7 +362,7 @@
               [checked]="permissionDraft.has(permission)"
               (change)="togglePermission(roleIds.get(roleOption) ?? 0, permission)"
             />
-            {{ permission }}
+            {{ permissionLabel(permission) }}
           </label>
           </div>
           <div class="role-actions">

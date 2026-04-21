@@ -77,6 +77,24 @@ export class UsersComponent implements OnInit {
     { value: 'cedula_extranjeria', label: 'Cédula extranjería' },
     { value: 'pasaporte', label: 'Pasaporte' }
   ];
+  readonly permissionLabels: Record<string, string> = {
+    'hb:create': 'Crear hojas de vida',
+    'hb:import': 'Importar hojas de vida masivamente',
+    'hb:view': 'Ver hojas de vida',
+    'areas:manage': 'Gestionar sedes, áreas y ubicaciones',
+    'clients:manage': 'Gestionar clientes',
+    'clients:view': 'Ver clientes',
+    'users:manage': 'Gestionar usuarios',
+    'schedules:manage': 'Gestionar cronogramas de mantenimiento',
+    'calibration:schedule:manage': 'Gestionar cronogramas de calibración',
+    'maintenance:request:create': 'Crear solicitudes de mantenimiento',
+    'maintenance:report:create': 'Crear reportes de mantenimiento',
+    'maintenance:report:sign': 'Firmar reportes de mantenimiento',
+    'calibration:report:upload': 'Subir reportes de calibración',
+    'inventory:move': 'Movimientos de inventario',
+    'inventory:request': 'Solicitudes de inventario',
+    'read:all': 'Lectura general'
+  };
 
   private readonly clientScopedRoles: Role[] = [
     'almacenista',
@@ -470,6 +488,10 @@ export class UsersComponent implements OnInit {
   permissionCount(role: Role): number {
     const roleId = this.roleIds.get(role);
     return roleId ? this.rolePermissions[roleId]?.length ?? 0 : 0;
+  }
+
+  permissionLabel(permission: string): string {
+    return this.permissionLabels[permission] ?? permission;
   }
 
   isEditingRole(role: Role): boolean {

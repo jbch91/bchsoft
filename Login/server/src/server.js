@@ -41,19 +41,23 @@ import {
   createArea,
   createAsset,
   createLocation,
+  createSite,
   deleteArea,
   deleteAsset,
   deleteLocation,
+  deleteSite,
   getAssetById,
   listAssetsForReader,
   readerCanAccessAsset,
   listAreas,
   listAssets,
   listLocations,
+  listSites,
   setAssetPhoto,
   updateArea,
   updateAsset,
   updateLocation,
+  updateSite,
   replaceAccessories,
   replaceCleaning,
   replaceRecommendations,
@@ -827,6 +831,7 @@ app.post(
       serial,
       location,
       invimaReg,
+      siteId,
       areaId,
       locationId,
       riskClass,
@@ -866,6 +871,7 @@ app.post(
         serial,
         location,
         invimaReg,
+        siteId: siteId || null,
         areaId: areaId || null,
         locationId: locationId || null,
         riskClass,
@@ -958,6 +964,139 @@ app.post(
   }
 );
 
+app.post(
+  '/biomed/:clientId/assets/import',
+  requireAuth,
+  requirePermission('hb:import'),
+  async (req, res) => {
+    const { clientId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+
+    const assets = Array.isArray(req.body?.assets) ? req.body.assets : [];
+    if (!assets.length) {
+      return res.status(400).json({ message: 'No hay equipos para importar.' });
+    }
+    if (assets.length > 500) {
+      return res.status(400).json({ message: 'Importa máximo 500 equipos por archivo.' });
+    }
+
+    const missing = assets.find((asset) =>
+      !asset?.code ||
+      !asset?.name ||
+      !asset?.brand ||
+      !asset?.model ||
+      !asset?.serial ||
+      !asset?.siteId ||
+      !asset?.areaId ||
+      !asset?.locationId ||
+      !asset?.invimaReg ||
+      !asset?.riskClass
+    );
+    if (missing) {
+      return res.status(400).json({ message: 'Hay equipos con campos obligatorios incompletos.' });
+    }
+
+    try {
+      const normalizedCodes = assets.map((asset) => String(asset.code || '').trim().toLowerCase());
+      const repeatedCodes = normalizedCodes.filter((code, index) => code && normalizedCodes.indexOf(code) !== index);
+      if (repeatedCodes.length) {
+        return res.status(400).json({
+          message: `Hay códigos repetidos en el archivo: ${Array.from(new Set(repeatedCodes)).join(', ')}.`
+        });
+      }
+
+      const [existingAssets, sites, areas, locations] = await Promise.all([
+        listAssets(clientId),
+        listSites(clientId),
+        listAreas(clientId),
+        listLocations(clientId)
+      ]);
+      const existingCodes = new Set(existingAssets.map((asset) => String(asset.code || '').trim().toLowerCase()));
+      const existingMatches = normalizedCodes.filter((code) => existingCodes.has(code));
+      if (existingMatches.length) {
+        return res.status(409).json({
+          message: `Ya existen equipos con estos códigos: ${Array.from(new Set(existingMatches)).join(', ')}.`
+        });
+      }
+
+      const siteIds = new Set(sites.map((site) => site.id));
+      const areaById = new Map(areas.map((area) => [area.id, area]));
+      const locationById = new Map(locations.map((location) => [location.id, location]));
+      const invalidReference = assets.find((asset) => {
+        const area = areaById.get(asset.areaId);
+        const location = locationById.get(asset.locationId);
+        return (
+          !siteIds.has(asset.siteId) ||
+          !area ||
+          area.site_id !== asset.siteId ||
+          !location ||
+          location.area_id !== asset.areaId
+        );
+      });
+      if (invalidReference) {
+        return res.status(400).json({
+          message: `La sede, área o ubicación del equipo ${invalidReference.code || invalidReference.name || ''} no corresponde al cliente seleccionado.`
+        });
+      }
+
+      const imported = [];
+      for (const asset of assets) {
+        const result = await createAsset(clientId, {
+          code: String(asset.code).trim(),
+          name: String(asset.name).trim(),
+          brand: asset.brand || null,
+          model: asset.model || null,
+          serial: asset.serial || null,
+          invimaReg: asset.invimaReg || null,
+          siteId: asset.siteId || null,
+          areaId: asset.areaId || null,
+          locationId: asset.locationId || null,
+          riskClass: asset.riskClass || null,
+          isMobile: Boolean(asset.isMobile),
+          manufacturer: asset.manufacturer || null,
+          acquisitionType: asset.acquisitionType || null,
+          contractText: asset.contractText || null,
+          acquisitionDate: asset.acquisitionDate || null,
+          usefulLifeYears: asset.usefulLifeYears ? Number(asset.usefulLifeYears) : null,
+          warrantyYears: asset.warrantyYears ? Number(asset.warrantyYears) : null,
+          supplierName: asset.supplierName || null,
+          supplierPhone: asset.supplierPhone || null,
+          supplierEmail: asset.supplierEmail || null,
+          powerType: asset.powerType || 'AC',
+          voltage: asset.voltage || null,
+          tempMin: asset.tempMin ? Number(asset.tempMin) : null,
+          tempMax: asset.tempMax ? Number(asset.tempMax) : null,
+          humidityMin: asset.humidityMin ? Number(asset.humidityMin) : null,
+          humidityMax: asset.humidityMax ? Number(asset.humidityMax) : null,
+          maintenanceFrequency: asset.maintenanceFrequency || 'mensual',
+          requiresCalibration: Boolean(asset.requiresCalibration),
+          calibrationFrequency: asset.requiresCalibration ? asset.calibrationFrequency || 'anual' : null
+        });
+        const createdAsset = await getAssetById(clientId, result.id);
+        imported.push(result.id);
+        await logEquipmentAudit(req, {
+          action: 'ASSET_IMPORT',
+          clientId,
+          assetId: result.id,
+          asset: createdAsset,
+          description: `Importación masiva de hoja de vida del equipo ${assetLabel(createdAsset)}.`,
+          details: {
+            eventType: 'hoja_vida_importada',
+            importBatchSize: assets.length
+          }
+        });
+      }
+
+      return res.status(201).json({ imported: imported.length, ids: imported });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo completar la importación masiva.' });
+    }
+  }
+);
+
 app.put(
   '/biomed/:clientId/assets/:assetId',
   requireAuth,
@@ -976,6 +1115,7 @@ app.put(
       model,
       serial,
       invimaReg,
+      siteId,
       areaId,
       locationId,
       riskClass,
@@ -1014,6 +1154,7 @@ app.put(
         model,
         serial,
         invimaReg,
+        siteId: siteId || null,
         areaId,
         locationId,
         riskClass,
@@ -1186,6 +1327,109 @@ app.get(
 );
 
 app.get(
+  '/biomed/:clientId/sites',
+  requireAuth,
+  requireAnyPermission(['hb:create', 'hb:view', 'read:all']),
+  async (req, res) => {
+    const { clientId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    try {
+      const sites = await listSites(clientId);
+      return res.json(sites);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudieron cargar las sedes.' });
+    }
+  }
+);
+
+app.post(
+  '/biomed/:clientId/sites',
+  requireAuth,
+  requirePermission('areas:manage'),
+  async (req, res) => {
+    const { clientId } = req.params;
+    const { name, address } = req.body || {};
+    if (!name) {
+      return res.status(400).json({ message: 'Nombre requerido.' });
+    }
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    try {
+      const result = await createSite(clientId, name, address);
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'SITE_CREATE',
+        targetUserId: clientId,
+        details: { clientId, name, address }
+      });
+      return res.status(201).json(result);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo crear la sede.' });
+    }
+  }
+);
+
+app.put(
+  '/biomed/:clientId/sites/:siteId',
+  requireAuth,
+  requirePermission('areas:manage'),
+  async (req, res) => {
+    const { clientId, siteId } = req.params;
+    const { name, address } = req.body || {};
+    if (!name) {
+      return res.status(400).json({ message: 'Nombre requerido.' });
+    }
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    await updateSite(clientId, siteId, { name, address });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'SITE_UPDATE',
+      targetUserId: clientId,
+      details: { clientId, siteId, name, address }
+    });
+    return res.json({ ok: true });
+  }
+);
+
+app.delete(
+  '/biomed/:clientId/sites/:siteId',
+  requireAuth,
+  requirePermission('areas:manage'),
+  async (req, res) => {
+    const { clientId, siteId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    try {
+      await deleteSite(clientId, siteId);
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'SITE_DELETE',
+        targetUserId: clientId,
+        details: { clientId, siteId }
+      });
+      return res.json({ ok: true });
+    } catch (error) {
+      if (error.message === 'SITE_IN_USE') {
+        return res.status(400).json({ message: 'No se puede eliminar una sede con áreas o equipos asociados.' });
+      }
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo eliminar la sede.' });
+    }
+  }
+);
+
+app.get(
   '/biomed/:clientId/areas',
   requireAuth,
   requireAnyPermission(['hb:create', 'hb:view', 'read:all']),
@@ -1210,7 +1454,7 @@ app.post(
   requirePermission('areas:manage'),
   async (req, res) => {
     const { clientId } = req.params;
-    const { name } = req.body || {};
+    const { name, siteId } = req.body || {};
     if (!name) {
       return res.status(400).json({ message: 'Nombre requerido.' });
     }
@@ -1218,13 +1462,13 @@ app.post(
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     try {
-      const result = await createArea(clientId, name);
+      const result = await createArea(clientId, name, siteId || null);
       await logAudit({
         actorUserId: req.user.sub,
         actorUsername: req.user.username,
         action: 'AREA_CREATE',
         targetUserId: clientId,
-        details: { name }
+        details: { clientId, name, siteId: siteId || null }
       });
       return res.status(201).json(result);
     } catch (error) {
@@ -1240,20 +1484,20 @@ app.put(
   requirePermission('areas:manage'),
   async (req, res) => {
     const { clientId, areaId } = req.params;
-    const { name } = req.body || {};
+    const { name, siteId } = req.body || {};
     if (!name) {
       return res.status(400).json({ message: 'Nombre requerido.' });
     }
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    await updateArea(clientId, areaId, name);
+    await updateArea(clientId, areaId, { name, siteId: siteId || null });
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,
       action: 'AREA_UPDATE',
       targetUserId: clientId,
-      details: { areaId, name }
+      details: { clientId, areaId, name, siteId: siteId || null }
     });
     return res.json({ ok: true });
   }

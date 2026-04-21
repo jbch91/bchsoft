@@ -19,6 +19,8 @@ interface AssetDto {
   manufacturer?: string | null;
   area_name?: string | null;
   location_name?: string | null;
+  site_name?: string | null;
+  site_id?: string | null;
   area_id?: string | null;
   location_id?: string | null;
   acquisition_type?: string | null;
@@ -44,12 +46,22 @@ interface AssetDto {
 interface AreaDto {
   id: string;
   name: string;
+  site_id: string | null;
+  site_name?: string | null;
+}
+
+interface SiteDto {
+  id: string;
+  name: string;
+  address: string | null;
 }
 
 interface LocationDto {
   id: string;
   name: string;
   area_id: string | null;
+  site_id?: string | null;
+  site_name?: string | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -78,6 +90,10 @@ export class BiomedService {
     return firstValueFrom(this.http.get<AreaDto[]>(`${this.apiBase}/biomed/${clientId}/areas`));
   }
 
+  async listSites(clientId: string): Promise<SiteDto[]> {
+    return firstValueFrom(this.http.get<SiteDto[]>(`${this.apiBase}/biomed/${clientId}/sites`));
+  }
+
   async listLocations(clientId: string, areaId?: string): Promise<LocationDto[]> {
     const url = areaId
       ? `${this.apiBase}/biomed/${clientId}/locations?areaId=${areaId}`
@@ -85,12 +101,24 @@ export class BiomedService {
     return firstValueFrom(this.http.get<LocationDto[]>(url));
   }
 
-  async createArea(clientId: string, name: string): Promise<void> {
-    await firstValueFrom(this.http.post(`${this.apiBase}/biomed/${clientId}/areas`, { name }));
+  async createSite(clientId: string, name: string, address?: string): Promise<void> {
+    await firstValueFrom(this.http.post(`${this.apiBase}/biomed/${clientId}/sites`, { name, address }));
   }
 
-  async updateArea(clientId: string, areaId: string, name: string): Promise<void> {
-    await firstValueFrom(this.http.put(`${this.apiBase}/biomed/${clientId}/areas/${areaId}`, { name }));
+  async updateSite(clientId: string, siteId: string, payload: { name: string; address?: string | null }): Promise<void> {
+    await firstValueFrom(this.http.put(`${this.apiBase}/biomed/${clientId}/sites/${siteId}`, payload));
+  }
+
+  async deleteSite(clientId: string, siteId: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`${this.apiBase}/biomed/${clientId}/sites/${siteId}`));
+  }
+
+  async createArea(clientId: string, name: string, siteId?: string | null): Promise<void> {
+    await firstValueFrom(this.http.post(`${this.apiBase}/biomed/${clientId}/areas`, { name, siteId }));
+  }
+
+  async updateArea(clientId: string, areaId: string, name: string, siteId?: string | null): Promise<void> {
+    await firstValueFrom(this.http.put(`${this.apiBase}/biomed/${clientId}/areas/${areaId}`, { name, siteId }));
   }
 
   async deleteArea(clientId: string, areaId: string): Promise<void> {
@@ -118,6 +146,7 @@ export class BiomedService {
     model?: string;
     serial?: string;
     invimaReg?: string;
+    siteId?: string;
     areaId?: string;
     locationId?: string;
     riskClass?: string;
@@ -154,6 +183,7 @@ export class BiomedService {
     if (payload.model) form.append('model', payload.model);
     if (payload.serial) form.append('serial', payload.serial);
     if (payload.invimaReg) form.append('invimaReg', payload.invimaReg);
+    if (payload.siteId) form.append('siteId', payload.siteId);
     if (payload.areaId) form.append('areaId', payload.areaId);
     if (payload.locationId) form.append('locationId', payload.locationId);
     if (payload.riskClass) form.append('riskClass', payload.riskClass);
@@ -186,6 +216,12 @@ export class BiomedService {
     await firstValueFrom(this.http.post(`${this.apiBase}/biomed/${clientId}/assets`, form));
   }
 
+  async importAssets(clientId: string, assets: any[]): Promise<{ imported: number }> {
+    return firstValueFrom(
+      this.http.post<{ imported: number }>(`${this.apiBase}/biomed/${clientId}/assets/import`, { assets })
+    );
+  }
+
   async updateAsset(clientId: string, assetId: string, payload: {
     code: string;
     name: string;
@@ -193,6 +229,7 @@ export class BiomedService {
     model?: string;
     serial?: string;
     invimaReg?: string;
+    siteId?: string;
     areaId?: string;
     locationId?: string;
     riskClass?: string;
@@ -229,6 +266,7 @@ export class BiomedService {
     if (payload.model) form.append('model', payload.model);
     if (payload.serial) form.append('serial', payload.serial);
     if (payload.invimaReg) form.append('invimaReg', payload.invimaReg);
+    if (payload.siteId) form.append('siteId', payload.siteId);
     if (payload.areaId) form.append('areaId', payload.areaId);
     if (payload.locationId) form.append('locationId', payload.locationId);
     if (payload.riskClass) form.append('riskClass', payload.riskClass);

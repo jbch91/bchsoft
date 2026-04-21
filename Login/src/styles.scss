@@ -216,6 +216,121 @@ body {
   background: var(--brand-700);
 }
 
+/* Shared client/filter panel used by module search sections */
+section.page .card.filters-card,
+section.page .card.client-filter-card,
+section.page .filters.audit-filter-card {
+  margin-top: 18px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--ink));
+  border-radius: 18px;
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.08);
+}
+
+section.page .card.filters-card .filters-top,
+section.page .card.client-filter-card .client-selector {
+  display: grid;
+  grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+section.page .card.filters-card .filters,
+section.page .card.client-filter-card .filters,
+section.page .filters.audit-filter-card {
+  display: grid;
+  gap: 12px;
+}
+
+section.page .filters.audit-filter-card {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+section.page .card.filters-card label,
+section.page .card.client-filter-card label,
+section.page .filters.audit-filter-card label {
+  color: var(--ink);
+  display: grid;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 7px;
+}
+
+section.page .card.filters-card input,
+section.page .card.filters-card select,
+section.page .card.client-filter-card input,
+section.page .card.client-filter-card select,
+section.page .filters.audit-filter-card input,
+section.page .filters.audit-filter-card select {
+  width: 100%;
+  min-height: 40px;
+  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--ink));
+  border-radius: 11px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  padding: 9px 11px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+section.page .card.filters-card input:focus,
+section.page .card.filters-card select:focus,
+section.page .card.client-filter-card input:focus,
+section.page .card.client-filter-card select:focus,
+section.page .filters.audit-filter-card input:focus,
+section.page .filters.audit-filter-card select:focus {
+  border-color: var(--brand-600);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-100) 72%, transparent);
+}
+
+section.page .card.filters-card .client-preview,
+section.page .card.client-filter-card .client-meta {
+  align-items: center;
+  background:
+    radial-gradient(circle at 95% 0%, rgba(166, 64, 69, 0.14), transparent 34%),
+    linear-gradient(135deg, #ffffff, var(--brand-50));
+  border: 1px solid color-mix(in srgb, var(--brand-100) 78%, var(--border));
+  border-radius: 16px;
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  justify-content: stretch;
+  min-height: 100%;
+  padding: 14px;
+}
+
+section.page .card.filters-card .client-preview-info,
+section.page .card.client-filter-card .client-meta-text {
+  display: grid;
+  gap: 4px;
+}
+
+section.page .card.filters-card .client-preview strong,
+section.page .card.client-filter-card .client-meta-text strong {
+  color: var(--brand-700);
+  display: block;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+section.page .card.filters-card .client-preview img,
+section.page .card.client-filter-card .client-meta img {
+  justify-self: end;
+  width: 104px;
+  max-height: 68px;
+  object-fit: contain;
+  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, var(--brand-600));
+  border-radius: 14px;
+  padding: 8px;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.08);
+}
+
 @media (max-width: 900px) {
   .page {
     padding: 24px 18px;
@@ -224,6 +339,21 @@ body {
   .page > header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  section.page .card.filters-card .filters-top,
+  section.page .card.client-filter-card .client-selector {
+    grid-template-columns: 1fr;
+  }
+
+  section.page .card.filters-card .client-preview,
+  section.page .card.client-filter-card .client-meta {
+    grid-template-columns: 1fr;
+  }
+
+  section.page .card.filters-card .client-preview img,
+  section.page .card.client-filter-card .client-meta img {
+    justify-self: start;
   }
 }
 

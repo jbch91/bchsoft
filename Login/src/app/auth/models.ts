@@ -14,6 +14,7 @@ export type Permission =
   | 'reports:view'
   | 'users:manage'
   | 'hb:create'
+  | 'hb:import'
   | 'hb:view'
   | 'schedules:manage'
   | 'calibration:schedule:manage'

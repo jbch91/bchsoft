@@ -9,18 +9,13 @@
   box-shadow: 0 14px 24px rgba(15, 23, 42, 0.06);
 }
 
-.filters {
-  margin-top: 16px;
+.audit-filter-grid {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--brand-100) 72%, var(--border));
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
-  background:
-    radial-gradient(circle at 100% 0%, rgba(166, 64, 69, 0.1), transparent 30%),
-    rgba(255, 255, 255, 0.82);
-  border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
-  padding: 14px;
-  border-radius: 18px;
-  box-shadow: 0 14px 24px rgba(15, 23, 42, 0.06);
 }
 
 .filters label {

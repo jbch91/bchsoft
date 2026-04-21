@@ -3,8 +3,19 @@ import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AdminService } from '../../admin/admin.service';
+import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
+
+interface ClientOption {
+  id: string;
+  name: string;
+  nit?: string | null;
+  city?: string | null;
+  address?: string | null;
+  email?: string | null;
+  logoPath?: string | null;
+}
 
 interface AuditView {
   id: string;
@@ -16,6 +27,8 @@ interface AuditView {
   details: string;
   category: string;
   createdAt: string;
+  clientId: string | null;
+  clientName: string | null;
 }
 
 @Component({
@@ -26,6 +39,7 @@ interface AuditView {
   styleUrl: './audit.component.scss'
 })
 export class AuditComponent {
+  private readonly publicBase = getPublicBase();
   private readonly actionLabels: Record<string, string> = {
     ASSET_CREATE: 'Creación de hoja de vida',
     ASSET_UPDATE: 'Edición de hoja de vida',
@@ -62,6 +76,9 @@ export class AuditComponent {
 
   logs: AuditView[] = [];
   filteredLogs: AuditView[] = [];
+  clients: ClientOption[] = [];
+  clientSearchTerm = '';
+  selectedClientId = 'todos';
   loading = false;
   errorMessage = '';
   selectedActor = 'todos';
@@ -77,7 +94,19 @@ export class AuditComponent {
     this.loading = true;
     this.errorMessage = '';
     try {
-      const logs = await this.admin.listAuditLogs();
+      const [logs, clients] = await Promise.all([
+        this.admin.listAuditLogs(),
+        this.admin.listClients().catch(() => [])
+      ]);
+      this.clients = clients.map((client) => ({
+        id: client.id,
+        name: client.name,
+        nit: client.nit,
+        city: client.city,
+        address: client.address ?? null,
+        email: client.email,
+        logoPath: client.logo_path ?? null
+      }));
       this.logs = logs.map((log) => ({
         id: log.id,
         actor: this.formatActor(log.actor_username, log.details),
@@ -87,7 +116,9 @@ export class AuditComponent {
         when: new Date(log.created_at).toLocaleString(),
         details: this.formatDetails(log.details),
         category: this.categoryLabel(log.details?.['category']),
-        createdAt: log.created_at
+        createdAt: log.created_at,
+        clientId: this.resolveClientId(log.details),
+        clientName: this.resolveClientName(log.details)
       }));
       this.applyFilters();
     } catch (error) {
@@ -109,6 +140,27 @@ export class AuditComponent {
     return ['todos', ...Array.from(set)];
   }
 
+  get filteredClients(): ClientOption[] {
+    const term = this.clientSearchTerm.toLowerCase().trim();
+    if (!term) return this.clients;
+    return this.clients.filter((client) =>
+      [client.name, client.nit, client.city, client.email]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(term))
+    );
+  }
+
+  get selectedClientInfo(): ClientOption | null {
+    if (this.selectedClientId === 'todos') return null;
+    return this.clients.find((client) => client.id === this.selectedClientId) ?? null;
+  }
+
+  clientLogoUrl(client: ClientOption | null): string | null {
+    if (!client?.logoPath) return null;
+    if (client.logoPath.startsWith('http')) return client.logoPath;
+    return joinBase(this.publicBase, client.logoPath);
+  }
+
   labelAction(action: string): string {
     return this.actionLabels[action] ?? action;
   }
@@ -118,6 +170,14 @@ export class AuditComponent {
     const to = this.dateTo ? new Date(this.dateTo) : null;
 
     this.filteredLogs = this.logs.filter((log) => {
+      if (this.selectedClientId !== 'todos') {
+        const selectedClient = this.selectedClientInfo;
+        const matchesClientId = log.clientId === this.selectedClientId;
+        const matchesClientName = selectedClient?.name && log.clientName === selectedClient.name;
+        if (!matchesClientId && !matchesClientName) {
+          return false;
+        }
+      }
       if (this.selectedActor !== 'todos' && log.actor !== this.selectedActor) {
         return false;
       }
@@ -193,5 +253,13 @@ export class AuditComponent {
       training: 'Capacitación'
     };
     return category ? labels[category] ?? category : 'General';
+  }
+
+  private resolveClientId(details: Record<string, any> | null): string | null {
+    return details?.['clientId'] ?? details?.['client']?.['id'] ?? details?.['asset']?.['clientId'] ?? null;
+  }
+
+  private resolveClientName(details: Record<string, any> | null): string | null {
+    return details?.['clientName'] ?? details?.['client']?.['name'] ?? null;
   }
 }
