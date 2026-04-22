@@ -55,6 +55,7 @@ export class UsersComponent implements OnInit {
   activeUserTab: UserTab = 'list';
   openClientId: string | null = null;
   editingUserId: string | null = null;
+  temporaryPanelUserId: string | null = null;
   editUser = {
     displayName: '',
     email: '',
@@ -71,10 +72,10 @@ export class UsersComponent implements OnInit {
   readerAccessUserId: string | null = null;
   temporaryPermissionLoading = false;
   temporaryPermissionForm = {
-    permission: 'hb:import',
     expiresAt: '',
     reason: 'Periodo temporal de creación/migración inicial del cliente'
   };
+  selectedTemporaryPermissions = new Set<string>();
 
   username = '';
   displayName = '';
@@ -291,6 +292,7 @@ export class UsersComponent implements OnInit {
     this.errorMessage = '';
     this.successMessage = '';
     this.cancelEditUser();
+    this.cancelTemporaryAccess();
     this.cancelRolePermissionsEdit();
   }
 
@@ -312,6 +314,7 @@ export class UsersComponent implements OnInit {
 
   startEditUser(user: UserView): void {
     this.editingUserId = user.id;
+    this.temporaryPanelUserId = null;
     this.editUser = {
       displayName: user.displayName,
       email: user.email,
@@ -321,7 +324,6 @@ export class UsersComponent implements OnInit {
       invimaRegistration: user.invimaRegistration ?? ''
     };
     this.editSignatureFile = null;
-    this.resetTemporaryPermissionForm();
     const targetClientId = user.clientId ?? this.editUser.clientId;
     if (this.isReader(user) && targetClientId) {
       void this.loadReaderAccess(user.id, targetClientId);
@@ -338,6 +340,25 @@ export class UsersComponent implements OnInit {
     this.editingUserId = null;
     this.readerAccessUserId = null;
     this.editSignatureFile = null;
+    this.temporaryPermissionLoading = false;
+  }
+
+  toggleTemporaryAccess(user: UserView): void {
+    if (this.temporaryPanelUserId === user.id) {
+      this.cancelTemporaryAccess();
+      return;
+    }
+    this.cancelEditUser();
+    this.temporaryPanelUserId = user.id;
+    this.resetTemporaryPermissionForm();
+    this.selectedTemporaryPermissions.clear();
+    this.errorMessage = '';
+    this.successMessage = '';
+  }
+
+  cancelTemporaryAccess(): void {
+    this.temporaryPanelUserId = null;
+    this.selectedTemporaryPermissions.clear();
     this.temporaryPermissionLoading = false;
   }
 
@@ -422,9 +443,36 @@ export class UsersComponent implements OnInit {
     });
   }
 
+  hasActiveTemporaryPermission(user: UserView, permission: string): boolean {
+    return this.activeTemporaryPermissions(user).some((item) => item.permission === permission);
+  }
+
+  isTemporaryPermissionSelected(permission: string): boolean {
+    return this.selectedTemporaryPermissions.has(permission);
+  }
+
+  selectedTemporaryPermissionCount(user: UserView): number {
+    return Array.from(this.selectedTemporaryPermissions).filter(
+      (permission) => !this.hasActiveTemporaryPermission(user, permission)
+    ).length;
+  }
+
+  toggleTemporaryPermissionSelection(user: UserView, permission: string): void {
+    if (this.hasActiveTemporaryPermission(user, permission) || this.temporaryPermissionLoading) return;
+    if (this.selectedTemporaryPermissions.has(permission)) {
+      this.selectedTemporaryPermissions.delete(permission);
+      return;
+    }
+    this.selectedTemporaryPermissions.add(permission);
+  }
+
   async grantTemporaryPermission(user: UserView): Promise<void> {
-    if (!this.temporaryPermissionForm.permission || !this.temporaryPermissionForm.expiresAt) {
-      this.errorMessage = 'Selecciona el permiso y la fecha de vencimiento.';
+    const permissionsToGrant = Array.from(this.selectedTemporaryPermissions).filter(
+      (permission) => !this.hasActiveTemporaryPermission(user, permission)
+    );
+
+    if (permissionsToGrant.length === 0 || !this.temporaryPermissionForm.expiresAt) {
+      this.errorMessage = 'Selecciona al menos un permiso y la fecha de vencimiento.';
       return;
     }
 
@@ -438,14 +486,21 @@ export class UsersComponent implements OnInit {
     this.errorMessage = '';
     this.successMessage = '';
     try {
-      await this.admin.grantTemporaryPermission(user.id, {
-        permission: this.temporaryPermissionForm.permission,
-        expiresAt: expiresAt.toISOString(),
-        reason: this.temporaryPermissionForm.reason.trim() || null
-      });
-      this.successMessage = 'Permiso temporal activado. Si el usuario está conectado, debe volver a iniciar sesión para verlo.';
+      await Promise.all(
+        permissionsToGrant.map((permission) =>
+          this.admin.grantTemporaryPermission(user.id, {
+            permission,
+            expiresAt: expiresAt.toISOString(),
+            reason: this.temporaryPermissionForm.reason.trim() || null
+          })
+        )
+      );
+      this.successMessage = permissionsToGrant.length === 1
+        ? 'Permiso temporal activado. Si el usuario está conectado, debe volver a iniciar sesión para verlo.'
+        : 'Permisos temporales activados. Si el usuario está conectado, debe volver a iniciar sesión para verlos.';
       await this.load();
-      this.editingUserId = user.id;
+      this.temporaryPanelUserId = user.id;
+      this.selectedTemporaryPermissions.clear();
       this.resetTemporaryPermissionForm();
     } catch (error) {
       console.error(error);
@@ -464,8 +519,9 @@ export class UsersComponent implements OnInit {
     try {
       await this.admin.revokeTemporaryPermission(user.id, permission);
       this.successMessage = 'Permiso temporal revocado. Si el usuario está conectado, debe volver a iniciar sesión para actualizar sus accesos.';
+      this.selectedTemporaryPermissions.delete(permission);
       await this.load();
-      this.editingUserId = user.id;
+      this.temporaryPanelUserId = user.id;
     } catch (error) {
       console.error(error);
       this.errorMessage = 'No se pudo revocar el permiso temporal.';
@@ -483,7 +539,6 @@ export class UsersComponent implements OnInit {
 
   private resetTemporaryPermissionForm(): void {
     this.temporaryPermissionForm = {
-      permission: 'hb:import',
       expiresAt: this.toDatetimeLocal(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
       reason: 'Periodo temporal de creación/migración inicial del cliente'
     };

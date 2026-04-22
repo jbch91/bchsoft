@@ -210,6 +210,17 @@
                 {{ user.isActive ? 'Bloquear' : 'Activar' }}
               </button>
               <button type="button" class="ghost" (click)="startEditUser(user)">Editar</button>
+              <button
+                type="button"
+                class="ghost temporary-action"
+                [class.active]="temporaryPanelUserId === user.id"
+                (click)="toggleTemporaryAccess(user)"
+              >
+                Permisos temporales
+                <span *ngIf="activeTemporaryPermissions(user).length > 0">
+                  {{ activeTemporaryPermissions(user).length }}
+                </span>
+              </button>
               <button type="button" class="danger" (click)="removeUser(user)">Eliminar</button>
             </div>
             <div class="edit-form" *ngIf="editingUserId === user.id">
@@ -303,73 +314,86 @@
                   </div>
                 </div>
               </div>
-              <div class="temporary-access">
-                <div class="temporary-header">
-                  <div>
-                    <h4>Permisos temporales de alto impacto</h4>
-                    <p>
-                      Activa importación masiva o migración de PDFs solo durante el periodo de creación del cliente.
-                    </p>
-                  </div>
-                  <span>Vencen automáticamente</span>
-                </div>
-
-                <div class="temporary-list" *ngIf="activeTemporaryPermissions(user).length > 0">
-                  <div class="temporary-chip" *ngFor="let permission of activeTemporaryPermissions(user)">
-                    <div>
-                      <strong>{{ temporaryPermissionLabel(permission.permission) }}</strong>
-                      <small>Hasta {{ temporaryPermissionDate(permission.expiresAt) }}</small>
-                      <small *ngIf="permission.reason">{{ permission.reason }}</small>
-                    </div>
-                    <button
-                      type="button"
-                      class="danger small"
-                      [disabled]="temporaryPermissionLoading"
-                      (click)="revokeTemporaryPermission(user, permission.permission)"
-                    >
-                      Revocar
-                    </button>
-                  </div>
-                </div>
-                <p class="muted" *ngIf="activeTemporaryPermissions(user).length === 0">
-                  Este usuario no tiene permisos temporales activos.
-                </p>
-
-                <div class="temporary-grid">
-                  <label>
-                    Permiso
-                    <select [(ngModel)]="temporaryPermissionForm.permission">
-                      <option *ngFor="let option of temporaryPermissionOptions" [value]="option.value">
-                        {{ option.label }}
-                      </option>
-                    </select>
-                  </label>
-                  <label>
-                    Vence
-                    <input type="datetime-local" [(ngModel)]="temporaryPermissionForm.expiresAt" />
-                  </label>
-                  <label class="wide">
-                    Motivo
-                    <input type="text" [(ngModel)]="temporaryPermissionForm.reason" />
-                  </label>
-                </div>
-                <div class="temporary-options">
-                  <small *ngFor="let option of temporaryPermissionOptions">
-                    <strong>{{ option.label }}:</strong> {{ option.description }}
-                  </small>
-                </div>
-                <button
-                  type="button"
-                  class="save-edit temporary-save"
-                  [disabled]="temporaryPermissionLoading"
-                  (click)="grantTemporaryPermission(user)"
-                >
-                  {{ temporaryPermissionLoading ? 'Activando...' : 'Activar temporalmente' }}
-                </button>
-              </div>
               <div class="edit-actions">
                 <button type="button" class="save-edit" (click)="saveUser(user)">Guardar</button>
                 <button type="button" class="cancel-edit" (click)="cancelEditUser()">Cancelar</button>
+              </div>
+            </div>
+            <div class="temporary-access" *ngIf="temporaryPanelUserId === user.id">
+              <div class="temporary-header">
+                <div>
+                  <h4>Permisos temporales de alto impacto</h4>
+                  <p>
+                    Activa importación masiva o migración de PDFs solo durante el periodo de creación del cliente.
+                  </p>
+                </div>
+                <span>Vencen automáticamente</span>
+              </div>
+
+              <div class="temporary-list" *ngIf="activeTemporaryPermissions(user).length > 0">
+                <div class="temporary-chip" *ngFor="let permission of activeTemporaryPermissions(user)">
+                  <div>
+                    <strong>{{ temporaryPermissionLabel(permission.permission) }}</strong>
+                    <small>Hasta {{ temporaryPermissionDate(permission.expiresAt) }}</small>
+                    <small *ngIf="permission.reason">{{ permission.reason }}</small>
+                  </div>
+                  <button
+                    type="button"
+                    class="danger small"
+                    [disabled]="temporaryPermissionLoading"
+                    (click)="revokeTemporaryPermission(user, permission.permission)"
+                  >
+                    Quitar permiso
+                  </button>
+                </div>
+              </div>
+              <p class="muted" *ngIf="activeTemporaryPermissions(user).length === 0">
+                Este usuario no tiene permisos temporales activos.
+              </p>
+
+              <div class="temporary-permission-options">
+                <label
+                  class="temporary-permission-option"
+                  *ngFor="let option of temporaryPermissionOptions"
+                  [class.active]="hasActiveTemporaryPermission(user, option.value)"
+                  [class.selected]="isTemporaryPermissionSelected(option.value)"
+                >
+                  <input
+                    type="checkbox"
+                    [checked]="hasActiveTemporaryPermission(user, option.value) || isTemporaryPermissionSelected(option.value)"
+                    [disabled]="hasActiveTemporaryPermission(user, option.value) || temporaryPermissionLoading"
+                    (change)="toggleTemporaryPermissionSelection(user, option.value)"
+                  />
+                  <span>
+                    <strong>{{ option.label }}</strong>
+                    <small>{{ option.description }}</small>
+                    <small class="active-note" *ngIf="hasActiveTemporaryPermission(user, option.value)">
+                      Activo actualmente
+                    </small>
+                  </span>
+                </label>
+              </div>
+
+              <div class="temporary-grid">
+                <label>
+                  Vence
+                  <input type="datetime-local" [(ngModel)]="temporaryPermissionForm.expiresAt" />
+                </label>
+                <label class="wide">
+                  Motivo
+                  <input type="text" [(ngModel)]="temporaryPermissionForm.reason" />
+                </label>
+              </div>
+              <div class="temporary-panel-actions">
+                <button
+                  type="button"
+                  class="save-edit temporary-save"
+                  [disabled]="temporaryPermissionLoading || selectedTemporaryPermissionCount(user) === 0"
+                  (click)="grantTemporaryPermission(user)"
+                >
+                  {{ temporaryPermissionLoading ? 'Activando...' : 'Activar seleccionados' }}
+                </button>
+                <button type="button" class="cancel-edit" (click)="cancelTemporaryAccess()">Cerrar</button>
               </div>
             </div>
             <div class="password">

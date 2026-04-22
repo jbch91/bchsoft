@@ -370,6 +370,29 @@ li span {
   border-color: var(--brand-500);
 }
 
+.meta .temporary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.meta .temporary-action.active {
+  background: var(--brand-50);
+  border-color: var(--brand-600);
+  color: var(--brand-700);
+}
+
+.meta .temporary-action span {
+  min-width: 18px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--brand-600);
+  color: #ffffff;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+}
+
 .meta .danger {
   background: #991b1b;
   color: #ffffff;
@@ -736,21 +759,77 @@ li span {
 .temporary-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 0.8fr) minmax(220px, 1.2fr);
+  grid-template-columns: minmax(180px, 0.55fr) minmax(240px, 1fr);
 }
 
 .temporary-grid .wide {
   min-width: 0;
 }
 
-.temporary-options {
+.temporary-permission-options {
   display: grid;
-  gap: 4px;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
-.temporary-options small {
+.temporary-permission-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, var(--brand-500));
+  border-radius: 12px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.temporary-permission-option:hover {
+  border-color: color-mix(in srgb, var(--brand-500) 68%, var(--border));
+  background: color-mix(in srgb, var(--brand-50) 44%, #ffffff);
+}
+
+.temporary-permission-option.active {
+  cursor: not-allowed;
+  background: color-mix(in srgb, #ecfdf5 78%, #ffffff);
+  border-color: #86efac;
+}
+
+.temporary-permission-option.selected {
+  background: color-mix(in srgb, var(--brand-50) 80%, #ffffff);
+  border-color: var(--brand-500);
+  box-shadow: inset 4px 0 0 var(--brand-600);
+}
+
+.temporary-permission-option input {
+  margin-top: 3px;
+}
+
+.temporary-permission-option strong,
+.temporary-permission-option small {
+  display: block;
+}
+
+.temporary-permission-option strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.temporary-permission-option small {
   color: var(--muted);
   font-size: 11px;
+  margin-top: 2px;
+}
+
+.temporary-permission-option .active-note {
+  color: #15803d;
+  font-weight: 900;
+}
+
+.temporary-panel-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .temporary-save {
@@ -993,7 +1072,8 @@ li span {
   .user-tabs,
   .list-tools,
   .temporary-grid,
-  .temporary-chip {
+  .temporary-chip,
+  .temporary-permission-options {
     display: grid;
     grid-template-columns: 1fr;
   }
