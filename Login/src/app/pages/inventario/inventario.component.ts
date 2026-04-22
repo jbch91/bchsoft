@@ -103,7 +103,11 @@ export class InventarioComponent {
         brand: row.brand,
         model: row.model,
         serial: row.serial,
+        siteId: row.site_id ?? null,
+        siteName: row.site_name ?? null,
+        areaId: row.area_id ?? null,
         areaName: row.area_name ?? null,
+        locationId: row.location_id ?? null,
         locationName: row.location_name ?? null,
         status: row.status
       }));

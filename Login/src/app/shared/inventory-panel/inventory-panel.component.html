@@ -90,17 +90,82 @@
         <span data-label="Ubicación">{{ item.locationName || '-' }}</span>
         <span class="actions">
           <button type="button" (click)="toggleHistory(item)">Ver hoja de vida</button>
+          <button type="button" *ngIf="canMove" (click)="startMove(item)">Mover</button>
           <button type="button" *ngIf="canEdit" (click)="editItem.emit(item)">Editar</button>
           <button type="button" class="danger" *ngIf="canEdit" (click)="deleteItem.emit(item)">Eliminar</button>
         </span>
       </div>
 
+      <div class="move-inline" *ngIf="movingAssetId === item.id">
+        <div class="move-inline-header">
+          <div>
+            <strong>Mover equipo</strong>
+            <p class="muted">Actualiza sede, área, ubicación o código. Se generará un PDF en el historial del equipo.</p>
+          </div>
+          <button type="button" class="hide-btn" (click)="cancelMove()">Cancelar</button>
+        </div>
+        <div class="move-grid">
+          <label>
+            Código
+            <input type="text" [(ngModel)]="moveForm.code" />
+          </label>
+          <label>
+            Sede
+            <select [(ngModel)]="moveForm.siteId" (change)="onMoveSiteChange()">
+              <option *ngFor="let site of moveSites" [value]="site.id">{{ site.name }}</option>
+            </select>
+          </label>
+          <label>
+            Área
+            <select [(ngModel)]="moveForm.areaId" (change)="onMoveAreaChange()">
+              <option *ngFor="let area of moveAreasForSite" [value]="area.id">{{ area.name }}</option>
+            </select>
+          </label>
+          <label>
+            Ubicación
+            <select [(ngModel)]="moveForm.locationId">
+              <option *ngFor="let location of moveLocationsForArea" [value]="location.id">{{ location.name }}</option>
+            </select>
+          </label>
+          <label class="wide">
+            Observación del movimiento
+            <input type="text" [(ngModel)]="moveForm.notes" placeholder="Ej: traslado por reorganización del servicio" />
+          </label>
+          <button type="button" class="history-btn" [disabled]="moveLoading" (click)="submitMove()">
+            {{ moveLoading ? 'Guardando...' : 'Guardar movimiento' }}
+          </button>
+        </div>
+        <p class="error" *ngIf="moveError">{{ moveError }}</p>
+        <p class="success" *ngIf="moveSuccess">{{ moveSuccess }}</p>
+      </div>
+
       <div class="history-inline" *ngIf="expandedAssetId === item.id" [attr.id]="'history-' + item.id">
         <div class="history-inline-header">
           <div class="history-inline-title">
-            <strong>Historial del equipo</strong>
+            <div>
+              <strong>Historial del equipo</strong>
+              <p class="muted">
+                {{ item.code }} · {{ item.name }} · Serie {{ item.serial || '-' }}
+              </p>
+            </div>
             <button type="button" class="hide-btn" (click)="toggleHistory(item)">Ocultar</button>
           </div>
+
+          <div class="history-summary-card">
+            <div>
+              <span class="summary-label">Equipo</span>
+              <strong>{{ item.name }}</strong>
+            </div>
+            <div>
+              <span class="summary-label">Ubicación actual</span>
+              <strong>{{ item.siteName || '-' }} / {{ item.areaName || '-' }} / {{ item.locationName || '-' }}</strong>
+            </div>
+            <div>
+              <span class="summary-label">Código</span>
+              <strong>{{ item.code }}</strong>
+            </div>
+          </div>
+
           <div class="history-inline-filters">
             <label>
               Desde
@@ -110,55 +175,102 @@
               Hasta
               <input type="date" [(ngModel)]="historyTo" (change)="loadHistory()" />
             </label>
+            <label>
+              Orden
+              <select [(ngModel)]="historyOrder" (change)="loadHistory()">
+                <option value="asc">Más antiguo a reciente</option>
+                <option value="desc">Más reciente a antiguo</option>
+              </select>
+            </label>
             <button type="button" class="ghost" (click)="loadHistory()">Buscar</button>
           </div>
         </div>
 
+        <div class="history-upload" *ngIf="canUploadHistoryFile">
+          <div>
+            <strong>Migrar PDF físico al historial</strong>
+            <p class="muted">Carga mantenimientos antiguos escaneados y asigna la fecha real del documento para ordenarlos correctamente.</p>
+          </div>
+          <div class="history-upload-grid">
+            <label>
+              Fecha del documento
+              <input type="date" [(ngModel)]="historyUploadDate" />
+            </label>
+            <label>
+              Título
+              <input type="text" [(ngModel)]="historyUploadTitle" placeholder="Ej: Mantenimiento preventivo 2025" />
+            </label>
+            <label class="wide">
+              Descripción breve
+              <input type="text" [(ngModel)]="historyUploadDescription" placeholder="Ej: Migración de reporte físico firmado" />
+            </label>
+            <label class="file-field">
+              Archivo PDF
+              <input class="file-input" type="file" accept="application/pdf,.pdf" (change)="onHistoryFileSelected($event)" />
+              <small>{{ historyUploadFile?.name || 'Selecciona un PDF escaneado' }}</small>
+            </label>
+            <div class="upload-action-wrap">
+              <span>Acción</span>
+              <button type="button" class="history-btn upload-action" [disabled]="historyUploadLoading" (click)="uploadHistoryFile()">
+                {{ historyUploadLoading ? 'Subiendo...' : 'Subir PDF' }}
+              </button>
+            </div>
+          </div>
+          <p class="error" *ngIf="historyUploadError">{{ historyUploadError }}</p>
+          <p class="success" *ngIf="historyUploadSuccess">{{ historyUploadSuccess }}</p>
+        </div>
+
         <div class="history-list">
-          <p class="muted" *ngIf="historyLoading">Cargando mantenimientos...</p>
-          <p class="muted" *ngIf="!historyLoading && historyCalibrationLoading">Cargando calibraciones...</p>
+          <p class="muted" *ngIf="historyLoading">Cargando historial del equipo...</p>
+
           <div class="history-row header">
             <span>Tipo</span>
             <span>Fecha</span>
-            <span>Resumen</span>
+            <span>Descripción</span>
             <span>Acciones</span>
           </div>
-          <div class="history-row">
-            <span>Hoja de vida</span>
+
+          <div class="history-row pinned">
+            <span class="history-badge">Hoja de vida</span>
             <span>-</span>
-            <span>PDF de hoja de vida del equipo</span>
+            <span>PDF principal de la hoja de vida del equipo seleccionado</span>
             <span><button type="button" class="history-btn" (click)="openHistoryHv()">VER</button></span>
           </div>
-          <div class="history-row" *ngFor="let report of historyReports">
-            <span>{{ report.type }}</span>
-            <span>{{ report.created_at | date: 'dd/MM/yyyy' }}</span>
-            <span>{{ report.summary || 'Reporte de mantenimiento' }}</span>
-            <span><button type="button" class="history-btn" (click)="openReportPdf(report.id)">VER</button></span>
+
+          <div class="history-row" *ngFor="let event of historyItems">
+            <span class="history-badge">{{ historyTypeLabel(event) }}</span>
+            <span>{{ event.event_date | date: 'dd/MM/yyyy' }}</span>
+            <span>
+              <strong>{{ event.title || 'Evento del equipo' }}</strong>
+              <small *ngIf="event.description">{{ event.description }}</small>
+            </span>
+            <span class="history-actions">
+              <button type="button" class="history-btn" [disabled]="!event.pdf_path" (click)="openHistoryItem(event)">VER</button>
+              <button
+                type="button"
+                class="danger small"
+                *ngIf="canEdit && event.item_type === 'legacy_pdf'"
+                (click)="deleteHistoryFile(event)"
+              >
+                Eliminar
+              </button>
+            </span>
           </div>
-          <div class="history-row" *ngFor="let report of historyCalibration">
-            <span>Calibración</span>
-            <span>{{ (report.completed_at || report.planned_date) | date: 'dd/MM/yyyy' }}</span>
-            <span>Certificado de calibración</span>
-            <span><button type="button" class="history-btn" (click)="openCalibrationPdf(report.id)">VER</button></span>
-          </div>
-          <p class="muted" *ngIf="!historyLoading && historyReports.length === 0 && historyCalibration.length === 0">
-            Sin reportes en el rango seleccionado.
+
+          <p class="muted" *ngIf="!historyLoading && historyItems.length === 0">
+            Sin reportes o PDFs históricos en el rango seleccionado.
           </p>
           <div class="history-more">
             <button type="button" class="ghost" [disabled]="historyLoading || historyOffset === 0" (click)="prevHistoryPage()">
               Anterior
             </button>
-            <button
-              type="button"
-              class="ghost"
-              [disabled]="historyLoading || (!historyHasMoreMaintenance && !historyHasMoreCalibration)"
-              (click)="nextHistoryPage()"
-            >
+            <button type="button" class="ghost" [disabled]="historyLoading || !historyHasMore" (click)="nextHistoryPage()">
               Siguiente
             </button>
           </div>
         </div>
       </div>
+
     </ng-container>
   </div>
 </div>

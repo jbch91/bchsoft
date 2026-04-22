@@ -188,11 +188,15 @@ export async function listAssets(clientId) {
             a.supplier_name, a.supplier_phone, a.supplier_email, a.power_type, a.voltage,
             a.temp_min, a.temp_max, a.humidity_min, a.humidity_max,
             a.maintenance_frequency, a.requires_calibration, a.calibration_frequency,
+            a.hv_engineer_user_id, a.hv_engineer_signed_at,
+            hu.display_name AS hv_engineer_name, hu.signature_path AS hv_engineer_signature_path,
+            hu.invima_registration AS hv_engineer_invima_registration,
             a.site_id, s.name AS site_name, a.area_id, a.location_id, ar.name AS area_name, lo.name AS location_name
      FROM "${schema}".assets a
      LEFT JOIN "${schema}".sites s ON s.id = a.site_id
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
+     LEFT JOIN public.users hu ON hu.id = a.hv_engineer_user_id
      ORDER BY created_at DESC`
   );
   return rows;
@@ -233,11 +237,15 @@ export async function listAssetsForReader(clientId, userId) {
             a.supplier_name, a.supplier_phone, a.supplier_email, a.power_type, a.voltage,
             a.temp_min, a.temp_max, a.humidity_min, a.humidity_max,
             a.maintenance_frequency, a.requires_calibration, a.calibration_frequency,
+            a.hv_engineer_user_id, a.hv_engineer_signed_at,
+            hu.display_name AS hv_engineer_name, hu.signature_path AS hv_engineer_signature_path,
+            hu.invima_registration AS hv_engineer_invima_registration,
             a.site_id, s.name AS site_name, a.area_id, a.location_id, ar.name AS area_name, lo.name AS location_name
      FROM "${schema}".assets a
      LEFT JOIN "${schema}".sites s ON s.id = a.site_id
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
+     LEFT JOIN public.users hu ON hu.id = a.hv_engineer_user_id
      WHERE 1=1 ${where}
      ORDER BY created_at DESC`,
     params
@@ -289,11 +297,17 @@ export async function getAssetById(clientId, assetId) {
     throw new Error('Cliente no encontrado');
   }
   const { rows } = await query(
-    `SELECT a.*, s.name AS site_name, ar.name AS area_name, lo.name AS location_name
+    `SELECT a.*, s.name AS site_name, ar.name AS area_name, lo.name AS location_name,
+            hu.display_name AS hv_engineer_name,
+            hu.signature_path AS hv_engineer_signature_path,
+            hu.invima_registration AS hv_engineer_invima_registration,
+            hu.document_type AS hv_engineer_document_type,
+            hu.document_number AS hv_engineer_document_number
      FROM "${schema}".assets a
      LEFT JOIN "${schema}".sites s ON s.id = a.site_id
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
+     LEFT JOIN public.users hu ON hu.id = a.hv_engineer_user_id
      WHERE a.id = $1`,
     [assetId]
   );
@@ -363,16 +377,19 @@ export async function createAsset(clientId, payload) {
     humidityMax,
     maintenanceFrequency,
     requiresCalibration,
-    calibrationFrequency
+    calibrationFrequency,
+    hvEngineerUserId
   } = payload;
   const { rows } = await query(
     `INSERT INTO "${schema}".assets
      (code, name, brand, model, serial, invima_reg, site_id, area_id, location_id, risk_class, is_mobile, manufacturer,
       acquisition_type, contract_text, acquisition_date, useful_life_years, warranty_years,
       supplier_name, supplier_phone, supplier_email, power_type, voltage, temp_min, temp_max,
-      humidity_min, humidity_max, maintenance_frequency, requires_calibration, calibration_frequency)
+      humidity_min, humidity_max, maintenance_frequency, requires_calibration, calibration_frequency,
+      hv_engineer_user_id, hv_engineer_signed_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-             $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+             $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
+             $30, CASE WHEN $30::uuid IS NULL THEN NULL ELSE NOW() END)
      RETURNING id`,
     [
       code,
@@ -403,7 +420,8 @@ export async function createAsset(clientId, payload) {
       humidityMax,
       maintenanceFrequency,
       requiresCalibration,
-      calibrationFrequency
+      calibrationFrequency,
+      hvEngineerUserId || null
     ]
   );
   return rows[0];
@@ -454,7 +472,8 @@ export async function updateAsset(clientId, assetId, payload) {
     humidityMax,
     maintenanceFrequency,
     requiresCalibration,
-    calibrationFrequency
+    calibrationFrequency,
+    hvEngineerUserId
   } = payload;
   await query(
     `UPDATE "${schema}".assets
@@ -465,8 +484,10 @@ export async function updateAsset(clientId, assetId, payload) {
          useful_life_years = $16, warranty_years = $17, supplier_name = $18,
          supplier_phone = $19, supplier_email = $20, power_type = $21, voltage = $22,
          temp_min = $23, temp_max = $24, humidity_min = $25, humidity_max = $26,
-         maintenance_frequency = $27, requires_calibration = $28, calibration_frequency = $29
-     WHERE id = $30`,
+         maintenance_frequency = $27, requires_calibration = $28, calibration_frequency = $29,
+         hv_engineer_user_id = COALESCE($30::uuid, hv_engineer_user_id),
+         hv_engineer_signed_at = CASE WHEN $30::uuid IS NULL THEN hv_engineer_signed_at ELSE NOW() END
+     WHERE id = $31`,
     [
       code,
       name,
@@ -497,9 +518,18 @@ export async function updateAsset(clientId, assetId, payload) {
       maintenanceFrequency,
       requiresCalibration,
       calibrationFrequency,
+      hvEngineerUserId || null,
       assetId
     ]
   );
+}
+
+export async function updateAssetStatus(clientId, assetId, status) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  await query(`UPDATE "${schema}".assets SET status = $1 WHERE id = $2`, [status, assetId]);
 }
 
 export async function deleteAsset(clientId, assetId) {
@@ -508,6 +538,297 @@ export async function deleteAsset(clientId, assetId) {
     throw new Error('Cliente no encontrado');
   }
   await query(`DELETE FROM "${schema}".assets WHERE id = $1`, [assetId]);
+}
+
+export async function setAssetHvEngineer(clientId, assetId, engineerUserId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  await query(
+    `UPDATE "${schema}".assets
+     SET hv_engineer_user_id = $1,
+         hv_engineer_signed_at = NOW()
+     WHERE id = $2`,
+    [engineerUserId, assetId]
+  );
+}
+
+export async function moveAsset(clientId, assetId, payload) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+
+  const before = await getAssetById(clientId, assetId);
+  if (!before) {
+    throw new Error('Equipo no encontrado');
+  }
+
+  await query(
+    `UPDATE "${schema}".assets
+     SET code = $1,
+         site_id = $2,
+         area_id = $3,
+         location_id = $4
+     WHERE id = $5`,
+    [
+      payload.code || before.code,
+      payload.siteId || null,
+      payload.areaId || null,
+      payload.locationId || null,
+      assetId
+    ]
+  );
+
+  const after = await getAssetById(clientId, assetId);
+  return { before, after };
+}
+
+export async function createAssetMovement(clientId, payload) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { before, after, movedBy, movedByName, movedByRole, notes } = payload;
+  const { rows } = await query(
+    `INSERT INTO "${schema}".asset_movements (
+       asset_id, from_code, to_code,
+       from_site_id, from_site_name, to_site_id, to_site_name,
+       from_area_id, from_area_name, to_area_id, to_area_name,
+       from_location_id, from_location_name, to_location_id, to_location_name,
+       moved_by, moved_by_name, moved_by_role, notes
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+     RETURNING *`,
+    [
+      after.id,
+      before.code,
+      after.code,
+      before.site_id,
+      before.site_name,
+      after.site_id,
+      after.site_name,
+      before.area_id,
+      before.area_name,
+      after.area_id,
+      after.area_name,
+      before.location_id,
+      before.location_name,
+      after.location_id,
+      after.location_name,
+      movedBy,
+      movedByName,
+      movedByRole,
+      notes || null
+    ]
+  );
+  return rows[0];
+}
+
+export async function updateAssetMovementPdf(clientId, movementId, pdfPath) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  await query(`UPDATE "${schema}".asset_movements SET pdf_path = $1 WHERE id = $2`, [pdfPath, movementId]);
+}
+
+export async function listAssetMovements(clientId, assetId, limit = 4, offset = 0) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { rows } = await query(
+    `SELECT *
+     FROM "${schema}".asset_movements
+     WHERE asset_id = $1
+     ORDER BY created_at DESC
+     LIMIT $2 OFFSET $3`,
+    [assetId, limit, offset]
+  );
+  return rows;
+}
+
+export async function createAssetHistoryFile(clientId, payload) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { assetId, title, description, documentDate, filePath, uploadedBy, uploadedByName } = payload;
+  const { rows } = await query(
+    `INSERT INTO "${schema}".asset_history_files (
+       asset_id, title, description, document_date, file_path, uploaded_by, uploaded_by_name
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     RETURNING *`,
+    [
+      assetId,
+      title || 'Mantenimiento histórico migrado',
+      description || null,
+      documentDate,
+      filePath,
+      uploadedBy || null,
+      uploadedByName || null
+    ]
+  );
+  return rows[0];
+}
+
+export async function listAssetHistory(clientId, assetId, { from, to, order = 'asc', limit = 4, offset = 0 } = {}) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+
+  const params = [assetId, clientId];
+  const clauses = ['event_date IS NOT NULL'];
+  if (from) {
+    params.push(from);
+    clauses.push(`event_date >= $${params.length}::date`);
+  }
+  if (to) {
+    params.push(to);
+    clauses.push(`event_date < ($${params.length}::date + INTERVAL '1 day')`);
+  }
+  params.push(limit);
+  const limitParam = params.length;
+  params.push(offset);
+  const offsetParam = params.length;
+  const orderDir = String(order).toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+
+  const { rows } = await query(
+    `WITH history AS (
+       SELECT
+         r.id,
+         'maintenance_report' AS item_type,
+         r.type AS subtype,
+         COALESCE(
+           (SELECT MAX(s.signed_at) FROM report_signatures s WHERE s.report_id = r.id),
+           r.created_at
+         ) AS event_date,
+         COALESCE(NULLIF(r.summary, ''), 'Reporte de mantenimiento') AS title,
+         r.findings AS description,
+         r.pdf_path,
+         COALESCE(
+           (SELECT MAX(s.signed_at) FROM report_signatures s WHERE s.report_id = r.id),
+           r.created_at
+         ) AS created_at
+       FROM maintenance_reports r
+       WHERE r.asset_id = $1
+         AND r.client_id = $2
+
+       UNION ALL
+
+       SELECT
+         i.id,
+         'calibration_report' AS item_type,
+         'calibracion' AS subtype,
+         COALESCE(i.completed_at, i.planned_date) AS event_date,
+         'Certificado de calibración' AS title,
+         i.frequency AS description,
+         i.pdf_path,
+         COALESCE(i.completed_at, i.planned_date) AS created_at
+       FROM calibration_schedule_items i
+       JOIN calibration_schedules s ON s.id = i.schedule_id
+       WHERE i.asset_id = $1
+         AND s.client_id = $2
+         AND i.pdf_path IS NOT NULL
+
+       UNION ALL
+
+       SELECT
+         m.id,
+         'movement_report' AS item_type,
+         'movimiento' AS subtype,
+         m.created_at AS event_date,
+         'Movimiento de equipo' AS title,
+         CONCAT_WS(' → ',
+           NULLIF(CONCAT_WS(' / ', m.from_site_name, m.from_area_name, m.from_location_name), ''),
+           NULLIF(CONCAT_WS(' / ', m.to_site_name, m.to_area_name, m.to_location_name), '')
+         ) AS description,
+         m.pdf_path,
+         m.created_at
+       FROM "${schema}".asset_movements m
+       WHERE m.asset_id = $1
+
+       UNION ALL
+
+       SELECT
+         f.id,
+         'legacy_pdf' AS item_type,
+         'mantenimiento_migrado' AS subtype,
+         f.document_date::timestamptz AS event_date,
+         f.title,
+         f.description,
+         f.file_path AS pdf_path,
+         f.created_at
+       FROM "${schema}".asset_history_files f
+       WHERE f.asset_id = $1
+     )
+     SELECT *
+     FROM history
+     WHERE ${clauses.join(' AND ')}
+     ORDER BY event_date ${orderDir}, created_at ${orderDir}, title ASC
+     LIMIT $${limitParam} OFFSET $${offsetParam}`,
+    params
+  );
+  return rows;
+}
+
+export async function listAssetHistoryFiles(clientId, assetId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { rows } = await query(
+    `SELECT *
+     FROM "${schema}".asset_history_files
+     WHERE asset_id = $1
+     ORDER BY document_date ASC, created_at ASC`,
+    [assetId]
+  );
+  return rows;
+}
+
+export async function getAssetHistoryFileById(clientId, fileId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { rows } = await query(
+    `SELECT *
+     FROM "${schema}".asset_history_files
+     WHERE id = $1`,
+    [fileId]
+  );
+  return rows[0] || null;
+}
+
+export async function deleteAssetHistoryFile(clientId, fileId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const file = await getAssetHistoryFileById(clientId, fileId);
+  await query(`DELETE FROM "${schema}".asset_history_files WHERE id = $1`, [fileId]);
+  return file;
+}
+
+export async function getAssetMovementById(clientId, movementId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { rows } = await query(
+    `SELECT m.*, a.code AS asset_code, a.name AS asset_name, a.brand AS asset_brand,
+            a.model AS asset_model, a.serial AS asset_serial
+     FROM "${schema}".asset_movements m
+     LEFT JOIN "${schema}".assets a ON a.id = m.asset_id
+     WHERE m.id = $1`,
+    [movementId]
+  );
+  return rows[0] || null;
 }
 
 export async function replaceAccessories(clientId, assetId, accessories) {

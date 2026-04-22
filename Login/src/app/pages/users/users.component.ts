@@ -10,6 +10,13 @@ import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 type UserDocumentType = 'cedula_ciudadania' | 'cedula_extranjeria' | 'pasaporte';
 type UserTab = 'list' | 'create' | 'roles';
 
+interface TemporaryPermissionView {
+  permission: string;
+  description?: string | null;
+  expiresAt: string;
+  reason?: string | null;
+}
+
 interface UserView {
   id: string;
   username: string;
@@ -22,6 +29,7 @@ interface UserView {
   documentType?: string | null;
   documentNumber?: string | null;
   invimaRegistration?: string | null;
+  temporaryPermissions: TemporaryPermissionView[];
 }
 
 @Component({
@@ -61,6 +69,12 @@ export class UsersComponent implements OnInit {
   readerAreaIds = new Set<string>();
   readerLocationIds = new Set<string>();
   readerAccessUserId: string | null = null;
+  temporaryPermissionLoading = false;
+  temporaryPermissionForm = {
+    permission: 'hb:import',
+    expiresAt: '',
+    reason: 'Periodo temporal de creación/migración inicial del cliente'
+  };
 
   username = '';
   displayName = '';
@@ -69,6 +83,7 @@ export class UsersComponent implements OnInit {
   role: Role = 'viewer';
   clientId = '';
   signatureFile: File | null = null;
+  private readonly signatureAllowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
   documentType: UserDocumentType = 'cedula_ciudadania';
   documentNumber = '';
   invimaRegistration = '';
@@ -81,6 +96,7 @@ export class UsersComponent implements OnInit {
     'hb:create': 'Crear hojas de vida',
     'hb:import': 'Importar hojas de vida masivamente',
     'hb:view': 'Ver hojas de vida',
+    'asset_history:upload': 'Migrar PDFs históricos de equipos',
     'areas:manage': 'Gestionar sedes, áreas y ubicaciones',
     'clients:manage': 'Gestionar clientes',
     'clients:view': 'Ver clientes',
@@ -91,10 +107,25 @@ export class UsersComponent implements OnInit {
     'maintenance:report:create': 'Crear reportes de mantenimiento',
     'maintenance:report:sign': 'Firmar reportes de mantenimiento',
     'calibration:report:upload': 'Subir reportes de calibración',
-    'inventory:move': 'Movimientos de inventario',
+    'inventory:move': 'Mover equipos y generar reportes de movimiento',
     'inventory:request': 'Solicitudes de inventario',
     'read:all': 'Lectura general'
   };
+  readonly temporaryPermissionOptions = [
+    {
+      value: 'hb:import',
+      label: 'Importación masiva de hojas de vida',
+      description: 'Permite cargar muchos equipos desde una plantilla Excel.'
+    },
+    {
+      value: 'asset_history:upload',
+      label: 'Migración de PDFs históricos',
+      description: 'Permite subir reportes físicos antiguos al historial del equipo.'
+    }
+  ];
+  private readonly temporaryOnlyPermissions = new Set(
+    this.temporaryPermissionOptions.map((option) => option.value)
+  );
 
   private readonly clientScopedRoles: Role[] = [
     'almacenista',
@@ -137,7 +168,13 @@ export class UsersComponent implements OnInit {
         clientId: user.client_id ?? null,
         documentType: user.document_type ?? null,
         documentNumber: user.document_number ?? null,
-        invimaRegistration: user.invima_registration ?? null
+        invimaRegistration: user.invima_registration ?? null,
+        temporaryPermissions: (user.temporary_permissions ?? []).map((permission) => ({
+          permission: permission.permission,
+          description: permission.description ?? null,
+          expiresAt: permission.expiresAt,
+          reason: permission.reason ?? null
+        }))
       }));
       await this.loadRolePermissions();
       try {
@@ -284,6 +321,7 @@ export class UsersComponent implements OnInit {
       invimaRegistration: user.invimaRegistration ?? ''
     };
     this.editSignatureFile = null;
+    this.resetTemporaryPermissionForm();
     const targetClientId = user.clientId ?? this.editUser.clientId;
     if (this.isReader(user) && targetClientId) {
       void this.loadReaderAccess(user.id, targetClientId);
@@ -300,6 +338,7 @@ export class UsersComponent implements OnInit {
     this.editingUserId = null;
     this.readerAccessUserId = null;
     this.editSignatureFile = null;
+    this.temporaryPermissionLoading = false;
   }
 
   async saveUser(user: UserView): Promise<void> {
@@ -359,20 +398,141 @@ export class UsersComponent implements OnInit {
     return this.documentTypes.find((item) => item.value === value)?.label ?? 'Sin tipo';
   }
 
+  temporaryPermissionLabel(permission: string): string {
+    return this.temporaryPermissionOptions.find((item) => item.value === permission)?.label
+      ?? this.permissionLabel(permission);
+  }
+
+  temporaryPermissionDate(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString('es-CO', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  activeTemporaryPermissions(user: UserView): TemporaryPermissionView[] {
+    return (user.temporaryPermissions || []).filter((permission) => {
+      const expiresAt = new Date(permission.expiresAt).getTime();
+      return !Number.isNaN(expiresAt) && expiresAt > Date.now();
+    });
+  }
+
+  async grantTemporaryPermission(user: UserView): Promise<void> {
+    if (!this.temporaryPermissionForm.permission || !this.temporaryPermissionForm.expiresAt) {
+      this.errorMessage = 'Selecciona el permiso y la fecha de vencimiento.';
+      return;
+    }
+
+    const expiresAt = new Date(this.temporaryPermissionForm.expiresAt);
+    if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+      this.errorMessage = 'La fecha de vencimiento debe ser futura.';
+      return;
+    }
+
+    this.temporaryPermissionLoading = true;
+    this.errorMessage = '';
+    this.successMessage = '';
+    try {
+      await this.admin.grantTemporaryPermission(user.id, {
+        permission: this.temporaryPermissionForm.permission,
+        expiresAt: expiresAt.toISOString(),
+        reason: this.temporaryPermissionForm.reason.trim() || null
+      });
+      this.successMessage = 'Permiso temporal activado. Si el usuario está conectado, debe volver a iniciar sesión para verlo.';
+      await this.load();
+      this.editingUserId = user.id;
+      this.resetTemporaryPermissionForm();
+    } catch (error) {
+      console.error(error);
+      this.errorMessage = 'No se pudo activar el permiso temporal.';
+    } finally {
+      this.temporaryPermissionLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  async revokeTemporaryPermission(user: UserView, permission: string): Promise<void> {
+    if (!confirm('¿Revocar este permiso temporal?')) return;
+    this.temporaryPermissionLoading = true;
+    this.errorMessage = '';
+    this.successMessage = '';
+    try {
+      await this.admin.revokeTemporaryPermission(user.id, permission);
+      this.successMessage = 'Permiso temporal revocado. Si el usuario está conectado, debe volver a iniciar sesión para actualizar sus accesos.';
+      await this.load();
+      this.editingUserId = user.id;
+    } catch (error) {
+      console.error(error);
+      this.errorMessage = 'No se pudo revocar el permiso temporal.';
+    } finally {
+      this.temporaryPermissionLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
   private toDocumentType(value?: string | null): UserDocumentType {
     return this.documentTypes.some((item) => item.value === value)
       ? (value as UserDocumentType)
       : 'cedula_ciudadania';
   }
 
+  private resetTemporaryPermissionForm(): void {
+    this.temporaryPermissionForm = {
+      permission: 'hb:import',
+      expiresAt: this.toDatetimeLocal(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+      reason: 'Periodo temporal de creación/migración inicial del cliente'
+    };
+  }
+
+  private toDatetimeLocal(date: Date): string {
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return [
+      date.getFullYear(),
+      '-',
+      pad(date.getMonth() + 1),
+      '-',
+      pad(date.getDate()),
+      'T',
+      pad(date.getHours()),
+      ':',
+      pad(date.getMinutes())
+    ].join('');
+  }
+
+  private isValidSignatureFile(file: File): boolean {
+    const extension = file.name.toLowerCase().split('.').pop();
+    return this.signatureAllowedTypes.includes(file.type) || ['png', 'jpg', 'jpeg', 'webp', 'pdf'].includes(extension || '');
+  }
+
   onSignatureSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
-    this.signatureFile = input.files?.[0] ?? null;
+    const file = input.files?.[0] ?? null;
+    if (file && !this.isValidSignatureFile(file)) {
+      this.signatureFile = null;
+      input.value = '';
+      this.errorMessage = 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.';
+      return;
+    }
+    this.errorMessage = '';
+    this.signatureFile = file;
   }
 
   onEditSignatureSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
-    this.editSignatureFile = input.files?.[0] ?? null;
+    const file = input.files?.[0] ?? null;
+    if (file && !this.isValidSignatureFile(file)) {
+      this.editSignatureFile = null;
+      input.value = '';
+      this.errorMessage = 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.';
+      return;
+    }
+    this.errorMessage = '';
+    this.editSignatureFile = file;
   }
 
   async loadReaderAccess(userId: string, clientId: string): Promise<void> {
@@ -494,6 +654,11 @@ export class UsersComponent implements OnInit {
     return this.permissionLabels[permission] ?? permission;
   }
 
+  roleAssignablePermissions(role: Role): string[] {
+    if (role === 'superuser') return this.permissions;
+    return this.permissions.filter((permission) => !this.temporaryOnlyPermissions.has(permission));
+  }
+
   isEditingRole(role: Role): boolean {
     const roleId = this.roleIds.get(role);
     return !!roleId && this.editingRoleId === roleId;
@@ -526,7 +691,10 @@ export class UsersComponent implements OnInit {
     this.errorMessage = '';
     this.successMessage = '';
     try {
-      const permissions = Array.from(this.permissionDraft);
+      const role = this.roles.find((roleOption) => this.roleIds.get(roleOption) === roleId);
+      const permissions = Array.from(this.permissionDraft).filter((permission) =>
+        role === 'superuser' || !this.temporaryOnlyPermissions.has(permission)
+      );
       await this.admin.updateRolePermissions(roleId, permissions);
       this.rolePermissions[roleId] = permissions;
       this.cancelRolePermissionsEdit();

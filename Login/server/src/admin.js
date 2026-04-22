@@ -1,6 +1,8 @@
 import bcrypt from 'bcrypt';
 import { query } from './db.js';
 
+const TEMPORARY_ONLY_PERMISSIONS = ['hb:import', 'asset_history:upload'];
+
 export async function listRoles() {
   const { rows } = await query('SELECT id, name, description FROM roles ORDER BY id');
   return rows;
@@ -11,7 +13,27 @@ export async function listUsers() {
     `SELECT u.id, u.username, u.display_name, u.email, u.is_active, u.client_id,
             u.signature_path, u.document_type, u.document_number, u.invima_registration,
             c.name AS client_name,
-            ARRAY_REMOVE(ARRAY_AGG(r.name), NULL) AS roles
+            ARRAY_REMOVE(ARRAY_AGG(r.name), NULL) AS roles,
+            COALESCE(
+              (
+                SELECT JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id', utp.id,
+                    'permission', p.name,
+                    'description', p.description,
+                    'expiresAt', utp.expires_at,
+                    'reason', utp.reason,
+                    'createdAt', utp.created_at
+                  )
+                  ORDER BY utp.expires_at ASC
+                )
+                FROM user_temporary_permissions utp
+                JOIN permissions p ON p.id = utp.permission_id
+                WHERE utp.user_id = u.id
+                  AND utp.expires_at > NOW()
+              ),
+              '[]'::json
+            ) AS temporary_permissions
      FROM users u
      LEFT JOIN clients c ON c.id = u.client_id
      LEFT JOIN user_roles ur ON ur.user_id = u.id
@@ -24,7 +46,7 @@ export async function listUsers() {
 
 export async function getUserById(userId) {
   const { rows } = await query(
-    `SELECT id, username, email, signature_path, document_type, document_number,
+    `SELECT id, username, display_name, email, signature_path, document_type, document_number,
             invima_registration
      FROM users WHERE id = $1`,
     [userId]
@@ -89,11 +111,17 @@ export async function getRolePermissions(roleId) {
 }
 
 export async function updateRolePermissions(roleId, permissions) {
+  const { rows: roleRows } = await query('SELECT name FROM roles WHERE id = $1', [roleId]);
+  const roleName = roleRows[0]?.name;
+  const allowedPermissions = roleName === 'superuser'
+    ? permissions
+    : permissions.filter((permission) => !TEMPORARY_ONLY_PERMISSIONS.includes(permission));
+
   await query('DELETE FROM role_permissions WHERE role_id = $1', [roleId]);
 
   const { rows: permissionRows } = await query(
     'SELECT id, name FROM permissions WHERE name = ANY($1)',
-    [permissions]
+    [allowedPermissions]
   );
 
   for (const permission of permissionRows) {
@@ -102,6 +130,67 @@ export async function updateRolePermissions(roleId, permissions) {
       [roleId, permission.id]
     );
   }
+}
+
+export async function grantTemporaryPermission({
+  userId,
+  permission,
+  expiresAt,
+  grantedBy,
+  reason
+}) {
+  const { rows: userRows } = await query('SELECT id, username FROM users WHERE id = $1', [userId]);
+  if (!userRows.length) {
+    return { error: 'USER_NOT_FOUND' };
+  }
+
+  const { rows: permissionRows } = await query(
+    'SELECT id, name, description FROM permissions WHERE name = $1',
+    [permission]
+  );
+  if (!permissionRows.length) {
+    return { error: 'PERMISSION_NOT_FOUND' };
+  }
+
+  const cleanReason = String(reason || '').trim() || null;
+  const { rows } = await query(
+    `INSERT INTO user_temporary_permissions (
+       user_id, permission_id, expires_at, granted_by, reason
+     )
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_id, permission_id)
+     DO UPDATE SET
+       expires_at = EXCLUDED.expires_at,
+       granted_by = EXCLUDED.granted_by,
+       reason = EXCLUDED.reason
+     RETURNING id, expires_at, reason, created_at`,
+    [userId, permissionRows[0].id, expiresAt, grantedBy ?? null, cleanReason]
+  );
+
+  return {
+    id: rows[0].id,
+    permission: permissionRows[0].name,
+    description: permissionRows[0].description,
+    expiresAt: rows[0].expires_at,
+    reason: rows[0].reason,
+    createdAt: rows[0].created_at,
+    username: userRows[0].username
+  };
+}
+
+export async function revokeTemporaryPermission({ userId, permission }) {
+  const { rows } = await query(
+    `DELETE FROM user_temporary_permissions utp
+     USING permissions p, users u
+     WHERE utp.permission_id = p.id
+       AND utp.user_id = u.id
+       AND utp.user_id = $1
+       AND p.name = $2
+     RETURNING utp.id, p.name AS permission, u.username`,
+    [userId, permission]
+  );
+
+  return rows[0] ?? null;
 }
 
 export async function createUser({

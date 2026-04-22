@@ -64,6 +64,35 @@ interface LocationDto {
   site_name?: string | null;
 }
 
+export interface AssetMovementDto {
+  id: string;
+  asset_id: string;
+  from_code?: string | null;
+  to_code?: string | null;
+  from_site_name?: string | null;
+  to_site_name?: string | null;
+  from_area_name?: string | null;
+  to_area_name?: string | null;
+  from_location_name?: string | null;
+  to_location_name?: string | null;
+  moved_by_name?: string | null;
+  moved_by_role?: string | null;
+  notes?: string | null;
+  pdf_path?: string | null;
+  created_at: string;
+}
+
+export interface AssetHistoryItemDto {
+  id: string;
+  item_type: 'maintenance_report' | 'calibration_report' | 'movement_report' | 'legacy_pdf';
+  subtype?: string | null;
+  event_date: string;
+  title: string;
+  description?: string | null;
+  pdf_path?: string | null;
+  created_at?: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class BiomedService {
   private readonly apiBase = getApiBase();
@@ -220,6 +249,82 @@ export class BiomedService {
     return firstValueFrom(
       this.http.post<{ imported: number }>(`${this.apiBase}/biomed/${clientId}/assets/import`, { assets })
     );
+  }
+
+  async moveAsset(clientId: string, assetId: string, payload: {
+    code: string;
+    siteId: string;
+    areaId: string;
+    locationId: string;
+    notes?: string;
+  }): Promise<{ ok: boolean; movementId: string; pdfPath: string }> {
+    return firstValueFrom(
+      this.http.post<{ ok: boolean; movementId: string; pdfPath: string }>(
+        `${this.apiBase}/biomed/${clientId}/assets/${assetId}/move`,
+        payload
+      )
+    );
+  }
+
+  async listAssetMovements(clientId: string, assetId: string, limit = 4, offset = 0): Promise<AssetMovementDto[]> {
+    return firstValueFrom(
+      this.http.get<AssetMovementDto[]>(
+        `${this.apiBase}/biomed/${clientId}/assets/${assetId}/movements?limit=${limit}&offset=${offset}`
+      )
+    );
+  }
+
+  async downloadAssetMovementPdf(clientId: string, movementId: string): Promise<Blob> {
+    return firstValueFrom(
+      this.http.get(`${this.apiBase}/biomed/${clientId}/asset-movements/${movementId}/pdf`, {
+        responseType: 'blob'
+      })
+    );
+  }
+
+  async listAssetHistory(
+    clientId: string,
+    assetId: string,
+    params?: { from?: string; to?: string; order?: 'asc' | 'desc'; limit?: number; offset?: number }
+  ): Promise<AssetHistoryItemDto[]> {
+    const query = new URLSearchParams();
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    if (params?.order) query.set('order', params.order);
+    if (params?.limit !== undefined) query.set('limit', String(params.limit));
+    if (params?.offset !== undefined) query.set('offset', String(params.offset));
+    const suffix = query.toString() ? `?${query}` : '';
+    return firstValueFrom(
+      this.http.get<AssetHistoryItemDto[]>(`${this.apiBase}/biomed/${clientId}/assets/${assetId}/history${suffix}`)
+    );
+  }
+
+  async uploadAssetHistoryFile(clientId: string, assetId: string, payload: {
+    file: File;
+    documentDate: string;
+    title?: string;
+    description?: string;
+  }): Promise<void> {
+    const form = new FormData();
+    form.append('file', payload.file);
+    form.append('documentDate', payload.documentDate);
+    if (payload.title) form.append('title', payload.title);
+    if (payload.description) form.append('description', payload.description);
+    await firstValueFrom(
+      this.http.post(`${this.apiBase}/biomed/${clientId}/assets/${assetId}/history-files`, form)
+    );
+  }
+
+  async downloadAssetHistoryFilePdf(clientId: string, fileId: string): Promise<Blob> {
+    return firstValueFrom(
+      this.http.get(`${this.apiBase}/biomed/${clientId}/asset-history-files/${fileId}/pdf`, {
+        responseType: 'blob'
+      })
+    );
+  }
+
+  async deleteAssetHistoryFile(clientId: string, fileId: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`${this.apiBase}/biomed/${clientId}/asset-history-files/${fileId}`));
   }
 
   async updateAsset(clientId: string, assetId: string, payload: {

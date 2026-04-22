@@ -52,7 +52,13 @@ export async function sendPreventiveRemindersForClient(clientId) {
         clientId,
         title,
         message,
-        link: '/mantenimiento'
+        link: '/mantenimiento',
+        type: isToday ? 'preventive_maintenance_start' : 'preventive_maintenance_reminder',
+        priority: isToday ? 'high' : 'normal',
+        data: {
+          plannedDate: request.planned_date,
+          reminderKind: isToday ? 'day_start' : 'three_days_before'
+        }
       });
       if (user.email) {
         try {
@@ -155,7 +161,14 @@ export async function sendTrainingRemindersForClient(clientId) {
         clientId,
         title,
         message,
-        link: '/cronogramas'
+        link: '/cronogramas',
+        type: isToday ? 'training_start' : 'training_reminder',
+        priority: isToday ? 'high' : 'normal',
+        data: {
+          trainingItemId: item.id,
+          scheduleId: item.schedule_id,
+          plannedDate: item.planned_date
+        }
       });
       if (user.email) {
         try {
@@ -243,7 +256,15 @@ export async function sendCalibrationRemindersForClient(clientId) {
         clientId,
         title,
         message,
-        link: '/calibraciones'
+        link: '/calibraciones',
+        type: isToday ? 'calibration_start' : 'calibration_reminder',
+        priority: isToday ? 'high' : 'normal',
+        data: {
+          calibrationItemId: item.id,
+          scheduleId: item.schedule_id,
+          assetId: item.asset_id,
+          plannedDate: item.planned_date
+        }
       });
       if (user.email) {
         try {

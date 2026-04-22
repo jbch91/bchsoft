@@ -34,6 +34,41 @@ async function storeRefreshToken(userId, refreshToken) {
   );
 }
 
+async function loadUserRoles(userId) {
+  const roleRows = await query(
+    `SELECT r.name
+     FROM roles r
+     JOIN user_roles ur ON ur.role_id = r.id
+     WHERE ur.user_id = $1`,
+    [userId]
+  );
+  return roleRows.rows.map((row) => row.name);
+}
+
+async function loadUserPermissions(userId) {
+  const permRows = await query(
+    `SELECT DISTINCT name
+     FROM (
+       SELECT p.name
+       FROM permissions p
+       JOIN role_permissions rp ON rp.permission_id = p.id
+       JOIN user_roles ur ON ur.role_id = rp.role_id
+       WHERE ur.user_id = $1
+
+       UNION
+
+       SELECT p.name
+       FROM permissions p
+       JOIN user_temporary_permissions utp ON utp.permission_id = p.id
+       WHERE utp.user_id = $1
+         AND utp.expires_at > NOW()
+     ) active_permissions
+     ORDER BY name`,
+    [userId]
+  );
+  return permRows.rows.map((row) => row.name);
+}
+
 export async function authenticateUser(username, password) {
   const { rows } = await query(
     `SELECT id, username, display_name, password_hash, is_active, client_id
@@ -52,26 +87,8 @@ export async function authenticateUser(username, password) {
     return null;
   }
 
-  const roleRows = await query(
-    `SELECT r.name
-     FROM roles r
-     JOIN user_roles ur ON ur.role_id = r.id
-     WHERE ur.user_id = $1`,
-    [user.id]
-  );
-
-  const roles = roleRows.rows.map((row) => row.name);
-
-  const permRows = await query(
-    `SELECT DISTINCT p.name
-     FROM permissions p
-     JOIN role_permissions rp ON rp.permission_id = p.id
-     JOIN user_roles ur ON ur.role_id = rp.role_id
-     WHERE ur.user_id = $1`,
-    [user.id]
-  );
-
-  const permissions = permRows.rows.map((row) => row.name);
+  const roles = await loadUserRoles(user.id);
+  const permissions = await loadUserPermissions(user.id);
 
   const payload = {
     sub: user.id,
@@ -131,26 +148,8 @@ export async function refreshSession(refreshToken) {
     throw new Error('User inactive');
   }
 
-  const roleRows = await query(
-    `SELECT r.name
-     FROM roles r
-     JOIN user_roles ur ON ur.role_id = r.id
-     WHERE ur.user_id = $1`,
-    [user.id]
-  );
-
-  const roles = roleRows.rows.map((row) => row.name);
-
-  const permRows = await query(
-    `SELECT DISTINCT p.name
-     FROM permissions p
-     JOIN role_permissions rp ON rp.permission_id = p.id
-     JOIN user_roles ur ON ur.role_id = rp.role_id
-     WHERE ur.user_id = $1`,
-    [user.id]
-  );
-
-  const permissions = permRows.rows.map((row) => row.name);
+  const roles = await loadUserRoles(user.id);
+  const permissions = await loadUserPermissions(user.id);
 
   const payload = {
     sub: user.id,

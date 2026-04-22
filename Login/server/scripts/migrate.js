@@ -23,6 +23,9 @@ const MIGRATIONS = [
   'maintenance_add_pdf.sql',
   'maintenance_add_schedule_fields.sql',
   'maintenance_add_reminders.sql',
+  'maintenance_report_tracking.sql',
+  'notifications_mobile_ready.sql',
+  'maintenance_spare_part_notifications_backfill.sql',
   'schedules.sql',
   'schedules_add_pdf.sql',
   'training_schedules.sql',
@@ -37,9 +40,14 @@ const MIGRATIONS = [
   'admin_clients_permission.sql',
   'superuser_all_permissions.sql',
   'hv_import_permission.sql',
+  'user_temporary_permissions.sql',
+  'high_impact_permissions_role_cleanup.sql',
   'tenant_hv_migration.sql',
   'tenant_hv_part2.sql',
   'tenant_sites.sql',
+  'asset_hv_signatures_and_movements.sql',
+  'asset_history_files.sql',
+  'asset_hv_engineer_backfill.sql',
   'history_indexes.sql'
 ];
 

@@ -60,8 +60,8 @@
         </label>
 
         <label>
-          Nombre visible
-          <input type="text" name="displayName" [(ngModel)]="displayName" required />
+          Nombre completo
+          <input type="text" name="displayName" [(ngModel)]="displayName" placeholder="Nombres y apellidos" required />
         </label>
 
         <label>
@@ -116,10 +116,10 @@
         </div>
 
         <label *ngIf="requiresSignature(role)">
-          Firma digital (imagen)
-          <input type="file" accept="image/*" (change)="onSignatureSelected($event)" />
+          Firma digital (imagen o PDF)
+          <input type="file" accept="image/*,.pdf,application/pdf" (change)="onSignatureSelected($event)" />
           <small class="signature-hint">
-            Sube la firma sobre fondo blanco. El sistema eliminará el fondo y guardará solo la firma.
+            Sube una foto con fondo blanco o un PDF. El sistema eliminará el fondo y guardará solo la firma.
           </small>
         </label>
 
@@ -195,6 +195,12 @@
               <span *ngIf="requiresBiomedicalCredentials(user.roles[0] || 'viewer')">
                 Registro INVIMA: {{ user.invimaRegistration || 'Sin registro' }}
               </span>
+              <span class="temp-inline" *ngIf="activeTemporaryPermissions(user).length > 0">
+                Temporal:
+                <ng-container *ngFor="let permission of activeTemporaryPermissions(user); let last = last">
+                  {{ temporaryPermissionLabel(permission.permission) }}{{ last ? '' : ', ' }}
+                </ng-container>
+              </span>
             </div>
             <div class="meta">
               <select [ngModel]="user.roles[0]" (ngModelChange)="onChangeRole(user, $event)">
@@ -218,8 +224,8 @@
                 <h4>Datos principales</h4>
                 <div class="edit-grid">
                   <label>
-                    Nombre visible
-                    <input type="text" [(ngModel)]="editUser.displayName" />
+                  Nombre completo
+                  <input type="text" [(ngModel)]="editUser.displayName" />
                   </label>
                   <label>
                     Correo
@@ -247,8 +253,8 @@
                 </label>
               </div>
               <label *ngIf="requiresSignature(user.roles[0] || 'viewer')">
-                Firma digital (imagen)
-                <input type="file" accept="image/*" (change)="onEditSignatureSelected($event)" />
+                Firma digital (imagen o PDF)
+                <input type="file" accept="image/*,.pdf,application/pdf" (change)="onEditSignatureSelected($event)" />
                 <small class="signature-hint">
                   Se procesará como PNG transparente para usarla en documentos.
                 </small>
@@ -296,6 +302,70 @@
                     </div>
                   </div>
                 </div>
+              </div>
+              <div class="temporary-access">
+                <div class="temporary-header">
+                  <div>
+                    <h4>Permisos temporales de alto impacto</h4>
+                    <p>
+                      Activa importación masiva o migración de PDFs solo durante el periodo de creación del cliente.
+                    </p>
+                  </div>
+                  <span>Vencen automáticamente</span>
+                </div>
+
+                <div class="temporary-list" *ngIf="activeTemporaryPermissions(user).length > 0">
+                  <div class="temporary-chip" *ngFor="let permission of activeTemporaryPermissions(user)">
+                    <div>
+                      <strong>{{ temporaryPermissionLabel(permission.permission) }}</strong>
+                      <small>Hasta {{ temporaryPermissionDate(permission.expiresAt) }}</small>
+                      <small *ngIf="permission.reason">{{ permission.reason }}</small>
+                    </div>
+                    <button
+                      type="button"
+                      class="danger small"
+                      [disabled]="temporaryPermissionLoading"
+                      (click)="revokeTemporaryPermission(user, permission.permission)"
+                    >
+                      Revocar
+                    </button>
+                  </div>
+                </div>
+                <p class="muted" *ngIf="activeTemporaryPermissions(user).length === 0">
+                  Este usuario no tiene permisos temporales activos.
+                </p>
+
+                <div class="temporary-grid">
+                  <label>
+                    Permiso
+                    <select [(ngModel)]="temporaryPermissionForm.permission">
+                      <option *ngFor="let option of temporaryPermissionOptions" [value]="option.value">
+                        {{ option.label }}
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    Vence
+                    <input type="datetime-local" [(ngModel)]="temporaryPermissionForm.expiresAt" />
+                  </label>
+                  <label class="wide">
+                    Motivo
+                    <input type="text" [(ngModel)]="temporaryPermissionForm.reason" />
+                  </label>
+                </div>
+                <div class="temporary-options">
+                  <small *ngFor="let option of temporaryPermissionOptions">
+                    <strong>{{ option.label }}:</strong> {{ option.description }}
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  class="save-edit temporary-save"
+                  [disabled]="temporaryPermissionLoading"
+                  (click)="grantTemporaryPermission(user)"
+                >
+                  {{ temporaryPermissionLoading ? 'Activando...' : 'Activar temporalmente' }}
+                </button>
               </div>
               <div class="edit-actions">
                 <button type="button" class="save-edit" (click)="saveUser(user)">Guardar</button>
@@ -355,8 +425,11 @@
             <strong>Editando permisos</strong>
             <span>Marca solo los permisos que este rol debe tener.</span>
           </div>
+          <div class="temporary-role-note" *ngIf="roleOption !== 'superuser'">
+            Importación masiva y migración de PDFs se asignan por usuario y con vencimiento automático.
+          </div>
           <div class="perm-list">
-          <label *ngFor="let permission of permissions">
+          <label *ngFor="let permission of roleAssignablePermissions(roleOption)">
             <input
               type="checkbox"
               [checked]="permissionDraft.has(permission)"

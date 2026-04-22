@@ -1,0 +1,42 @@
+<div class="notification-center">
+  <button type="button" class="notification-trigger" (click)="toggleOpen()" aria-label="Notificaciones">
+    <span class="bell">●</span>
+    <span>Notificaciones</span>
+    <strong *ngIf="unreadCount > 0">{{ unreadCount > 9 ? '9+' : unreadCount }}</strong>
+  </button>
+
+  <div class="notification-panel" *ngIf="open">
+    <div class="notification-header">
+      <div>
+        <span>Centro</span>
+        <h3>Notificaciones</h3>
+      </div>
+      <button type="button" class="mark-all" [disabled]="unreadCount === 0" (click)="markAllRead($event)">
+        Leer todas
+      </button>
+    </div>
+
+    <p class="loading" *ngIf="loading">Cargando notificaciones...</p>
+    <div class="notification-list" *ngIf="!loading">
+      <button
+        type="button"
+        class="notification-item"
+        [class.unread]="!notification.read_at"
+        [class.high]="notification.priority === 'high'"
+        *ngFor="let notification of recentNotifications"
+        (click)="openNotification(notification)"
+      >
+        <span class="type">{{ typeLabel(notification.type) }}</span>
+        <strong>{{ notification.title }}</strong>
+        <small>{{ notification.message }}</small>
+        <span class="meta">
+          {{ notification.created_at | date: 'dd/MM/yyyy, h:mm a' }} · {{ priorityLabel(notification.priority) }}
+        </span>
+      </button>
+
+      <p class="empty" *ngIf="recentNotifications.length === 0">
+        Sin notificaciones por ahora.
+      </p>
+    </div>
+  </div>
+</div>

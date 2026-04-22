@@ -1,6 +1,9 @@
 .session-bar {
   display: flex;
   justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
   margin-bottom: 14px;
   position: relative;
   z-index: 20;

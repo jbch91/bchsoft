@@ -1,4 +1,6 @@
 <div class="session-bar" *ngIf="auth.currentUser() as user">
+  <app-notification-center></app-notification-center>
+
   <details class="user-menu">
     <summary>
       <span class="avatar">{{ initials() }}</span>

@@ -75,6 +75,8 @@ interface ImportPreviewRow {
   areaName: string;
   locationName: string;
   errors: string[];
+  fieldErrors: { field: string; message: string }[];
+  originalRow: Record<string, unknown>;
   payload?: AssetImportPayload;
 }
 
@@ -217,9 +219,11 @@ export class HojasDeVidaComponent {
   cleaning: { procedure: string; frequency?: string; responsible?: string }[] = [];
   recommendations: { text: string }[] = [];
   importPreviewRows: ImportPreviewRow[] = [];
+  importOriginalHeaders: string[] = [];
   importFileName = '';
   importMessage = '';
   importMessageType: 'info' | 'success' | 'error' = 'info';
+  importReading = false;
   importLoading = false;
 
   newAreaName = '';
@@ -583,15 +587,18 @@ export class HojasDeVidaComponent {
     const input = event.target as HTMLInputElement;
     const file = input.files && input.files[0] ? input.files[0] : null;
     this.importPreviewRows = [];
+    this.importOriginalHeaders = [];
     this.setImportMessage('', 'info');
     this.importFileName = file?.name ?? '';
     if (!file) {
+      this.cdr.detectChanges();
       return;
     }
 
     if (!this.selectedClientId) {
       this.setImportMessage('Selecciona primero un cliente.', 'error');
       input.value = '';
+      this.cdr.detectChanges();
       return;
     }
 
@@ -599,14 +606,20 @@ export class HojasDeVidaComponent {
     if (!['xlsx', 'xls', 'csv'].includes(extension)) {
       this.setImportMessage('El archivo debe ser Excel (.xlsx, .xls) o CSV.', 'error');
       input.value = '';
+      this.cdr.detectChanges();
       return;
     }
 
     if (file.size > this.maxImportFileSizeMb * 1024 * 1024) {
       this.setImportMessage(`El archivo supera ${this.maxImportFileSizeMb} MB. Divide la carga en archivos más pequeños.`, 'error');
       input.value = '';
+      this.cdr.detectChanges();
       return;
     }
+
+    this.importReading = true;
+    this.setImportMessage('Leyendo y validando el archivo...', 'info');
+    this.cdr.detectChanges();
 
     try {
       await this.loadSites();
@@ -621,6 +634,7 @@ export class HojasDeVidaComponent {
         return;
       }
       const worksheet = workbook.Sheets[firstSheetName];
+      this.importOriginalHeaders = this.getWorksheetHeaders(worksheet);
       const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
       const rows = rawRows.filter((row) => this.rowHasAnyValue(row));
       if (rows.length > this.maxImportRows) {
@@ -640,7 +654,9 @@ export class HojasDeVidaComponent {
       console.error(error);
       this.setImportMessage('No se pudo leer el archivo. Verifica que sea una plantilla válida de hojas de vida.', 'error');
     } finally {
+      this.importReading = false;
       input.value = '';
+      this.cdr.detectChanges();
     }
   }
 
@@ -673,7 +689,9 @@ export class HojasDeVidaComponent {
 
   clearHvImport(): void {
     this.importPreviewRows = [];
+    this.importOriginalHeaders = [];
     this.importFileName = '';
+    this.importReading = false;
     this.setImportMessage('', 'info');
   }
 
@@ -682,36 +700,102 @@ export class HojasDeVidaComponent {
     this.importMessageType = type;
   }
 
-  downloadHvImportErrors(): void {
+  async downloadHvImportErrors(): Promise<void> {
     const errorRows = this.importPreviewRows.filter((row) => row.errors.length > 0);
     if (!errorRows.length) {
       return;
     }
 
-    const worksheet = XLSX.utils.json_to_sheet(
-      errorRows.map((row) => ({
-        Fila: row.rowNumber,
-        Código: row.code || '',
-        Equipo: row.name || '',
-        Sede: row.siteName || '',
-        Área: row.areaName || '',
-        Ubicación: row.locationName || '',
-        Errores: row.errors.join(' | ')
-      }))
-    );
-    worksheet['!cols'] = [
-      { wch: 8 },
-      { wch: 18 },
-      { wch: 28 },
-      { wch: 24 },
-      { wch: 24 },
-      { wch: 24 },
-      { wch: 90 }
+    const ExcelJS = await import('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'INBIHOSPITALARIO';
+    workbook.created = new Date();
+    const worksheet = workbook.addWorksheet('Corregir hojas de vida', {
+      views: [{ state: 'frozen', ySplit: 1 }]
+    });
+
+    const headers = this.importOriginalHeaders.length ? this.importOriginalHeaders : this.importHeaders;
+    const errorHeader = 'Errores encontrados';
+    const allHeaders = [...headers, errorHeader];
+    worksheet.columns = allHeaders.map((header) => ({
+      header,
+      key: header,
+      width: header === errorHeader ? 72 : Math.min(Math.max(header.length + 4, 15), 30)
+    }));
+
+    worksheet.getRow(1).height = 28;
+    worksheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFA64045' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF8F343A' } },
+        left: { style: 'thin', color: { argb: 'FF8F343A' } },
+        bottom: { style: 'thin', color: { argb: 'FF8F343A' } },
+        right: { style: 'thin', color: { argb: 'FF8F343A' } }
+      };
+    });
+
+    this.importPreviewRows.forEach((preview) => {
+      const values = headers.map((header) => this.excelCellValue(this.valueFromRow(preview.originalRow, header)));
+      values.push(preview.errors.join(' | '));
+      const excelRow = worksheet.addRow(values);
+      excelRow.eachCell((cell) => {
+        cell.alignment = { vertical: 'middle', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+        };
+      });
+
+      if (!preview.errors.length) {
+        return;
+      }
+
+      const fieldKeys = new Set(preview.fieldErrors.map((error) => this.normalizeHeader(error.field)));
+      excelRow.eachCell((cell, colNumber) => {
+        const header = allHeaders[colNumber - 1];
+        const isErrorColumn = header === errorHeader;
+        const isFieldWithError = fieldKeys.has(this.normalizeHeader(header));
+        if (isErrorColumn || isFieldWithError) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isErrorColumn ? 'FFFFE4E6' : 'FFFEE2E2' } };
+          cell.font = { color: { argb: 'FF991B1B' }, bold: true };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFEF4444' } },
+            left: { style: 'thin', color: { argb: 'FFEF4444' } },
+            bottom: { style: 'thin', color: { argb: 'FFEF4444' } },
+            right: { style: 'thin', color: { argb: 'FFEF4444' } }
+          };
+        }
+      });
+    });
+
+    const guideSheet = workbook.addWorksheet('Guia de correccion');
+    guideSheet.columns = [
+      { header: 'Cómo corregir', key: 'guide', width: 100 }
     ];
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Errores');
+    [
+      'Corrige las celdas marcadas en rojo en la hoja "Corregir hojas de vida".',
+      'La columna "Errores encontrados" explica qué debe corregirse en cada fila.',
+      'Puedes borrar la columna "Errores encontrados" antes de subir nuevamente el archivo; si la dejas, el sistema la ignorará.',
+      'No cambies los nombres de las columnas obligatorias marcadas con asterisco (*).'
+    ].forEach((text) => guideSheet.addRow({ guide: text }));
+    guideSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    guideSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFA64045' } };
+
     const baseName = this.importFileName.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '');
-    XLSX.writeFile(workbook, `errores-importacion-${baseName || 'hojas-de-vida'}.xlsx`);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer as BlobPart], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `corregir-importacion-${baseName || 'hojas-de-vida'}.xlsx`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   private buildImportPreview(rows: Record<string, unknown>[]): ImportPreviewRow[] {
@@ -868,9 +952,79 @@ export class HojasDeVidaComponent {
         areaName,
         locationName,
         errors,
+        fieldErrors: this.inferImportFieldErrors(errors),
+        originalRow: row,
         payload
       };
     });
+  }
+
+  private inferImportFieldErrors(errors: string[]): { field: string; message: string }[] {
+    const mappings: { field: string; tokens: string[] }[] = [
+      { field: 'Código*', tokens: ['codigo'] },
+      { field: 'Nombre*', tokens: ['nombre'] },
+      { field: 'Marca*', tokens: ['marca'] },
+      { field: 'Modelo*', tokens: ['modelo'] },
+      { field: 'Serie*', tokens: ['serie', 'serial'] },
+      { field: 'Sede*', tokens: ['sede'] },
+      { field: 'Área*', tokens: ['area'] },
+      { field: 'Ubicación*', tokens: ['ubicacion'] },
+      { field: 'Registro Invima*', tokens: ['invima'] },
+      { field: 'Riesgo*', tokens: ['riesgo'] },
+      { field: 'Tipo equipo', tokens: ['tipo equipo'] },
+      { field: 'Forma adquisición', tokens: ['forma de adquisicion'] },
+      { field: 'Fecha adquisición', tokens: ['fecha adquisicion'] },
+      { field: 'Vida útil años', tokens: ['vida util'] },
+      { field: 'Garantía años', tokens: ['garantia'] },
+      { field: 'Correo proveedor', tokens: ['correo proveedor'] },
+      { field: 'Frecuencia mantenimiento', tokens: ['frecuencia de mantenimiento'] },
+      { field: 'Requiere calibración', tokens: ['requiere calibracion'] },
+      { field: 'Frecuencia calibración', tokens: ['frecuencia de calibracion'] }
+    ];
+    const result: { field: string; message: string }[] = [];
+    const seen = new Set<string>();
+
+    errors.forEach((message) => {
+      const normalizedMessage = this.normalizeText(message);
+      mappings.forEach((mapping) => {
+        if (!mapping.tokens.some((token) => normalizedMessage.includes(this.normalizeText(token)))) {
+          return;
+        }
+        const key = `${mapping.field}-${message}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          result.push({ field: mapping.field, message });
+        }
+      });
+    });
+
+    return result;
+  }
+
+  private getWorksheetHeaders(worksheet: XLSX.WorkSheet): string[] {
+    if (!worksheet['!ref']) {
+      return [...this.importHeaders];
+    }
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    const headers: string[] = [];
+    for (let col = range.s.c; col <= range.e.c; col += 1) {
+      const cell = worksheet[XLSX.utils.encode_cell({ r: range.s.r, c: col })];
+      const value = String(cell?.v ?? '').trim();
+      if (value && this.normalizeHeader(value) !== this.normalizeHeader('Errores encontrados')) {
+        headers.push(value);
+      }
+    }
+    return headers.length ? headers : [...this.importHeaders];
+  }
+
+  private excelCellValue(value: unknown): string | number | Date {
+    if (value instanceof Date) {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return value;
+    }
+    return String(value ?? '').trim();
   }
 
   private rowValue(row: Record<string, unknown>, ...keys: string[]): string {
@@ -882,13 +1036,19 @@ export class HojasDeVidaComponent {
   }
 
   private valueFromRow(row: Record<string, unknown>, ...keys: string[]): unknown {
-    const normalizedKeys = keys.map((key) => this.normalizeText(key.replace('*', '')));
-    const match = Object.entries(row).find(([key]) => normalizedKeys.includes(this.normalizeText(key.replace('*', ''))));
+    const normalizedKeys = keys.map((key) => this.normalizeHeader(key));
+    const match = Object.entries(row).find(([key]) => normalizedKeys.includes(this.normalizeHeader(key)));
     return match?.[1] ?? '';
   }
 
+  private normalizeHeader(value: string): string {
+    return this.normalizeText(value.replace('*', ''));
+  }
+
   private rowHasAnyValue(row: Record<string, unknown>): boolean {
-    return Object.values(row).some((value) => this.hasCellValue(value));
+    return Object.entries(row).some(([key, value]) =>
+      this.normalizeHeader(key) !== this.normalizeHeader('Errores encontrados') && this.hasCellValue(value)
+    );
   }
 
   private hasCellValue(value: unknown): boolean {

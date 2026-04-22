@@ -16,6 +16,15 @@ interface PermissionDto {
   description: string | null;
 }
 
+interface TemporaryPermissionDto {
+  id: string;
+  permission: string;
+  description: string | null;
+  expiresAt: string;
+  reason: string | null;
+  createdAt?: string;
+}
+
 interface AuditLogDto {
   id: string;
   actor_user_id: string | null;
@@ -59,6 +68,7 @@ interface UserDto {
   document_type?: string | null;
   document_number?: string | null;
   invima_registration?: string | null;
+  temporary_permissions?: TemporaryPermissionDto[];
 }
 
 interface ReaderAccessDto {
@@ -102,6 +112,24 @@ export class AdminService {
   async updateRolePermissions(roleId: number, permissions: string[]): Promise<void> {
     await firstValueFrom(
       this.http.put(`${this.apiBase}/admin/roles/${roleId}/permissions`, { permissions })
+    );
+  }
+
+  async grantTemporaryPermission(userId: string, payload: {
+    permission: string;
+    expiresAt: string;
+    reason?: string | null;
+  }): Promise<void> {
+    await firstValueFrom(
+      this.http.post(`${this.apiBase}/admin/users/${userId}/temporary-permissions`, payload)
+    );
+  }
+
+  async revokeTemporaryPermission(userId: string, permission: string): Promise<void> {
+    await firstValueFrom(
+      this.http.delete(`${this.apiBase}/admin/users/${userId}/temporary-permissions`, {
+        params: { permission }
+      })
     );
   }
 

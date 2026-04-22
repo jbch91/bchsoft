@@ -649,6 +649,129 @@ li span {
   color: var(--muted);
 }
 
+.temp-inline {
+  margin-top: 4px;
+  color: var(--brand-700) !important;
+  font-weight: 800;
+}
+
+.temporary-access {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  background:
+    radial-gradient(circle at 94% 10%, rgba(166, 64, 69, 0.12), transparent 28%),
+    #ffffff;
+  border: 1px solid color-mix(in srgb, var(--brand-500) 25%, var(--border));
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.temporary-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.temporary-header h4,
+.temporary-header p {
+  margin: 0;
+}
+
+.temporary-header h4 {
+  color: var(--brand-700);
+  font-size: 14px;
+}
+
+.temporary-header p {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.temporary-header > span {
+  background: var(--brand-50);
+  border: 1px solid color-mix(in srgb, var(--brand-100) 75%, var(--border));
+  border-radius: 999px;
+  color: var(--brand-700);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.temporary-list {
+  display: grid;
+  gap: 8px;
+}
+
+.temporary-chip {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  background: color-mix(in srgb, var(--brand-50) 70%, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--brand-100) 74%, var(--border));
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.temporary-chip strong,
+.temporary-chip small {
+  display: block;
+}
+
+.temporary-chip strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.temporary-chip small {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.temporary-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 0.8fr) minmax(220px, 1.2fr);
+}
+
+.temporary-grid .wide {
+  min-width: 0;
+}
+
+.temporary-options {
+  display: grid;
+  gap: 4px;
+}
+
+.temporary-options small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.temporary-save {
+  justify-self: start;
+}
+
+.danger.small {
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 7px 10px;
+}
+
+.danger.small:disabled,
+.temporary-save:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .ghost {
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
@@ -784,6 +907,16 @@ li span {
   font-size: 12px;
 }
 
+.temporary-role-note {
+  background: var(--brand-50);
+  border: 1px solid color-mix(in srgb, var(--brand-100) 75%, var(--border));
+  border-radius: 10px;
+  color: var(--brand-700);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 10px;
+}
+
 .perm-list {
   display: grid;
   gap: 8px;
@@ -858,9 +991,15 @@ li span {
   }
 
   .user-tabs,
-  .list-tools {
+  .list-tools,
+  .temporary-grid,
+  .temporary-chip {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .temporary-header {
+    display: grid;
   }
 }
 

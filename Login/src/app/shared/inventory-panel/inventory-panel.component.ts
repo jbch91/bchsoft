@@ -1,9 +1,9 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, EventEmitter, Input, Output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { BiomedService } from '../../biomed/biomed.service';
-import { CalibrationReportDto, CalibrationService } from '../../calibration/calibration.service';
-import { MaintenanceReportDto, MaintenanceService } from '../../maintenance/maintenance.service';
+import { AssetHistoryItemDto, BiomedService } from '../../biomed/biomed.service';
+import { CalibrationService } from '../../calibration/calibration.service';
+import { MaintenanceService } from '../../maintenance/maintenance.service';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -16,9 +16,29 @@ export interface InventoryPanelItem {
   model: string | null;
   serial: string | null;
   siteName?: string | null;
+  siteId?: string | null;
   areaName?: string | null;
+  areaId?: string | null;
   locationName?: string | null;
+  locationId?: string | null;
   status: string;
+}
+
+interface MoveSiteOption {
+  id: string;
+  name: string;
+}
+
+interface MoveAreaOption {
+  id: string;
+  name: string;
+  site_id: string | null;
+}
+
+interface MoveLocationOption {
+  id: string;
+  name: string;
+  area_id: string | null;
 }
 
 @Component({
@@ -34,11 +54,15 @@ export class InventoryPanelComponent {
   @Input() loading = false;
   @Input() errorMessage = '';
   @Input() canEdit = false;
+  @Input() canMove = false;
+  @Input() canUploadHistory = false;
+  @Input() showRetired = false;
   @Input() title = 'Inventario';
   @Input() emptyMessage = 'Sin equipos registrados.';
 
   @Output() editItem = new EventEmitter<InventoryPanelItem>();
   @Output() deleteItem = new EventEmitter<InventoryPanelItem>();
+  @Output() movedItem = new EventEmitter<void>();
 
   searchTerm = '';
   filterSite = '';
@@ -50,16 +74,35 @@ export class InventoryPanelComponent {
   historyAssetId = '';
   historyFrom = '';
   historyTo = '';
-  historyReports: MaintenanceReportDto[] = [];
-  historyCalibration: CalibrationReportDto[] = [];
+  historyOrder: 'asc' | 'desc' = 'asc';
+  historyItems: AssetHistoryItemDto[] = [];
   expandedAssetId: string | null = null;
   historyLoading = false;
-  historyCalibrationLoading = false;
   historyLoadToken = 0;
   historyLimit = 4;
   historyOffset = 0;
-  historyHasMoreMaintenance = true;
-  historyHasMoreCalibration = true;
+  historyHasMore = true;
+  historyUploadFile: File | null = null;
+  historyUploadDate = '';
+  historyUploadTitle = 'Mantenimiento histórico migrado';
+  historyUploadDescription = '';
+  historyUploadLoading = false;
+  historyUploadError = '';
+  historyUploadSuccess = '';
+  movingAssetId: string | null = null;
+  moveLoading = false;
+  moveError = '';
+  moveSuccess = '';
+  moveSites: MoveSiteOption[] = [];
+  moveAreas: MoveAreaOption[] = [];
+  moveLocations: MoveLocationOption[] = [];
+  moveForm = {
+    code: '',
+    siteId: '',
+    areaId: '',
+    locationId: '',
+    notes: ''
+  };
 
   constructor(
     private readonly biomed: BiomedService,
@@ -81,12 +124,20 @@ export class InventoryPanelComponent {
   }
 
   get statusOptions(): string[] {
-    return Array.from(new Set(this.items.map((item) => item.status || '').filter(Boolean))).sort();
+    return Array.from(new Set(this.visibleItems.map((item) => item.status || '').filter(Boolean))).sort();
+  }
+
+  get moveAreasForSite(): MoveAreaOption[] {
+    return this.moveAreas.filter((area) => area.site_id === this.moveForm.siteId);
+  }
+
+  get moveLocationsForArea(): MoveLocationOption[] {
+    return this.moveLocations.filter((location) => location.area_id === this.moveForm.areaId);
   }
 
   get filteredItems(): InventoryPanelItem[] {
     const term = this.normalize(this.searchTerm);
-    return this.items.filter((item) => {
+    return this.visibleItems.filter((item) => {
       if (this.filterArea && item.areaName !== this.filterArea) return false;
       if (this.filterSite && item.siteName !== this.filterSite) return false;
       if (this.filterLocation && item.locationName !== this.filterLocation) return false;
@@ -113,7 +164,20 @@ export class InventoryPanelComponent {
   }
 
   get totalCount(): number {
-    return this.items.length;
+    return this.visibleItems.length;
+  }
+
+  get visibleItems(): InventoryPanelItem[] {
+    if (this.showRetired) return this.items;
+    return this.items.filter((item) => item.status !== 'dado_de_baja');
+  }
+
+  get selectedHistoryAsset(): InventoryPanelItem | null {
+    return this.items.find((item) => item.id === this.historyAssetId) ?? null;
+  }
+
+  get canUploadHistoryFile(): boolean {
+    return this.canUploadHistory;
   }
 
   get activeFilters(): { key: string; label: string }[] {
@@ -225,56 +289,85 @@ export class InventoryPanelComponent {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
+  async openMovementPdf(movementId: string): Promise<void> {
+    if (!this.selectedClientId) return;
+    const blob = await this.biomed.downloadAssetMovementPdf(this.selectedClientId, movementId);
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  async openLegacyPdf(fileId: string): Promise<void> {
+    if (!this.selectedClientId) return;
+    const blob = await this.biomed.downloadAssetHistoryFilePdf(this.selectedClientId, fileId);
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  async openHistoryItem(item: AssetHistoryItemDto): Promise<void> {
+    if (!item.pdf_path) return;
+    if (item.item_type === 'maintenance_report') {
+      await this.openReportPdf(item.id);
+      return;
+    }
+    if (item.item_type === 'calibration_report') {
+      await this.openCalibrationPdf(item.id);
+      return;
+    }
+    if (item.item_type === 'movement_report') {
+      await this.openMovementPdf(item.id);
+      return;
+    }
+    await this.openLegacyPdf(item.id);
+  }
+
+  historyTypeLabel(item: AssetHistoryItemDto): string {
+    if (item.item_type === 'maintenance_report') {
+      return item.subtype === 'preventivo' ? 'Mantenimiento preventivo' : 'Mantenimiento correctivo';
+    }
+    if (item.item_type === 'calibration_report') return 'Calibración';
+    if (item.item_type === 'movement_report') return 'Movimiento';
+    return 'PDF migrado';
+  }
+
   async loadHistory(reset = true): Promise<void> {
     if (!this.selectedClientId || !this.historyAssetId) {
-      this.historyReports = [];
-      this.historyCalibration = [];
+      this.historyItems = [];
       return;
     }
     if (reset) {
       this.historyOffset = 0;
-      this.historyReports = [];
-      this.historyCalibration = [];
-      this.historyHasMoreMaintenance = true;
-      this.historyHasMoreCalibration = true;
+      this.historyItems = [];
+      this.historyHasMore = true;
     }
     const token = ++this.historyLoadToken;
     this.historyLoading = true;
-    this.historyCalibrationLoading = true;
     try {
-      const [reportsResult, calibrationResult] = await Promise.all([
-        this.maintenance.listReports(this.selectedClientId, {
-          assetId: this.historyAssetId,
-          from: this.historyFrom || undefined,
-          to: this.historyTo || undefined,
-          order: 'desc',
-          limit: this.historyLimit,
-          offset: this.historyOffset
-        }),
-        this.calibration.listReports(this.selectedClientId, this.historyAssetId, this.historyLimit, this.historyOffset)
-      ]);
-
+      const result = await this.biomed.listAssetHistory(this.selectedClientId, this.historyAssetId, {
+        from: this.historyFrom || undefined,
+        to: this.historyTo || undefined,
+        order: this.historyOrder,
+        limit: this.historyLimit,
+        offset: this.historyOffset
+      });
       if (token !== this.historyLoadToken) return;
-      this.historyReports = reportsResult;
-      this.historyHasMoreMaintenance = reportsResult.length === this.historyLimit;
-      this.historyCalibration = calibrationResult;
-      this.historyHasMoreCalibration = calibrationResult.length === this.historyLimit;
+      this.historyItems = result;
+      this.historyHasMore = result.length === this.historyLimit;
       this.cdr.detectChanges();
     } catch (error) {
       console.error(error);
-      this.historyReports = [];
-      this.historyCalibration = [];
+      this.historyItems = [];
       this.cdr.detectChanges();
     } finally {
       if (token === this.historyLoadToken) {
         this.historyLoading = false;
-        this.historyCalibrationLoading = false;
       }
     }
   }
 
   async nextHistoryPage(): Promise<void> {
-    if (!this.historyHasMoreMaintenance && !this.historyHasMoreCalibration) return;
+    if (!this.historyHasMore) return;
     this.historyOffset += this.historyLimit;
     await this.loadHistory(false);
   }
@@ -292,8 +385,11 @@ export class InventoryPanelComponent {
     }
     this.expandedAssetId = item.id;
     this.historyAssetId = item.id;
+    this.movingAssetId = null;
     this.historyFrom = '';
     this.historyTo = '';
+    this.historyOrder = 'asc';
+    this.resetHistoryUpload();
     await this.loadHistory(true);
     setTimeout(() => {
       const el = document.getElementById(`history-${item.id}`);
@@ -301,10 +397,158 @@ export class InventoryPanelComponent {
     }, 0);
   }
 
+  onHistoryFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    if (file && !this.isPdfFile(file)) {
+      this.historyUploadFile = null;
+      input.value = '';
+      this.historyUploadError = 'Solo se permiten archivos PDF.';
+      return;
+    }
+    this.historyUploadError = '';
+    this.historyUploadFile = file;
+  }
+
+  async uploadHistoryFile(): Promise<void> {
+    if (!this.selectedClientId || !this.historyAssetId) return;
+    if (!this.historyUploadDate) {
+      this.historyUploadError = 'Selecciona la fecha real del documento.';
+      return;
+    }
+    if (!this.historyUploadFile) {
+      this.historyUploadError = 'Selecciona un archivo PDF.';
+      return;
+    }
+    this.historyUploadLoading = true;
+    this.historyUploadError = '';
+    this.historyUploadSuccess = '';
+    try {
+      await this.biomed.uploadAssetHistoryFile(this.selectedClientId, this.historyAssetId, {
+        file: this.historyUploadFile,
+        documentDate: this.historyUploadDate,
+        title: this.historyUploadTitle.trim(),
+        description: this.historyUploadDescription.trim()
+      });
+      this.historyUploadSuccess = 'PDF histórico cargado correctamente.';
+      this.resetHistoryUpload(true);
+      await this.loadHistory(true);
+    } catch (error) {
+      console.error(error);
+      this.historyUploadError = 'No se pudo cargar el PDF histórico.';
+    } finally {
+      this.historyUploadLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  async deleteHistoryFile(item: AssetHistoryItemDto): Promise<void> {
+    if (!this.selectedClientId || item.item_type !== 'legacy_pdf') return;
+    const ok = window.confirm('¿Eliminar este PDF histórico del equipo?');
+    if (!ok) return;
+    await this.biomed.deleteAssetHistoryFile(this.selectedClientId, item.id);
+    await this.loadHistory(true);
+  }
+
+  async startMove(item: InventoryPanelItem): Promise<void> {
+    if (!this.selectedClientId) return;
+    this.expandedAssetId = null;
+    this.movingAssetId = item.id;
+    this.moveError = '';
+    this.moveSuccess = '';
+    this.moveForm = {
+      code: item.code || '',
+      siteId: item.siteId || '',
+      areaId: item.areaId || '',
+      locationId: item.locationId || '',
+      notes: ''
+    };
+    await this.loadMoveCatalogs();
+  }
+
+  cancelMove(): void {
+    this.movingAssetId = null;
+    this.moveError = '';
+    this.moveSuccess = '';
+  }
+
+  async loadMoveCatalogs(): Promise<void> {
+    if (!this.selectedClientId) return;
+    const [sites, areas, locations] = await Promise.all([
+      this.biomed.listSites(this.selectedClientId),
+      this.biomed.listAreas(this.selectedClientId),
+      this.biomed.listLocations(this.selectedClientId)
+    ]);
+    this.moveSites = sites.map((site) => ({ id: site.id, name: site.name }));
+    this.moveAreas = areas.map((area) => ({ id: area.id, name: area.name, site_id: area.site_id }));
+    this.moveLocations = locations.map((location) => ({ id: location.id, name: location.name, area_id: location.area_id }));
+    if (!this.moveForm.siteId && this.moveSites.length) {
+      this.moveForm.siteId = this.moveSites[0].id;
+    }
+    if (!this.moveAreasForSite.some((area) => area.id === this.moveForm.areaId)) {
+      this.moveForm.areaId = this.moveAreasForSite[0]?.id || '';
+    }
+    if (!this.moveLocationsForArea.some((location) => location.id === this.moveForm.locationId)) {
+      this.moveForm.locationId = this.moveLocationsForArea[0]?.id || '';
+    }
+    this.cdr.detectChanges();
+  }
+
+  onMoveSiteChange(): void {
+    this.moveForm.areaId = this.moveAreasForSite[0]?.id || '';
+    this.onMoveAreaChange();
+  }
+
+  onMoveAreaChange(): void {
+    this.moveForm.locationId = this.moveLocationsForArea[0]?.id || '';
+  }
+
+  async submitMove(): Promise<void> {
+    if (!this.selectedClientId || !this.movingAssetId) return;
+    if (!this.moveForm.code.trim() || !this.moveForm.siteId || !this.moveForm.areaId || !this.moveForm.locationId) {
+      this.moveError = 'Completa código, sede, área y ubicación.';
+      return;
+    }
+    this.moveLoading = true;
+    this.moveError = '';
+    this.moveSuccess = '';
+    try {
+      await this.biomed.moveAsset(this.selectedClientId, this.movingAssetId, {
+        code: this.moveForm.code.trim(),
+        siteId: this.moveForm.siteId,
+        areaId: this.moveForm.areaId,
+        locationId: this.moveForm.locationId,
+        notes: this.moveForm.notes.trim()
+      });
+      this.moveSuccess = 'Movimiento guardado y reporte PDF generado.';
+      this.movedItem.emit();
+      this.movingAssetId = null;
+    } catch (error) {
+      console.error(error);
+      this.moveError = 'No se pudo guardar el movimiento.';
+    } finally {
+      this.moveLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
   private toCsv(headers: string[], rows: string[][]): string {
     const escape = (value: string) => `"${String(value).replace(/\"/g, '""')}"`;
     const lines = [headers.join(','), ...rows.map((row) => row.map((cell) => escape(cell)).join(','))];
     return lines.join('\n');
+  }
+
+  private resetHistoryUpload(keepSuccess = false): void {
+    this.historyUploadFile = null;
+    this.historyUploadDate = '';
+    this.historyUploadTitle = 'Mantenimiento histórico migrado';
+    this.historyUploadDescription = '';
+    this.historyUploadError = '';
+    if (!keepSuccess) this.historyUploadSuccess = '';
+  }
+
+  private isPdfFile(file: File): boolean {
+    return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   }
 
   private normalize(value: string | null | undefined): string {

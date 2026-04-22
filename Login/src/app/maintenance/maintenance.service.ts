@@ -9,10 +9,16 @@ export interface MaintenanceRequestDto {
   asset_id: string;
   type: 'preventivo' | 'correctivo';
   description?: string | null;
+  requester_name?: string | null;
+  requester_email?: string | null;
   requested_by: string;
   assigned_to?: string | null;
   status: string;
+  planned_date?: string | null;
+  deadline_date?: string | null;
+  source?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface MaintenanceReportDto {
@@ -24,8 +30,13 @@ export interface MaintenanceReportDto {
   summary?: string | null;
   findings?: string | null;
   actions_taken?: string | null;
+  asset_status_after?: string | null;
+  requires_spare_parts?: boolean;
+  spare_parts_needed?: string | null;
+  spare_parts_status?: string | null;
   created_by: string;
   created_at: string;
+  engineer_name?: string | null;
   request_status?: string | null;
   signed_by_me?: boolean;
   is_fully_signed?: boolean;
@@ -93,6 +104,11 @@ export class MaintenanceService {
     summary?: string;
     findings?: string;
     actionsTaken?: string;
+    assetStatusAfter?: string;
+    assetLifecycleAction?: 'retire' | null;
+    requiresSpareParts?: boolean;
+    sparePartsNeeded?: string;
+    sparePartsStatus?: string;
   }): Promise<void> {
     await firstValueFrom(this.http.post(`${this.apiBase}/maintenance/reports`, payload));
   }

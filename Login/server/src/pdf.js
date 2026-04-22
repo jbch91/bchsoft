@@ -1,12 +1,45 @@
 import fs from 'fs';
 import path from 'path';
 
-const TABLE_BORDER = '#94a3b8';
-const TABLE_HEADER_BG = '#ffffff';
-const TABLE_STRIPE_BG = '#f8fafc';
+const PDF_BRAND_50 = '#fff1f2';
+const PDF_BRAND_100 = '#ffe4e6';
+const PDF_BRAND_200 = '#fecdd3';
+const PDF_BRAND_600 = '#a64045';
+const PDF_BRAND_700 = '#8f3237';
+const PDF_BRAND_800 = '#7f1d1d';
+const PDF_INK = '#241416';
+const PDF_MUTED = '#6b4b4f';
+const PDF_DANGER = '#991b1b';
+const PDF_WHITE = '#ffffff';
+const PDF_SOFT_BG = '#fff7f7';
+const PDF_TABLE_BORDER = '#e7c8cb';
+const PDF_TABLE_DIVIDER = '#f0d4d8';
+const PDF_TABLE_STRIPE_BG = '#fffafa';
+const TABLE_BORDER = PDF_TABLE_BORDER;
+const TABLE_HEADER_BG = PDF_BRAND_50;
+const TABLE_STRIPE_BG = PDF_TABLE_STRIPE_BG;
 
 function safeText(value) {
   return value || '-';
+}
+
+function maintenanceAssetStatusLabel(value) {
+  const labels = {
+    operativo: 'Operativo',
+    operativo_observacion: 'Operativo con observación',
+    fuera_de_servicio: 'Fuera de servicio'
+  };
+  return labels[value] || safeText(value);
+}
+
+function sparePartStatusLabel(value) {
+  const labels = {
+    no_aplica: 'No aplica',
+    pendiente: 'Pendiente',
+    solicitado: 'Repuesto solicitado',
+    recibido: 'Recibido'
+  };
+  return labels[value] || safeText(value);
 }
 
 function safeNumber(value, fallback) {
@@ -23,8 +56,44 @@ function formatDate(value) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+function paintPageBackground(doc) {
+  doc.save();
+  doc
+    .rect(0, 0, doc.page.width, doc.page.height)
+    .fillColor(PDF_WHITE)
+    .fill();
+  doc.restore();
+}
+
+function documentTitle(doc, title) {
+  paintPageBackground(doc);
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(18)
+    .fillColor(PDF_BRAND_700)
+    .text(title, { align: 'center' });
+
+  const lineWidth = 96;
+  const lineX = (doc.page.width - lineWidth) / 2;
+  const lineY = doc.y + 4;
+  doc
+    .moveTo(lineX, lineY)
+    .lineTo(lineX + lineWidth, lineY)
+    .strokeColor(PDF_BRAND_200)
+    .lineWidth(1.4)
+    .stroke();
+
+  doc.moveDown(0.8);
+  doc.font('Helvetica').fillColor(PDF_INK);
+}
+
 function sectionTitle(doc, title, opts = {}) {
   doc.moveDown(0.8);
+  const bottomLimit = doc.page.height - doc.page.margins.bottom;
+  if (doc.y + 48 > bottomLimit) {
+    doc.addPage();
+    paintPageBackground(doc);
+  }
   const startX = safeNumber(opts.x ?? doc.page.margins.left, doc.page.margins.left);
   const width = safeNumber(
     opts.width ?? doc.page.width - doc.page.margins.left - doc.page.margins.right,
@@ -34,16 +103,24 @@ function sectionTitle(doc, title, opts = {}) {
   doc.save();
   doc
     .rect(startX, doc.y, width, barHeight)
-    .fillColor('#0f172a')
+    .fillColor(PDF_BRAND_700)
     .fill();
   doc
-    .fillColor('#ffffff')
+    .fillColor(PDF_WHITE)
     .font('Helvetica-Bold')
     .fontSize(11.5)
     .text(title, startX + 8, doc.y + 4, { width: width - 16, align: 'left' });
   doc.restore();
   doc.moveDown(1.4);
-  doc.fillColor('#0f172a').fontSize(10.5);
+  doc.fillColor(PDF_INK).fontSize(10.5);
+}
+
+function ensureSpace(doc, height = 120) {
+  const bottomLimit = doc.page.height - doc.page.margins.bottom;
+  if (doc.y + height > bottomLimit) {
+    doc.addPage();
+    paintPageBackground(doc);
+  }
 }
 
 function drawTable(
@@ -89,10 +166,12 @@ function drawTable(
     const bottomLimit = doc.page.height - doc.page.margins.bottom;
     if (cursorY + height > bottomLimit) {
       doc.addPage();
+      paintPageBackground(doc);
       cursorY = doc.page.margins.top;
     }
     const rowWidth = widths.reduce((a, b) => a + b, 0);
-    if (header && rowIndex === 0) {
+    const isHeaderRow = header && rowIndex === 0;
+    if (isHeaderRow) {
       doc
         .rect(startX, cursorY, rowWidth, height)
         .fillColor(TABLE_HEADER_BG)
@@ -117,12 +196,13 @@ function drawTable(
         doc
           .moveTo(cellX, cursorY)
           .lineTo(cellX, cursorY + height)
-          .strokeColor('#cbd5f5')
+          .strokeColor(PDF_TABLE_DIVIDER)
           .stroke();
       }
       doc
+        .font(isHeaderRow ? 'Helvetica-Bold' : 'Helvetica')
         .fontSize(textSize)
-        .fillColor('#0f172a')
+        .fillColor(isHeaderRow ? PDF_BRAND_800 : PDF_INK)
         .text(String(cell), cellX + padding, cursorY + 6, { width: width - padding * 2 });
       cellX += width;
     });
@@ -135,9 +215,80 @@ function drawTable(
   return cursorY + 6;
 }
 
+function drawAssetEngineerSignature(doc, asset) {
+  sectionTitle(doc, 'QUIEN ELABORO / ACTUALIZO LA HOJA DE VIDA');
+  ensureSpace(doc, 125);
+
+  const startX = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const startY = doc.y;
+  const boxHeight = 130;
+  const signatureWidth = 205;
+  const signatureBoxX = startX + 16;
+  const signatureBoxY = startY + 34;
+  const signatureBoxHeight = 60;
+
+  doc
+    .roundedRect(startX, startY, width, boxHeight, 8)
+    .fillColor(PDF_SOFT_BG)
+    .fill()
+    .strokeColor(PDF_BRAND_200)
+    .lineWidth(0.8)
+    .stroke();
+
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(10)
+    .fillColor(PDF_BRAND_800)
+    .text('Firma del ingeniero biomédico que elaboró o actualizó técnicamente', startX + 14, startY + 12, { width: width - 28 });
+
+  const signaturePath = asset.hv_engineer_signature_path
+    ? path.join(process.cwd(), asset.hv_engineer_signature_path.replace(/^\//, ''))
+    : null;
+
+  if (signaturePath && fs.existsSync(signaturePath)) {
+    doc
+      .roundedRect(signatureBoxX, signatureBoxY, signatureWidth, signatureBoxHeight, 6)
+      .fillColor(PDF_WHITE)
+      .fill()
+      .strokeColor(PDF_BRAND_200)
+      .stroke();
+    doc.image(signaturePath, signatureBoxX + 10, signatureBoxY + 7, {
+      fit: [signatureWidth - 20, signatureBoxHeight - 14],
+      align: 'center',
+      valign: 'center'
+    });
+  } else {
+    doc
+      .font('Helvetica')
+      .fontSize(9)
+      .fillColor(PDF_DANGER)
+      .text('Firma digital pendiente.', signatureBoxX, startY + 58, { width: signatureWidth, align: 'center' });
+  }
+
+  const infoX = signatureBoxX + signatureWidth + 24;
+  const infoWidth = width - signatureWidth - 56;
+  doc
+    .font('Helvetica')
+    .fontSize(9.5)
+    .fillColor(PDF_INK)
+    .text(`Nombre completo: ${safeText(asset.hv_engineer_name)}`, infoX, startY + 36, { width: infoWidth })
+    .text(`Registro INVIMA: ${safeText(asset.hv_engineer_invima_registration)}`, infoX, startY + 52, { width: infoWidth })
+    .text(`Documento: ${safeText(asset.hv_engineer_document_number)}`, infoX, startY + 68, { width: infoWidth })
+    .text(`Fecha de elaboración/actualización: ${formatDate(asset.hv_engineer_signed_at)}`, infoX, startY + 84, { width: infoWidth });
+
+  doc
+    .fontSize(8)
+    .fillColor(PDF_MUTED)
+    .text('Esta firma queda fija y solo se actualiza cuando un ingeniero biomédico crea o modifica técnicamente la hoja de vida.', startX + 14, startY + 108, {
+      width: width - 28
+    });
+
+  doc.y = startY + boxHeight + 8;
+}
+
 export function buildAssetPdf(doc, { client, asset }) {
-  doc.fontSize(18).fillColor('#0f172a').text('Hoja de Vida - Equipo Biomédico', { align: 'center' });
-  doc.moveDown(0.5);
+  documentTitle(doc, 'Hoja de Vida - Equipo Biomédico');
 
   const headerY = doc.y;
   const headerLeftX = doc.page.margins.left;
@@ -147,13 +298,13 @@ export function buildAssetPdf(doc, { client, asset }) {
 
   doc
     .rect(headerLeftX, headerY, headerWidth, headerHeight)
-    .strokeColor('#94a3b8')
+    .strokeColor(PDF_TABLE_BORDER)
     .lineWidth(1)
     .stroke();
   doc
     .moveTo(headerLeftX + logoCellWidth, headerY)
     .lineTo(headerLeftX + logoCellWidth, headerY + headerHeight)
-    .strokeColor('#94a3b8')
+    .strokeColor(PDF_TABLE_BORDER)
     .stroke();
 
   if (client.logo_path) {
@@ -172,7 +323,7 @@ export function buildAssetPdf(doc, { client, asset }) {
   doc
     .font('Helvetica-Bold')
     .fontSize(13)
-    .fillColor('#0f172a')
+    .fillColor(PDF_INK)
     .text(safeText(client.name), infoStartX, headerY + 8, { width: infoMaxWidth });
 
   // Datos del cliente (sin bordes), pegados al nombre
@@ -185,7 +336,7 @@ export function buildAssetPdf(doc, { client, asset }) {
   doc
     .font('Helvetica')
     .fontSize(8.5)
-    .fillColor('#334155')
+    .fillColor(PDF_MUTED)
     .text(infoLines.join('\n'), infoStartX, headerY + 26, { width: infoMaxWidth });
 
   doc.y = headerY + headerHeight + 12;
@@ -202,16 +353,16 @@ export function buildAssetPdf(doc, { client, asset }) {
       photoBottomY = photoY + frameSize + 18;
       doc
         .rect(photoX - 4, photoY - 4, frameSize + 8, frameSize + 24)
-        .fillColor('#f1f5f9')
+        .fillColor(PDF_BRAND_50)
         .fill();
       doc
         .rect(photoX - 4, photoY - 4, frameSize + 8, frameSize + 8)
-        .strokeColor('#94a3b8')
+        .strokeColor(PDF_TABLE_BORDER)
         .lineWidth(0.8)
         .stroke();
       doc.image(photoPath, photoX, photoY, { fit: [frameSize, frameSize] });
       doc
-        .fillColor('#334155')
+        .fillColor(PDF_MUTED)
         .fontSize(9)
         .text('Foto del equipo', photoX, photoY + frameSize + 4, { width: frameSize, align: 'center' });
     }
@@ -340,12 +491,102 @@ export function buildAssetPdf(doc, { client, asset }) {
     drawTable(doc, [['Recomendaciones', 'Sin recomendaciones registradas.']], { colWidths: [170, 320], header: true });
   }
 
+  drawAssetEngineerSignature(doc, asset);
+
+  return doc;
+}
+
+export function buildAssetMovementPdf(doc, { client, asset, movement }) {
+  documentTitle(doc, 'Reporte de Movimiento de Equipo');
+
+  const headerY = doc.y;
+  const headerLeftX = doc.page.margins.left;
+  const headerWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const headerHeight = 72;
+  const logoCellWidth = 160;
+
+  doc
+    .rect(headerLeftX, headerY, headerWidth, headerHeight)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(1)
+    .stroke();
+  doc
+    .moveTo(headerLeftX + logoCellWidth, headerY)
+    .lineTo(headerLeftX + logoCellWidth, headerY + headerHeight)
+    .strokeColor(PDF_TABLE_BORDER)
+    .stroke();
+
+  if (client.logo_path) {
+    const logoPath = path.join(process.cwd(), client.logo_path.replace(/^\//, ''));
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, headerLeftX + 10, headerY + 8, { fit: [140, 54] });
+    }
+  }
+
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(12)
+    .fillColor(PDF_INK)
+    .text(safeText(client.name), headerLeftX + logoCellWidth + 10, headerY + 10, {
+      width: headerWidth - logoCellWidth - 20
+    });
+  doc
+    .font('Helvetica')
+    .fontSize(8.5)
+    .fillColor(PDF_MUTED)
+    .text(
+      [
+        `NIT: ${safeText(client.nit)}`,
+        `Ciudad: ${safeText(client.city)}`,
+        `Dirección: ${safeText(client.address)}`,
+        `Correo: ${safeText(client.email)}`
+      ].join('\n'),
+      headerLeftX + logoCellWidth + 10,
+      headerY + 28,
+      { width: headerWidth - logoCellWidth - 20 }
+    );
+
+  doc.y = headerY + headerHeight + 14;
+
+  sectionTitle(doc, 'DATOS DEL EQUIPO');
+  drawTable(doc, [
+    ['Código', safeText(asset.code)],
+    ['Equipo', safeText(asset.name)],
+    ['Marca', safeText(asset.brand)],
+    ['Modelo', safeText(asset.model)],
+    ['Serie', safeText(asset.serial)]
+  ], { colWidths: [170, 320], header: true });
+
+  sectionTitle(doc, 'MOVIMIENTO REALIZADO');
+  drawTable(doc, [
+    ['Fecha', formatDate(movement.created_at)],
+    ['Realizado por', safeText(movement.moved_by_name)],
+    ['Rol', safeText(movement.moved_by_role)],
+    ['Observación', safeText(movement.notes)]
+  ], { colWidths: [170, 320], header: true });
+
+  sectionTitle(doc, 'CAMBIOS DE UBICACION');
+  drawTable(doc, [
+    ['Campo', 'Antes', 'Después'],
+    ['Código', safeText(movement.from_code), safeText(movement.to_code)],
+    ['Sede', safeText(movement.from_site_name), safeText(movement.to_site_name)],
+    ['Área', safeText(movement.from_area_name), safeText(movement.to_area_name)],
+    ['Ubicación', safeText(movement.from_location_name), safeText(movement.to_location_name)]
+  ], { colWidths: [110, 185, 185], header: true });
+
+  doc.moveDown(1);
+  doc
+    .fontSize(8.5)
+    .fillColor(PDF_MUTED)
+    .text('Este reporte se genera automáticamente al mover el equipo y queda almacenado en el historial de la hoja de vida.', {
+      align: 'center'
+    });
+
   return doc;
 }
 
 export function buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures }) {
-  doc.fontSize(18).fillColor('#0f172a').text('Reporte de Mantenimiento', { align: 'center' });
-  doc.moveDown(0.6);
+  documentTitle(doc, 'Reporte de Mantenimiento');
 
   const headerY = doc.y;
   const headerLeftX = doc.page.margins.left;
@@ -355,13 +596,13 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
 
   doc
     .rect(headerLeftX, headerY, headerWidth, headerHeight)
-    .strokeColor('#94a3b8')
+    .strokeColor(PDF_TABLE_BORDER)
     .lineWidth(1)
     .stroke();
   doc
     .moveTo(headerLeftX + logoCellWidth, headerY)
     .lineTo(headerLeftX + logoCellWidth, headerY + headerHeight)
-    .strokeColor('#94a3b8')
+    .strokeColor(PDF_TABLE_BORDER)
     .stroke();
 
   if (client.logo_path) {
@@ -377,7 +618,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
   doc
     .font('Helvetica-Bold')
     .fontSize(13)
-    .fillColor('#0f172a')
+    .fillColor(PDF_INK)
     .text(safeText(client.name), infoStartX, headerY + 8, { width: infoMaxWidth });
 
   const infoLines = [
@@ -389,7 +630,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
   doc
     .font('Helvetica')
     .fontSize(8.5)
-    .fillColor('#334155')
+    .fillColor(PDF_MUTED)
     .text(infoLines.join('\n'), infoStartX, headerY + 26, { width: infoMaxWidth });
 
   doc.y = headerY + headerHeight + 10;
@@ -415,13 +656,17 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     ['Fecha solicitud', formatDate(request.created_at)],
     ['Resumen', safeText(report.summary)],
     ['Hallazgos', safeText(report.findings)],
-    ['Acciones realizadas', safeText(report.actions_taken)]
+    ['Acciones realizadas', safeText(report.actions_taken)],
+    ['Estado final del equipo', maintenanceAssetStatusLabel(report.asset_status_after)],
+    ['Requiere repuesto', report.requires_spare_parts ? 'Sí' : 'No'],
+    ['Repuesto requerido', report.requires_spare_parts ? safeText(report.spare_parts_needed) : 'No aplica'],
+    ['Estado del repuesto', report.requires_spare_parts ? sparePartStatusLabel(report.spare_parts_status) : 'No aplica']
   ];
   drawTable(doc, reportRows, { colWidths: [140, 360], rowHeight: 24 });
 
   sectionTitle(doc, 'FIRMAS');
   if (!signatures?.length) {
-    doc.fontSize(10).fillColor('#475569').text('Sin firmas registradas.');
+    doc.fontSize(10).fillColor(PDF_MUTED).text('Sin firmas registradas.');
     return;
   }
 
@@ -439,7 +684,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
 
     doc
       .rect(cursorX, cursorY, signatureWidth, signatureHeight)
-      .strokeColor('#cbd5f5')
+      .strokeColor(PDF_TABLE_DIVIDER)
       .lineWidth(0.8)
       .stroke();
 
@@ -453,7 +698,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     doc
       .font('Helvetica')
       .fontSize(8.5)
-      .fillColor('#475569')
+      .fillColor(PDF_MUTED)
       .text('Firmante', cursorX, cursorY + signatureHeight + 2, {
         width: signatureWidth,
         align: 'center'
@@ -461,7 +706,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     doc
       .font('Helvetica-Bold')
       .fontSize(10)
-      .fillColor('#0f172a')
+      .fillColor(PDF_INK)
       .text(safeText(sig.display_name), cursorX, cursorY + signatureHeight + 12, {
         width: signatureWidth,
         align: 'center'
@@ -469,7 +714,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     doc
       .font('Helvetica')
       .fontSize(8.5)
-      .fillColor('#334155')
+      .fillColor(PDF_MUTED)
       .text(`Rol: ${safeText(sig.role)}`, cursorX, cursorY + signatureHeight + 24, {
         width: signatureWidth,
         align: 'center'
@@ -477,7 +722,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     doc
       .font('Helvetica')
       .fontSize(8.5)
-      .fillColor('#334155')
+      .fillColor(PDF_MUTED)
       .text(`Fecha: ${formatDate(sig.signed_at)}`, cursorX, cursorY + signatureHeight + 34, {
         width: signatureWidth,
         align: 'center'
@@ -490,8 +735,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
 }
 
 export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
-  doc.fontSize(18).fillColor('#0f172a').text('Cronograma de Mantenimiento Preventivo', { align: 'center' });
-  doc.moveDown(0.6);
+  documentTitle(doc, 'Cronograma de Mantenimiento Preventivo');
 
   const headerY = doc.y;
   const headerLeftX = doc.page.margins.left;
@@ -501,13 +745,13 @@ export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
 
   doc
     .rect(headerLeftX, headerY, headerWidth, headerHeight)
-    .strokeColor('#94a3b8')
+    .strokeColor(PDF_TABLE_BORDER)
     .lineWidth(1)
     .stroke();
   doc
     .moveTo(headerLeftX + logoCellWidth, headerY)
     .lineTo(headerLeftX + logoCellWidth, headerY + headerHeight)
-    .strokeColor('#94a3b8')
+    .strokeColor(PDF_TABLE_BORDER)
     .stroke();
 
   if (client.logo_path) {
@@ -523,7 +767,7 @@ export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
   doc
     .font('Helvetica-Bold')
     .fontSize(13)
-    .fillColor('#0f172a')
+    .fillColor(PDF_INK)
     .text(safeText(client.name), infoStartX, headerY + 8, { width: infoMaxWidth });
 
   const infoLines = [
@@ -533,7 +777,7 @@ export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
   doc
     .font('Helvetica')
     .fontSize(9)
-    .fillColor('#334155')
+    .fillColor(PDF_MUTED)
     .text(infoLines.join('\n'), infoStartX, headerY + 28, { width: infoMaxWidth });
 
   doc.y = headerY + headerHeight + 10;
@@ -601,8 +845,7 @@ export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
 }
 
 export function buildCalibrationSchedulePdf(doc, { client, schedule, items }) {
-  doc.fontSize(18).fillColor('#0f172a').text('Cronograma de Calibración', { align: 'center' });
-  doc.moveDown(0.6);
+  documentTitle(doc, 'Cronograma de Calibración');
 
   const headerY = doc.y;
   const headerLeftX = doc.page.margins.left;
@@ -612,13 +855,13 @@ export function buildCalibrationSchedulePdf(doc, { client, schedule, items }) {
 
   doc
     .rect(headerLeftX, headerY, headerWidth, headerHeight)
-    .strokeColor('#94a3b8')
+    .strokeColor(PDF_TABLE_BORDER)
     .lineWidth(1)
     .stroke();
   doc
     .moveTo(headerLeftX + logoCellWidth, headerY)
     .lineTo(headerLeftX + logoCellWidth, headerY + headerHeight)
-    .strokeColor('#94a3b8')
+    .strokeColor(PDF_TABLE_BORDER)
     .stroke();
 
   if (client.logo_path) {
@@ -634,7 +877,7 @@ export function buildCalibrationSchedulePdf(doc, { client, schedule, items }) {
   doc
     .font('Helvetica-Bold')
     .fontSize(13)
-    .fillColor('#0f172a')
+    .fillColor(PDF_INK)
     .text(safeText(client.name), infoStartX, headerY + 8, { width: infoMaxWidth });
 
   const infoLines = [
@@ -644,7 +887,7 @@ export function buildCalibrationSchedulePdf(doc, { client, schedule, items }) {
   doc
     .font('Helvetica')
     .fontSize(9)
-    .fillColor('#334155')
+    .fillColor(PDF_MUTED)
     .text(infoLines.join('\n'), infoStartX, headerY + 28, { width: infoMaxWidth });
 
   doc.y = headerY + headerHeight + 10;
@@ -698,8 +941,7 @@ export function buildCalibrationSchedulePdf(doc, { client, schedule, items }) {
 }
 
 export function buildTrainingSchedulePdf(doc, { client, schedule, items }) {
-  doc.fontSize(18).fillColor('#0f172a').text('Cronograma de Capacitaciones', { align: 'center' });
-  doc.moveDown(0.6);
+  documentTitle(doc, 'Cronograma de Capacitaciones');
 
   const headerY = doc.y;
   const headerLeftX = doc.page.margins.left;
@@ -709,13 +951,13 @@ export function buildTrainingSchedulePdf(doc, { client, schedule, items }) {
 
   doc
     .rect(headerLeftX, headerY, headerWidth, headerHeight)
-    .strokeColor('#94a3b8')
+    .strokeColor(PDF_TABLE_BORDER)
     .lineWidth(1)
     .stroke();
   doc
     .moveTo(headerLeftX + logoCellWidth, headerY)
     .lineTo(headerLeftX + logoCellWidth, headerY + headerHeight)
-    .strokeColor('#94a3b8')
+    .strokeColor(PDF_TABLE_BORDER)
     .stroke();
 
   if (client.logo_path) {
@@ -731,7 +973,7 @@ export function buildTrainingSchedulePdf(doc, { client, schedule, items }) {
   doc
     .font('Helvetica-Bold')
     .fontSize(13)
-    .fillColor('#0f172a')
+    .fillColor(PDF_INK)
     .text(safeText(client.name), infoStartX, headerY + 8, { width: infoMaxWidth });
 
   const infoLines = [
@@ -742,7 +984,7 @@ export function buildTrainingSchedulePdf(doc, { client, schedule, items }) {
   doc
     .font('Helvetica')
     .fontSize(9)
-    .fillColor('#334155')
+    .fillColor(PDF_MUTED)
     .text(infoLines.join('\n'), infoStartX, headerY + 26, { width: infoMaxWidth });
 
   doc.y = headerY + headerHeight + 10;

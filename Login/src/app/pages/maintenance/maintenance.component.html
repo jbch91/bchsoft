@@ -3,7 +3,7 @@
   <header>
     <div>
       <h1>Reportes de mantenimiento</h1>
-      <p>Solicitudes, reportes y firmas por equipo.</p>
+      <p>Solicitudes, trazabilidad, reportes, firmas y estado operativo de los equipos.</p>
     </div>
     <div class="header-actions">
       <a class="back" routerLink="/dashboard">Menú</a>
@@ -39,110 +39,265 @@
     </div>
   </div>
 
+  <div class="maintenance-summary">
+    <div>
+      <span>Solicitudes activas</span>
+      <strong>{{ requests.length }}</strong>
+    </div>
+    <div>
+      <span>Reportes</span>
+      <strong>{{ reportListCount }}</strong>
+    </div>
+    <div>
+      <span>Pendientes repuesto</span>
+      <strong>{{ sparePartReports.length + pendingSpareAssets.length }}</strong>
+    </div>
+    <div>
+      <span>Dados de baja</span>
+      <strong>{{ retiredAssets.length }}</strong>
+    </div>
+  </div>
+
   <div class="tab-bar">
     <button
       type="button"
       class="tab"
-      [class.active]="viewMode === 'solicitudes'"
-      (click)="viewMode = 'solicitudes'"
+      *ngIf="auth.hasPermission('maintenance:request:create')"
+      [class.active]="viewMode === 'crear_solicitud'"
+      (click)="viewMode = 'crear_solicitud'"
     >
-      Solicitudes
+      Crear solicitud
     </button>
-    <button
-      type="button"
-      class="tab"
-      [class.active]="viewMode === 'reportes'"
-      (click)="viewMode = 'reportes'"
-    >
+    <button type="button" class="tab" [class.active]="viewMode === 'solicitudes'" (click)="viewMode = 'solicitudes'">
+      Listado solicitudes
+    </button>
+    <button type="button" class="tab" [class.active]="viewMode === 'reportes'" (click)="viewMode = 'reportes'">
       Reportes
     </button>
-    <button
-      type="button"
-      class="tab"
-      [class.active]="viewMode === 'equipos'"
-      (click)="viewMode = 'equipos'"
-    >
-      Datos del equipo
+    <button type="button" class="tab" [class.active]="viewMode === 'repuestos'" (click)="viewMode = 'repuestos'">
+      Pendientes repuestos
+    </button>
+    <button type="button" class="tab" [class.active]="viewMode === 'bajas'" (click)="viewMode = 'bajas'">
+      Equipos dados de baja
+    </button>
+    <button type="button" class="tab" [class.active]="viewMode === 'equipos'" (click)="viewMode = 'equipos'">
+      Estado equipos
     </button>
   </div>
 
-  <ng-container *ngIf="viewMode === 'solicitudes'">
-    <div class="grid">
-      <div class="card" *ngIf="auth.hasPermission('maintenance:request:create')">
-        <h2>Nueva solicitud</h2>
-        <form (ngSubmit)="createRequest()">
+  <ng-container *ngIf="viewMode === 'crear_solicitud'">
+    <div class="grid request-grid">
+      <div class="card form-card" *ngIf="auth.hasPermission('maintenance:request:create')">
+        <div class="card-title">
+          <span>Nueva solicitud</span>
+          <h2>Reportar falla o necesidad</h2>
+          <p>Los mantenimientos preventivos se generan desde cronograma; lector y almacenista solo solicitan correctivos.</p>
+        </div>
+        <form class="request-form" (ngSubmit)="createRequest()">
           <label>
             Tipo
             <select [(ngModel)]="requestType" name="requestType">
               <option value="correctivo">Correctivo</option>
-              <option
-                value="preventivo"
-                *ngIf="!auth.hasRole('lector') && !auth.hasRole('almacenista')"
-              >
+              <option value="preventivo" *ngIf="!auth.hasRole('lector') && !auth.hasRole('almacenista')">
                 Preventivo
               </option>
             </select>
           </label>
+
+          <div class="equipment-picker">
+            <label>
+              Buscar equipo
+              <input
+                type="text"
+                [(ngModel)]="assetSearchTerm"
+                name="assetSearchTerm"
+                placeholder="Código, equipo, área, ubicación, marca, modelo, serie..."
+              />
+            </label>
+            <label>
+              Equipo
+              <select [(ngModel)]="requestAssetId" name="requestAssetId">
+                <option *ngFor="let asset of filteredAssets" [value]="asset.id">
+                  {{ asset.code }} - {{ asset.name }} · Área {{ asset.areaName || '-' }} · Ubicación {{ asset.locationName || '-' }}
+                </option>
+              </select>
+            </label>
+          </div>
+
+          <div class="selected-asset-card" *ngIf="selectedRequestAsset as asset">
+            <div>
+              <span>Equipo seleccionado</span>
+              <strong>{{ asset.code }} - {{ asset.name }}</strong>
+              <small>{{ asset.brand || '-' }} · {{ asset.model || '-' }} · Serie {{ asset.serial || '-' }}</small>
+            </div>
+            <div class="asset-location">
+              <span>Sede</span>
+              <strong>{{ asset.siteName || '-' }}</strong>
+            </div>
+            <div class="asset-location highlight">
+              <span>Área</span>
+              <strong>{{ asset.areaName || '-' }}</strong>
+            </div>
+            <div class="asset-location">
+              <span>Ubicación</span>
+              <strong>{{ asset.locationName || '-' }}</strong>
+            </div>
+            <span class="status-pill" [ngClass]="statusClass(asset.status)">{{ statusLabel(asset.status || 'activo') }}</span>
+          </div>
+
+          <div class="qr-card">
+            <div>
+              <strong>Identificación por QR</strong>
+              <p>Escanea el QR del equipo o pega el código si estás trabajando desde computador.</p>
+            </div>
+            <div class="qr-actions">
+              <button type="button" class="ghost" *ngIf="!qrScannerActive" (click)="startQrScan()">Escanear QR</button>
+              <button type="button" class="danger-soft" *ngIf="qrScannerActive" (click)="stopQrScan()">Detener cámara</button>
+            </div>
+            <video #qrVideo class="qr-video" *ngIf="qrScannerActive" muted playsinline></video>
+            <div class="qr-manual">
+              <input type="text" [(ngModel)]="qrManualCode" name="qrManualCode" placeholder="Pegar código, serial o QR" />
+              <button type="button" class="ghost" (click)="applyManualQrCode()">Aplicar</button>
+            </div>
+            <p class="error compact" *ngIf="qrScanError">{{ qrScanError }}</p>
+          </div>
+
           <label>
-            Equipo
-            <select [(ngModel)]="requestAssetId" name="requestAssetId">
-              <option *ngFor="let asset of assets" [value]="asset.id">{{ asset.code }} - {{ asset.name }}</option>
-            </select>
-          </label>
-          <label>
-            Descripción
+            Descripción de la falla o necesidad
             <textarea [(ngModel)]="requestDescription" name="requestDescription" rows="3"></textarea>
           </label>
-          <button type="submit" [disabled]="loading">Crear solicitud</button>
+          <div class="request-submit">
+            <button type="submit" [disabled]="loading">Crear solicitud</button>
+            <small>Antes de guardar, confirma que el área y ubicación correspondan al equipo seleccionado.</small>
+          </div>
         </form>
       </div>
     </div>
+  </ng-container>
 
+  <ng-container *ngIf="viewMode === 'solicitudes'">
     <div class="card">
-      <h2>Solicitudes</h2>
+      <div class="list-title">
+        <div>
+          <h2>Listado de solicitudes</h2>
+          <p>Trazabilidad desde la creación hasta el reporte y firma.</p>
+        </div>
+        <div class="list-tools">
+          <label>
+            Buscar
+            <input type="text" [(ngModel)]="requestSearchTerm" placeholder="Equipo, área, ubicación, serial, solicitante..." />
+          </label>
+          <label>
+            Estado
+            <select [(ngModel)]="requestStatusFilter">
+              <option *ngFor="let option of requestStatuses" [value]="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
       <p *ngIf="loading">Cargando...</p>
-      <div class="table" *ngIf="!loading">
+      <div class="table requests-table" *ngIf="!loading">
         <div class="row header">
           <span>Equipo</span>
-          <span>Tipo</span>
+          <span>Solicitud</span>
           <span>Estado</span>
+          <span>Solicitante</span>
           <span>Acciones</span>
         </div>
-        <div class="row" *ngFor="let request of requests">
-          <span>{{ assetLabel(request.asset_id) }}</span>
-          <span>{{ request.type }}</span>
-          <span>{{ request.status }}</span>
+        <div class="row" *ngFor="let request of filteredRequests">
           <span>
+            <strong>{{ assetLabel(request.asset_id) }}</strong>
+            <small>{{ assetMap.get(request.asset_id)?.siteName || '-' }} / {{ assetMap.get(request.asset_id)?.areaName || '-' }}</small>
+          </span>
+          <span>
+            {{ request.type }}
+            <small>{{ request.description || 'Sin descripción' }}</small>
+            <small>{{ request.created_at | date: 'dd/MM/yyyy, h:mm a' }}</small>
+          </span>
+          <span><span class="status-pill" [ngClass]="statusClass(request.status)">{{ statusLabel(request.status) }}</span></span>
+          <span>{{ request.requester_name || '-' }}</span>
+          <span class="actions">
             <button *ngIf="canTakeRequest(request)" type="button" (click)="takeRequest(request.id)">
-              Tomar
+              {{ takeRequestLabel(request) }}
             </button>
             <button
-              *ngIf="auth.hasRole('superuser')"
+              *ngIf="request.status === 'espera_repuesto'"
               type="button"
-              class="danger"
-              (click)="deleteRequest(request.id)"
+              class="ghost"
+              (click)="openSpareWorkflow(request)"
             >
+              Gestionar repuesto
+            </button>
+            <button *ngIf="auth.hasRole('superuser')" type="button" class="danger" (click)="deleteRequest(request.id)">
               Eliminar
             </button>
           </span>
         </div>
+        <p class="empty" *ngIf="filteredRequests.length === 0">No hay solicitudes con esos filtros.</p>
       </div>
     </div>
   </ng-container>
 
   <ng-container *ngIf="viewMode === 'reportes'">
     <div class="grid">
-      <div class="card" *ngIf="auth.hasPermission('maintenance:report:create')">
-        <h2>Crear reporte</h2>
+      <div class="card form-card" *ngIf="auth.hasPermission('maintenance:report:create') && reportFormActive">
+        <div class="card-title">
+          <span>Reporte técnico</span>
+          <h2>Crear reporte</h2>
+          <p>Registra la intervención, el estado final del equipo y si requiere repuestos.</p>
+        </div>
+        <div class="workflow-note" *ngIf="reportFlowMode !== 'normal'">
+          <div>
+            <span>{{ reportWorkflowTitle() }}</span>
+            <strong>{{ reportFlowSource ? assetLabel(reportFlowSource.asset_id) : 'Equipo seleccionado' }}</strong>
+            <small>
+              Cargamos automáticamente el antecedente del reporte anterior. Revisa y completa antes de guardar.
+            </small>
+          </div>
+          <button type="button" class="ghost" (click)="cancelReportWorkflow()">Cancelar flujo</button>
+        </div>
         <form (ngSubmit)="createReport()">
           <label>
             Solicitud
             <select [(ngModel)]="reportRequestId" name="reportRequestId">
-              <option *ngFor="let request of requests" [value]="request.id">
-                {{ request.type }} · {{ assetLabel(request.asset_id) }}
+              <option *ngFor="let request of reportableRequests" [value]="request.id">
+                {{ request.type }} · {{ assetLabel(request.asset_id) }} · {{ statusLabel(request.status) }}
               </option>
             </select>
           </label>
+          <div class="selected-request" *ngIf="reportRequestId">
+            {{ selectedRequestLabel(reportRequestId) }}
+          </div>
+          <div class="request-context" *ngIf="selectedReportRequest as request">
+            <div class="context-title">
+              <span>Solicitud realizada</span>
+              <strong>{{ assetLabel(request.asset_id) }}</strong>
+              <small>{{ request.created_at | date: 'dd/MM/yyyy, h:mm a' }} · {{ statusLabel(request.status) }}</small>
+            </div>
+            <div class="context-grid" *ngIf="selectedReportAsset as asset">
+              <div>
+                <span>Sede</span>
+                <strong>{{ asset.siteName || '-' }}</strong>
+              </div>
+              <div>
+                <span>Área</span>
+                <strong>{{ asset.areaName || '-' }}</strong>
+              </div>
+              <div>
+                <span>Ubicación</span>
+                <strong>{{ asset.locationName || '-' }}</strong>
+              </div>
+              <div>
+                <span>Solicitante</span>
+                <strong>{{ request.requester_name || '-' }}</strong>
+              </div>
+            </div>
+            <label class="readonly-field">
+              Descripción de la solicitud
+              <textarea [ngModel]="request.description || 'Sin descripción registrada.'" name="requestDescriptionReadonly" rows="3" readonly></textarea>
+            </label>
+          </div>
           <label>
             Resumen
             <textarea [(ngModel)]="reportSummary" name="reportSummary" rows="2"></textarea>
@@ -155,54 +310,281 @@
             Acciones realizadas
             <textarea [(ngModel)]="reportActions" name="reportActions" rows="2"></textarea>
           </label>
+
+          <div class="tracking-grid">
+            <label>
+              Estado final del equipo
+              <select [(ngModel)]="reportAssetStatus" name="reportAssetStatus">
+                <option *ngFor="let option of assetStatusOptions" [value]="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <label class="check-row">
+              <input
+                type="checkbox"
+                [(ngModel)]="reportRequiresSpareParts"
+                name="reportRequiresSpareParts"
+                (change)="onSparePartsToggle()"
+              />
+              Requiere repuesto
+            </label>
+          </div>
+
+          <div class="spare-box" *ngIf="reportRequiresSpareParts">
+            <label>
+              Repuesto requerido
+              <textarea
+                [(ngModel)]="reportSparePartsNeeded"
+                name="reportSparePartsNeeded"
+                rows="2"
+                placeholder="Ej: Tarjeta electrónica, válvula, pieza específica..."
+              ></textarea>
+            </label>
+            <label>
+              Estado del repuesto
+              <select [(ngModel)]="reportSparePartsStatus" name="reportSparePartsStatus">
+                <option *ngFor="let option of spareStatusOptions" [value]="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <p class="spare-help">
+              Si seleccionas “Solicitar repuesto”, el caso queda abierto en espera de repuesto y se notifica al almacenista.
+              Cuando el repuesto llegue, crea otro reporte con estado “Recibido” para registrar la instalación y continuar con la firma.
+            </p>
+          </div>
+
           <button type="submit" [disabled]="loading">Guardar reporte</button>
         </form>
+      </div>
+      <div class="card form-card report-empty" *ngIf="auth.hasPermission('maintenance:report:create') && !reportFormActive">
+        <div class="card-title">
+          <span>Reporte técnico</span>
+          <h2>Sin solicitud tomada</h2>
+          <p>
+            Para crear un reporte, primero toma una solicitud desde el listado o abre la notificación de mantenimiento.
+            Así evitamos registrar reportes sobre solicitudes equivocadas.
+          </p>
+        </div>
+        <button type="button" class="ghost" (click)="viewMode = 'solicitudes'">Ir a solicitudes</button>
       </div>
     </div>
 
     <div class="card">
-      <h2>Reportes</h2>
-      <div class="table">
+      <div class="list-title">
+        <div>
+          <h2>Reportes</h2>
+          <p>Separamos los reportes listos para firma de la trazabilidad histórica del caso.</p>
+        </div>
+        <div class="list-tools three">
+          <label>
+            Buscar
+            <input type="text" [(ngModel)]="reportSearchTerm" placeholder="Equipo, serial, hallazgo..." />
+          </label>
+          <label>
+            Estado
+            <select [(ngModel)]="reportStatusFilter">
+              <option value="">Todos</option>
+              <option value="reportado">Por firmar</option>
+              <option value="firmado">Firmado</option>
+              <option value="trazabilidad_repuesto">Trazabilidad repuesto</option>
+            </select>
+          </label>
+          <label>
+            Repuestos
+            <select [(ngModel)]="reportSpareFilter">
+              <option value="">Todos</option>
+              <option value="con_repuesto">Con repuesto</option>
+              <option value="sin_repuesto">Sin repuesto</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="inner-tabs">
+        <button
+          type="button"
+          [class.active]="reportSubView === 'pendientes_firma'"
+          (click)="reportSubView = 'pendientes_firma'"
+        >
+          Reportes por firmar
+          <strong>{{ pendingSignatureReports.length }}</strong>
+        </button>
+        <button
+          type="button"
+          [class.active]="reportSubView === 'historial'"
+          (click)="reportSubView = 'historial'"
+        >
+          Historial y trazabilidad
+          <strong>{{ reportHistory.length }}</strong>
+        </button>
+      </div>
+
+      <div class="table reports-table">
         <div class="row header">
           <span>Equipo</span>
-          <span>Tipo</span>
-          <span>Estado</span>
+          <span>Reporte</span>
+          <span>Estado equipo</span>
+          <span>Firma</span>
           <span>Acciones</span>
         </div>
-        <div class="row" *ngFor="let report of reports">
-          <span>{{ assetLabel(report.asset_id) }}</span>
-          <span>{{ report.type }}</span>
-          <span>{{ report.request_status || 'reportado' }}</span>
+        <div class="row" *ngFor="let report of filteredReports">
           <span>
-            <button type="button" (click)="downloadReport(report.id)">PDF</button>
-            <button *ngIf="canSignReport(report)" type="button" (click)="signReport(report.id)">
-              Firmar
-            </button>
-            <button
-              *ngIf="auth.hasRole('superuser')"
-              type="button"
-              class="danger"
-              (click)="deleteReport(report.id)"
-            >
+            <strong>{{ assetLabel(report.asset_id) }}</strong>
+            <small>Ing: {{ report.engineer_name || '-' }}</small>
+          </span>
+          <span>
+            {{ report.type }}
+            <small>{{ report.summary || 'Sin resumen' }}</small>
+            <small>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</small>
+          </span>
+          <span>
+            <span class="status-pill" [ngClass]="statusClass(report.asset_status_after)">
+              {{ statusLabel(report.asset_status_after || 'operativo') }}
+            </span>
+            <small *ngIf="report.requires_spare_parts">
+              Repuesto: {{ report.spare_parts_needed || '-' }} · {{ statusLabel(report.spare_parts_status) }}
+            </small>
+          </span>
+          <span>
+            <span class="status-pill" [ngClass]="reportSignatureClass(report)">
+              {{ reportSignedDate(report) }}
+            </span>
+          </span>
+          <span class="actions">
+            <button type="button" (click)="downloadReport(report.id)">VER</button>
+            <button *ngIf="canSignReport(report)" type="button" (click)="signReport(report.id)">Firmar</button>
+            <button *ngIf="auth.hasRole('superuser')" type="button" class="danger" (click)="deleteReport(report.id)">
               Eliminar
             </button>
           </span>
         </div>
+        <p class="empty" *ngIf="filteredReports.length === 0 && reportSubView === 'pendientes_firma'">
+          No hay reportes listos para firmar con esos filtros.
+        </p>
+        <p class="empty" *ngIf="filteredReports.length === 0 && reportSubView === 'historial'">
+          No hay reportes en el historial o trazabilidad con esos filtros.
+        </p>
       </div>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="viewMode === 'repuestos'">
+    <div class="card">
+      <div class="list-title">
+        <div>
+          <h2>Equipos pendientes por repuesto</h2>
+          <p>Vista rápida para seguimiento de equipos que no quedan plenamente operativos.</p>
+        </div>
+      </div>
+
+      <div class="spare-dashboard">
+        <div class="spare-card" *ngFor="let asset of pendingSpareAssets">
+          <span class="status-pill pending">Equipo pendiente</span>
+          <strong>{{ asset.code }} - {{ asset.name }}</strong>
+          <small>Serie {{ asset.serial || '-' }}</small>
+          <small>{{ asset.siteName || '-' }} / {{ asset.areaName || '-' }} / {{ asset.locationName || '-' }}</small>
+        </div>
+        <div class="spare-card" *ngFor="let report of sparePartReports">
+          <span class="status-pill pending">{{ statusLabel(report.spare_parts_status) }}</span>
+          <strong>{{ assetLabel(report.asset_id) }}</strong>
+          <small><b>Repuesto:</b> {{ report.spare_parts_needed || 'Repuesto no especificado' }}</small>
+          <small><b>Resumen:</b> {{ report.summary || 'Sin resumen' }}</small>
+          <small><b>Hallazgos:</b> {{ report.findings || 'Sin hallazgos' }}</small>
+          <small>Reporte: {{ report.created_at | date: 'dd/MM/yyyy' }}</small>
+          <div class="spare-actions">
+            <button type="button" (click)="startSpareInstallation(report)">Instalar repuesto</button>
+            <button type="button" class="danger-soft" (click)="startAssetRetirement(report)">Dar de baja</button>
+            <button type="button" class="ghost" (click)="downloadReport(report.id)">VER REPORTE</button>
+          </div>
+        </div>
+      </div>
+      <p class="empty" *ngIf="pendingSpareAssets.length === 0 && sparePartReports.length === 0">
+        No hay equipos pendientes por repuestos.
+      </p>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="viewMode === 'bajas'">
+    <div class="card">
+      <div class="list-title">
+        <div>
+          <h2>Equipos dados de baja</h2>
+          <p>Equipos retirados del inventario activo, con su reporte final y trazabilidad técnica.</p>
+        </div>
+      </div>
+
+      <div class="retired-list" *ngIf="retiredAssets.length">
+        <div class="retired-card" *ngFor="let asset of retiredAssets">
+          <div class="retired-head">
+            <span class="status-pill danger">Dado de baja</span>
+            <strong>{{ asset.code }} - {{ asset.name }}</strong>
+            <small>{{ asset.brand || '-' }} · {{ asset.model || '-' }} · Serie {{ asset.serial || '-' }}</small>
+            <small>{{ asset.siteName || '-' }} / {{ asset.areaName || '-' }} / {{ asset.locationName || '-' }}</small>
+          </div>
+
+          <div class="retired-report" *ngIf="retirementReportForAsset(asset.id) as report">
+            <span>Reporte final</span>
+            <strong>{{ report.summary || 'Baja técnica del equipo' }}</strong>
+            <small>{{ report.actions_taken || report.findings || 'Sin justificación registrada.' }}</small>
+            <small>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</small>
+            <div class="spare-actions">
+              <button type="button" (click)="downloadReport(report.id)">VER REPORTE FINAL</button>
+              <button
+                type="button"
+                class="ghost"
+                *ngFor="let item of reportsForAsset(asset.id)"
+                (click)="downloadReport(item.id)"
+              >
+                Ver historial {{ item.created_at | date: 'dd/MM/yyyy' }}
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            class="danger-soft"
+            *ngIf="canRemoveRetiredAsset()"
+            (click)="removeRetiredAsset(asset)"
+          >
+            Retirar del hospital
+          </button>
+        </div>
+      </div>
+
+      <p class="empty" *ngIf="retiredAssets.length === 0">
+        No hay equipos dados de baja.
+      </p>
     </div>
   </ng-container>
 
   <ng-container *ngIf="viewMode === 'equipos'">
     <div class="card">
-      <h2>Datos del equipo</h2>
-      <div class="table">
+      <div class="list-title">
+        <div>
+          <h2>Estado actual de equipos</h2>
+          <p>Consulta rápida del estado operativo registrado en la hoja de vida.</p>
+        </div>
+        <div class="list-tools">
+          <label>
+            Buscar equipo
+            <input type="text" [(ngModel)]="assetSearchTerm" placeholder="Código, nombre, serial..." />
+          </label>
+        </div>
+      </div>
+
+      <div class="table assets-table">
         <div class="row header">
           <span>Código</span>
           <span>Equipo</span>
+          <span>Ubicación</span>
+          <span>Estado</span>
         </div>
-        <div class="row" *ngFor="let asset of assets">
+        <div class="row" *ngFor="let asset of filteredAssets">
           <span>{{ asset.code }}</span>
-          <span>{{ asset.name }}</span>
+          <span>
+            <strong>{{ asset.name }}</strong>
+            <small>{{ asset.brand || '-' }} · {{ asset.model || '-' }} · Serie {{ asset.serial || '-' }}</small>
+          </span>
+          <span>{{ asset.siteName || '-' }} / {{ asset.areaName || '-' }} / {{ asset.locationName || '-' }}</span>
+          <span><span class="status-pill" [ngClass]="statusClass(asset.status)">{{ statusLabel(asset.status || 'activo') }}</span></span>
         </div>
       </div>
     </div>

@@ -3,6 +3,11 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
+import { execFile } from 'child_process';
+import { randomUUID } from 'crypto';
+import { finished } from 'stream/promises';
+import { promisify } from 'util';
 import multer from 'multer';
 import sharp from 'sharp';
 import { query } from './db.js';
@@ -10,6 +15,7 @@ import { authenticateUser, refreshSession, revokeRefreshToken } from './auth.js'
 import { requireAnyPermission, requireAuth, requirePermission } from './middleware.js';
 import {
   createUser,
+  grantTemporaryPermission,
   getUserById,
   getRolePermissions,
   listClientModules,
@@ -17,6 +23,7 @@ import {
   listPermissions,
   listRoles,
   listUsers,
+  revokeTemporaryPermission,
   updateUserSignature,
   updateUserProfile,
   deleteUser,
@@ -40,6 +47,7 @@ import {
 import {
   createArea,
   createAsset,
+  createAssetMovement,
   createLocation,
   createSite,
   deleteArea,
@@ -47,13 +55,23 @@ import {
   deleteLocation,
   deleteSite,
   getAssetById,
+  getAssetHistoryFileById,
+  getAssetMovementById,
+  createAssetHistoryFile,
+  deleteAssetHistoryFile,
+  listAssetHistory,
   listAssetsForReader,
+  listAssetMovements,
   readerCanAccessAsset,
   listAreas,
   listAssets,
   listLocations,
   listSites,
+  setAssetHvEngineer,
   setAssetPhoto,
+  updateAssetStatus,
+  moveAsset,
+  updateAssetMovementPdf,
   updateArea,
   updateAsset,
   updateLocation,
@@ -64,7 +82,14 @@ import {
   replaceDocuments
 } from './biomed.js';
 import PDFDocument from 'pdfkit';
-import { buildAssetPdf, buildMaintenanceReportPdf, buildMaintenanceSchedulePdf, buildCalibrationSchedulePdf, buildTrainingSchedulePdf } from './pdf.js';
+import {
+  buildAssetMovementPdf,
+  buildAssetPdf,
+  buildMaintenanceReportPdf,
+  buildMaintenanceSchedulePdf,
+  buildCalibrationSchedulePdf,
+  buildTrainingSchedulePdf
+} from './pdf.js';
 import {
   createSchedule,
   listSchedules,
@@ -124,8 +149,11 @@ import {
   deleteMaintenanceReport,
   deleteMaintenanceRequest,
   createNotification,
+  createNotificationOnce,
   listNotifications,
   markNotificationRead,
+  markAllNotificationsRead,
+  markMaintenanceRequestNotificationsResolved,
   listUsersByRoleAndClient
 } from './maintenance.js';
 import { sendNotificationEmail } from './mailer.js';
@@ -134,6 +162,7 @@ import { sendPreventiveRemindersForClient } from './preventive-reminders.js';
 
 dotenv.config();
 
+const execFileAsync = promisify(execFile);
 const app = express();
 const corsOriginList = String(process.env.CORS_ORIGIN || 'http://localhost:4200')
   .split(',')
@@ -158,6 +187,20 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 const upload = multer({ storage: multer.memoryStorage() });
 const BIOMED_DOCUMENT_TYPES = ['cedula_ciudadania', 'cedula_extranjeria', 'pasaporte'];
+const MAINTENANCE_ASSET_STATUSES = [
+  'operativo',
+  'operativo_observacion',
+  'fuera_de_servicio'
+];
+const MAINTENANCE_SPARE_STATUSES = ['no_aplica', 'solicitado', 'recibido'];
+const SIGNATURE_ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.pdf'];
+const SIGNATURE_ALLOWED_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'application/pdf'
+];
 const uploadAssetFiles = upload.fields([
   { name: 'photo', maxCount: 1 },
   { name: 'manualOperacion', maxCount: 1 },
@@ -359,6 +402,97 @@ app.get('/admin/users', requireAuth, requirePermission('users:manage'), async (r
   return res.json(users);
 });
 
+app.post(
+  '/admin/users/:id/temporary-permissions',
+  requireAuth,
+  requirePermission('users:manage'),
+  async (req, res) => {
+    if (!req.user.roles?.includes('superuser')) {
+      return res.status(403).json({ message: 'Solo superuser.' });
+    }
+
+    const { permission, expiresAt, reason } = req.body || {};
+    const allowedTemporaryPermissions = ['hb:import', 'asset_history:upload'];
+    if (!allowedTemporaryPermissions.includes(permission)) {
+      return res.status(400).json({ message: 'Permiso temporal inválido.' });
+    }
+
+    const parsedExpiresAt = new Date(expiresAt);
+    if (!expiresAt || Number.isNaN(parsedExpiresAt.getTime())) {
+      return res.status(400).json({ message: 'Fecha de vencimiento inválida.' });
+    }
+    if (parsedExpiresAt.getTime() <= Date.now()) {
+      return res.status(400).json({ message: 'La fecha de vencimiento debe ser futura.' });
+    }
+
+    const result = await grantTemporaryPermission({
+      userId: req.params.id,
+      permission,
+      expiresAt: parsedExpiresAt,
+      grantedBy: req.user.sub,
+      reason
+    });
+    if (result?.error === 'USER_NOT_FOUND') {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    }
+    if (result?.error === 'PERMISSION_NOT_FOUND') {
+      return res.status(404).json({ message: 'Permiso no encontrado.' });
+    }
+
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'USER_TEMP_PERMISSION_GRANT',
+      targetUserId: req.params.id,
+      targetUsername: result.username,
+      details: {
+        permission,
+        expiresAt: parsedExpiresAt.toISOString(),
+        reason: reason || null
+      }
+    });
+
+    return res.status(201).json(result);
+  }
+);
+
+app.delete(
+  '/admin/users/:id/temporary-permissions',
+  requireAuth,
+  requirePermission('users:manage'),
+  async (req, res) => {
+    if (!req.user.roles?.includes('superuser')) {
+      return res.status(403).json({ message: 'Solo superuser.' });
+    }
+
+    const permission = req.query.permission || req.body?.permission;
+    if (!permission) {
+      return res.status(400).json({ message: 'Permiso requerido.' });
+    }
+
+    const result = await revokeTemporaryPermission({
+      userId: req.params.id,
+      permission: String(permission)
+    });
+    if (!result) {
+      return res.status(404).json({ message: 'Permiso temporal no encontrado.' });
+    }
+
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'USER_TEMP_PERMISSION_REVOKE',
+      targetUserId: req.params.id,
+      targetUsername: result.username,
+      details: {
+        permission: result.permission
+      }
+    });
+
+    return res.json({ ok: true });
+  }
+);
+
 app.get('/admin/modules', requireAuth, requirePermission('clients:manage'), async (req, res) => {
   if (!req.user.roles?.includes('superuser')) {
     return res.status(403).json({ message: 'Solo superuser.' });
@@ -451,6 +585,11 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       message: 'Registro INVIMA obligatorio para el ingeniero biomédico.'
     });
   }
+  if (req.file && !isAllowedSignatureFile(req.file)) {
+    return res.status(400).json({
+      message: 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.'
+    });
+  }
 
   try {
     const result = await createUser({
@@ -469,7 +608,7 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
     }
 
     if (req.file && result?.id) {
-      const signaturePath = await saveUserSignature(result.id, req.file.buffer);
+      const signaturePath = await saveUserSignature(result.id, req.file);
       await updateUserSignature(result.id, signaturePath);
     }
 
@@ -493,54 +632,138 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
   }
 });
 
-async function saveUserSignature(userId, buffer) {
+function isPdfBuffer(buffer) {
+  return buffer?.subarray?.(0, 4)?.toString?.() === '%PDF';
+}
+
+function isPdfUploadFile(file) {
+  const mimetype = String(file?.mimetype || '').toLowerCase();
+  const extension = path.extname(String(file?.originalname || '')).toLowerCase();
+  return extension === '.pdf' && (mimetype === 'application/pdf' || isPdfBuffer(file?.buffer));
+}
+
+function isAllowedSignatureFile(file) {
+  const mimetype = String(file?.mimetype || '').toLowerCase();
+  const extension = path.extname(String(file?.originalname || '')).toLowerCase();
+  return SIGNATURE_ALLOWED_MIME_TYPES.includes(mimetype) || SIGNATURE_ALLOWED_EXTENSIONS.includes(extension);
+}
+
+function isPdfSignatureFile(file) {
+  const mimetype = String(file?.mimetype || '').toLowerCase();
+  const extension = path.extname(String(file?.originalname || '')).toLowerCase();
+  return mimetype === 'application/pdf' || extension === '.pdf' || isPdfBuffer(file?.buffer);
+}
+
+async function renderSignaturePdfFirstPage(buffer) {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'bchsoft-signature-'));
+  const pdfPath = path.join(tmpDir, 'signature.pdf');
+  const outputPrefix = path.join(tmpDir, 'signature-page');
+  const outputPath = `${outputPrefix}.png`;
+
+  try {
+    await fs.promises.writeFile(pdfPath, buffer);
+    try {
+      await execFileAsync('pdftoppm', ['-png', '-f', '1', '-singlefile', '-r', '240', pdfPath, outputPrefix], {
+        timeout: 30000
+      });
+      return fs.promises.readFile(outputPath);
+    } catch {
+      // macOS development fallback. In production Docker we install poppler-utils.
+      await execFileAsync('sips', ['-s', 'format', 'png', pdfPath, '--out', outputPath], {
+        timeout: 30000
+      });
+      return fs.promises.readFile(outputPath);
+    }
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+  }
+}
+
+async function signatureFileToImageBuffer(file) {
+  if (isPdfSignatureFile(file)) {
+    return renderSignaturePdfFirstPage(file.buffer);
+  }
+  return file.buffer;
+}
+
+async function saveUserSignature(userId, file) {
   const dir = path.join(process.cwd(), 'uploads', 'users', userId);
   await fs.promises.mkdir(dir, { recursive: true });
   const filename = path.join(dir, 'signature.png');
+  const imageBuffer = await signatureFileToImageBuffer(file);
+  await processSignatureImage(imageBuffer, filename);
+  const publicPath = `/${path.join('uploads', 'users', userId, 'signature.png')}`;
+  return publicPath.replace(/\\/g, '/');
+}
+
+async function processSignatureImage(buffer, filename) {
   const normalized = sharp(buffer)
     .rotate()
     .flatten({ background: '#ffffff' })
-    .trim({ background: '#ffffff', threshold: 22 })
-    .resize(420, 180, {
+    .resize(900, 360, {
       fit: 'inside',
       withoutEnlargement: true
     })
     .ensureAlpha();
   const { data, info } = await normalized.raw().toBuffer({ resolveWithObject: true });
+  const lumaValues = [];
 
   for (let i = 0; i < data.length; i += info.channels) {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
-    const average = (r + g + b) / 3;
-    const colorSpread = Math.max(r, g, b) - Math.min(r, g, b);
-    const isWhitePaper = average >= 238 && colorSpread <= 24;
-    const isSoftPaperShadow = average >= 224 && colorSpread <= 16;
+    lumaValues.push(0.299 * r + 0.587 * g + 0.114 * b);
+  }
+  lumaValues.sort((a, b) => a - b);
+  const sampleIndex = Math.min(lumaValues.length - 1, Math.floor(lumaValues.length * 0.025));
+  const dynamicCut = lumaValues[sampleIndex] || 128;
+  const threshold = Math.max(118, Math.min(132, dynamicCut + 4));
 
-    if (isWhitePaper) {
-      data[i + 3] = 0;
-    } else if (isSoftPaperShadow) {
-      const opacity = Math.max(0, Math.min(255, Math.round((238 - average) * 18)));
-      data[i + 3] = Math.min(data[i + 3], opacity);
+  for (let i = 0; i < data.length; i += info.channels) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+
+    // Convertimos la foto a una firma real: fondo transparente y trazo oscuro.
+    // El umbral dinámico evita conservar sombras del papel cuando la foto queda gris.
+    let alpha = 0;
+    if (luma < threshold) {
+      alpha = Math.max(170, Math.min(255, Math.round((threshold - luma) * 24)));
     }
+
+    data[i] = 15;
+    data[i + 1] = 23;
+    data[i + 2] = 42;
+    data[i + 3] = alpha;
   }
 
-  await sharp(data, {
+  const cleanedBuffer = await sharp(data, {
     raw: {
       width: info.width,
       height: info.height,
       channels: info.channels
     }
   })
-    .trim({ background: { r: 255, g: 255, b: 255, alpha: 0 }, threshold: 1 })
-    .resize(420, 220, {
-      fit: 'contain',
+    .trim({ background: { r: 15, g: 23, b: 42, alpha: 0 }, threshold: 5 })
+    .extend({
+      top: 14,
+      bottom: 14,
+      left: 28,
+      right: 28,
       background: { r: 255, g: 255, b: 255, alpha: 0 }
+    })
+    .png()
+    .toBuffer();
+
+  await sharp(cleanedBuffer)
+    .resize(420, 160, {
+      fit: 'contain',
+      background: { r: 255, g: 255, b: 255, alpha: 0 },
+      withoutEnlargement: false
     })
     .png({ compressionLevel: 9 })
     .toFile(filename);
-  const publicPath = `/${path.join('uploads', 'users', userId, 'signature.png')}`;
-  return publicPath.replace(/\\/g, '/');
 }
 
 
@@ -558,6 +781,53 @@ function assetLabel(asset) {
   if (!asset) return 'Equipo';
   const code = asset.code ? `${asset.code} - ` : '';
   return `${code}${asset.name || 'Equipo sin nombre'}`;
+}
+
+function isBiomedicalEngineer(user) {
+  return user?.roles?.includes('ingeniero_biomedico');
+}
+
+function primaryRole(user) {
+  return user?.roles?.[0] || 'usuario';
+}
+
+async function userHasRole(userId, roleName) {
+  if (!userId) return false;
+  const { rows } = await query(
+    `SELECT 1
+     FROM user_roles ur
+     JOIN roles r ON r.id = ur.role_id
+     WHERE ur.user_id = $1 AND r.name = $2
+     LIMIT 1`,
+    [userId, roleName]
+  );
+  return rows.length > 0;
+}
+
+async function resolveHvEngineerUserId(req) {
+  if (!req.user?.sub) return null;
+  if (isBiomedicalEngineer(req.user)) return req.user.sub;
+  return (await userHasRole(req.user.sub, 'ingeniero_biomedico')) ? req.user.sub : null;
+}
+
+async function backfillHvEngineerFromAudit(clientId, asset) {
+  if (!asset || asset.hv_engineer_user_id) return asset;
+  const { rows } = await query(
+    `SELECT al.actor_user_id
+     FROM audit_logs al
+     JOIN user_roles ur ON ur.user_id = al.actor_user_id
+     JOIN roles r ON r.id = ur.role_id
+     WHERE al.target_user_id = $1
+       AND al.action IN ('ASSET_IMPORT', 'ASSET_CREATE', 'ASSET_UPDATE')
+       AND r.name = 'ingeniero_biomedico'
+     ORDER BY al.created_at DESC
+     LIMIT 1`,
+    [asset.id]
+  );
+  const engineerUserId = rows[0]?.actor_user_id;
+  if (!engineerUserId) return asset;
+  await setAssetHvEngineer(clientId, asset.id, engineerUserId);
+  return getAssetById(clientId, asset.id);
 }
 
 function assetSnapshot(asset) {
@@ -863,6 +1133,7 @@ app.post(
     }
 
     try {
+      const hvEngineerUserId = await resolveHvEngineerUserId(req);
       const result = await createAsset(clientId, {
         code,
         name,
@@ -893,7 +1164,8 @@ app.post(
         humidityMax: humidityMax ? Number(humidityMax) : null,
         maintenanceFrequency,
         requiresCalibration: String(requiresCalibration) === 'true',
-        calibrationFrequency
+        calibrationFrequency,
+        hvEngineerUserId
       });
 
       if (req.files?.photo?.[0]) {
@@ -1041,6 +1313,7 @@ app.post(
         });
       }
 
+      const hvEngineerUserId = await resolveHvEngineerUserId(req);
       const imported = [];
       for (const asset of assets) {
         const result = await createAsset(clientId, {
@@ -1072,7 +1345,8 @@ app.post(
           humidityMax: asset.humidityMax ? Number(asset.humidityMax) : null,
           maintenanceFrequency: asset.maintenanceFrequency || 'mensual',
           requiresCalibration: Boolean(asset.requiresCalibration),
-          calibrationFrequency: asset.requiresCalibration ? asset.calibrationFrequency || 'anual' : null
+          calibrationFrequency: asset.requiresCalibration ? asset.calibrationFrequency || 'anual' : null,
+          hvEngineerUserId
         });
         const createdAsset = await getAssetById(clientId, result.id);
         imported.push(result.id);
@@ -1146,6 +1420,7 @@ app.put(
       return res.status(400).json({ message: 'Código y nombre son requeridos.' });
     }
     try {
+      const hvEngineerUserId = await resolveHvEngineerUserId(req);
       const beforeAsset = await getAssetById(clientId, assetId);
       await updateAsset(clientId, assetId, {
         code,
@@ -1176,7 +1451,8 @@ app.put(
         humidityMax: humidityMax ? Number(humidityMax) : null,
         maintenanceFrequency,
         requiresCalibration: String(requiresCalibration) === 'true',
-        calibrationFrequency
+        calibrationFrequency,
+        hvEngineerUserId
       });
 
       if (req.files?.photo?.[0]) {
@@ -1247,16 +1523,345 @@ app.put(
   }
 );
 
+app.post(
+  '/biomed/:clientId/assets/:assetId/move',
+  requireAuth,
+  requirePermission('inventory:move'),
+  async (req, res) => {
+    const { clientId, assetId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+
+    const { code, siteId, areaId, locationId, notes } = req.body || {};
+    if (!siteId || !areaId || !locationId) {
+      return res.status(400).json({ message: 'Sede, área y ubicación son obligatorias para mover el equipo.' });
+    }
+
+    try {
+      const [sites, areas, locations] = await Promise.all([
+        listSites(clientId),
+        listAreas(clientId),
+        listLocations(clientId)
+      ]);
+      const site = sites.find((item) => item.id === siteId);
+      const area = areas.find((item) => item.id === areaId);
+      const location = locations.find((item) => item.id === locationId);
+      if (!site || !area || area.site_id !== siteId || !location || location.area_id !== areaId) {
+        return res.status(400).json({ message: 'La sede, área o ubicación no corresponde al cliente seleccionado.' });
+      }
+
+      const { before, after } = await moveAsset(clientId, assetId, {
+        code: String(code || '').trim(),
+        siteId,
+        areaId,
+        locationId
+      });
+
+      const movement = await createAssetMovement(clientId, {
+        before,
+        after,
+        movedBy: req.user.sub,
+        movedByName: req.user.displayName || req.user.username,
+        movedByRole: primaryRole(req.user),
+        notes: String(notes || '').trim()
+      });
+
+      const client = await getClientById(clientId);
+      const dir = await ensureClientLogoDir(clientId);
+      const movementDir = path.join(dir, 'assets', assetId, 'movements');
+      await fs.promises.mkdir(movementDir, { recursive: true });
+      const filename = path.join('uploads', 'clients', clientId, 'assets', assetId, 'movements', `${movement.id}.pdf`);
+      const fullPath = path.join(process.cwd(), filename);
+      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const stream = fs.createWriteStream(fullPath);
+      doc.pipe(stream);
+      buildAssetMovementPdf(doc, { client, asset: after, movement });
+      doc.end();
+      await finished(stream);
+      const publicPath = `/${filename}`.replace(/\\/g, '/');
+      await updateAssetMovementPdf(clientId, movement.id, publicPath);
+
+      await logEquipmentAudit(req, {
+        action: 'ASSET_MOVE',
+        clientId,
+        assetId,
+        asset: after,
+        description: `Movimiento de equipo ${assetLabel(after)}.`,
+        details: {
+          eventType: 'equipo_movido',
+          movementId: movement.id,
+          from: {
+            code: before.code,
+            site: before.site_name,
+            area: before.area_name,
+            location: before.location_name
+          },
+          to: {
+            code: after.code,
+            site: after.site_name,
+            area: after.area_name,
+            location: after.location_name
+          },
+          pdfPath: publicPath
+        }
+      });
+
+      return res.status(201).json({ ok: true, movementId: movement.id, pdfPath: publicPath });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo mover el equipo.' });
+    }
+  }
+);
+
+app.get(
+  '/biomed/:clientId/assets/:assetId/movements',
+  requireAuth,
+  requireAnyPermission(['hb:create', 'hb:view', 'read:all', 'inventory:move']),
+  async (req, res) => {
+    const { clientId, assetId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (req.user.roles?.includes('lector')) {
+      const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
+      if (!allowed) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+    }
+    const limit = Math.min(Number(req.query.limit || 4), 25);
+    const offset = Math.max(Number(req.query.offset || 0), 0);
+    const rows = await listAssetMovements(clientId, assetId, limit, offset);
+    return res.json(rows);
+  }
+);
+
+app.get(
+  '/biomed/:clientId/assets/:assetId/history',
+  requireAuth,
+  requireAnyPermission(['hb:create', 'hb:view', 'read:all', 'inventory:move', 'maintenance:report:create', 'maintenance:report:sign']),
+  async (req, res) => {
+    const { clientId, assetId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (req.user.roles?.includes('lector')) {
+      const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
+      if (!allowed) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+    }
+    try {
+      const limit = Math.min(Number(req.query.limit || 4), 25);
+      const offset = Math.max(Number(req.query.offset || 0), 0);
+      const rows = await listAssetHistory(clientId, assetId, {
+        from: req.query.from || null,
+        to: req.query.to || null,
+        order: req.query.order || 'asc',
+        limit,
+        offset
+      });
+      return res.json(rows);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo cargar el historial del equipo.' });
+    }
+  }
+);
+
+app.post(
+  '/biomed/:clientId/assets/:assetId/history-files',
+  requireAuth,
+  requirePermission('asset_history:upload'),
+  upload.single('file'),
+  async (req, res) => {
+    const { clientId, assetId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: 'Archivo PDF requerido.' });
+    }
+    if (!isPdfUploadFile(req.file)) {
+      return res.status(400).json({ message: 'Solo se permiten archivos PDF.' });
+    }
+    const documentDate = String(req.body?.documentDate || '').trim();
+    if (!documentDate || Number.isNaN(new Date(documentDate).getTime())) {
+      return res.status(400).json({ message: 'La fecha del documento es obligatoria.' });
+    }
+
+    try {
+      const asset = await getAssetById(clientId, assetId);
+      if (!asset) {
+        return res.status(404).json({ message: 'Equipo no encontrado.' });
+      }
+
+      const dir = await ensureClientLogoDir(clientId);
+      const historyDir = path.join(dir, 'assets', assetId, 'history');
+      await fs.promises.mkdir(historyDir, { recursive: true });
+      const filename = path.join(
+        'uploads',
+        'clients',
+        clientId,
+        'assets',
+        assetId,
+        'history',
+        `historico-${Date.now()}-${randomUUID()}.pdf`
+      );
+      const fullPath = path.join(process.cwd(), filename);
+      await fs.promises.writeFile(fullPath, req.file.buffer);
+      const publicPath = `/${filename}`.replace(/\\/g, '/');
+
+      const historyFile = await createAssetHistoryFile(clientId, {
+        assetId,
+        title: String(req.body?.title || '').trim() || 'Mantenimiento histórico migrado',
+        description: String(req.body?.description || '').trim() || null,
+        documentDate,
+        filePath: publicPath,
+        uploadedBy: req.user.sub,
+        uploadedByName: req.user.displayName || req.user.username
+      });
+
+      await logEquipmentAudit(req, {
+        action: 'ASSET_HISTORY_FILE_UPLOAD',
+        clientId,
+        assetId,
+        asset,
+        description: `Carga de PDF histórico para ${assetLabel(asset)}.`,
+        details: {
+          eventType: 'pdf_historico_cargado',
+          historyFileId: historyFile.id,
+          documentDate,
+          pdfPath: publicPath
+        }
+      });
+
+      return res.status(201).json(historyFile);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo cargar el PDF histórico.' });
+    }
+  }
+);
+
+app.get(
+  '/biomed/:clientId/asset-history-files/:fileId/pdf',
+  requireAuth,
+  requireAnyPermission(['hb:create', 'hb:view', 'read:all', 'inventory:move', 'maintenance:report:create', 'maintenance:report:sign']),
+  async (req, res) => {
+    const { clientId, fileId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const file = await getAssetHistoryFileById(clientId, fileId);
+    if (!file) {
+      return res.status(404).json({ message: 'PDF histórico no encontrado.' });
+    }
+    if (req.user.roles?.includes('lector')) {
+      const allowed = await readerCanAccessAsset(clientId, req.user.sub, file.asset_id);
+      if (!allowed) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+    }
+    const fullPath = path.join(process.cwd(), file.file_path.replace(/^\//, ''));
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ message: 'Archivo PDF no encontrado.' });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=\"historico-${fileId}.pdf\"`);
+    return res.sendFile(fullPath);
+  }
+);
+
+app.delete(
+  '/biomed/:clientId/asset-history-files/:fileId',
+  requireAuth,
+  requirePermission('hb:create'),
+  async (req, res) => {
+    const { clientId, fileId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const file = await deleteAssetHistoryFile(clientId, fileId);
+    if (!file) {
+      return res.status(404).json({ message: 'PDF histórico no encontrado.' });
+    }
+    const fullPath = path.join(process.cwd(), file.file_path.replace(/^\//, ''));
+    if (fs.existsSync(fullPath)) {
+      await fs.promises.rm(fullPath, { force: true });
+    }
+    const asset = await getAssetById(clientId, file.asset_id);
+    await logEquipmentAudit(req, {
+      action: 'ASSET_HISTORY_FILE_DELETE',
+      clientId,
+      assetId: file.asset_id,
+      asset,
+      description: `Eliminación de PDF histórico para ${assetLabel(asset)}.`,
+      details: {
+        eventType: 'pdf_historico_eliminado',
+        historyFileId: file.id,
+        documentDate: file.document_date,
+        pdfPath: file.file_path
+      }
+    });
+    return res.json({ ok: true });
+  }
+);
+
+app.get(
+  '/biomed/:clientId/asset-movements/:movementId/pdf',
+  requireAuth,
+  requireAnyPermission(['hb:create', 'hb:view', 'read:all', 'inventory:move']),
+  async (req, res) => {
+    const { clientId, movementId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const movement = await getAssetMovementById(clientId, movementId);
+    if (!movement) {
+      return res.status(404).json({ message: 'Movimiento no encontrado.' });
+    }
+    if (req.user.roles?.includes('lector')) {
+      const allowed = await readerCanAccessAsset(clientId, req.user.sub, movement.asset_id);
+      if (!allowed) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+    }
+    if (!movement.pdf_path) {
+      return res.status(404).json({ message: 'PDF no disponible.' });
+    }
+    const fullPath = path.join(process.cwd(), movement.pdf_path.replace(/^\//, ''));
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ message: 'PDF no encontrado.' });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=\"movimiento-${movementId}.pdf\"`);
+    return res.sendFile(fullPath);
+  }
+);
+
 app.delete(
   '/biomed/:clientId/assets/:assetId',
   requireAuth,
-  requirePermission('hb:create'),
+  requireAnyPermission(['hb:create', 'inventory:move']),
   async (req, res) => {
     const { clientId, assetId } = req.params;
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     const asset = await getAssetById(clientId, assetId);
+    if (!asset) {
+      return res.status(404).json({ message: 'Equipo no encontrado.' });
+    }
+    if (!req.user.permissions?.includes('hb:create')) {
+      const canRemoveRetiredAsset = req.user.roles?.includes('almacenista') && asset?.status === 'dado_de_baja';
+      if (!canRemoveRetiredAsset) {
+        return res.status(403).json({
+          message: 'Solo puedes retirar equipos que ya estén dados de baja.'
+        });
+      }
+    }
     await deleteAsset(clientId, assetId);
     await logEquipmentAudit(req, {
       action: 'ASSET_DELETE',
@@ -1289,10 +1894,11 @@ app.get(
       }
     }
     const client = await getClientById(clientId);
-    const asset = await getAssetById(clientId, assetId);
+    let asset = await getAssetById(clientId, assetId);
     if (!client || !asset) {
       return res.status(404).json({ message: 'No encontrado.' });
     }
+    asset = await backfillHvEngineerFromAudit(clientId, asset);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=\"hv-${asset.code}.pdf\"`);
@@ -1751,8 +2357,13 @@ app.post(
     if (!req.file) {
       return res.status(400).json({ message: 'Firma requerida.' });
     }
+    if (!isAllowedSignatureFile(req.file)) {
+      return res.status(400).json({
+        message: 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.'
+      });
+    }
     try {
-      const signaturePath = await saveUserSignature(req.params.id, req.file.buffer);
+      const signaturePath = await saveUserSignature(req.params.id, req.file);
       await updateUserSignature(req.params.id, signaturePath);
       await logAudit({
         actorUserId: req.user.sub,
@@ -1765,7 +2376,7 @@ app.post(
     } catch (error) {
       console.error(error);
       return res.status(400).json({
-        message: 'No se pudo procesar la firma. Sube una imagen clara con fondo blanco.'
+        message: 'No se pudo procesar la firma. Sube una imagen clara con fondo blanco o un PDF con la firma en la primera página.'
       });
     }
   }
@@ -1882,6 +2493,15 @@ app.post(
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
       }
     }
+    const requestedAsset = await getAssetById(clientId, assetId);
+    if (!requestedAsset) {
+      return res.status(404).json({ message: 'Equipo no encontrado.' });
+    }
+    if (requestedAsset.status === 'dado_de_baja') {
+      return res.status(400).json({
+        message: 'Este equipo está dado de baja y no permite nuevas solicitudes de mantenimiento.'
+      });
+    }
 
     const result = await createMaintenanceRequest({
       clientId,
@@ -1891,7 +2511,6 @@ app.post(
       requestedBy: req.user.sub
     });
 
-    const requestedAsset = await getAssetById(clientId, assetId);
     await logEquipmentAudit(req, {
       action: 'MAINTENANCE_REQUEST_CREATE',
       clientId,
@@ -1909,13 +2528,20 @@ app.post(
     const engineers = await listUsersByRoleAndClient('ingeniero_biomedico', clientId);
     for (const engineer of engineers) {
       const title = 'Nueva solicitud de mantenimiento';
-      const message = `Se creó una solicitud ${type} para un equipo.`;
+      const message = `Se creó una solicitud ${type} para ${assetLabel(requestedAsset)}.${description ? ` Descripción: ${description}` : ''}`;
       await createNotification({
         userId: engineer.id,
         clientId,
         title,
         message,
-        link: '/mantenimiento'
+        link: '/mantenimiento',
+        type: 'maintenance_request_created',
+        priority: 'high',
+        data: {
+          requestId: result.id,
+          assetId,
+          maintenanceType: type
+        }
       });
       if (engineer.email) {
         try {
@@ -2003,10 +2629,35 @@ app.post(
   requireAuth,
   requirePermission('maintenance:report:create'),
   async (req, res) => {
-    const { requestId, summary, findings, actionsTaken } = req.body || {};
+    const {
+      requestId,
+      summary,
+      findings,
+      actionsTaken,
+      assetStatusAfter,
+      assetLifecycleAction,
+      requiresSpareParts,
+      sparePartsNeeded,
+      sparePartsStatus
+    } = req.body || {};
     if (!requestId) {
       return res.status(400).json({ message: 'Solicitud requerida.' });
     }
+    const cleanAssetStatus = MAINTENANCE_ASSET_STATUSES.includes(assetStatusAfter)
+      ? assetStatusAfter
+      : 'operativo';
+    const cleanLifecycleAction = assetLifecycleAction === 'retire' ? 'retire' : null;
+    const cleanRequiresSpareParts = Boolean(requiresSpareParts);
+    const cleanSparePartsStatus = cleanRequiresSpareParts
+      ? (MAINTENANCE_SPARE_STATUSES.includes(sparePartsStatus) ? sparePartsStatus : 'solicitado')
+      : 'no_aplica';
+    const cleanSparePartsNeeded = String(sparePartsNeeded || '').trim();
+    if (cleanRequiresSpareParts && !cleanSparePartsNeeded) {
+      return res.status(400).json({ message: 'Describe el repuesto requerido.' });
+    }
+    const requestStatusAfter = cleanRequiresSpareParts && cleanSparePartsStatus !== 'recibido'
+      ? 'espera_repuesto'
+      : 'reportado';
     const request = await getMaintenanceRequestById(requestId);
     if (!request) {
       return res.status(404).json({ message: 'Solicitud no encontrada.' });
@@ -2022,8 +2673,16 @@ app.post(
       summary,
       findings,
       actionsTaken,
+      assetStatusAfter: cleanAssetStatus,
+      requiresSpareParts: cleanRequiresSpareParts,
+      sparePartsNeeded: cleanRequiresSpareParts ? cleanSparePartsNeeded : null,
+      sparePartsStatus: cleanSparePartsStatus,
+      requestStatusAfter,
       createdBy: req.user.sub
     });
+
+    const assetStatusToPersist = cleanLifecycleAction === 'retire' ? 'dado_de_baja' : cleanAssetStatus;
+    await updateAssetStatus(request.client_id, request.asset_id, assetStatusToPersist);
 
     const reportAsset = await getAssetById(request.client_id, request.asset_id);
     await logEquipmentAudit(req, {
@@ -2038,7 +2697,13 @@ app.post(
         requestId,
         maintenanceType: request.type,
         summary: summary ?? null,
-        findings: findings ?? null
+        findings: findings ?? null,
+        assetStatusAfter: cleanAssetStatus,
+        assetLifecycleAction: cleanLifecycleAction,
+        assetStatusPersisted: assetStatusToPersist,
+        requiresSpareParts: cleanRequiresSpareParts,
+        sparePartsNeeded: cleanRequiresSpareParts ? cleanSparePartsNeeded : null,
+        sparePartsStatus: cleanSparePartsStatus
       }
     });
 
@@ -2052,7 +2717,9 @@ app.post(
       });
     }
 
-    if (request.type === 'preventivo') {
+    await writeMaintenanceReportPdfFile(result.id);
+
+    if (request.type === 'preventivo' && requestStatusAfter !== 'espera_repuesto') {
       const year = new Date().getFullYear();
       const schedules = await listSchedules(request.client_id, year);
       if (schedules.length) {
@@ -2065,7 +2732,39 @@ app.post(
       }
     }
 
-    if (request.requested_by) {
+    if (requestStatusAfter === 'espera_repuesto') {
+      const storekeepers = await listUsersByRoleAndClient('almacenista', request.client_id);
+      for (const storekeeper of storekeepers) {
+        const title = 'Solicitud de repuesto';
+        const message = `El equipo ${assetLabel(reportAsset)} requiere repuesto: ${cleanSparePartsNeeded}. El caso queda en espera de repuestos.`;
+        await createNotificationOnce({
+          userId: storekeeper.id,
+          clientId: request.client_id,
+          title,
+          message,
+          link: '/mantenimiento',
+          type: 'maintenance_spare_part_requested',
+          priority: 'high',
+          data: {
+            reportId: result.id,
+            requestId,
+            assetId: request.asset_id,
+            sparePartsNeeded: cleanSparePartsNeeded
+          }
+        });
+        if (storekeeper.email) {
+          try {
+            await sendNotificationEmail({
+              to: storekeeper.email,
+              subject: title,
+              text: message
+            });
+          } catch (error) {
+            console.error('Email notificación falló', error);
+          }
+        }
+      }
+    } else if (request.requested_by) {
       const title = 'Reporte de mantenimiento listo';
       const message = `Se generó el reporte ${request.type}. Requiere tu firma.`;
       await createNotification({
@@ -2073,7 +2772,15 @@ app.post(
         clientId: request.client_id,
         title,
         message,
-        link: '/mantenimiento'
+        link: '/mantenimiento',
+        type: 'maintenance_report_ready',
+        priority: 'high',
+        data: {
+          reportId: result.id,
+          requestId,
+          assetId: request.asset_id,
+          maintenanceType: request.type
+        }
       });
       if (request.requester_email) {
         try {
@@ -2103,6 +2810,11 @@ app.post(
     }
     if (req.user.clientId && req.user.clientId !== report.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (report.requires_spare_parts && report.spare_parts_status !== 'recibido') {
+      return res.status(400).json({
+        message: 'Este reporte queda en espera de repuesto. Se firma cuando se registre la instalación del repuesto.'
+      });
     }
     const user = await getUserById(req.user.sub);
     if (!user?.signature_path) {
@@ -2156,6 +2868,7 @@ app.post(
     const hasRequesterFinal = signaturesAfter.some((sig) => sig.user_id === report.requested_by);
     if (hasEngineerFinal && hasRequesterFinal) {
       await updateMaintenanceRequestStatus(report.request_id, 'firmado');
+      await markMaintenanceRequestNotificationsResolved(report.request_id);
       await logEquipmentAudit(req, {
         action: 'MAINTENANCE_REPORT_FINALIZED',
         clientId: report.client_id,
@@ -2196,13 +2909,43 @@ app.post(
         clientId: report.client_id,
         title,
         message,
-        link: '/mantenimiento'
+        link: '/mantenimiento',
+        type: 'maintenance_report_signed',
+        priority: 'normal',
+        data: {
+          reportId: report.id,
+          requestId: report.request_id,
+          assetId: report.asset_id
+        }
       });
     }
 
     return res.json(result);
   }
 );
+
+async function writeMaintenanceReportPdfFile(reportId) {
+  const report = await getMaintenanceReportById(reportId);
+  if (!report) return null;
+  const client = await getClientById(report.client_id);
+  const asset = await getAssetById(report.client_id, report.asset_id);
+  const request = await getMaintenanceRequestById(report.request_id);
+  const signaturesForPdf = await listReportSignatures(report.id);
+  if (!client || !asset || !request) return null;
+
+  const dir = path.join(process.cwd(), 'uploads', 'clients', report.client_id, 'maintenance');
+  await fs.promises.mkdir(dir, { recursive: true });
+  const filename = path.join(dir, `reporte-${report.id}.pdf`);
+  const publicPath = `/${path.join('uploads', 'clients', report.client_id, 'maintenance', `reporte-${report.id}.pdf`)}`.replace(/\\/g, '/');
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  const stream = fs.createWriteStream(filename);
+  doc.pipe(stream);
+  buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures: signaturesForPdf });
+  doc.end();
+  await finished(stream);
+  await updateMaintenanceReportPdf(report.id, publicPath);
+  return publicPath;
+}
 
 app.get(
   '/maintenance/reports/:id/pdf',
@@ -2277,6 +3020,21 @@ app.post('/maintenance/notifications/:id/read', requireAuth, async (req, res) =>
   return res.json({ ok: true });
 });
 
+app.get('/notifications', requireAuth, async (req, res) => {
+  const rows = await listNotifications(req.user.sub);
+  return res.json(rows);
+});
+
+app.post('/notifications/:id/read', requireAuth, async (req, res) => {
+  await markNotificationRead(req.params.id, req.user.sub);
+  return res.json({ ok: true });
+});
+
+app.post('/notifications/read-all', requireAuth, async (req, res) => {
+  await markAllNotificationsRead(req.user.sub);
+  return res.json({ ok: true });
+});
+
 async function writeTrainingSchedulePdf({ client, schedule, items }) {
   const dir = path.join(process.cwd(), 'uploads', 'clients', schedule.client_id, 'trainings');
   await fs.promises.mkdir(dir, { recursive: true });
@@ -2294,13 +3052,17 @@ async function writeTrainingSchedulePdf({ client, schedule, items }) {
 
 async function syncDueScheduleRequests(clientId, fallbackUserId) {
   const today = new Date().toISOString().slice(0, 10);
+  const client = await getClientById(clientId);
+  if (!client?.schema_name) return;
   const { rows } = await query(
-    `SELECT i.asset_id, i.planned_date, i.deadline_date, s.created_by
+    `SELECT i.id, i.asset_id, i.planned_date, i.deadline_date, s.created_by
      FROM maintenance_schedule_items i
      JOIN maintenance_schedules s ON s.id = i.schedule_id
+     JOIN "${client.schema_name}".assets a ON a.id = i.asset_id
      WHERE s.client_id = $1
        AND s.status = 'approved'
        AND i.status <> 'done'
+       AND COALESCE(a.status, 'activo') <> 'dado_de_baja'
        AND i.planned_date <= $2`,
     [clientId, today]
   );
@@ -2322,7 +3084,7 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
       continue;
     }
 
-    const request = await createMaintenanceRequest({
+    const result = await createMaintenanceRequest({
       clientId,
       assetId: item.asset_id,
       type: 'preventivo',
@@ -2342,7 +3104,14 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
         clientId,
         title,
         message,
-        link: '/mantenimiento'
+        link: '/mantenimiento',
+        type: 'maintenance_preventive_generated',
+        priority: 'normal',
+        data: {
+          requestId: result.id,
+          scheduleItemId: item.id,
+          assetId: item.asset_id
+        }
       });
     }
   }
@@ -2419,6 +3188,7 @@ app.post(
       `SELECT id, code, name, brand, model, serial, maintenance_frequency
        FROM "${schema}".assets
        WHERE maintenance_frequency IS NOT NULL
+         AND COALESCE(status, 'activo') <> 'dado_de_baja'
        ORDER BY created_at ASC`
     );
     const assets = assetsResult.rows;

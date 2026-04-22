@@ -57,7 +57,34 @@ CREATE TABLE IF NOT EXISTS "${schema}".assets (
   maintenance_frequency TEXT,
   requires_calibration BOOLEAN NOT NULL DEFAULT FALSE,
   calibration_frequency TEXT,
+  hv_engineer_user_id UUID,
+  hv_engineer_signed_at TIMESTAMPTZ,
   status TEXT DEFAULT 'activo',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS "${schema}".asset_movements (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  asset_id UUID REFERENCES "${schema}".assets(id) ON DELETE CASCADE,
+  from_code TEXT,
+  to_code TEXT,
+  from_site_id UUID,
+  from_site_name TEXT,
+  to_site_id UUID,
+  to_site_name TEXT,
+  from_area_id UUID,
+  from_area_name TEXT,
+  to_area_id UUID,
+  to_area_name TEXT,
+  from_location_id UUID,
+  from_location_name TEXT,
+  to_location_id UUID,
+  to_location_name TEXT,
+  moved_by UUID,
+  moved_by_name TEXT,
+  moved_by_role TEXT,
+  notes TEXT,
+  pdf_path TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -149,6 +176,21 @@ CREATE TABLE IF NOT EXISTS "${schema}".asset_documents (
   doc_type TEXT NOT NULL,
   file_path TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS "${schema}".asset_history_files (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  asset_id UUID REFERENCES "${schema}".assets(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT 'Mantenimiento histórico migrado',
+  description TEXT,
+  document_date DATE NOT NULL,
+  file_path TEXT NOT NULL,
+  uploaded_by UUID,
+  uploaded_by_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS "idx_asset_history_files_asset_date"
+  ON "${schema}".asset_history_files (asset_id, document_date ASC, created_at ASC);
 
 INSERT INTO "${schema}".sites (name)
 SELECT 'Sede principal'

@@ -16,6 +16,7 @@ export type Permission =
   | 'hb:create'
   | 'hb:import'
   | 'hb:view'
+  | 'asset_history:upload'
   | 'schedules:manage'
   | 'calibration:schedule:manage'
   | 'inventory:move'

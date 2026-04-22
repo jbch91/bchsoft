@@ -46,6 +46,43 @@ input {
   border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
 }
 
+input[type='file'].file-input {
+  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--brand-600) 28%, var(--border));
+  border-radius: 9px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  min-height: 34px;
+  padding: 4px 6px;
+}
+
+input[type='file'].file-input::file-selector-button {
+  background: linear-gradient(135deg, var(--brand-700), var(--brand-600));
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  margin-right: 8px;
+  min-height: 26px;
+  padding: 5px 10px;
+}
+
+input[type='file'].file-input:hover::file-selector-button {
+  background: var(--brand-700);
+}
+
+.file-field small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ghost {
   background: #ffffff;
   border: 1px solid color-mix(in srgb, var(--border) 70%, var(--ink));
@@ -109,7 +146,8 @@ input {
   background: var(--brand-600);
   color: #ffffff;
   border: none;
-  padding: 6px 8px;
+  min-height: 30px;
+  padding: 6px 10px;
   border-radius: 8px;
   cursor: pointer;
   font-size: 11px;
@@ -145,22 +183,59 @@ input {
 
 .history-inline {
   grid-column: 1 / -1;
-  background: #e2e8f0;
-  border: 1px solid #94a3b8;
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
-  border-radius: 12px;
-  padding: 14px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--brand-50) 82%, #ffffff), #ffffff 62%),
+    #ffffff;
+  border: 2px solid color-mix(in srgb, var(--brand-600) 30%, var(--border));
+  box-shadow: 0 24px 50px rgba(143, 50, 55, 0.18);
+  border-radius: 18px;
+  padding: 18px;
   display: grid;
   gap: 12px;
+}
+
+.move-inline {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #fff7f7, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--brand-100) 78%, var(--border));
+  border-radius: 14px;
+  box-shadow: 0 14px 26px rgba(166, 64, 69, 0.12);
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.move-inline-header {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.move-grid {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.move-grid .wide {
+  grid-column: span 2;
+}
+
+.success {
+  color: #047857;
+  font-weight: 800;
+  margin: 0;
 }
 
 .history-list {
   display: grid;
   gap: 8px;
   background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--brand-100) 76%, var(--border));
+  border-radius: 16px;
+  padding: 12px;
 }
 
 .history-row {
@@ -169,14 +244,35 @@ input {
   gap: 12px;
   align-items: center;
   padding: 10px 12px;
-  border-radius: 10px;
-  background: #f8fafc;
+  border-radius: 12px;
+  background: #fffafa;
+  border: 1px solid color-mix(in srgb, var(--brand-100) 68%, var(--border));
+  font-size: 12px;
+}
+
+.history-row strong {
+  display: block;
+  color: var(--ink);
+}
+
+.history-row small {
+  color: var(--muted);
+  display: block;
+  margin-top: 3px;
+}
+
+.history-row.pinned {
+  background: linear-gradient(135deg, #ffffff, var(--brand-50));
+  border-color: color-mix(in srgb, var(--brand-600) 32%, var(--border));
 }
 
 .history-row.header {
   background: linear-gradient(135deg, var(--brand-700), #5f1f25);
   color: #ffffff;
   font-weight: 800;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .history-more {
@@ -198,6 +294,25 @@ input {
   gap: 12px;
 }
 
+.history-summary-card {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1.1fr 1.6fr 0.8fr;
+  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--brand-100) 76%, var(--border));
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.summary-label {
+  color: var(--muted);
+  display: block;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .history-inline-filters {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -209,6 +324,97 @@ input {
   align-self: end;
   padding: 8px 14px;
   font-size: 12px;
+}
+
+.history-upload {
+  background: #ffffff;
+  border: 1px dashed color-mix(in srgb, var(--brand-600) 42%, var(--border));
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.history-upload-grid {
+  align-items: stretch;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.history-upload-grid .wide {
+  grid-column: span 3;
+}
+
+.history-upload-grid label,
+.upload-action-wrap {
+  background: #fffafa;
+  border: 1px solid color-mix(in srgb, var(--brand-100) 70%, var(--border));
+  border-radius: 12px;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.history-upload-grid input {
+  min-height: 34px;
+  padding: 7px 9px;
+}
+
+.history-upload-grid label:not(.wide),
+.upload-action-wrap {
+  grid-column: span 2;
+}
+
+.upload-action {
+  width: 100%;
+  min-height: 34px;
+}
+
+.upload-action-wrap {
+  align-content: end;
+  display: grid;
+  gap: 5px;
+}
+
+.upload-action-wrap span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-badge {
+  background: var(--brand-50);
+  border: 1px solid color-mix(in srgb, var(--brand-600) 26%, var(--border));
+  border-radius: 999px;
+  color: var(--brand-700);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  justify-content: center;
+  padding: 6px 9px;
+  width: fit-content;
+}
+
+.small {
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 6px 8px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.25);
+  opacity: 0.58;
 }
 
 @media (max-width: 900px) {
@@ -252,6 +458,28 @@ input {
 
   .history-row.header {
     display: none;
+  }
+
+  .move-grid .wide {
+    grid-column: auto;
+  }
+
+  .history-summary-card,
+  .history-upload-grid .wide {
+    grid-column: auto;
+  }
+
+  .history-summary-card {
+    grid-template-columns: 1fr;
+  }
+
+  .history-upload-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .history-upload-grid label:not(.wide),
+  .upload-action-wrap {
+    grid-column: auto;
   }
 }
 

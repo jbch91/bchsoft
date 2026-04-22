@@ -243,9 +243,12 @@
     [loading]="loading"
     [errorMessage]="errorMessage"
     [canEdit]="auth.hasPermission('hb:create')"
+    [canMove]="auth.hasPermission('inventory:move')"
+    [canUploadHistory]="auth.hasPermission('asset_history:upload')"
     title="Inventario de hojas de vida"
     (editItem)="startEdit($event)"
     (deleteItem)="deleteAsset($event)"
+    (movedItem)="loadAssets()"
   ></app-inventory-panel>
 
   <div class="grid" *ngIf="viewMode === 'form'">
@@ -269,17 +272,18 @@
         <button
           type="button"
           class="primary"
-          [disabled]="importLoading || importHasErrors || !importValidRowsCount"
+          [disabled]="importReading || importLoading || importHasErrors || !importValidRowsCount"
           (click)="confirmHvImport()"
         >
           {{ importLoading ? 'Importando...' : 'Importar hojas de vida' }}
         </button>
         <button type="button" class="ghost danger-ghost" *ngIf="importHasErrors" (click)="downloadHvImportErrors()">
-          Descargar errores
+          Descargar archivo corregible
         </button>
         <button type="button" class="ghost" *ngIf="importHasRows || importMessage" (click)="clearHvImport()">Limpiar</button>
       </div>
       <p class="muted" *ngIf="importFileName">Archivo seleccionado: {{ importFileName }}</p>
+      <p class="muted loading-note" *ngIf="importReading">Validando archivo, por favor espera...</p>
       <p class="success" *ngIf="importMessage && importMessageType === 'success'">{{ importMessage }}</p>
       <p class="error" *ngIf="importMessage && importMessageType === 'error'">{{ importMessage }}</p>
       <p class="muted" *ngIf="importMessage && importMessageType === 'info'">{{ importMessage }}</p>
