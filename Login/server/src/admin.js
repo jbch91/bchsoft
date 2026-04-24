@@ -73,10 +73,17 @@ export async function listModules() {
 
 export async function listClientModules(clientId) {
   const { rows: counts } = await query(
-    'SELECT COUNT(*)::int AS total FROM client_modules WHERE client_id = $1',
+    `SELECT COUNT(*)::int AS total,
+            COALESCE(BOOL_OR(module_key <> 'guias_rapidas'), FALSE) AS has_non_quick_module
+     FROM client_modules
+     WHERE client_id = $1`,
     [clientId]
   );
-  const hasConfig = (counts[0]?.total ?? 0) > 0;
+  const total = counts[0]?.total ?? 0;
+  const hasNonQuickModule = Boolean(counts[0]?.has_non_quick_module);
+  // If the only saved row is the auto-created quick-guides module, treat the
+  // client as unconfigured so existing clients keep all modules visible.
+  const hasConfig = total > 0 && (total !== 1 || hasNonQuickModule);
 
   const { rows } = await query(
     `SELECT m.key, m.name, m.description, COALESCE(cm.enabled, ${hasConfig ? 'FALSE' : 'TRUE'}) AS enabled

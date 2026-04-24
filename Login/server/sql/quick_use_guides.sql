@@ -63,6 +63,23 @@ SELECT id, 'guias_rapidas', TRUE
 FROM clients
 ON CONFLICT (client_id, module_key) DO NOTHING;
 
+-- Existing clients that had no explicit module configuration could end up with
+-- only the auto-added quick-guides row. In that case, restore the expected
+-- default: all active modules enabled for that client.
+WITH clients_only_quick_guides AS (
+  SELECT c.id AS client_id
+  FROM clients c
+  JOIN client_modules cm ON cm.client_id = c.id
+  GROUP BY c.id
+  HAVING COUNT(*) = 1
+     AND BOOL_AND(cm.module_key = 'guias_rapidas')
+)
+INSERT INTO client_modules (client_id, module_key, enabled)
+SELECT cqg.client_id, m.key, TRUE
+FROM clients_only_quick_guides cqg
+JOIN modules m ON m.is_active = TRUE
+ON CONFLICT (client_id, module_key) DO NOTHING;
+
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM roles r
