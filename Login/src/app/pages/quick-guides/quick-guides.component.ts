@@ -166,6 +166,10 @@ export class QuickGuidesComponent {
     return this.auth.hasPermission('quick_guides:delete');
   }
 
+  get canSelectClient(): boolean {
+    return this.auth.hasRole('superuser');
+  }
+
   get isEditing(): boolean {
     return Boolean(this.editingGuideId);
   }

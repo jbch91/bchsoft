@@ -13,8 +13,8 @@
   <app-module-tabs></app-module-tabs>
 
   <div class="card filters-card guide-client-card">
-    <div class="filters-top">
-      <div class="filters">
+    <div class="filters-top" [class.only-client-preview]="!canSelectClient">
+      <div class="filters" *ngIf="canSelectClient">
         <label>
           Buscar cliente
           <input
