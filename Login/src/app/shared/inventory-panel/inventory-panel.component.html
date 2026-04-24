@@ -237,6 +237,13 @@
             <span><button type="button" class="history-btn" (click)="openHistoryHv()">VER</button></span>
           </div>
 
+          <div class="history-row pinned guide-pinned">
+            <span class="history-badge">Guía rápida</span>
+            <span>-</span>
+            <span>Guía práctica de uso seguro por marca y modelo del equipo</span>
+            <span><button type="button" class="history-btn" (click)="openQuickGuideForAsset()">VER</button></span>
+          </div>
+
           <div class="history-row" *ngFor="let event of historyItems">
             <span class="history-badge">{{ historyTypeLabel(event) }}</span>
             <span>{{ event.event_date | date: 'dd/MM/yyyy' }}</span>

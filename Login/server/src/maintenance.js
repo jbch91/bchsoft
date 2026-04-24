@@ -1,12 +1,37 @@
 import { query } from './db.js';
 
 export async function createMaintenanceRequest(payload) {
-  const { clientId, assetId, type, description, requestedBy, plannedDate, deadlineDate, source } = payload;
+  const {
+    clientId,
+    assetId,
+    type,
+    description,
+    requestedBy,
+    plannedDate,
+    deadlineDate,
+    source,
+    scheduleId,
+    scheduleItemId
+  } = payload;
   const { rows } = await query(
-    `INSERT INTO maintenance_requests (client_id, asset_id, type, description, planned_date, deadline_date, source, requested_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `INSERT INTO maintenance_requests (
+       client_id, asset_id, type, description, planned_date, deadline_date, source,
+       requested_by, schedule_id, schedule_item_id
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      RETURNING id`,
-    [clientId, assetId, type, description || null, plannedDate || null, deadlineDate || null, source || 'manual', requestedBy]
+    [
+      clientId,
+      assetId,
+      type,
+      description || null,
+      plannedDate || null,
+      deadlineDate || null,
+      source || 'manual',
+      requestedBy,
+      scheduleId || null,
+      scheduleItemId || null
+    ]
   );
   return rows[0];
 }
@@ -17,7 +42,7 @@ export async function listMaintenanceRequests(clientId) {
      FROM maintenance_requests r
      LEFT JOIN users u ON u.id = r.requested_by
      WHERE r.client_id = $1
-       AND r.status <> 'firmado'
+       AND r.status NOT IN ('firmado', 'vencido')
      ORDER BY r.created_at DESC`,
     [clientId]
   );
@@ -61,7 +86,7 @@ export async function listMaintenanceRequestsForReader(clientId, userId) {
      JOIN "${schema}".assets a ON a.id = r.asset_id
      LEFT JOIN users u ON u.id = r.requested_by
      WHERE r.client_id = $1 ${where}
-       AND r.status <> 'firmado'
+       AND r.status NOT IN ('firmado', 'vencido')
      ORDER BY r.created_at DESC`,
     params
   );
@@ -96,6 +121,10 @@ export async function createMaintenanceReport(payload) {
     summary,
     findings,
     actionsTaken,
+    failureCause,
+    maintenanceChecks,
+    maintenanceActivities,
+    maintenanceTests,
     assetStatusAfter,
     requiresSpareParts,
     sparePartsNeeded,
@@ -106,9 +135,10 @@ export async function createMaintenanceReport(payload) {
   const { rows } = await query(
     `INSERT INTO maintenance_reports (
        client_id, request_id, asset_id, type, summary, findings, actions_taken,
+       failure_cause, maintenance_checks, maintenance_activities, maintenance_tests,
        asset_status_after, requires_spare_parts, spare_parts_needed, spare_parts_status, created_by
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      RETURNING id`,
     [
       clientId,
@@ -118,6 +148,10 @@ export async function createMaintenanceReport(payload) {
       summary || null,
       findings || null,
       actionsTaken || null,
+      failureCause || null,
+      JSON.stringify(Array.isArray(maintenanceChecks) ? maintenanceChecks : []),
+      JSON.stringify(Array.isArray(maintenanceActivities) ? maintenanceActivities : []),
+      JSON.stringify(Array.isArray(maintenanceTests) ? maintenanceTests : []),
       assetStatusAfter || 'operativo',
       Boolean(requiresSpareParts),
       sparePartsNeeded || null,
@@ -131,6 +165,105 @@ export async function createMaintenanceReport(payload) {
     [requestId, requestStatusAfter || 'reportado']
   );
   return rows[0];
+}
+
+export async function getMaintenanceReportWithOpenCorrectionByRequest(requestId) {
+  const { rows } = await query(
+    `SELECT r.*
+     FROM maintenance_reports r
+     JOIN maintenance_report_corrections c ON c.report_id = r.id AND c.resolved_at IS NULL
+     WHERE r.request_id = $1
+     ORDER BY c.created_at DESC
+     LIMIT 1`,
+    [requestId]
+  );
+  return rows[0];
+}
+
+export async function getLatestWaitingSpareReportByRequest(requestId) {
+  const { rows } = await query(
+    `SELECT *
+     FROM maintenance_reports
+     WHERE request_id = $1
+       AND requires_spare_parts = TRUE
+       AND spare_parts_status <> 'recibido'
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [requestId]
+  );
+  return rows[0];
+}
+
+export async function updateMaintenanceReport(reportId, payload) {
+  const {
+    type,
+    summary,
+    findings,
+    actionsTaken,
+    failureCause,
+    maintenanceChecks,
+    maintenanceActivities,
+    maintenanceTests,
+    assetStatusAfter,
+    requiresSpareParts,
+    sparePartsNeeded,
+    sparePartsStatus,
+    requestStatusAfter,
+    createdBy
+  } = payload;
+  await query(
+    `UPDATE maintenance_reports
+     SET type = $2,
+         summary = $3,
+         findings = $4,
+         actions_taken = $5,
+         failure_cause = $6,
+         maintenance_checks = $7,
+         maintenance_activities = $8,
+         maintenance_tests = $9,
+         asset_status_after = $10,
+         requires_spare_parts = $11,
+         spare_parts_needed = $12,
+         spare_parts_status = $13,
+         created_by = $14,
+         pdf_path = NULL
+     WHERE id = $1`,
+    [
+      reportId,
+      type,
+      summary || null,
+      findings || null,
+      actionsTaken || null,
+      failureCause || null,
+      JSON.stringify(Array.isArray(maintenanceChecks) ? maintenanceChecks : []),
+      JSON.stringify(Array.isArray(maintenanceActivities) ? maintenanceActivities : []),
+      JSON.stringify(Array.isArray(maintenanceTests) ? maintenanceTests : []),
+      assetStatusAfter || 'operativo',
+      Boolean(requiresSpareParts),
+      sparePartsNeeded || null,
+      sparePartsStatus || 'no_aplica',
+      createdBy
+    ]
+  );
+  await query(
+    `UPDATE maintenance_requests SET status = $2, updated_at = NOW()
+     WHERE id = (SELECT request_id FROM maintenance_reports WHERE id = $1)`,
+    [reportId, requestStatusAfter || 'reportado']
+  );
+  return { id: reportId };
+}
+
+export async function deleteReportSignatures(reportId) {
+  await query('DELETE FROM report_signatures WHERE report_id = $1', [reportId]);
+}
+
+export async function resolveMaintenanceReportCorrections(reportId) {
+  await query(
+    `UPDATE maintenance_report_corrections
+     SET resolved_at = COALESCE(resolved_at, NOW())
+     WHERE report_id = $1 AND resolved_at IS NULL`,
+    [reportId]
+  );
 }
 
 export async function signMaintenanceReport(payload) {
@@ -169,10 +302,22 @@ export async function listMaintenanceReports(clientId, { assetId, from, to, orde
   const limitClause = limit !== undefined ? `LIMIT $${params.length - (offset !== undefined ? 1 : 0)}` : '';
   const offsetClause = offset !== undefined ? `OFFSET $${params.length}` : '';
   const { rows } = await query(
-    `SELECT r.*, u.display_name AS engineer_name, req.status AS request_status, req.requested_by
+    `SELECT r.*, u.display_name AS engineer_name, req.status AS request_status, req.requested_by,
+            (lc.id IS NOT NULL) AS correction_requested,
+            lc.reason AS correction_reason,
+            lc.created_at AS correction_requested_at,
+            lcu.display_name AS correction_requested_by_name
      FROM maintenance_reports r
      LEFT JOIN users u ON u.id = r.created_by
      LEFT JOIN maintenance_requests req ON req.id = r.request_id
+     LEFT JOIN LATERAL (
+       SELECT id, requested_by, reason, created_at
+       FROM maintenance_report_corrections
+       WHERE report_id = r.id AND resolved_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) lc ON TRUE
+     LEFT JOIN users lcu ON lcu.id = lc.requested_by
      WHERE ${clauses.join(' AND ')}
      ORDER BY r.created_at ${orderDir}
      ${limitClause} ${offsetClause}`,
@@ -256,11 +401,23 @@ export async function listMaintenanceReportsForReader(clientId, userId, { assetI
   const limitClause = limit !== undefined ? `LIMIT $${params.length - (offset !== undefined ? 1 : 0)}` : '';
   const offsetClause = offset !== undefined ? `OFFSET $${params.length}` : '';
   const { rows } = await query(
-    `SELECT r.*, u.display_name AS engineer_name, req.status AS request_status, req.requested_by
+    `SELECT r.*, u.display_name AS engineer_name, req.status AS request_status, req.requested_by,
+            (lc.id IS NOT NULL) AS correction_requested,
+            lc.reason AS correction_reason,
+            lc.created_at AS correction_requested_at,
+            lcu.display_name AS correction_requested_by_name
      FROM maintenance_reports r
      JOIN "${schema}".assets a ON a.id = r.asset_id
      LEFT JOIN users u ON u.id = r.created_by
      LEFT JOIN maintenance_requests req ON req.id = r.request_id
+     LEFT JOIN LATERAL (
+       SELECT id, requested_by, reason, created_at
+       FROM maintenance_report_corrections
+       WHERE report_id = r.id AND resolved_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) lc ON TRUE
+     LEFT JOIN users lcu ON lcu.id = lc.requested_by
      WHERE ${clauses.join(' AND ')} ${accessClause}
      ORDER BY r.created_at ${orderDir}
      ${limitClause} ${offsetClause}`,
@@ -271,11 +428,34 @@ export async function listMaintenanceReportsForReader(clientId, userId, { assetI
 
 export async function getMaintenanceReportById(reportId) {
   const { rows } = await query(
-    `SELECT r.*, req.client_id, req.requested_by
+    `SELECT r.*, req.client_id, req.requested_by, req.status AS request_status,
+            (lc.id IS NOT NULL) AS correction_requested,
+            lc.reason AS correction_reason,
+            lc.created_at AS correction_requested_at,
+            lcu.display_name AS correction_requested_by_name
      FROM maintenance_reports r
      JOIN maintenance_requests req ON req.id = r.request_id
+     LEFT JOIN LATERAL (
+       SELECT id, requested_by, reason, created_at
+       FROM maintenance_report_corrections
+       WHERE report_id = r.id AND resolved_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) lc ON TRUE
+     LEFT JOIN users lcu ON lcu.id = lc.requested_by
      WHERE r.id = $1`,
     [reportId]
+  );
+  return rows[0];
+}
+
+export async function requestMaintenanceReportCorrection(payload) {
+  const { reportId, userId, reason } = payload;
+  const { rows } = await query(
+    `INSERT INTO maintenance_report_corrections (report_id, requested_by, reason)
+     VALUES ($1,$2,$3)
+     RETURNING id`,
+    [reportId, userId, reason]
   );
   return rows[0];
 }
@@ -403,6 +583,17 @@ export async function markMaintenanceRequestNotificationsResolved(requestId) {
   );
 }
 
+export async function markMaintenanceReportNotificationsResolved(reportId) {
+  await query(
+    `UPDATE notifications
+     SET read_at = COALESCE(read_at, NOW())
+     WHERE payload->>'reportId' = $1
+       AND type = 'maintenance_report_ready'
+       AND read_at IS NULL`,
+    [reportId]
+  );
+}
+
 export async function listUsersByRoleAndClient(role, clientId) {
   const { rows } = await query(
     `SELECT u.id, u.email, u.display_name, u.signature_path
@@ -411,6 +602,18 @@ export async function listUsersByRoleAndClient(role, clientId) {
      JOIN roles r ON r.id = ur.role_id
      WHERE r.name = $1 AND u.client_id = $2 AND u.is_active = TRUE`,
     [role, clientId]
+  );
+  return rows;
+}
+
+export async function listUsersByClient(clientId) {
+  const { rows } = await query(
+    `SELECT DISTINCT u.id, u.email, u.display_name
+     FROM users u
+     WHERE u.client_id = $1
+       AND u.is_active = TRUE
+     ORDER BY u.display_name ASC`,
+    [clientId]
   );
   return rows;
 }

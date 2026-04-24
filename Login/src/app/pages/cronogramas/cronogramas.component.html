@@ -156,13 +156,23 @@
             <option *ngFor="let freq of maintenanceFrequencyOptions" [value]="freq">{{ freq | titlecase }}</option>
           </select>
         </label>
+        <label class="inline">
+          Estado
+          <select [(ngModel)]="maintenanceItemStatusFilter">
+            <option value="">Todos</option>
+            <option value="pending">Programado</option>
+            <option value="active">Activo</option>
+            <option value="done">Realizado</option>
+            <option value="expired">Vencido</option>
+          </select>
+        </label>
         <input
           class="search-input"
           type="text"
-          placeholder="Buscar equipo"
+          placeholder="Buscar área, sede o equipo"
           [(ngModel)]="maintenanceDetailSearch"
         />
-        <span class="pill">{{ filteredGroupedItems.length }} equipos</span>
+        <span class="pill">{{ filteredGroupedItems.length }} áreas</span>
       </div>
     </div>
     <div class="detail-actions" *ngIf="canEditSelected()">
@@ -170,36 +180,48 @@
     </div>
     <div class="items-table">
       <div class="item-row header">
-        <span>Código</span>
-        <span>Equipo</span>
-        <span>Marca</span>
-        <span>Modelo</span>
+        <span>Área</span>
+        <span>Sede</span>
+        <span>Equipos</span>
         <span>Frecuencia</span>
+        <span>Estado</span>
         <span>Fechas</span>
       </div>
       <div class="item-row" *ngFor="let group of filteredGroupedItems">
-        <span>{{ group.code }}</span>
-        <span>{{ group.name }}</span>
-        <span>{{ group.brand || '-' }}</span>
-        <span>{{ group.model || '-' }}</span>
-        <span>{{ group.frequency }}</span>
+        <span>
+          <strong>{{ group.areaName }}</strong>
+          <small>{{ group.assetCount }} equipo{{ group.assetCount === 1 ? '' : 's' }} programado{{ group.assetCount === 1 ? '' : 's' }}</small>
+        </span>
+        <span>{{ group.siteName }}</span>
+        <span>{{ group.assetCount }}</span>
+        <span>{{ frequencyLabel(group) }}</span>
+        <span class="status-stack">
+          <span
+            class="status-pill"
+            *ngFor="let item of areaStatusItems(group)"
+            [ngClass]="maintenanceItemStatusClass(item.status)"
+          >
+            {{ maintenanceItemStatusLabel(item.status) }} {{ item.count }}
+          </span>
+        </span>
         <span class="dates">
-          <div *ngFor="let item of group.items">
+          <div class="area-date-item" *ngFor="let dateGroup of group.dateGroups">
             <input
               *ngIf="editing; else dateText"
               type="date"
-              [value]="item.planned_date"
-              [min]="rangeMin(item)"
-              [max]="rangeMax(item)"
-              (change)="onPlannedDateChange(item, $event.target.value)"
+              [value]="dateGroup.plannedDate"
+              [min]="dateGroup.minDate"
+              [max]="dateGroup.maxDate"
+              (change)="onAreaPlannedDateChange(dateGroup, $event.target.value)"
             />
             <ng-template #dateText>
               <span class="date-range compact">
-                {{ rangeMin(item) | date: 'dd/MM/yyyy' }} - {{ rangeMax(item) | date: 'dd/MM/yyyy' }}
+                {{ dateGroup.minDate | date: 'dd/MM/yyyy' }} - {{ dateGroup.maxDate | date: 'dd/MM/yyyy' }}
               </span>
             </ng-template>
+            <small>{{ dateGroup.items.length }} mantenimiento{{ dateGroup.items.length === 1 ? '' : 's' }}</small>
             <span class="date-range" *ngIf="editing">
-              Rango: {{ rangeMin(item) | date: 'dd/MM/yyyy' }} - {{ rangeMax(item) | date: 'dd/MM/yyyy' }}
+              Rango: {{ dateGroup.minDate | date: 'dd/MM/yyyy' }} - {{ dateGroup.maxDate | date: 'dd/MM/yyyy' }}
             </span>
           </div>
         </span>

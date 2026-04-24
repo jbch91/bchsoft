@@ -27,6 +27,10 @@ export interface ScheduleItemDto {
   name?: string | null;
   brand?: string | null;
   model?: string | null;
+  serial?: string | null;
+  area_id?: string | null;
+  site_id?: string | null;
+  site_name?: string | null;
   area_name?: string | null;
   location_name?: string | null;
 }

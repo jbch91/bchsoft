@@ -1,9 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, EventEmitter, Input, Output } from '@angular/core';
+import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, Output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AssetHistoryItemDto, BiomedService } from '../../biomed/biomed.service';
 import { CalibrationService } from '../../calibration/calibration.service';
 import { MaintenanceService } from '../../maintenance/maintenance.service';
+import { QuickGuidesService } from '../../quick-guides/quick-guides.service';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -48,7 +49,7 @@ interface MoveLocationOption {
   templateUrl: './inventory-panel.component.html',
   styleUrl: './inventory-panel.component.scss'
 })
-export class InventoryPanelComponent {
+export class InventoryPanelComponent implements OnDestroy {
   @Input() items: InventoryPanelItem[] = [];
   @Input() selectedClientId = '';
   @Input() loading = false;
@@ -103,13 +104,19 @@ export class InventoryPanelComponent {
     locationId: '',
     notes: ''
   };
+  private destroyed = false;
 
   constructor(
     private readonly biomed: BiomedService,
     private readonly maintenance: MaintenanceService,
     private readonly calibration: CalibrationService,
+    private readonly quickGuides: QuickGuidesService,
     private readonly cdr: ChangeDetectorRef
   ) {}
+
+  ngOnDestroy(): void {
+    this.destroyed = true;
+  }
 
   get areaOptions(): string[] {
     return Array.from(new Set(this.items.map((item) => item.areaName || '').filter(Boolean))).sort();
@@ -275,6 +282,22 @@ export class InventoryPanelComponent {
     await this.downloadPdf(asset);
   }
 
+  async openQuickGuideForAsset(): Promise<void> {
+    if (!this.selectedClientId || !this.historyAssetId) return;
+    try {
+      const blob = await this.quickGuides.downloadAssetGuidePdf(this.selectedClientId, this.historyAssetId);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (error: any) {
+      if (error?.status === 404) {
+        window.alert('Este equipo aún no tiene una guía rápida aprobada para su marca y modelo.');
+        return;
+      }
+      window.alert('No se pudo abrir la guía rápida de uso.');
+    }
+  }
+
   async openReportPdf(reportId: string): Promise<void> {
     const blob = await this.maintenance.downloadReportPdf(reportId);
     const url = URL.createObjectURL(blob);
@@ -354,14 +377,15 @@ export class InventoryPanelComponent {
       if (token !== this.historyLoadToken) return;
       this.historyItems = result;
       this.historyHasMore = result.length === this.historyLimit;
-      this.cdr.detectChanges();
+      this.refreshViewSoon();
     } catch (error) {
       console.error(error);
       this.historyItems = [];
-      this.cdr.detectChanges();
+      this.refreshViewSoon();
     } finally {
       if (token === this.historyLoadToken) {
         this.historyLoading = false;
+        this.refreshViewSoon();
       }
     }
   }
@@ -438,7 +462,7 @@ export class InventoryPanelComponent {
       this.historyUploadError = 'No se pudo cargar el PDF histórico.';
     } finally {
       this.historyUploadLoading = false;
-      this.cdr.detectChanges();
+      this.refreshViewSoon();
     }
   }
 
@@ -491,7 +515,7 @@ export class InventoryPanelComponent {
     if (!this.moveLocationsForArea.some((location) => location.id === this.moveForm.locationId)) {
       this.moveForm.locationId = this.moveLocationsForArea[0]?.id || '';
     }
-    this.cdr.detectChanges();
+    this.refreshViewSoon();
   }
 
   onMoveSiteChange(): void {
@@ -528,7 +552,7 @@ export class InventoryPanelComponent {
       this.moveError = 'No se pudo guardar el movimiento.';
     } finally {
       this.moveLoading = false;
-      this.cdr.detectChanges();
+      this.refreshViewSoon();
     }
   }
 
@@ -553,5 +577,13 @@ export class InventoryPanelComponent {
 
   private normalize(value: string | null | undefined): string {
     return (value || '').toLowerCase().trim();
+  }
+
+  private refreshViewSoon(): void {
+    setTimeout(() => {
+      if (!this.destroyed) {
+        this.cdr.detectChanges();
+      }
+    }, 0);
   }
 }

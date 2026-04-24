@@ -1,0 +1,238 @@
+<section class="page quick-guides-page">
+  <app-user-menu></app-user-menu>
+  <header>
+    <div>
+      <h1>Guías rápidas de uso</h1>
+      <p>Formatos prácticos por marca y modelo para uso seguro de equipos biomédicos.</p>
+    </div>
+    <div class="header-actions">
+      <a class="back" routerLink="/dashboard">Menú</a>
+    </div>
+  </header>
+
+  <app-module-tabs></app-module-tabs>
+
+  <div class="card filters-card guide-client-card">
+    <div class="filters-top">
+      <div class="filters">
+        <label>
+          Buscar cliente
+          <input
+            type="text"
+            [(ngModel)]="clientSearchTerm"
+            [placeholder]="clientsLoading ? 'Cargando clientes...' : 'Escribe para filtrar...'"
+            [disabled]="clientsLoading || !clients.length"
+          />
+        </label>
+        <label>
+          Cliente
+          <select [(ngModel)]="selectedClientId" (change)="onClientChange()" [disabled]="clientsLoading || !clients.length">
+            <option value="" *ngIf="clientsLoading">Cargando clientes...</option>
+            <option value="" *ngIf="!clientsLoading && !clients.length">Sin clientes disponibles</option>
+            <option *ngFor="let client of selectableClients" [value]="client.id">{{ client.name }}</option>
+          </select>
+        </label>
+      </div>
+      <div class="client-preview" *ngIf="selectedClientInfo && !clientsLoading">
+        <div class="client-preview-info">
+          <div><strong>{{ selectedClientInfo.name }}</strong></div>
+          <div *ngIf="selectedClientInfo.nit">NIT: {{ selectedClientInfo.nit }}</div>
+          <div *ngIf="selectedClientInfo.city">Ciudad: {{ selectedClientInfo.city }}</div>
+          <div *ngIf="selectedClientInfo.address">Dirección: {{ selectedClientInfo.address }}</div>
+          <div *ngIf="selectedClientInfo.email">Correo: {{ selectedClientInfo.email }}</div>
+        </div>
+        <img *ngIf="clientLogoUrl(selectedClientInfo)" [src]="clientLogoUrl(selectedClientInfo)!" alt="Logo cliente" />
+      </div>
+      <div class="client-preview empty" *ngIf="clientsLoading || !selectedClientInfo">
+        <div class="client-preview-info">
+          <strong>{{ clientsLoading ? 'Cargando clientes' : 'Selecciona un cliente' }}</strong>
+          <div>{{ clientsLoading ? 'Preparando el selector del módulo.' : 'Las guías rápidas se crean por cliente, marca y modelo.' }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-bar">
+    <button type="button" class="tab" [class.active]="viewMode === 'list'" (click)="viewMode = 'list'">
+      Listado de guías
+    </button>
+    <button type="button" class="tab" *ngIf="canCreate" [class.active]="viewMode === 'form'" (click)="startCreate()">
+      Crear guía rápida
+    </button>
+  </div>
+
+  <p class="message" [class.success]="messageType === 'success'" [class.error]="messageType === 'error'" *ngIf="message">
+    {{ message }}
+  </p>
+
+  <div class="card guide-list-card" *ngIf="viewMode === 'list'">
+    <div class="list-head">
+      <div>
+        <h2>Guías por marca y modelo</h2>
+        <p class="muted">Una guía aprobada queda disponible para todos los equipos con la misma marca y modelo.</p>
+      </div>
+      <button type="button" class="primary" *ngIf="canCreate" (click)="startCreate()">Nueva guía</button>
+    </div>
+
+    <div class="list-filters">
+      <label>
+        Buscar
+        <input type="text" [(ngModel)]="searchTerm" placeholder="Equipo, marca, modelo o código..." />
+      </label>
+      <button type="button" class="ghost" (click)="searchTerm = ''">Limpiar</button>
+    </div>
+
+    <p class="muted" *ngIf="loading">Cargando guías rápidas...</p>
+    <p class="muted" *ngIf="!loading && !filteredGuides.length">No hay guías rápidas para mostrar.</p>
+
+    <div class="guide-table" *ngIf="!loading && filteredGuides.length">
+      <div class="guide-row header">
+        <span>Equipo</span>
+        <span>Marca / Modelo</span>
+        <span>Equipos</span>
+        <span>Actualización</span>
+        <span>Acciones</span>
+      </div>
+      <div class="guide-row" *ngFor="let guide of filteredGuides">
+        <span data-label="Equipo">
+          <strong>{{ guide.equipment_name }}</strong>
+          <small>{{ guide.document_code || 'Sin código documental' }} · V{{ guide.version }}</small>
+        </span>
+        <span data-label="Marca / Modelo">
+          {{ guide.brand }} / {{ guide.model }}
+        </span>
+        <span data-label="Equipos">{{ guide.asset_count || 0 }}</span>
+        <span data-label="Actualización">
+          {{ guide.updated_at | date: 'dd/MM/yyyy' }}
+          <small *ngIf="guide.updated_by_name">por {{ guide.updated_by_name }}</small>
+        </span>
+        <span class="actions">
+          <button type="button" class="primary small" (click)="openPdf(guide)">Ver</button>
+          <button type="button" class="ghost small" *ngIf="canEdit" (click)="editGuide(guide)">Editar</button>
+          <button type="button" class="danger small" *ngIf="canDelete" (click)="deleteGuide(guide)">Eliminar</button>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <form class="card guide-form-card" *ngIf="viewMode === 'form'" (ngSubmit)="submitGuide()">
+    <div class="form-head">
+      <div>
+        <h2>{{ isEditing ? 'Editar guía rápida' : 'Crear guía rápida' }}</h2>
+        <p class="muted">Completa operación básica, limpieza y emergencia. Encendido, apagado y alarmas solo si aplican al equipo.</p>
+      </div>
+      <button type="button" class="ghost" (click)="cancelForm()">Cancelar</button>
+    </div>
+
+    <div class="form-grid">
+      <label>
+        Usar marca/modelo del inventario
+        <select [(ngModel)]="selectedBrandModelKey" name="brandModel" (change)="onBrandModelChange()">
+          <option value="">Seleccionar manualmente</option>
+          <option *ngFor="let option of brandModelOptions" [value]="option.key">{{ option.label }}</option>
+        </select>
+      </label>
+      <label class="meta-field">
+        <span class="label-row">
+          Código documental
+          <button type="button" class="mini-edit" *ngIf="!metadataEditable" (click)="enableMetadataEdit()">Editar</button>
+        </span>
+        <input
+          type="text"
+          [(ngModel)]="form.documentCode"
+          name="documentCode"
+          placeholder="Se genera con marca/modelo"
+          [disabled]="!metadataEditable"
+          (input)="onDocumentCodeInput()"
+        />
+      </label>
+      <label class="meta-field">
+        <span class="label-row">
+          Versión
+          <button type="button" class="mini-edit" *ngIf="!metadataEditable" (click)="enableMetadataEdit()">Editar</button>
+        </span>
+        <input type="text" [(ngModel)]="form.version" name="version" [disabled]="!metadataEditable" />
+      </label>
+      <label>
+        Equipo *
+        <input type="text" [(ngModel)]="form.equipmentName" name="equipmentName" required />
+      </label>
+      <label>
+        Tipo de equipo
+        <select [(ngModel)]="form.equipmentType" name="equipmentType">
+          <option *ngFor="let type of equipmentTypeOptions" [value]="type">{{ type }}</option>
+        </select>
+      </label>
+      <label>
+        Marca *
+        <input type="text" [(ngModel)]="form.brand" name="brand" (input)="onBrandModelManualChange()" required />
+      </label>
+      <label>
+        Modelo *
+        <input type="text" [(ngModel)]="form.model" name="model" (input)="onBrandModelManualChange()" required />
+      </label>
+      <label>
+        Responsable del uso
+        <input type="text" [(ngModel)]="form.responsibleUse" name="responsibleUse" placeholder="Ej: personal asistencial del área" />
+      </label>
+      <label>
+        Contacto o reporte de falla
+        <input type="text" [(ngModel)]="form.supportContact" name="supportContact" placeholder="Ej: reportar a biomédica por la app" />
+      </label>
+    </div>
+
+    <div class="norm-grid">
+      <label>
+        Antes de encender / condiciones previas
+        <textarea [(ngModel)]="form.prerequisites" name="prerequisites" rows="3"></textarea>
+      </label>
+      <label>
+        Encendido seguro
+        <textarea [(ngModel)]="form.startupSteps" name="startupSteps" rows="3" placeholder="Si el equipo no enciende, déjalo en blanco."></textarea>
+      </label>
+      <label>
+        Apagado seguro
+        <textarea [(ngModel)]="form.shutdownSteps" name="shutdownSteps" rows="3" placeholder="Si no aplica, déjalo en blanco."></textarea>
+      </label>
+      <label>
+        Operación básica / parámetros comunes *
+        <textarea [(ngModel)]="form.basicOperation" name="basicOperation" rows="4" required></textarea>
+      </label>
+      <label>
+        Alertas y alarmas principales
+        <textarea [(ngModel)]="form.alarms" name="alarms" rows="4" placeholder="Si no tiene alarmas, déjalo en blanco."></textarea>
+      </label>
+      <label>
+        Limpieza y desinfección rápida *
+        <textarea [(ngModel)]="form.cleaningDisinfection" name="cleaningDisinfection" rows="4" required></textarea>
+      </label>
+      <label>
+        Acciones en emergencia o falla *
+        <textarea [(ngModel)]="form.emergencyActions" name="emergencyActions" rows="4" required></textarea>
+      </label>
+      <label>
+        Nota visual / pictograma
+        <textarea [(ngModel)]="form.visualNotes" name="visualNotes" rows="4" placeholder="Describe imagen, diagrama o pictograma recomendado."></textarea>
+      </label>
+    </div>
+
+    <div class="visual-card">
+      <div>
+        <strong>Referencia visual</strong>
+        <p class="muted">Opcional, pero recomendable para equipos de alto riesgo. Puedes subir imagen del panel, pasos o pictograma.</p>
+      </div>
+      <label class="file-field">
+        Imagen
+        <input type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" (change)="onVisualSelected($event)" />
+        <small>{{ visualFileName || 'Sin imagen seleccionada' }}</small>
+      </label>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="primary" [disabled]="saving">
+        {{ saving ? 'Guardando...' : isEditing ? 'Guardar cambios' : 'Crear guía rápida' }}
+      </button>
+      <button type="button" class="ghost" (click)="cancelForm()">Volver al listado</button>
+    </div>
+  </form>
+</section>

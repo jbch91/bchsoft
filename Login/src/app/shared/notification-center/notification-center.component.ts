@@ -77,6 +77,12 @@ export class NotificationCenterComponent implements OnInit, OnDestroy {
       });
       return;
     }
+    if (notification.type === 'maintenance_report_correction_requested') {
+      await this.router.navigate(['/mantenimiento'], {
+        queryParams: { view: 'reportes', source: 'notification' }
+      });
+      return;
+    }
     if (notification.link) {
       await this.router.navigateByUrl(notification.link);
     }
@@ -109,6 +115,7 @@ export class NotificationCenterComponent implements OnInit, OnDestroy {
     const labels: Record<string, string> = {
       maintenance_request_created: 'Solicitud mantenimiento',
       maintenance_report_ready: 'Reporte listo',
+      maintenance_report_correction_requested: 'Corrección solicitada',
       maintenance_report_signed: 'Reporte firmado',
       maintenance_spare_part_requested: 'Solicitud de repuesto',
       maintenance_preventive_generated: 'Preventivo',

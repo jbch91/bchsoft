@@ -42,7 +42,7 @@
   <div class="maintenance-summary">
     <div>
       <span>Solicitudes activas</span>
-      <strong>{{ requests.length }}</strong>
+      <strong>{{ manualRequests.length }}</strong>
     </div>
     <div>
       <span>Reportes</span>
@@ -64,25 +64,42 @@
       class="tab"
       *ngIf="auth.hasPermission('maintenance:request:create')"
       [class.active]="viewMode === 'crear_solicitud'"
-      (click)="viewMode = 'crear_solicitud'"
+      (click)="switchView('crear_solicitud')"
     >
       Crear solicitud
     </button>
-    <button type="button" class="tab" [class.active]="viewMode === 'solicitudes'" (click)="viewMode = 'solicitudes'">
+    <button type="button" class="tab" [class.active]="viewMode === 'solicitudes'" (click)="switchView('solicitudes')">
       Listado solicitudes
     </button>
-    <button type="button" class="tab" [class.active]="viewMode === 'reportes'" (click)="viewMode = 'reportes'">
+    <button
+      type="button"
+      class="tab"
+      *ngIf="auth.hasPermission('maintenance:report:create')"
+      [class.active]="viewMode === 'preventivos'"
+      (click)="switchView('preventivos')"
+    >
+      Preventivos programados
+    </button>
+    <button type="button" class="tab" [class.active]="viewMode === 'reportes'" (click)="switchView('reportes')">
       Reportes
     </button>
-    <button type="button" class="tab" [class.active]="viewMode === 'repuestos'" (click)="viewMode = 'repuestos'">
+    <button type="button" class="tab" [class.active]="viewMode === 'repuestos'" (click)="switchView('repuestos')">
       Pendientes repuestos
     </button>
-    <button type="button" class="tab" [class.active]="viewMode === 'bajas'" (click)="viewMode = 'bajas'">
+    <button type="button" class="tab" [class.active]="viewMode === 'bajas'" (click)="switchView('bajas')">
       Equipos dados de baja
     </button>
-    <button type="button" class="tab" [class.active]="viewMode === 'equipos'" (click)="viewMode = 'equipos'">
+    <button type="button" class="tab" [class.active]="viewMode === 'equipos'" (click)="switchView('equipos')">
       Estado equipos
     </button>
+  </div>
+
+  <div class="message error" *ngIf="errorMessage">{{ errorMessage }}</div>
+  <div class="message success" *ngIf="successMessage">{{ successMessage }}</div>
+  <div class="floating-alert" [ngClass]="alertKind" *ngIf="alertMessage">
+    <strong>{{ alertKind === 'success' ? 'Proceso realizado' : 'Revisa la información' }}</strong>
+    <span>{{ alertMessage }}</span>
+    <button type="button" (click)="alertMessage = ''">Cerrar</button>
   </div>
 
   <ng-container *ngIf="viewMode === 'crear_solicitud'">
@@ -206,18 +223,18 @@
           <span>Acciones</span>
         </div>
         <div class="row" *ngFor="let request of filteredRequests">
-          <span>
+          <span data-label="Equipo">
             <strong>{{ assetLabel(request.asset_id) }}</strong>
             <small>{{ assetMap.get(request.asset_id)?.siteName || '-' }} / {{ assetMap.get(request.asset_id)?.areaName || '-' }}</small>
           </span>
-          <span>
+          <span data-label="Solicitud">
             {{ request.type }}
             <small>{{ request.description || 'Sin descripción' }}</small>
             <small>{{ request.created_at | date: 'dd/MM/yyyy, h:mm a' }}</small>
           </span>
-          <span><span class="status-pill" [ngClass]="statusClass(request.status)">{{ statusLabel(request.status) }}</span></span>
-          <span>{{ request.requester_name || '-' }}</span>
-          <span class="actions">
+          <span data-label="Estado"><span class="status-pill" [ngClass]="statusClass(request.status)">{{ statusLabel(request.status) }}</span></span>
+          <span data-label="Solicitante">{{ request.requester_name || '-' }}</span>
+          <span class="actions" data-label="Acciones">
             <button *ngIf="canTakeRequest(request)" type="button" (click)="takeRequest(request.id)">
               {{ takeRequestLabel(request) }}
             </button>
@@ -239,13 +256,96 @@
     </div>
   </ng-container>
 
+  <ng-container *ngIf="viewMode === 'preventivos'">
+    <div #preventiveProgrammedCard class="card">
+      <div class="inline-alert success" *ngIf="successMessage">
+        <strong>Listo</strong>
+        <span>{{ successMessage }}</span>
+      </div>
+      <div class="list-title">
+        <div>
+          <h2>Preventivos programados activos</h2>
+          <p>
+            Aquí aparecen los equipos cuyo mantenimiento preventivo ya está dentro de la ventana del cronograma.
+            Si pusiste la fecha de hoy para probar, deben mostrarse en esta lista.
+          </p>
+        </div>
+        <div class="preventive-summary">
+          <span>Áreas activas</span>
+          <strong>{{ preventiveAreaGroups.length }}</strong>
+          <span>Equipos activos</span>
+          <strong>{{ preventiveProgrammedRequests.length }}</strong>
+        </div>
+      </div>
+
+      <div class="preventive-area-list" *ngIf="preventiveAreaGroups.length">
+        <div class="preventive-area-card" *ngFor="let group of preventiveAreaGroups">
+          <div class="preventive-area-head">
+            <div>
+              <span>Área programada</span>
+              <strong>{{ group.areaName }}</strong>
+              <small>{{ group.siteName }} · {{ group.requests.length }} equipo{{ group.requests.length === 1 ? '' : 's' }}</small>
+            </div>
+          </div>
+
+          <div class="table preventive-table">
+            <div class="row header">
+              <span>Equipo</span>
+              <span>Ventana</span>
+              <span>Estado</span>
+              <span>Acciones</span>
+            </div>
+            <div class="row" *ngFor="let request of group.requests">
+              <span data-label="Equipo">
+                <strong>{{ assetLabel(request.asset_id) }}</strong>
+                <small>
+                  {{ assetMap.get(request.asset_id)?.locationName || '-' }}
+                  · Serie {{ assetMap.get(request.asset_id)?.serial || '-' }}
+                </small>
+              </span>
+              <span data-label="Ventana">{{ preventiveWindowLabel(request) }}</span>
+              <span data-label="Estado">
+                <span class="status-pill" [ngClass]="statusClass(request.status)">
+                  {{ statusLabel(request.status) }}
+                </span>
+              </span>
+              <span class="actions" data-label="Acciones">
+                <button
+                  *ngIf="canTakeRequest(request)"
+                  type="button"
+                  [disabled]="reportOpening"
+                  (click)="startPreventiveReport(request)"
+                >
+                  {{
+                    openingReportRequestId === request.id
+                      ? 'Abriendo...'
+                      : request.status === 'en_proceso'
+                        ? 'Continuar reporte'
+                        : 'Realizar reporte'
+                  }}
+                </button>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="empty" *ngIf="!loading && preventiveAreaGroups.length === 0">
+        No hay mantenimientos preventivos activos en la fecha actual. Revisa que el cronograma esté aprobado y que hoy esté dentro del rango del mantenimiento.
+      </p>
+    </div>
+  </ng-container>
+
   <ng-container *ngIf="viewMode === 'reportes'">
     <div class="grid">
-      <div class="card form-card" *ngIf="auth.hasPermission('maintenance:report:create') && reportFormActive">
+      <div #reportFormCard class="card form-card" *ngIf="auth.hasPermission('maintenance:report:create') && reportFormActive">
         <div class="card-title">
           <span>Reporte técnico</span>
-          <h2>Crear reporte</h2>
-          <p>Registra la intervención, el estado final del equipo y si requiere repuestos.</p>
+          <h2>{{ reportCorrectionMode ? 'Corregir reporte' : 'Crear reporte' }}</h2>
+          <p *ngIf="!reportCorrectionMode">Registra la intervención, el estado final del equipo y si requiere repuestos.</p>
+          <p *ngIf="reportCorrectionMode">
+            Ajusta el protocolo según la observación recibida. Al guardar, el reporte volverá a quedar pendiente de firma.
+          </p>
         </div>
         <div class="workflow-note" *ngIf="reportFlowMode !== 'normal'">
           <div>
@@ -257,10 +357,23 @@
           </div>
           <button type="button" class="ghost" (click)="cancelReportWorkflow()">Cancelar flujo</button>
         </div>
+        <div class="workflow-note" *ngIf="reportCorrectionMode">
+          <div>
+            <span>Corrección solicitada</span>
+            <strong>{{ selectedReportAsset ? assetLabel(selectedReportAsset.id) : 'Reporte seleccionado' }}</strong>
+            <small>Revisa todos los campos antes de guardar nuevamente el reporte.</small>
+          </div>
+          <button type="button" class="ghost" (click)="cancelReportWorkflow()">Cancelar corrección</button>
+        </div>
         <form (ngSubmit)="createReport()">
           <label>
             Solicitud
-            <select [(ngModel)]="reportRequestId" name="reportRequestId">
+            <select
+              [(ngModel)]="reportRequestId"
+              name="reportRequestId"
+              [disabled]="reportCorrectionMode"
+              (change)="onReportRequestChange()"
+            >
               <option *ngFor="let request of reportableRequests" [value]="request.id">
                 {{ request.type }} · {{ assetLabel(request.asset_id) }} · {{ statusLabel(request.status) }}
               </option>
@@ -298,6 +411,76 @@
               <textarea [ngModel]="request.description || 'Sin descripción registrada.'" name="requestDescriptionReadonly" rows="3" readonly></textarea>
             </label>
           </div>
+
+          <div class="standard-report-panel" *ngIf="selectedReportRequest as request">
+            <div class="standard-report-head">
+              <div>
+                <span
+                  class="report-kind-badge"
+                  [class.corrective]="request.type === 'correctivo'"
+                  [class.preventive]="request.type === 'preventivo'"
+                >
+                  {{ reportTypeLabel() }}
+                </span>
+                <h3>Formato técnico estandarizado</h3>
+                <p>
+                  Selecciona la causa probable, revisiones, actividades y pruebas realizadas.
+                  Esto deja todos los reportes comparables aunque los equipos sean diferentes.
+                </p>
+              </div>
+              <small>
+                Estos campos quedan guardados en el PDF y en el historial de la hoja de vida.
+              </small>
+            </div>
+
+            <div class="standard-grid">
+              <div class="standard-group">
+                <div class="standard-group-title">
+                  <strong>Revisiones realizadas</strong>
+                  <span>{{ reportMaintenanceChecks.length }} seleccionada{{ reportMaintenanceChecks.length === 1 ? '' : 's' }}</span>
+                </div>
+                <label class="standard-option" *ngFor="let option of maintenanceCheckOptions">
+                  <input
+                    type="checkbox"
+                    [checked]="optionChecked('checks', option.value)"
+                    (change)="toggleReportOption('checks', option.value, $any($event.target).checked)"
+                  />
+                  <span>{{ option.label }}</span>
+                </label>
+              </div>
+
+              <div class="standard-group">
+                <div class="standard-group-title">
+                  <strong>Actividades técnicas</strong>
+                  <span>{{ reportMaintenanceActivities.length }} seleccionada{{ reportMaintenanceActivities.length === 1 ? '' : 's' }}</span>
+                </div>
+                <label class="standard-option" *ngFor="let option of maintenanceActivityOptions">
+                  <input
+                    type="checkbox"
+                    [checked]="optionChecked('activities', option.value)"
+                    (change)="toggleReportOption('activities', option.value, $any($event.target).checked)"
+                  />
+                  <span>{{ option.label }}</span>
+                </label>
+              </div>
+
+              <div class="standard-group">
+                <div class="standard-group-title">
+                  <strong>Pruebas y verificación</strong>
+                  <span>{{ reportMaintenanceTests.length }} seleccionada{{ reportMaintenanceTests.length === 1 ? '' : 's' }}</span>
+                </div>
+                <label class="standard-option" *ngFor="let option of maintenanceTestOptions">
+                  <input
+                    type="checkbox"
+                    [checked]="optionChecked('tests', option.value)"
+                    (change)="toggleReportOption('tests', option.value, $any($event.target).checked)"
+                  />
+                  <span>{{ option.label }}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <label>
             Resumen
             <textarea [(ngModel)]="reportSummary" name="reportSummary" rows="2"></textarea>
@@ -351,7 +534,9 @@
             </p>
           </div>
 
-          <button type="submit" [disabled]="loading">Guardar reporte</button>
+          <button type="submit" [disabled]="loading || reportOpening">
+            {{ loading ? 'Guardando reporte...' : reportOpening ? 'Preparando reporte...' : submitReportLabel() }}
+          </button>
         </form>
       </div>
       <div class="card form-card report-empty" *ngIf="auth.hasPermission('maintenance:report:create') && !reportFormActive">
@@ -363,7 +548,7 @@
             Así evitamos registrar reportes sobre solicitudes equivocadas.
           </p>
         </div>
-        <button type="button" class="ghost" (click)="viewMode = 'solicitudes'">Ir a solicitudes</button>
+        <button type="button" class="ghost" (click)="switchView('solicitudes')">Ir a solicitudes</button>
       </div>
     </div>
 
@@ -383,6 +568,7 @@
             <select [(ngModel)]="reportStatusFilter">
               <option value="">Todos</option>
               <option value="reportado">Por firmar</option>
+              <option value="correccion">Corrección solicitada</option>
               <option value="firmado">Firmado</option>
               <option value="trazabilidad_repuesto">Trazabilidad repuesto</option>
             </select>
@@ -426,31 +612,50 @@
           <span>Acciones</span>
         </div>
         <div class="row" *ngFor="let report of filteredReports">
-          <span>
+          <span data-label="Equipo">
             <strong>{{ assetLabel(report.asset_id) }}</strong>
             <small>Ing: {{ report.engineer_name || '-' }}</small>
           </span>
-          <span>
+          <span data-label="Reporte">
             {{ report.type }}
             <small>{{ report.summary || 'Sin resumen' }}</small>
             <small>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</small>
           </span>
-          <span>
+          <span data-label="Estado equipo">
             <span class="status-pill" [ngClass]="statusClass(report.asset_status_after)">
               {{ statusLabel(report.asset_status_after || 'operativo') }}
             </span>
             <small *ngIf="report.requires_spare_parts">
               Repuesto: {{ report.spare_parts_needed || '-' }} · {{ statusLabel(report.spare_parts_status) }}
             </small>
+            <small class="correction-note" *ngIf="report.correction_requested">
+              Corrección: {{ report.correction_reason || 'Sin detalle registrado' }}
+            </small>
           </span>
-          <span>
+          <span data-label="Firma">
             <span class="status-pill" [ngClass]="reportSignatureClass(report)">
               {{ reportSignedDate(report) }}
             </span>
           </span>
-          <span class="actions">
+          <span class="actions" data-label="Acciones">
             <button type="button" (click)="downloadReport(report.id)">VER</button>
             <button *ngIf="canSignReport(report)" type="button" (click)="signReport(report.id)">Firmar</button>
+            <button
+              *ngIf="canRequestReportCorrection(report)"
+              type="button"
+              class="warning"
+              (click)="requestReportCorrection(report)"
+            >
+              Corrección
+            </button>
+            <button
+              *ngIf="canCorrectReport(report)"
+              type="button"
+              class="warning"
+              (click)="startReportCorrection(report)"
+            >
+              Corregir
+            </button>
             <button *ngIf="auth.hasRole('superuser')" type="button" class="danger" (click)="deleteReport(report.id)">
               Eliminar
             </button>
@@ -578,18 +783,15 @@
           <span>Estado</span>
         </div>
         <div class="row" *ngFor="let asset of filteredAssets">
-          <span>{{ asset.code }}</span>
-          <span>
+          <span data-label="Código">{{ asset.code }}</span>
+          <span data-label="Equipo">
             <strong>{{ asset.name }}</strong>
             <small>{{ asset.brand || '-' }} · {{ asset.model || '-' }} · Serie {{ asset.serial || '-' }}</small>
           </span>
-          <span>{{ asset.siteName || '-' }} / {{ asset.areaName || '-' }} / {{ asset.locationName || '-' }}</span>
-          <span><span class="status-pill" [ngClass]="statusClass(asset.status)">{{ statusLabel(asset.status || 'activo') }}</span></span>
+          <span data-label="Ubicación">{{ asset.siteName || '-' }} / {{ asset.areaName || '-' }} / {{ asset.locationName || '-' }}</span>
+          <span data-label="Estado"><span class="status-pill" [ngClass]="statusClass(asset.status)">{{ statusLabel(asset.status || 'activo') }}</span></span>
         </div>
       </div>
     </div>
   </ng-container>
-
-  <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
-  <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
 </section>

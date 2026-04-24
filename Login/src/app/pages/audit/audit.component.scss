@@ -60,11 +60,11 @@
   position: sticky;
   top: 8px;
   z-index: 1;
-  background: linear-gradient(135deg, var(--brand-700), #5f1f25);
+  background: var(--table-header-bg);
   border: none;
   color: #ffffff;
   font-weight: 800;
-  box-shadow: 0 14px 24px rgba(80, 25, 30, 0.18);
+  box-shadow: var(--table-header-shadow);
 }
 
 .row span {

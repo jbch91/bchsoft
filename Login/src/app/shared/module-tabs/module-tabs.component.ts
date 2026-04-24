@@ -60,6 +60,12 @@ export class ModuleTabsComponent implements OnInit {
       permissionsAny: ['hb:create', 'hb:view', 'read:all']
     },
     {
+      label: 'Guías rápidas',
+      route: '/guias-rapidas',
+      moduleKey: 'guias_rapidas',
+      permissionsAny: ['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete', 'hb:view', 'read:all']
+    },
+    {
       label: 'Mantenimiento',
       route: '/mantenimiento',
       moduleKey: 'reportes_mantenimiento',

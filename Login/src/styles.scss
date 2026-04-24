@@ -7,6 +7,7 @@
   --brand-500: #b64f54;
   --brand-600: #a64045;
   --brand-700: #8f3237;
+  --brand-800: #6f252b;
 
   --ink: #0f172a;
   --ink-2: #1e293b;
@@ -15,6 +16,8 @@
   --card: #ffffff;
   --bg-a: #fff5f5;
   --bg-b: #f8fafc;
+  --table-header-bg: linear-gradient(135deg, var(--brand-700), var(--brand-600));
+  --table-header-shadow: 0 10px 18px rgba(166, 64, 69, 0.2);
 
   font-family: 'Rubik', sans-serif;
   background: linear-gradient(120deg, var(--bg-a), var(--bg-b));

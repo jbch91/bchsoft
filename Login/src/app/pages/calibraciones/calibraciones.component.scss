@@ -134,9 +134,13 @@ button {
 
 .schedule-row.header,
 .item-row.header {
-  background: var(--ink);
+  background: var(--table-header-bg);
   color: #ffffff;
-  font-weight: 600;
+  border: none;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: var(--table-header-shadow);
 }
 
 .actions {

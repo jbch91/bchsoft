@@ -503,13 +503,14 @@ button:active:not(:disabled) {
 }
 
 .import-preview-row.header {
-  background: linear-gradient(135deg, var(--brand-700), var(--brand-600));
+  background: var(--table-header-bg);
   border: none;
   color: #ffffff;
   font-weight: 900;
   position: sticky;
   top: 0;
   z-index: 1;
+  box-shadow: var(--table-header-shadow);
 }
 
 .import-error {
@@ -574,9 +575,9 @@ button:active:not(:disabled) {
 }
 
 .table .row.header {
-  background: linear-gradient(135deg, var(--brand-700), var(--brand-600));
+  background: var(--table-header-bg);
   border: none;
-  box-shadow: 0 12px 22px rgba(166, 64, 69, 0.22);
+  box-shadow: var(--table-header-shadow);
   color: #ffffff;
   font-weight: 900;
   letter-spacing: 0.02em;

@@ -39,7 +39,25 @@
     </div>
   </div>
 
+  <div class="inventory-tabs">
+    <button
+      type="button"
+      [class.active]="activeInventoryView === 'listado'"
+      (click)="setInventoryView('listado')"
+    >
+      Listado de inventario
+    </button>
+    <button
+      type="button"
+      [class.active]="activeInventoryView === 'qr'"
+      (click)="setInventoryView('qr')"
+    >
+      Códigos QR
+    </button>
+  </div>
+
   <app-inventory-panel
+    *ngIf="activeInventoryView === 'listado'"
     [items]="items"
     [selectedClientId]="selectedClientId"
     [loading]="loading"
@@ -52,4 +70,84 @@
     (deleteItem)="deleteItem($event)"
     (movedItem)="loadItems()"
   ></app-inventory-panel>
+
+  <section class="card qr-card" *ngIf="activeInventoryView === 'qr'">
+    <div class="qr-head">
+      <div>
+        <span>Identificación rápida</span>
+        <h2>Códigos QR por equipo</h2>
+        <p>
+          Genera etiquetas para que el usuario pueda escanear el equipo y abrir una solicitud o reporte con mayor facilidad.
+        </p>
+      </div>
+      <div class="qr-counter">
+        <strong>{{ qrFilteredItems.length }}</strong>
+        <span>equipos visibles</span>
+      </div>
+    </div>
+
+    <div class="qr-tools">
+      <label>
+        Buscar equipo
+        <input type="text" [(ngModel)]="qrSearchTerm" placeholder="Código, equipo, serie, área..." />
+      </label>
+      <label>
+        Área
+        <select [(ngModel)]="qrAreaFilter">
+          <option value="">Todas</option>
+          <option *ngFor="let area of qrAreaOptions" [value]="area">{{ area }}</option>
+        </select>
+      </label>
+      <label>
+        Estado
+        <select [(ngModel)]="qrStatusFilter">
+          <option value="">Todos</option>
+          <option *ngFor="let status of qrStatusOptions" [value]="status">{{ status }}</option>
+        </select>
+      </label>
+      <button type="button" class="ghost" (click)="clearQrFilters()">Limpiar</button>
+      <button type="button" class="ghost" [disabled]="qrGenerating" (click)="generateVisibleQrCodes()">
+        {{ qrGenerating ? 'Generando...' : 'Generar visibles' }}
+      </button>
+      <button type="button" class="ghost" (click)="selectAllQrFiltered()">Seleccionar visibles</button>
+      <button type="button" class="ghost" (click)="clearQrSelection()">Quitar selección</button>
+      <button type="button" class="primary" [disabled]="qrGenerating || qrFilteredItems.length === 0" (click)="downloadQrPdf()">
+        PDF {{ qrSelectedItems.length ? 'seleccionados' : 'visibles' }}
+      </button>
+    </div>
+
+    <p class="error" *ngIf="qrError">{{ qrError }}</p>
+    <p class="success" *ngIf="qrSuccess">{{ qrSuccess }}</p>
+    <p class="muted" *ngIf="!qrFilteredItems.length">No hay equipos con esos filtros.</p>
+
+    <div class="qr-grid" *ngIf="qrFilteredItems.length">
+      <article class="qr-item" *ngFor="let item of qrFilteredItems">
+        <label class="qr-select">
+          <input type="checkbox" [checked]="isQrSelected(item)" (change)="toggleQrSelection(item)" />
+          Seleccionar
+        </label>
+
+        <div class="qr-image">
+          <img *ngIf="qrCodes[item.id]" [src]="qrCodes[item.id]" [alt]="'QR ' + item.code" />
+          <button type="button" class="ghost" *ngIf="!qrCodes[item.id]" [disabled]="qrGenerating" (click)="generateQrCodes([item])">
+            Generar QR
+          </button>
+        </div>
+
+        <div class="qr-info">
+          <strong>{{ item.code }}</strong>
+          <span>{{ item.name }}</span>
+          <small>{{ item.brand || '-' }} · {{ item.model || '-' }}</small>
+          <small>Serie: {{ item.serial || '-' }}</small>
+          <small>{{ item.areaName || '-' }} / {{ item.locationName || '-' }}</small>
+        </div>
+
+        <div class="qr-actions">
+          <button type="button" class="ghost" [disabled]="qrGenerating" (click)="downloadQrPng(item)">
+            Descargar PNG
+          </button>
+        </div>
+      </article>
+    </div>
+  </section>
 </section>

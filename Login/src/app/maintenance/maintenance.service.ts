@@ -17,6 +17,8 @@ export interface MaintenanceRequestDto {
   planned_date?: string | null;
   deadline_date?: string | null;
   source?: string | null;
+  schedule_id?: string | null;
+  schedule_item_id?: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -30,6 +32,10 @@ export interface MaintenanceReportDto {
   summary?: string | null;
   findings?: string | null;
   actions_taken?: string | null;
+  failure_cause?: string | null;
+  maintenance_checks?: string[];
+  maintenance_activities?: string[];
+  maintenance_tests?: string[];
   asset_status_after?: string | null;
   requires_spare_parts?: boolean;
   spare_parts_needed?: string | null;
@@ -40,6 +46,10 @@ export interface MaintenanceReportDto {
   request_status?: string | null;
   signed_by_me?: boolean;
   is_fully_signed?: boolean;
+  correction_requested?: boolean;
+  correction_reason?: string | null;
+  correction_requested_at?: string | null;
+  correction_requested_by_name?: string | null;
 }
 
 export interface NotificationDto {
@@ -104,6 +114,9 @@ export class MaintenanceService {
     summary?: string;
     findings?: string;
     actionsTaken?: string;
+    maintenanceChecks?: string[];
+    maintenanceActivities?: string[];
+    maintenanceTests?: string[];
     assetStatusAfter?: string;
     assetLifecycleAction?: 'retire' | null;
     requiresSpareParts?: boolean;
@@ -115,6 +128,12 @@ export class MaintenanceService {
 
   async signReport(reportId: string): Promise<void> {
     await firstValueFrom(this.http.post(`${this.apiBase}/maintenance/reports/${reportId}/sign`, {}));
+  }
+
+  async requestReportCorrection(reportId: string, reason: string): Promise<void> {
+    await firstValueFrom(
+      this.http.post(`${this.apiBase}/maintenance/reports/${reportId}/correction`, { reason })
+    );
   }
 
   async downloadReportPdf(reportId: string): Promise<Blob> {

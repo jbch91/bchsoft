@@ -34,6 +34,21 @@ interface AssetLite {
   locationName?: string | null;
 }
 
+interface PreventiveAreaGroup {
+  areaName: string;
+  siteName: string;
+  requests: MaintenanceRequestDto[];
+}
+
+type MaintenanceViewMode =
+  | 'crear_solicitud'
+  | 'solicitudes'
+  | 'preventivos'
+  | 'reportes'
+  | 'repuestos'
+  | 'bajas'
+  | 'equipos';
+
 @Component({
   selector: 'app-maintenance',
   standalone: true,
@@ -43,16 +58,23 @@ interface AssetLite {
 })
 export class MaintenanceComponent implements OnInit, OnDestroy {
   @ViewChild('qrVideo') qrVideo?: ElementRef<HTMLVideoElement>;
+  @ViewChild('reportFormCard') reportFormCard?: ElementRef<HTMLElement>;
+  @ViewChild('preventiveProgrammedCard') preventiveProgrammedCard?: ElementRef<HTMLElement>;
 
   private readonly publicBase = getPublicBase();
   private qrStream: MediaStream | null = null;
   private qrTimer: ReturnType<typeof setTimeout> | null = null;
   private qrDetector: any = null;
   private routeSub: Subscription | null = null;
+  private destroyed = false;
 
   loading = false;
   errorMessage = '';
   successMessage = '';
+  alertMessage = '';
+  alertKind: 'success' | 'error' = 'success';
+  reportOpening = false;
+  openingReportRequestId = '';
 
   clients: ClientLite[] = [];
   clientSearchTerm = '';
@@ -81,21 +103,26 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportSummary = '';
   reportFindings = '';
   reportActions = '';
+  reportMaintenanceChecks: string[] = [];
+  reportMaintenanceActivities: string[] = [];
+  reportMaintenanceTests: string[] = [];
   reportAssetStatus: 'operativo' | 'operativo_observacion' | 'fuera_de_servicio' = 'operativo';
   reportRequiresSpareParts = false;
   reportSparePartsNeeded = '';
   reportSparePartsStatus: 'no_aplica' | 'solicitado' | 'recibido' = 'no_aplica';
   reportFlowMode: 'normal' | 'install_spare' | 'retire_asset' = 'normal';
   reportFlowSource: MaintenanceReportDto | null = null;
+  reportCorrectionMode = false;
   reportFormActive = false;
   reportSubView: 'pendientes_firma' | 'historial' = 'pendientes_firma';
-  viewMode: 'crear_solicitud' | 'solicitudes' | 'reportes' | 'repuestos' | 'bajas' | 'equipos' = 'crear_solicitud';
+  viewMode: MaintenanceViewMode = 'crear_solicitud';
 
   readonly requestStatuses = [
     { value: '', label: 'Todos' },
     { value: 'abierto', label: 'Abierto' },
     { value: 'en_proceso', label: 'En proceso' },
     { value: 'espera_repuesto', label: 'En espera de repuesto' },
+    { value: 'correccion', label: 'Corrección solicitada' },
     { value: 'reportado', label: 'Reportado' },
     { value: 'firmado', label: 'Firmado' }
   ];
@@ -108,6 +135,36 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     { value: 'solicitado', label: 'Solicitar repuesto' },
     { value: 'recibido', label: 'Recibido' }
   ];
+  readonly maintenanceCheckOptions = [
+    { value: 'revision_visual', label: 'Revisión visual externa' },
+    { value: 'revision_cables_conexiones', label: 'Revisión de cables y conexiones' },
+    { value: 'revision_accesorios', label: 'Revisión de accesorios' },
+    { value: 'verificacion_alimentacion', label: 'Verificación eléctrica/batería' },
+    { value: 'revision_alarmas_errores', label: 'Alarmas o códigos de error' },
+    { value: 'prueba_funcional_inicial', label: 'Prueba funcional inicial' },
+    { value: 'revision_seguridad_basica', label: 'Revisión básica de seguridad' }
+  ];
+  readonly maintenanceActivityOptions = [
+    { value: 'limpieza_externa', label: 'Limpieza externa' },
+    { value: 'limpieza_interna', label: 'Limpieza interna' },
+    { value: 'ajuste_conexiones', label: 'Ajuste de conexiones' },
+    { value: 'configuracion_parametros', label: 'Configuración de parámetros' },
+    { value: 'reparacion_componente', label: 'Reparación de componente' },
+    { value: 'instalacion_repuesto', label: 'Instalación/reemplazo de repuesto' },
+    { value: 'lubricacion', label: 'Lubricación' },
+    { value: 'actualizacion_software', label: 'Actualización de software' },
+    { value: 'capacitacion_usuario', label: 'Inducción al usuario' },
+    { value: 'prueba_funcional_final', label: 'Prueba funcional final' }
+  ];
+  readonly maintenanceTestOptions = [
+    { value: 'encendido_apagado', label: 'Encendido y apagado' },
+    { value: 'prueba_modos_operacion', label: 'Modos de operación' },
+    { value: 'verificacion_alarmas', label: 'Verificación de alarmas' },
+    { value: 'verificacion_accesorios', label: 'Verificación de accesorios' },
+    { value: 'prueba_con_paciente_simulado', label: 'Paciente/simulador' },
+    { value: 'verificacion_parametros', label: 'Parámetros dentro de rango' },
+    { value: 'equipo_operativo_entregado', label: 'Equipo operativo y entregado' }
+  ];
 
   constructor(
     private readonly admin: AdminService,
@@ -119,17 +176,20 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   ) {}
 
   async ngOnInit(): Promise<void> {
-    await this.loadClients();
-    await this.loadData();
-    if (!this.auth.hasPermission('maintenance:request:create')) {
+    if (!this.auth.hasPermission('maintenance:request:create') && this.auth.hasPermission('maintenance:report:create')) {
+      this.viewMode = 'preventivos';
+    } else if (!this.auth.hasPermission('maintenance:request:create')) {
       this.viewMode = 'solicitudes';
     }
+    await this.loadClients();
+    await this.loadData();
     this.routeSub = this.route.queryParamMap.subscribe((params) => {
       void this.applyRouteIntent(params);
     });
   }
 
   ngOnDestroy(): void {
+    this.destroyed = true;
     this.stopQrScan();
     this.routeSub?.unsubscribe();
   }
@@ -179,9 +239,40 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     await this.loadData();
   }
 
+  async switchView(mode: MaintenanceViewMode): Promise<void> {
+    this.viewMode = mode;
+    this.refreshViewSoon();
+
+    if (mode === 'preventivos') {
+      await this.loadData();
+      this.scrollToPreventiveProgrammed();
+    }
+  }
+
   async applyRouteIntent(params: ParamMap): Promise<void> {
     const view = params.get('view');
     const requestId = params.get('requestId');
+    const assetId = params.get('assetId');
+    const assetCode = params.get('code');
+    const clientId = params.get('clientId');
+
+    if ((assetId || assetCode) && clientId && !this.auth.currentUser()?.clientId && this.selectedClientId !== clientId) {
+      this.selectedClientId = clientId;
+      await this.loadData();
+    }
+
+    if (assetId || assetCode) {
+      if (!this.assets.length && this.selectedClientId) {
+        await this.loadData();
+      }
+      const found = this.selectAssetFromCode(assetId || assetCode || '');
+      if (found) {
+        this.viewMode = 'crear_solicitud';
+        this.requestType = 'correctivo';
+        this.scrollToTop();
+      }
+    }
+
     if (view === 'reportes' && requestId) {
       if (!this.requests.length && this.selectedClientId) {
         await this.loadData();
@@ -211,7 +302,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.reports = [];
       this.assets = [];
       this.assetMap = new Map();
-      this.cdr.detectChanges();
+      this.refreshViewSoon();
       return;
     }
     this.loading = true;
@@ -247,13 +338,24 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.errorMessage = 'No se pudo cargar la información de mantenimiento.';
     } finally {
       this.loading = false;
-      this.cdr.detectChanges();
+      this.refreshViewSoon();
     }
   }
 
   activateReportForm(requestId: string, message = ''): void {
     const request = this.requests.find((item) => item.id === requestId);
-    if (!request || ['reportado', 'firmado'].includes(request.status)) {
+    if (!request) {
+      this.reportFormActive = false;
+      this.reportRequestId = '';
+      this.viewMode = 'reportes';
+      this.errorMessage = 'Esta solicitud ya no está disponible para crear reporte.';
+      return;
+    }
+    this.openReportFormForRequest(request, message);
+  }
+
+  private openReportFormForRequest(request: MaintenanceRequestDto, message = ''): void {
+    if (['reportado', 'firmado', 'vencido'].includes(request.status)) {
       this.reportFormActive = false;
       this.reportRequestId = '';
       this.viewMode = 'reportes';
@@ -264,12 +366,13 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.openSpareWorkflow(request);
       return;
     }
-    this.reportRequestId = requestId;
+    this.reportRequestId = request.id;
     this.reportFormActive = true;
     this.viewMode = 'reportes';
     this.resetReportFields();
+    this.applyReportDefaults(request);
     if (message) this.successMessage = message;
-    this.scrollToTop();
+    this.scrollToReportForm();
   }
 
   async createRequest(): Promise<void> {
@@ -303,8 +406,45 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       await this.maintenance.assignRequest(requestId);
       await this.loadData();
       this.activateReportForm(requestId, 'Solicitud tomada. Completa el reporte cuando termines la intervención.');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
+      this.errorMessage = error?.error?.message ?? 'No se pudo tomar la solicitud.';
+    }
+  }
+
+  async startPreventiveReport(request: MaintenanceRequestDto): Promise<void> {
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.alertMessage = '';
+    if (!this.canTakeRequest(request)) {
+      this.errorMessage = 'No puedes tomar este mantenimiento preventivo en este momento.';
+      return;
+    }
+    this.reportOpening = true;
+    this.openingReportRequestId = request.id;
+    this.openReportFormForRequest(
+      request,
+      `Abriendo mantenimiento preventivo para ${this.assetLabel(request.asset_id)}...`
+    );
+    try {
+      if (request.status !== 'en_proceso') {
+        await this.maintenance.assignRequest(request.id);
+      }
+      await this.loadData();
+      const updatedRequest = this.requests.find((item) => item.id === request.id) ?? request;
+      this.reportRequestId = updatedRequest.id;
+      this.applyReportDefaults(updatedRequest);
+      this.successMessage = `Mantenimiento preventivo cargado para ${this.assetLabel(updatedRequest.asset_id)}.`;
+      this.scrollToReportForm();
+    } catch (error: any) {
+      console.error(error);
+      this.reportFormActive = false;
+      this.reportRequestId = '';
+      this.viewMode = 'preventivos';
+      this.errorMessage = error?.error?.message ?? 'No se pudo abrir el reporte preventivo.';
+    } finally {
+      this.reportOpening = false;
+      this.openingReportRequestId = '';
     }
   }
 
@@ -326,40 +466,90 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.errorMessage = 'Selecciona una solicitud.';
       return;
     }
+    const request = this.selectedReportRequest;
+    const summary = this.reportSummary?.trim();
+    const findings = this.reportFindings?.trim();
+    const actionsTaken = this.reportActions?.trim();
+    if (!summary || !findings || !actionsTaken) {
+      this.errorMessage = 'Completa resumen, hallazgos y acciones realizadas antes de guardar el reporte.';
+      return;
+    }
+    if (!this.reportMaintenanceChecks.length) {
+      this.errorMessage = 'Selecciona al menos una revisión realizada.';
+      return;
+    }
+    if (!this.reportMaintenanceActivities.length) {
+      this.errorMessage = 'Selecciona al menos una actividad técnica realizada.';
+      return;
+    }
+    if (this.reportAssetStatus !== 'fuera_de_servicio' && !this.reportMaintenanceTests.length) {
+      this.errorMessage = 'Selecciona al menos una prueba o verificación realizada.';
+      return;
+    }
+    if (this.reportRequiresSpareParts && !this.reportSparePartsNeeded.trim()) {
+      this.errorMessage = 'Describe el repuesto requerido antes de guardar el reporte.';
+      this.showAlert(this.errorMessage, 'error');
+      return;
+    }
     this.errorMessage = '';
     this.successMessage = '';
+    this.loading = true;
     try {
+      const requestBeforeSave = this.selectedReportRequest;
+      const savedAssetLabel = requestBeforeSave ? this.assetLabel(requestBeforeSave.asset_id) : '';
+      const wasPreventive = requestBeforeSave?.type === 'preventivo';
+      const hadPendingSparePartRequest = Boolean(
+        this.reportRequiresSpareParts && this.reportSparePartsStatus !== 'recibido'
+      );
+      const flowMode = this.reportFlowMode;
+      const isInstallingSpare = flowMode === 'install_spare';
+      const requiresSparePartsForPayload = isInstallingSpare || this.reportRequiresSpareParts;
+      const sparePartsNeededForPayload = isInstallingSpare
+        ? (this.reportSparePartsNeeded.trim() || 'Repuesto instalado')
+        : this.reportSparePartsNeeded.trim();
       await this.maintenance.createReport({
         requestId: this.reportRequestId,
-        summary: this.reportSummary?.trim(),
-        findings: this.reportFindings?.trim(),
-        actionsTaken: this.reportActions?.trim(),
+        summary,
+        findings,
+        actionsTaken,
+        maintenanceChecks: this.reportMaintenanceChecks,
+        maintenanceActivities: this.reportMaintenanceActivities,
+        maintenanceTests: this.reportMaintenanceTests,
         assetStatusAfter: this.reportAssetStatus,
         assetLifecycleAction: this.reportFlowMode === 'retire_asset' ? 'retire' : null,
-        requiresSpareParts: this.reportRequiresSpareParts,
-        sparePartsNeeded: this.reportRequiresSpareParts ? this.reportSparePartsNeeded.trim() : '',
-        sparePartsStatus: this.reportRequiresSpareParts ? this.reportSparePartsStatus : 'no_aplica'
+        requiresSpareParts: requiresSparePartsForPayload,
+        sparePartsNeeded: requiresSparePartsForPayload ? sparePartsNeededForPayload : '',
+        sparePartsStatus: isInstallingSpare ? 'recibido' : (this.reportRequiresSpareParts ? this.reportSparePartsStatus : 'no_aplica')
       });
-      this.reportSummary = '';
-      this.reportFindings = '';
-      this.reportActions = '';
-      this.reportAssetStatus = 'operativo';
-      this.reportRequiresSpareParts = false;
-      this.reportSparePartsNeeded = '';
-      this.reportSparePartsStatus = 'no_aplica';
       this.reportRequestId = '';
-      const flowMode = this.reportFlowMode;
-      this.resetReportWorkflow();
+      this.resetReportFields();
       this.reportFormActive = false;
       await this.loadData();
-      this.successMessage = flowMode === 'install_spare'
+      if (wasPreventive) {
+        this.viewMode = 'preventivos';
+        const message = hadPendingSparePartRequest
+          ? `Reporte preventivo guardado${savedAssetLabel ? ` para ${savedAssetLabel}` : ''}. El equipo quedó en Pendientes repuestos y se notificó al almacenista. Puedes continuar con el siguiente preventivo.`
+          : `Reporte preventivo guardado${savedAssetLabel ? ` para ${savedAssetLabel}` : ''}. Puedes continuar con el siguiente equipo.`;
+        this.showAlert(
+          message,
+          'success'
+        );
+        this.scrollToPreventiveProgrammed();
+        return;
+      }
+      const message = flowMode === 'install_spare'
         ? 'Reporte de instalación de repuesto creado. El caso salió de pendientes de repuesto.'
         : flowMode === 'retire_asset'
           ? 'Reporte de baja técnica creado. El caso salió de pendientes de repuesto.'
           : 'Reporte creado.';
+      this.showAlert(message, 'success');
     } catch (error: any) {
       console.error(error);
       this.errorMessage = error?.error?.message ?? 'No se pudo crear el reporte.';
+      this.showAlert(this.errorMessage, 'error');
+    } finally {
+      this.loading = false;
+      this.refreshViewSoon();
     }
   }
 
@@ -371,6 +561,45 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       console.error(error);
       this.errorMessage = error?.error?.message ?? 'No se pudo firmar el reporte.';
     }
+  }
+
+  async requestReportCorrection(report: MaintenanceReportDto): Promise<void> {
+    const reason = prompt('Describe claramente qué debe corregir el ingeniero antes de firmar:');
+    const cleanReason = reason?.trim();
+    if (!cleanReason) {
+      return;
+    }
+    try {
+      await this.maintenance.requestReportCorrection(report.id, cleanReason);
+      await this.loadData();
+      this.showAlert('Corrección solicitada. El ingeniero recibió una notificación con el motivo.', 'success');
+    } catch (error: any) {
+      console.error(error);
+      this.errorMessage = error?.error?.message ?? 'No se pudo solicitar la corrección.';
+      this.showAlert(this.errorMessage, 'error');
+    }
+  }
+
+  startReportCorrection(report: MaintenanceReportDto): void {
+    if (!this.canCorrectReport(report)) return;
+    this.reportRequestId = report.request_id;
+    this.reportFormActive = true;
+    this.reportCorrectionMode = true;
+    this.viewMode = 'reportes';
+    this.reportSummary = report.summary || '';
+    this.reportFindings = report.findings || '';
+    this.reportActions = report.actions_taken || '';
+    this.reportMaintenanceChecks = this.asStringArray(report.maintenance_checks);
+    this.reportMaintenanceActivities = this.asStringArray(report.maintenance_activities);
+    this.reportMaintenanceTests = this.asStringArray(report.maintenance_tests);
+    this.reportAssetStatus = this.isAssetStatus(report.asset_status_after) ? report.asset_status_after : 'operativo';
+    this.reportRequiresSpareParts = Boolean(report.requires_spare_parts);
+    this.reportSparePartsNeeded = report.spare_parts_needed || '';
+    this.reportSparePartsStatus = this.isSpareStatus(report.spare_parts_status) ? report.spare_parts_status : 'no_aplica';
+    this.reportFlowMode = 'normal';
+    this.reportFlowSource = null;
+    this.successMessage = `Corrección cargada. Motivo: ${report.correction_reason || 'Sin detalle registrado'}`;
+    this.scrollToReportForm();
   }
 
   async downloadReport(reportId: string): Promise<void> {
@@ -423,7 +652,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   get filteredRequests(): MaintenanceRequestDto[] {
     const term = this.normalize(this.requestSearchTerm);
-    return this.requests.filter((request) => {
+    return this.manualRequests.filter((request) => {
       if (this.requestStatusFilter && request.status !== this.requestStatusFilter) return false;
       if (!term) return true;
       const asset = this.assetMap.get(request.asset_id);
@@ -445,6 +674,44 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         .join(' ');
       return haystack.includes(term);
     });
+  }
+
+  get manualRequests(): MaintenanceRequestDto[] {
+    return this.requests.filter((request) => !this.isScheduledPreventive(request));
+  }
+
+  get preventiveProgrammedRequests(): MaintenanceRequestDto[] {
+    return this.requests
+      .filter((request) => this.isScheduledPreventive(request) && ['abierto', 'en_proceso'].includes(request.status))
+      .sort((a, b) => {
+        const assetA = this.assetMap.get(a.asset_id);
+        const assetB = this.assetMap.get(b.asset_id);
+        return `${assetA?.areaName ?? ''} ${assetA?.code ?? ''}`.localeCompare(
+          `${assetB?.areaName ?? ''} ${assetB?.code ?? ''}`
+        );
+      });
+  }
+
+  get preventiveAreaGroups(): PreventiveAreaGroup[] {
+    const groups = new Map<string, PreventiveAreaGroup>();
+    for (const request of this.preventiveProgrammedRequests) {
+      const asset = this.assetMap.get(request.asset_id);
+      const areaName = asset?.areaName || 'Sin área';
+      const siteName = asset?.siteName || 'Sin sede';
+      const key = `${siteName}:${areaName}`;
+      if (!groups.has(key)) {
+        groups.set(key, { areaName, siteName, requests: [] });
+      }
+      groups.get(key)!.requests.push(request);
+    }
+    return Array.from(groups.values()).sort((a, b) => `${a.siteName} ${a.areaName}`.localeCompare(`${b.siteName} ${b.areaName}`));
+  }
+
+  preventiveWindowLabel(request: MaintenanceRequestDto): string {
+    if (!request.planned_date && !request.deadline_date) return 'Ventana no registrada';
+    const planned = request.planned_date ? new Date(request.planned_date).toLocaleDateString('es-CO') : '-';
+    const deadline = request.deadline_date ? new Date(request.deadline_date).toLocaleDateString('es-CO') : '-';
+    return `${planned} - ${deadline}`;
   }
 
   get reportableRequests(): MaintenanceRequestDto[] {
@@ -494,18 +761,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   get pendingSignatureReports(): MaintenanceReportDto[] {
-    return this.reports.filter((report) =>
-      !this.isWaitingSpareReport(report) &&
-      !this.isIntermediateSpareRequestReport(report) &&
-      !report.is_fully_signed
-    );
+    return this.reports.filter((report) => !report.is_fully_signed);
   }
 
   get reportHistory(): MaintenanceReportDto[] {
-    return this.reports.filter((report) =>
-      !this.isWaitingSpareReport(report) &&
-      (report.is_fully_signed || this.isIntermediateSpareRequestReport(report))
-    );
+    return this.reports.filter((report) => report.is_fully_signed);
   }
 
   get sparePartReports(): MaintenanceReportDto[] {
@@ -519,6 +779,16 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   selectedRequestLabel(requestId: string): string {
     const request = this.requests.find((item) => item.id === requestId);
     return request ? `${request.type} · ${this.assetLabel(request.asset_id)}` : 'Solicitud no encontrada';
+  }
+
+  onReportRequestChange(): void {
+    if (this.reportFlowMode !== 'normal') {
+      return;
+    }
+    const request = this.selectedReportRequest;
+    if (request) {
+      this.applyReportDefaults(request);
+    }
   }
 
   get selectedReportRequest(): MaintenanceRequestDto | null {
@@ -549,6 +819,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       reportado: 'Reportado',
       firmado: 'Firmado',
       espera_repuesto: 'En espera de repuesto',
+      correccion: 'Corrección solicitada',
+      vencido: 'Vencido',
       operativo: 'Operativo',
       activo: 'Activo',
       operativo_observacion: 'Operativo con observación',
@@ -568,20 +840,26 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (['firmado', 'operativo', 'activo', 'recibido'].includes(status)) return 'ok';
     if (['abierto', 'reportado', 'operativo_observacion', 'solicitado'].includes(status)) return 'warn';
     if (['en_proceso', 'pendiente', 'pendiente_repuesto', 'espera_repuesto'].includes(status)) return 'pending';
-    if (status === 'fuera_de_servicio' || status === 'dado_de_baja') return 'danger';
+    if (['fuera_de_servicio', 'dado_de_baja', 'vencido', 'correccion'].includes(status)) return 'danger';
     return 'neutral';
   }
 
   reportSignedDate(report: MaintenanceReportDto): string {
-    if (this.isIntermediateSpareRequestReport(report)) {
-      return this.isWaitingSpareReport(report) ? 'En espera de repuesto' : 'Solicitud de repuesto';
+    if (report.correction_requested) {
+      return 'Corrección solicitada';
+    }
+    if (this.isWaitingSpareReport(report)) {
+      return report.is_fully_signed ? 'Firmado / En espera de repuesto' : 'Pendiente firma / espera repuesto';
     }
     return report.is_fully_signed ? 'Firmado' : 'Pendiente firma';
   }
 
   reportSignatureClass(report: MaintenanceReportDto): string {
-    if (this.isIntermediateSpareRequestReport(report)) {
-      return this.isWaitingSpareReport(report) ? 'pending' : 'neutral';
+    if (report.correction_requested) {
+      return 'danger';
+    }
+    if (this.isWaitingSpareReport(report)) {
+      return report.is_fully_signed ? 'pending' : 'warn';
     }
     return report.is_fully_signed ? 'ok' : 'warn';
   }
@@ -595,6 +873,49 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportSparePartsStatus = 'no_aplica';
   }
 
+  reportTypeLabel(): string {
+    if (this.reportFlowMode === 'install_spare' || this.reportFlowMode === 'retire_asset') {
+      return 'Reporte correctivo';
+    }
+    const request = this.selectedReportRequest;
+    if (!request) return 'Reporte técnico';
+    if (request.status === 'espera_repuesto') return 'Reporte correctivo';
+    return request.type === 'preventivo' ? 'Reporte preventivo' : 'Reporte correctivo';
+  }
+
+  submitReportLabel(): string {
+    if (this.reportCorrectionMode) return 'Guardar corrección del reporte';
+    if (this.reportFlowMode === 'install_spare') return 'Guardar instalación de repuesto';
+    if (this.reportFlowMode === 'retire_asset') return 'Guardar baja técnica';
+    const request = this.selectedReportRequest;
+    if (request?.type === 'correctivo') return 'Guardar reporte correctivo';
+    if (request?.type === 'preventivo') return 'Guardar reporte preventivo';
+    return 'Guardar reporte';
+  }
+
+  optionChecked(kind: 'checks' | 'activities' | 'tests', value: string): boolean {
+    const target = kind === 'checks'
+      ? this.reportMaintenanceChecks
+      : kind === 'activities'
+        ? this.reportMaintenanceActivities
+        : this.reportMaintenanceTests;
+    return target.includes(value);
+  }
+
+  toggleReportOption(kind: 'checks' | 'activities' | 'tests', value: string, checked: boolean): void {
+    const current = kind === 'checks'
+      ? this.reportMaintenanceChecks
+      : kind === 'activities'
+        ? this.reportMaintenanceActivities
+        : this.reportMaintenanceTests;
+    const next = checked
+      ? Array.from(new Set([...current, value]))
+      : current.filter((item) => item !== value);
+    if (kind === 'checks') this.reportMaintenanceChecks = next;
+    if (kind === 'activities') this.reportMaintenanceActivities = next;
+    if (kind === 'tests') this.reportMaintenanceTests = next;
+  }
+
   startSpareInstallation(report: MaintenanceReportDto): void {
     this.reportRequestId = report.request_id;
     this.reportFormActive = true;
@@ -605,11 +926,14 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportRequiresSpareParts = true;
     this.reportSparePartsNeeded = report.spare_parts_needed || '';
     this.reportSparePartsStatus = 'recibido';
+    this.reportMaintenanceChecks = ['revision_visual', 'revision_cables_conexiones'];
+    this.reportMaintenanceActivities = ['instalacion_repuesto', 'prueba_funcional_final'];
+    this.reportMaintenanceTests = ['encendido_apagado', 'prueba_modos_operacion', 'equipo_operativo_entregado'];
     this.reportFlowMode = 'install_spare';
     this.reportFlowSource = report;
     this.viewMode = 'reportes';
     this.successMessage = 'Cargué la falla anterior. Completa el estado final y guarda el reporte de instalación.';
-    this.scrollToTop();
+    this.scrollToReportForm();
   }
 
   startAssetRetirement(report: MaintenanceReportDto): void {
@@ -622,11 +946,14 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportRequiresSpareParts = false;
     this.reportSparePartsNeeded = '';
     this.reportSparePartsStatus = 'no_aplica';
+    this.reportMaintenanceChecks = ['revision_visual', 'revision_cables_conexiones'];
+    this.reportMaintenanceActivities = ['reparacion_componente'];
+    this.reportMaintenanceTests = [];
     this.reportFlowMode = 'retire_asset';
     this.reportFlowSource = report;
     this.viewMode = 'reportes';
     this.successMessage = 'Cargué la falla anterior. Revisa la justificación y guarda el reporte de baja técnica.';
-    this.scrollToTop();
+    this.scrollToReportForm();
   }
 
   cancelReportWorkflow(): void {
@@ -696,7 +1023,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         video: { facingMode: { ideal: 'environment' } }
       });
       this.qrScannerActive = true;
-      this.cdr.detectChanges();
+      this.refreshViewSoon();
       setTimeout(() => {
         const video = this.qrVideo?.nativeElement;
         if (!video || !this.qrStream) return;
@@ -708,7 +1035,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       console.error(error);
       this.stopQrScan();
       this.qrScanError = 'No se pudo iniciar la cámara para leer el QR.';
-      this.cdr.detectChanges();
+      this.refreshViewSoon();
     }
   }
 
@@ -765,7 +1092,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.qrManualCode = '';
     this.qrScanError = '';
     this.successMessage = `Equipo seleccionado: ${asset.code} - ${asset.name}`;
-    this.cdr.detectChanges();
+    this.refreshViewSoon();
     return true;
   }
 
@@ -812,11 +1139,15 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return request.status === 'en_proceso' ? 'Continuar reporte' : 'Tomar';
   }
 
+  private isScheduledPreventive(request: MaintenanceRequestDto): boolean {
+    return request.type === 'preventivo' && request.source === 'cronograma';
+  }
+
   canSignReport(report: MaintenanceReportDto): boolean {
-    if (!this.auth.hasPermission('maintenance:report:sign')) {
+    if (!this.canSignMaintenanceReport()) {
       return false;
     }
-    if (report.requires_spare_parts && report.spare_parts_status !== 'recibido') {
+    if (report.correction_requested) {
       return false;
     }
     if (report.is_fully_signed) {
@@ -828,7 +1159,39 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return report.request_status !== 'firmado';
   }
 
+  canRequestReportCorrection(report: MaintenanceReportDto): boolean {
+    if (!this.canSignMaintenanceReport()) {
+      return false;
+    }
+    if (report.is_fully_signed || report.signed_by_me || report.correction_requested) {
+      return false;
+    }
+    return report.request_status !== 'firmado';
+  }
+
+  canCorrectReport(report: MaintenanceReportDto): boolean {
+    if (!report.correction_requested) {
+      return false;
+    }
+    if (!this.auth.hasPermission('maintenance:report:create') && !this.auth.hasRole('superuser')) {
+      return false;
+    }
+    const currentUserId = this.auth.currentUser()?.id;
+    return this.auth.hasRole('superuser') || report.created_by === currentUserId;
+  }
+
+  private canSignMaintenanceReport(): boolean {
+    return this.auth.hasPermission('maintenance:report:sign') ||
+      this.auth.hasRole(['almacenista', 'lector', 'viewer', 'superuser']);
+  }
+
   private reportWorkflowStatus(report: MaintenanceReportDto): string {
+    if (report.correction_requested) {
+      return 'correccion';
+    }
+    if (report.is_fully_signed) {
+      return 'firmado';
+    }
     if (this.isWaitingSpareReport(report)) {
       return 'espera_repuesto';
     }
@@ -877,12 +1240,45 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   private resetReportWorkflow(): void {
     this.reportFlowMode = 'normal';
     this.reportFlowSource = null;
+    this.reportCorrectionMode = false;
+  }
+
+  private asStringArray(value?: string[] | null): string[] {
+    return Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [];
+  }
+
+  private isAssetStatus(value?: string | null): value is 'operativo' | 'operativo_observacion' | 'fuera_de_servicio' {
+    return ['operativo', 'operativo_observacion', 'fuera_de_servicio'].includes(value || '');
+  }
+
+  private isSpareStatus(value?: string | null): value is 'no_aplica' | 'solicitado' | 'recibido' {
+    return ['no_aplica', 'solicitado', 'recibido'].includes(value || '');
+  }
+
+  private applyReportDefaults(request: MaintenanceRequestDto): void {
+    if (request.type === 'preventivo') {
+      this.reportMaintenanceChecks = [
+        'revision_visual',
+        'revision_cables_conexiones',
+        'revision_accesorios',
+        'verificacion_alimentacion'
+      ];
+      this.reportMaintenanceActivities = ['limpieza_externa', 'ajuste_conexiones', 'prueba_funcional_final'];
+      this.reportMaintenanceTests = ['encendido_apagado', 'prueba_modos_operacion', 'equipo_operativo_entregado'];
+      return;
+    }
+    this.reportMaintenanceChecks = ['revision_visual', 'revision_cables_conexiones', 'prueba_funcional_inicial'];
+    this.reportMaintenanceActivities = [];
+    this.reportMaintenanceTests = ['encendido_apagado'];
   }
 
   private resetReportFields(): void {
     this.reportSummary = '';
     this.reportFindings = '';
     this.reportActions = '';
+    this.reportMaintenanceChecks = [];
+    this.reportMaintenanceActivities = [];
+    this.reportMaintenanceTests = [];
     this.reportAssetStatus = 'operativo';
     this.reportRequiresSpareParts = false;
     this.reportSparePartsNeeded = '';
@@ -892,5 +1288,47 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   private scrollToTop(): void {
     setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50);
+  }
+
+  private scrollToReportForm(): void {
+    setTimeout(() => {
+      const element = this.reportFormCard?.nativeElement;
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      this.scrollToTop();
+    }, 80);
+  }
+
+  private scrollToPreventiveProgrammed(): void {
+    setTimeout(() => {
+      const element = this.preventiveProgrammedCard?.nativeElement;
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      this.scrollToTop();
+    }, 120);
+  }
+
+  private showAlert(message: string, kind: 'success' | 'error' = 'success'): void {
+    this.alertMessage = message;
+    this.alertKind = kind;
+    this.successMessage = kind === 'success' ? message : '';
+    this.errorMessage = kind === 'error' ? message : '';
+    setTimeout(() => {
+      if (this.alertMessage === message) {
+        this.alertMessage = '';
+      }
+    }, 6500);
+  }
+
+  private refreshViewSoon(): void {
+    setTimeout(() => {
+      if (!this.destroyed) {
+        this.cdr.detectChanges();
+      }
+    }, 0);
   }
 }

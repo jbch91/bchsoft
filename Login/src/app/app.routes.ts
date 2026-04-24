@@ -14,6 +14,7 @@ import { InventarioComponent } from './pages/inventario/inventario.component';
 import { MaintenanceComponent } from './pages/maintenance/maintenance.component';
 import { CronogramasComponent } from './pages/cronogramas/cronogramas.component';
 import { CalibracionesComponent } from './pages/calibraciones/calibraciones.component';
+import { QuickGuidesComponent } from './pages/quick-guides/quick-guides.component';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'login' },
@@ -70,6 +71,12 @@ export const routes: Routes = [
     component: InventarioComponent,
     canActivate: [accessGuard],
     data: { permissionsAny: ['hb:create', 'hb:view', 'read:all'] }
+  },
+  {
+    path: 'guias-rapidas',
+    component: QuickGuidesComponent,
+    canActivate: [accessGuard],
+    data: { permissionsAny: ['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete', 'hb:view', 'read:all'] }
   },
   {
     path: 'mantenimiento',

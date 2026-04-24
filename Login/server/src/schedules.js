@@ -59,10 +59,12 @@ export async function markEngineerEdited(scheduleId) {
 export async function listScheduleItemsWithSchema(scheduleId, schema) {
   const { rows } = await query(
     `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date, i.status,
-            a.code, a.name, a.brand, a.model, a.serial, ar.name AS area_name, lo.name AS location_name
+            a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id,
+            ar.name AS area_name, s.name AS site_name, lo.name AS location_name
      FROM maintenance_schedule_items i
      LEFT JOIN "${schema}".assets a ON a.id = i.asset_id
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
+     LEFT JOIN "${schema}".sites s ON s.id = a.site_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
      WHERE i.schedule_id = $1
      ORDER BY i.planned_date ASC`,

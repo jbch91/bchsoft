@@ -65,6 +65,15 @@
     </a>
 
     <a
+      routerLink="/guias-rapidas"
+      class="ui-card module-card"
+      *ngIf="(auth.hasPermission('quick_guides:view') || auth.hasPermission('quick_guides:create') || auth.hasPermission('quick_guides:edit') || auth.hasPermission('quick_guides:approve') || auth.hasPermission('quick_guides:delete') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('guias_rapidas')"
+    >
+      <h2>Guías rápidas de uso</h2>
+      <p>Consulta y crea guías por marca y modelo.</p>
+    </a>
+
+    <a
       routerLink="/mantenimiento"
       class="ui-card module-card"
       *ngIf="(auth.hasPermission('maintenance:request:create') || auth.hasPermission('maintenance:report:create') || auth.hasPermission('maintenance:report:sign') || auth.hasPermission('read:all')) && canShow('reportes_mantenimiento')"

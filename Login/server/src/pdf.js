@@ -42,6 +42,45 @@ function sparePartStatusLabel(value) {
   return labels[value] || safeText(value);
 }
 
+function listLabels(values, labels) {
+  const list = Array.isArray(values) ? values : [];
+  if (!list.length) return 'No registrado';
+  return list.map((value) => labels[value] || value).join('\n');
+}
+
+const MAINTENANCE_CHECK_LABELS = {
+  revision_visual: 'Revisión visual externa',
+  revision_cables_conexiones: 'Revisión de cables y conexiones',
+  revision_accesorios: 'Revisión de accesorios',
+  verificacion_alimentacion: 'Verificación de alimentación eléctrica/batería',
+  revision_alarmas_errores: 'Revisión de alarmas o códigos de error',
+  prueba_funcional_inicial: 'Prueba funcional inicial',
+  revision_seguridad_basica: 'Revisión básica de seguridad'
+};
+
+const MAINTENANCE_ACTIVITY_LABELS = {
+  limpieza_externa: 'Limpieza externa',
+  limpieza_interna: 'Limpieza interna',
+  ajuste_conexiones: 'Ajuste de conexiones',
+  configuracion_parametros: 'Configuración de parámetros',
+  reparacion_componente: 'Reparación de componente',
+  instalacion_repuesto: 'Instalación/reemplazo de repuesto',
+  lubricacion: 'Lubricación',
+  actualizacion_software: 'Actualización de software',
+  capacitacion_usuario: 'Inducción/capacitación al usuario',
+  prueba_funcional_final: 'Prueba funcional final'
+};
+
+const MAINTENANCE_TEST_LABELS = {
+  encendido_apagado: 'Encendido y apagado',
+  prueba_modos_operacion: 'Prueba de modos de operación',
+  verificacion_alarmas: 'Verificación de alarmas',
+  verificacion_accesorios: 'Verificación de accesorios',
+  prueba_con_paciente_simulado: 'Prueba con paciente/simulador',
+  verificacion_parametros: 'Verificación de parámetros',
+  equipo_operativo_entregado: 'Equipo operativo y entregado'
+};
+
 function safeNumber(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
@@ -496,6 +535,437 @@ export function buildAssetPdf(doc, { client, asset }) {
   return doc;
 }
 
+function guideStatusLabel(value) {
+  const labels = {
+    borrador: 'Borrador',
+    aprobada: 'Aprobada',
+    obsoleta: 'Obsoleta'
+  };
+  return labels[value] || safeText(value);
+}
+
+function hasText(value) {
+  return String(value || '').trim().length > 0;
+}
+
+function optionalRow(label, value) {
+  return hasText(value) ? [[label, String(value).trim()]] : [];
+}
+
+function drawClientHeader(doc, client, extraLines = []) {
+  const headerY = doc.y;
+  const headerLeftX = doc.page.margins.left;
+  const headerWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const headerHeight = 78;
+  const logoCellWidth = 170;
+
+  doc
+    .rect(headerLeftX, headerY, headerWidth, headerHeight)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(1)
+    .stroke();
+  doc
+    .moveTo(headerLeftX + logoCellWidth, headerY)
+    .lineTo(headerLeftX + logoCellWidth, headerY + headerHeight)
+    .strokeColor(PDF_TABLE_BORDER)
+    .stroke();
+
+  if (client.logo_path) {
+    const logoPath = path.join(process.cwd(), client.logo_path.replace(/^\//, ''));
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, headerLeftX + 10, headerY + 8, { fit: [150, 60] });
+    }
+  }
+
+  const infoStartX = headerLeftX + logoCellWidth + 8;
+  const infoMaxWidth = headerWidth - logoCellWidth - 16;
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(13)
+    .fillColor(PDF_INK)
+    .text(safeText(client.name), infoStartX, headerY + 8, { width: infoMaxWidth });
+
+  const infoLines = [
+    `NIT: ${safeText(client.nit)}`,
+    `Ciudad: ${safeText(client.city)}`,
+    `Dirección: ${safeText(client.address)}`,
+    `Correo: ${safeText(client.email)}`,
+    ...extraLines
+  ];
+  doc
+    .font('Helvetica')
+    .fontSize(8.5)
+    .fillColor(PDF_MUTED)
+    .text(infoLines.join('\n'), infoStartX, headerY + 26, { width: infoMaxWidth });
+
+  doc.y = headerY + headerHeight + 12;
+}
+
+function drawGuideSignature(doc, guide) {
+  sectionTitle(doc, 'RESPONSABLE DE ELABORACION / ACTUALIZACION');
+  ensureSpace(doc, 120);
+
+  const startX = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const startY = doc.y;
+  const boxHeight = 122;
+  const signatureWidth = 190;
+  const signatureBoxX = startX + 16;
+  const signatureBoxY = startY + 34;
+  const signatureBoxHeight = 56;
+
+  doc
+    .roundedRect(startX, startY, width, boxHeight, 8)
+    .fillColor(PDF_SOFT_BG)
+    .fill()
+    .strokeColor(PDF_BRAND_200)
+    .lineWidth(0.8)
+    .stroke();
+
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(10)
+    .fillColor(PDF_BRAND_800)
+    .text('Firma y datos del responsable técnico de la guía rápida', startX + 14, startY + 12, { width: width - 28 });
+
+  const signaturePath = guide.updated_by_signature_path
+    ? path.join(process.cwd(), guide.updated_by_signature_path.replace(/^\//, ''))
+    : null;
+
+  if (signaturePath && fs.existsSync(signaturePath)) {
+    doc
+      .roundedRect(signatureBoxX, signatureBoxY, signatureWidth, signatureBoxHeight, 6)
+      .fillColor(PDF_WHITE)
+      .fill()
+      .strokeColor(PDF_BRAND_200)
+      .stroke();
+    doc.image(signaturePath, signatureBoxX + 10, signatureBoxY + 6, {
+      fit: [signatureWidth - 20, signatureBoxHeight - 12],
+      align: 'center',
+      valign: 'center'
+    });
+  } else {
+    doc
+      .font('Helvetica')
+      .fontSize(9)
+      .fillColor(PDF_DANGER)
+      .text('Firma digital pendiente.', signatureBoxX, startY + 58, { width: signatureWidth, align: 'center' });
+  }
+
+  const infoX = signatureBoxX + signatureWidth + 24;
+  const infoWidth = width - signatureWidth - 56;
+  doc
+    .font('Helvetica')
+    .fontSize(9.4)
+    .fillColor(PDF_INK)
+    .text(`Nombre completo: ${safeText(guide.updated_by_name || guide.created_by_name)}`, infoX, startY + 34, { width: infoWidth })
+    .text(`Documento: ${safeText(guide.updated_by_document_number)}`, infoX, startY + 50, { width: infoWidth })
+    .text(`Registro INVIMA: ${safeText(guide.updated_by_invima_registration)}`, infoX, startY + 66, { width: infoWidth })
+    .text(`Fecha de actualización: ${formatDate(guide.updated_at)}`, infoX, startY + 82, { width: infoWidth });
+
+  doc
+    .fontSize(8)
+    .fillColor(PDF_MUTED)
+    .text('La guía rápida debe permanecer visible y accesible en el sitio de trabajo del equipo.', startX + 14, startY + 102, {
+      width: width - 28
+    });
+
+  doc.y = startY + boxHeight + 8;
+}
+
+function drawQuickGuideCompactHeader(doc, client, guide) {
+  paintPageBackground(doc);
+  doc.page.margins = { top: 24, bottom: 24, left: 28, right: 28 };
+  doc.x = doc.page.margins.left;
+  doc.y = doc.page.margins.top;
+
+  const x = doc.page.margins.left;
+  const y = doc.y;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const height = 58;
+  const logoWidth = 112;
+
+  doc
+    .roundedRect(x, y, width, height, 8)
+    .fillColor(PDF_SOFT_BG)
+    .fill()
+    .strokeColor(PDF_BRAND_200)
+    .lineWidth(0.8)
+    .stroke();
+
+  if (client.logo_path) {
+    const logoPath = path.join(process.cwd(), client.logo_path.replace(/^\//, ''));
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, x + 8, y + 7, { fit: [logoWidth - 16, height - 14] });
+    }
+  }
+
+  const infoX = x + logoWidth;
+  const infoWidth = width - logoWidth - 130;
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(12)
+    .fillColor(PDF_BRAND_800)
+    .text('GUIA RAPIDA DE USO', infoX, y + 8, { width: infoWidth });
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(9.2)
+    .fillColor(PDF_INK)
+    .text(safeText(client.name), infoX, y + 24, { width: infoWidth, height: 12, ellipsis: true });
+  doc
+    .font('Helvetica')
+    .fontSize(7.2)
+    .fillColor(PDF_MUTED)
+    .text(
+      [`NIT: ${safeText(client.nit)}`, `Ciudad: ${safeText(client.city)}`, `Correo: ${safeText(client.email)}`].join('  |  '),
+      infoX,
+      y + 39,
+      { width: infoWidth, height: 10, ellipsis: true }
+    );
+
+  const codeX = x + width - 122;
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7.5)
+    .fillColor(PDF_BRAND_800)
+    .text(`Código: ${safeText(guide.document_code)}`, codeX, y + 12, { width: 112, height: 12, ellipsis: true })
+    .text(`Versión: ${safeText(guide.version)}`, codeX, y + 27, { width: 112, height: 12, ellipsis: true })
+    .font('Helvetica')
+    .fontSize(7)
+    .fillColor(PDF_MUTED)
+    .text(`Fecha: ${formatDate(guide.updated_at || guide.created_at)}`, codeX, y + 42, { width: 112, height: 10, ellipsis: true });
+
+  doc.y = y + height + 7;
+}
+
+function drawQuickGuideSection(doc, title) {
+  const x = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  doc
+    .roundedRect(x, doc.y, width, 13, 4)
+    .fillColor(PDF_BRAND_700)
+    .fill();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7.7)
+    .fillColor(PDF_WHITE)
+    .text(title, x + 6, doc.y + 3.2, { width: width - 12, height: 8, ellipsis: true });
+  doc.y += 16;
+}
+
+function drawQuickGuideRows(doc, rows, { labelWidth = 124, textSize = 7.4, rowMin = 16, rowMax = 38 } = {}) {
+  if (!rows.length) return;
+  const x = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const valueWidth = width - labelWidth;
+  const padding = 4;
+
+  rows.forEach(([label, value], rowIndex) => {
+    const text = String(value ?? '-');
+    const labelHeight = doc.heightOfString(String(label), { width: labelWidth - padding * 2 });
+    const valueHeight = doc.heightOfString(text, { width: valueWidth - padding * 2 });
+    const height = Math.min(Math.max(rowMin, labelHeight + padding * 2, valueHeight + padding * 2), rowMax);
+    const y = doc.y;
+
+    if (rowIndex % 2 === 1) {
+      doc.rect(x, y, width, height).fillColor(PDF_TABLE_STRIPE_BG).fill();
+    }
+    doc
+      .rect(x, y, width, height)
+      .strokeColor(PDF_TABLE_BORDER)
+      .lineWidth(0.55)
+      .stroke();
+    doc
+      .moveTo(x + labelWidth, y)
+      .lineTo(x + labelWidth, y + height)
+      .strokeColor(PDF_TABLE_DIVIDER)
+      .lineWidth(0.45)
+      .stroke();
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(textSize)
+      .fillColor(PDF_BRAND_800)
+      .text(String(label), x + padding, y + padding, {
+        width: labelWidth - padding * 2,
+        height: height - padding * 2,
+        ellipsis: true
+      });
+    doc
+      .font('Helvetica')
+      .fontSize(textSize)
+      .fillColor(PDF_INK)
+      .text(text, x + labelWidth + padding, y + padding, {
+        width: valueWidth - padding * 2,
+        height: height - padding * 2,
+        ellipsis: true
+      });
+
+    doc.y = y + height;
+  });
+  doc.y += 5;
+}
+
+function drawQuickGuideVisual(doc, guide) {
+  const visualPath = guide.visual_path
+    ? path.join(process.cwd(), guide.visual_path.replace(/^\//, ''))
+    : null;
+  const x = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+  if (visualPath && fs.existsSync(visualPath)) {
+    drawQuickGuideSection(doc, 'REFERENCIA VISUAL / PICTOGRAMA');
+    const y = doc.y;
+    const boxHeight = hasText(guide.visual_notes) ? 102 : 84;
+    doc
+      .roundedRect(x, y, width, boxHeight, 7)
+      .fillColor(PDF_WHITE)
+      .fill()
+      .strokeColor(PDF_BRAND_200)
+      .lineWidth(0.7)
+      .stroke();
+    doc.image(visualPath, x + 8, y + 6, {
+      fit: [width - 16, boxHeight - (hasText(guide.visual_notes) ? 28 : 12)],
+      align: 'center',
+      valign: 'center'
+    });
+    if (hasText(guide.visual_notes)) {
+      doc
+        .font('Helvetica')
+        .fontSize(7)
+        .fillColor(PDF_MUTED)
+        .text(String(guide.visual_notes).trim(), x + 8, y + boxHeight - 20, {
+          width: width - 16,
+          height: 14,
+          align: 'center',
+          ellipsis: true
+        });
+    }
+    doc.y = y + boxHeight + 5;
+  } else if (hasText(guide.visual_notes)) {
+    drawQuickGuideSection(doc, 'REFERENCIA VISUAL / PICTOGRAMA');
+    drawQuickGuideRows(doc, [['Nota visual', String(guide.visual_notes).trim()]], { rowMax: 28 });
+  }
+}
+
+function drawQuickGuideCompactSignature(doc, guide) {
+  drawQuickGuideSection(doc, 'RESPONSABLE DE ELABORACION / ACTUALIZACION');
+  const x = doc.page.margins.left;
+  const y = doc.y;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const height = 66;
+  const signatureWidth = 142;
+  const signaturePath = guide.updated_by_signature_path
+    ? path.join(process.cwd(), guide.updated_by_signature_path.replace(/^\//, ''))
+    : null;
+
+  doc
+    .roundedRect(x, y, width, height, 7)
+    .fillColor(PDF_SOFT_BG)
+    .fill()
+    .strokeColor(PDF_BRAND_200)
+    .lineWidth(0.7)
+    .stroke();
+
+  doc
+    .roundedRect(x + 8, y + 8, signatureWidth, 38, 5)
+    .fillColor(PDF_WHITE)
+    .fill()
+    .strokeColor(PDF_BRAND_200)
+    .stroke();
+
+  if (signaturePath && fs.existsSync(signaturePath)) {
+    doc.image(signaturePath, x + 14, y + 11, {
+      fit: [signatureWidth - 12, 32],
+      align: 'center',
+      valign: 'center'
+    });
+  } else {
+    doc
+      .font('Helvetica')
+      .fontSize(7)
+      .fillColor(PDF_DANGER)
+      .text('Firma pendiente', x + 8, y + 22, { width: signatureWidth, align: 'center' });
+  }
+
+  doc
+    .font('Helvetica')
+    .fontSize(6.8)
+    .fillColor(PDF_MUTED)
+    .text('La guía debe permanecer visible y accesible en el sitio de trabajo.', x + 8, y + 50, {
+      width: signatureWidth,
+      height: 9,
+      align: 'center',
+      ellipsis: true
+    });
+
+  const infoX = x + signatureWidth + 20;
+  const infoWidth = width - signatureWidth - 28;
+  const infoLines = [
+    `Responsable: ${safeText(guide.updated_by_name || guide.created_by_name)}`,
+    `Documento: ${safeText(guide.updated_by_document_number)}   Registro INVIMA: ${safeText(guide.updated_by_invima_registration)}`,
+    `Actualización: ${formatDate(guide.updated_at)}   Aprobación: ${formatDate(guide.approved_at)}`
+  ];
+  doc
+    .font('Helvetica')
+    .fontSize(7.4)
+    .fillColor(PDF_INK)
+    .text(infoLines.join('\n'), infoX, y + 12, {
+      width: infoWidth,
+      height: 42,
+      lineGap: 2,
+      ellipsis: true
+    });
+
+  doc.y = y + height + 4;
+}
+
+export function buildQuickGuidePdf(doc, { client, guide }) {
+  drawQuickGuideCompactHeader(doc, client, guide);
+
+  const metaRows = [
+    ['Equipo', safeText(guide.equipment_name)],
+    ...optionalRow('Tipo de equipo', guide.equipment_type),
+    ['Marca', safeText(guide.brand)],
+    ['Modelo', safeText(guide.model)],
+    ...optionalRow('Responsable del uso', guide.responsible_use)
+  ];
+  drawQuickGuideSection(doc, 'IDENTIFICACION DE LA GUIA');
+  drawQuickGuideRows(doc, metaRows, { rowMax: 21 });
+  drawQuickGuideVisual(doc, guide);
+
+  const startupRows = [
+    ...optionalRow('Antes de encender', guide.prerequisites),
+    ...optionalRow('Encendido seguro', guide.startup_steps),
+    ...optionalRow('Apagado seguro', guide.shutdown_steps)
+  ];
+  if (startupRows.length) {
+    drawQuickGuideSection(doc, 'PASOS PARA ENCENDIDO Y APAGADO SEGURO');
+    drawQuickGuideRows(doc, startupRows, { rowMax: 30 });
+  }
+
+  if (hasText(guide.basic_operation)) {
+    drawQuickGuideSection(doc, 'OPERACION BASICA');
+    drawQuickGuideRows(doc, [
+      ['Ajustes / parámetros comunes', String(guide.basic_operation).trim()]
+    ], { rowMax: 42 });
+  }
+
+  const safetyRows = [
+    ...optionalRow('Alertas y alarmas principales', guide.alarms),
+    ...optionalRow('Limpieza y desinfección rápida', guide.cleaning_disinfection),
+    ...optionalRow('Emergencia o falla', guide.emergency_actions),
+    ...optionalRow('Contacto / reporte', guide.support_contact)
+  ];
+  if (safetyRows.length) {
+    drawQuickGuideSection(doc, 'ALERTAS, LIMPIEZA Y EMERGENCIAS');
+    drawQuickGuideRows(doc, safetyRows, { rowMax: 38 });
+  }
+
+  drawQuickGuideCompactSignature(doc, guide);
+  return doc;
+}
+
 export function buildAssetMovementPdf(doc, { client, asset, movement }) {
   documentTitle(doc, 'Reporte de Movimiento de Equipo');
 
@@ -657,6 +1127,9 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     ['Resumen', safeText(report.summary)],
     ['Hallazgos', safeText(report.findings)],
     ['Acciones realizadas', safeText(report.actions_taken)],
+    ['Revisiones realizadas', listLabels(report.maintenance_checks, MAINTENANCE_CHECK_LABELS)],
+    ['Actividades técnicas', listLabels(report.maintenance_activities, MAINTENANCE_ACTIVITY_LABELS)],
+    ['Pruebas y verificaciones', listLabels(report.maintenance_tests, MAINTENANCE_TEST_LABELS)],
     ['Estado final del equipo', maintenanceAssetStatusLabel(report.asset_status_after)],
     ['Requiere repuesto', report.requires_spare_parts ? 'Sí' : 'No'],
     ['Repuesto requerido', report.requires_spare_parts ? safeText(report.spare_parts_needed) : 'No aplica'],

@@ -85,6 +85,7 @@ import PDFDocument from 'pdfkit';
 import {
   buildAssetMovementPdf,
   buildAssetPdf,
+  buildQuickGuidePdf,
   buildMaintenanceReportPdf,
   buildMaintenanceSchedulePdf,
   buildCalibrationSchedulePdf,
@@ -138,6 +139,10 @@ import {
   getMaintenanceRequestById,
   assignMaintenanceRequest,
   createMaintenanceReport,
+  deleteReportSignatures,
+  getLatestWaitingSpareReportByRequest,
+  getMaintenanceReportWithOpenCorrectionByRequest,
+  updateMaintenanceReport,
   signMaintenanceReport,
   listMaintenanceReports,
   listMaintenanceReportsForReader,
@@ -153,9 +158,22 @@ import {
   listNotifications,
   markNotificationRead,
   markAllNotificationsRead,
+  markMaintenanceReportNotificationsResolved,
   markMaintenanceRequestNotificationsResolved,
+  requestMaintenanceReportCorrection,
+  resolveMaintenanceReportCorrections,
   listUsersByRoleAndClient
 } from './maintenance.js';
+import {
+  approveQuickGuide,
+  createQuickGuide,
+  deleteQuickGuide,
+  findQuickGuideForAsset,
+  getQuickGuideById,
+  listQuickGuides,
+  setQuickGuideVisual,
+  updateQuickGuide
+} from './quick-guides.js';
 import { sendNotificationEmail } from './mailer.js';
 import { listReaderAccess, replaceReaderAccess } from './reader-access.js';
 import { sendPreventiveRemindersForClient } from './preventive-reminders.js';
@@ -193,6 +211,45 @@ const MAINTENANCE_ASSET_STATUSES = [
   'fuera_de_servicio'
 ];
 const MAINTENANCE_SPARE_STATUSES = ['no_aplica', 'solicitado', 'recibido'];
+const MAINTENANCE_ACCEPTANCE_SIGNER_ROLES = ['almacenista', 'lector', 'viewer', 'visor', 'superuser'];
+const MAINTENANCE_REPORT_ACCESS_ROLES = [
+  'almacenista',
+  'ingeniero_biomedico',
+  'lector',
+  'viewer',
+  'visor',
+  'superuser'
+];
+const MAINTENANCE_CHECK_OPTIONS = [
+  'revision_visual',
+  'revision_cables_conexiones',
+  'revision_accesorios',
+  'verificacion_alimentacion',
+  'revision_alarmas_errores',
+  'prueba_funcional_inicial',
+  'revision_seguridad_basica'
+];
+const MAINTENANCE_ACTIVITY_OPTIONS = [
+  'limpieza_externa',
+  'limpieza_interna',
+  'ajuste_conexiones',
+  'configuracion_parametros',
+  'reparacion_componente',
+  'instalacion_repuesto',
+  'lubricacion',
+  'actualizacion_software',
+  'capacitacion_usuario',
+  'prueba_funcional_final'
+];
+const MAINTENANCE_TEST_OPTIONS = [
+  'encendido_apagado',
+  'prueba_modos_operacion',
+  'verificacion_alarmas',
+  'verificacion_accesorios',
+  'prueba_con_paciente_simulado',
+  'verificacion_parametros',
+  'equipo_operativo_entregado'
+];
 const SIGNATURE_ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.pdf'];
 const SIGNATURE_ALLOWED_MIME_TYPES = [
   'image/png',
@@ -210,6 +267,80 @@ const uploadAssetFiles = upload.fields([
 function isWeekend(date) {
   const day = date.getDay();
   return day === 0 || day === 6;
+}
+
+function sanitizeList(values, allowed) {
+  if (!Array.isArray(values)) return [];
+  return values.filter((value) => allowed.includes(value));
+}
+
+function hasAnyPermission(user, permissions = []) {
+  return permissions.some((permission) => user?.permissions?.includes(permission));
+}
+
+function hasAnyRole(user, roles = []) {
+  return roles.some((role) => user?.roles?.includes(role));
+}
+
+function requireAnyPermissionOrRole(permissions = [], roles = []) {
+  return (req, res, next) => {
+    if (hasAnyPermission(req.user, permissions) || hasAnyRole(req.user, roles)) {
+      return next();
+    }
+    return res.status(403).json({ message: 'Sin permisos.' });
+  };
+}
+
+function isMaintenanceReportFullySigned(report, signatures = []) {
+  const hasEngineer = signatures.some((sig) => sig.role === 'ingeniero_biomedico');
+  if (!hasEngineer) return false;
+  if (report.type === 'preventivo') {
+    return signatures.some((sig) => MAINTENANCE_ACCEPTANCE_SIGNER_ROLES.includes(sig.role));
+  }
+  return signatures.some((sig) =>
+    MAINTENANCE_ACCEPTANCE_SIGNER_ROLES.includes(sig.role) ||
+    (report.requested_by && sig.user_id === report.requested_by)
+  );
+}
+
+async function listMaintenanceReportSigningUsers(clientId, asset, request) {
+  const storekeepers = await listUsersByRoleAndClient('almacenista', clientId);
+  const byId = new Map(storekeepers.map((user) => [user.id, user]));
+
+  let readers = [];
+  if (asset?.area_id || asset?.location_id) {
+    const { rows } = await query(
+      `SELECT DISTINCT u.id, u.email, u.display_name
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.id
+       JOIN roles r ON r.id = ur.role_id
+       JOIN reader_access ra ON ra.user_id = u.id AND ra.client_id = $1
+       WHERE u.client_id = $1
+         AND u.is_active = TRUE
+         AND r.name IN ('lector', 'viewer', 'visor')
+         AND (
+           ($2::uuid IS NOT NULL AND ra.area_id = $2::uuid)
+           OR ($3::uuid IS NOT NULL AND ra.location_id = $3::uuid)
+         )`,
+      [clientId, asset.area_id || null, asset.location_id || null]
+    );
+    readers = rows;
+  } else {
+    readers = await listUsersByRoleAndClient('lector', clientId);
+  }
+
+  for (const user of readers) {
+    byId.set(user.id, user);
+  }
+
+  if (request?.type !== 'preventivo' && request?.requested_by) {
+    const requester = await getUserById(request.requested_by);
+    if (requester?.id) {
+      byId.set(requester.id, requester);
+    }
+  }
+
+  return Array.from(byId.values());
 }
 
 function adjustToWeekday(date) {
@@ -928,6 +1059,34 @@ async function saveClientLogoBuffer(clientId, buffer) {
   return updateClientLogo(clientId, publicPath);
 }
 
+async function isValidImageBuffer(buffer) {
+  try {
+    await sharp(buffer).metadata();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function saveQuickGuideVisual(clientId, guideId, file) {
+  const dir = await ensureClientLogoDir(clientId);
+  const guideDir = path.join(dir, 'quick-guides', guideId);
+  await fs.promises.mkdir(guideDir, { recursive: true });
+  const filename = path.join('uploads', 'clients', clientId, 'quick-guides', guideId, 'visual.png');
+  const fullPath = path.join(process.cwd(), filename);
+
+  await sharp(file.buffer)
+    .rotate()
+    .resize(1000, 620, {
+      fit: 'inside',
+      withoutEnlargement: true
+    })
+    .png({ compressionLevel: 9 })
+    .toFile(fullPath);
+
+  return `/${filename}`.replace(/\\/g, '/');
+}
+
 app.get('/admin/clients', requireAuth, requirePermission('clients:manage'), async (req, res) => {
   if (!req.user.roles?.includes('superuser')) {
     return res.status(403).json({ message: 'Solo superuser.' });
@@ -1056,6 +1215,289 @@ app.post(
     });
 
     return res.json(updated);
+  }
+);
+
+function validateQuickGuidePayload(body) {
+  const required = [
+    ['equipmentName', 'Nombre del equipo'],
+    ['brand', 'Marca'],
+    ['model', 'Modelo'],
+    ['basicOperation', 'Operación básica'],
+    ['cleaningDisinfection', 'Limpieza y desinfección'],
+    ['emergencyActions', 'Emergencia o falla']
+  ];
+  const missing = required
+    .filter(([key]) => !String(body?.[key] || '').trim())
+    .map(([, label]) => label);
+  return missing;
+}
+
+app.get(
+  '/quick-guides/:clientId',
+  requireAuth,
+  requireAnyPermission(['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete', 'hb:view', 'read:all']),
+  async (req, res) => {
+    const { clientId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    try {
+      const guides = await listQuickGuides(clientId, {
+        search: req.query.search || '',
+        status: req.query.status || ''
+      });
+      return res.json(guides);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudieron cargar las guías rápidas.' });
+    }
+  }
+);
+
+app.get(
+  '/quick-guides/:clientId/assets/:assetId',
+  requireAuth,
+  requireAnyPermission(['quick_guides:view', 'hb:view', 'read:all']),
+  async (req, res) => {
+    const { clientId, assetId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (req.user.roles?.includes('lector')) {
+      const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
+      if (!allowed) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+    }
+    const includeDrafts = hasAnyPermission(req.user, ['quick_guides:create', 'quick_guides:edit', 'quick_guides:approve']);
+    const guide = await findQuickGuideForAsset(clientId, assetId, { includeDrafts });
+    if (!guide) {
+      return res.status(404).json({ message: 'No hay guía rápida aprobada para la marca y modelo de este equipo.' });
+    }
+    return res.json(guide);
+  }
+);
+
+app.get(
+  '/quick-guides/:clientId/assets/:assetId/pdf',
+  requireAuth,
+  requireAnyPermission(['quick_guides:view', 'hb:view', 'read:all']),
+  async (req, res) => {
+    const { clientId, assetId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (req.user.roles?.includes('lector')) {
+      const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
+      if (!allowed) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+    }
+    const client = await getClientById(clientId);
+    const includeDrafts = hasAnyPermission(req.user, ['quick_guides:create', 'quick_guides:edit', 'quick_guides:approve']);
+    const guide = await findQuickGuideForAsset(clientId, assetId, { includeDrafts });
+    if (!client || !guide) {
+      return res.status(404).json({ message: 'No hay guía rápida aprobada para la marca y modelo de este equipo.' });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=\"guia-rapida-${guide.brand}-${guide.model}.pdf\"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    doc.pipe(res);
+    buildQuickGuidePdf(doc, { client, guide });
+    doc.end();
+  }
+);
+
+app.get(
+  '/quick-guides/:clientId/:guideId',
+  requireAuth,
+  requireAnyPermission(['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete', 'hb:view', 'read:all']),
+  async (req, res) => {
+    const { clientId, guideId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const guide = await getQuickGuideById(clientId, guideId);
+    if (!guide) {
+      return res.status(404).json({ message: 'Guía rápida no encontrada.' });
+    }
+    return res.json(guide);
+  }
+);
+
+app.post(
+  '/quick-guides/:clientId',
+  requireAuth,
+  requirePermission('quick_guides:create'),
+  upload.single('visual'),
+  async (req, res) => {
+    const { clientId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const missing = validateQuickGuidePayload(req.body);
+    if (missing.length) {
+      return res.status(400).json({ message: `Campos obligatorios: ${missing.join(', ')}.` });
+    }
+    if (req.file && !(await isValidImageBuffer(req.file.buffer))) {
+      return res.status(400).json({ message: 'La imagen visual debe ser PNG, JPG o WEBP.' });
+    }
+    try {
+      const result = await createQuickGuide(clientId, req.body, req.user.sub);
+      let visualPath = null;
+      if (req.file) {
+        visualPath = await saveQuickGuideVisual(clientId, result.id, req.file);
+        await setQuickGuideVisual(clientId, result.id, visualPath);
+      }
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'QUICK_GUIDE_CREATE',
+        targetUserId: result.id,
+        details: {
+          clientId,
+          brand: req.body.brand,
+          model: req.body.model,
+          hasVisual: Boolean(visualPath)
+        }
+      });
+      return res.status(201).json({ ...result, visual_path: visualPath });
+    } catch (error) {
+      if (error?.code === '23505') {
+        return res.status(409).json({ message: 'Ya existe una guía rápida para esta marca y modelo en este cliente.' });
+      }
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo crear la guía rápida.' });
+    }
+  }
+);
+
+app.put(
+  '/quick-guides/:clientId/:guideId',
+  requireAuth,
+  requirePermission('quick_guides:edit'),
+  upload.single('visual'),
+  async (req, res) => {
+    const { clientId, guideId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const missing = validateQuickGuidePayload(req.body);
+    if (missing.length) {
+      return res.status(400).json({ message: `Campos obligatorios: ${missing.join(', ')}.` });
+    }
+    if (req.file && !(await isValidImageBuffer(req.file.buffer))) {
+      return res.status(400).json({ message: 'La imagen visual debe ser PNG, JPG o WEBP.' });
+    }
+    try {
+      const result = await updateQuickGuide(clientId, guideId, req.body, req.user.sub);
+      if (!result) {
+        return res.status(404).json({ message: 'Guía rápida no encontrada.' });
+      }
+      if (req.file) {
+        const visualPath = await saveQuickGuideVisual(clientId, guideId, req.file);
+        await setQuickGuideVisual(clientId, guideId, visualPath);
+      }
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'QUICK_GUIDE_UPDATE',
+        targetUserId: guideId,
+        details: {
+          clientId,
+          brand: req.body.brand,
+          model: req.body.model,
+          hasNewVisual: Boolean(req.file)
+        }
+      });
+      return res.json({ ok: true });
+    } catch (error) {
+      if (error?.code === '23505') {
+        return res.status(409).json({ message: 'Ya existe una guía rápida para esta marca y modelo en este cliente.' });
+      }
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo actualizar la guía rápida.' });
+    }
+  }
+);
+
+app.post(
+  '/quick-guides/:clientId/:guideId/approve',
+  requireAuth,
+  requirePermission('quick_guides:approve'),
+  async (req, res) => {
+    const { clientId, guideId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const result = await approveQuickGuide(clientId, guideId, req.user.sub);
+    if (!result) {
+      return res.status(404).json({ message: 'Guía rápida no encontrada.' });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'QUICK_GUIDE_APPROVE',
+      targetUserId: guideId,
+      details: { clientId }
+    });
+    return res.json({ ok: true });
+  }
+);
+
+app.get(
+  '/quick-guides/:clientId/:guideId/pdf',
+  requireAuth,
+  requireAnyPermission(['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete', 'hb:view', 'read:all']),
+  async (req, res) => {
+    const { clientId, guideId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const client = await getClientById(clientId);
+    const guide = await getQuickGuideById(clientId, guideId);
+    if (!client || !guide) {
+      return res.status(404).json({ message: 'Guía rápida no encontrada.' });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=\"guia-rapida-${guide.brand}-${guide.model}.pdf\"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    doc.pipe(res);
+    buildQuickGuidePdf(doc, { client, guide });
+    doc.end();
+  }
+);
+
+app.delete(
+  '/quick-guides/:clientId/:guideId',
+  requireAuth,
+  requirePermission('quick_guides:delete'),
+  async (req, res) => {
+    const { clientId, guideId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const guide = await deleteQuickGuide(clientId, guideId);
+    if (!guide) {
+      return res.status(404).json({ message: 'Guía rápida no encontrada.' });
+    }
+    const guideDir = path.join(process.cwd(), 'uploads', 'clients', clientId, 'quick-guides', guideId);
+    if (fs.existsSync(guideDir)) {
+      await fs.promises.rm(guideDir, { recursive: true, force: true });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'QUICK_GUIDE_DELETE',
+      targetUserId: guideId,
+      details: {
+        clientId,
+        brand: guide.brand,
+        model: guide.model
+      }
+    });
+    return res.json({ ok: true });
   }
 );
 
@@ -2543,7 +2985,7 @@ app.post(
           maintenanceType: type
         }
       });
-      if (engineer.email) {
+      if (type === 'correctivo' && engineer.email) {
         try {
           await sendNotificationEmail({
             to: engineer.email,
@@ -2585,7 +3027,10 @@ app.post(
 app.get(
   '/maintenance/reports/:clientId',
   requireAuth,
-  requireAnyPermission(['maintenance:report:create', 'maintenance:report:sign', 'read:all']),
+  requireAnyPermissionOrRole(
+    ['maintenance:report:create', 'maintenance:report:sign', 'read:all'],
+    MAINTENANCE_REPORT_ACCESS_ROLES
+  ),
   async (req, res) => {
     const { clientId } = req.params;
     if (req.user.clientId && req.user.clientId !== clientId) {
@@ -2612,12 +3057,10 @@ app.get(
     const enriched = rows.map((report) => {
       const sigs = byReport.get(report.id) || [];
       const signedByMe = sigs.some((sig) => sig.user_id === req.user.sub);
-      const hasEngineer = sigs.some((sig) => sig.role === 'ingeniero_biomedico');
-      const hasRequester = sigs.some((sig) => sig.user_id === report.requested_by);
       return {
         ...report,
         signed_by_me: signedByMe,
-        is_fully_signed: hasEngineer && hasRequester
+        is_fully_signed: isMaintenanceReportFullySigned(report, sigs)
       };
     });
     return res.json(enriched);
@@ -2634,6 +3077,9 @@ app.post(
       summary,
       findings,
       actionsTaken,
+      maintenanceChecks,
+      maintenanceActivities,
+      maintenanceTests,
       assetStatusAfter,
       assetLifecycleAction,
       requiresSpareParts,
@@ -2647,17 +3093,17 @@ app.post(
       ? assetStatusAfter
       : 'operativo';
     const cleanLifecycleAction = assetLifecycleAction === 'retire' ? 'retire' : null;
-    const cleanRequiresSpareParts = Boolean(requiresSpareParts);
-    const cleanSparePartsStatus = cleanRequiresSpareParts
+    const cleanMaintenanceChecks = sanitizeList(maintenanceChecks, MAINTENANCE_CHECK_OPTIONS);
+    const cleanMaintenanceActivities = sanitizeList(maintenanceActivities, MAINTENANCE_ACTIVITY_OPTIONS);
+    const cleanMaintenanceTests = sanitizeList(maintenanceTests, MAINTENANCE_TEST_OPTIONS);
+    let cleanRequiresSpareParts = Boolean(requiresSpareParts);
+    let cleanSparePartsStatus = cleanRequiresSpareParts
       ? (MAINTENANCE_SPARE_STATUSES.includes(sparePartsStatus) ? sparePartsStatus : 'solicitado')
       : 'no_aplica';
-    const cleanSparePartsNeeded = String(sparePartsNeeded || '').trim();
-    if (cleanRequiresSpareParts && !cleanSparePartsNeeded) {
-      return res.status(400).json({ message: 'Describe el repuesto requerido.' });
-    }
-    const requestStatusAfter = cleanRequiresSpareParts && cleanSparePartsStatus !== 'recibido'
-      ? 'espera_repuesto'
-      : 'reportado';
+    const cleanSummary = String(summary || '').trim();
+    const cleanFindings = String(findings || '').trim();
+    const cleanActionsTaken = String(actionsTaken || '').trim();
+    let cleanSparePartsNeeded = String(sparePartsNeeded || '').trim();
     const request = await getMaintenanceRequestById(requestId);
     if (!request) {
       return res.status(404).json({ message: 'Solicitud no encontrada.' });
@@ -2665,39 +3111,91 @@ app.post(
     if (req.user.clientId && req.user.clientId !== request.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    const result = await createMaintenanceReport({
+    if (['reportado', 'firmado', 'vencido'].includes(request.status)) {
+      return res.status(409).json({ message: 'Esta solicitud ya tiene reporte o no está disponible.' });
+    }
+    if (request.status === 'espera_repuesto' && cleanLifecycleAction !== 'retire') {
+      const waitingSpareReport = await getLatestWaitingSpareReportByRequest(requestId);
+      cleanRequiresSpareParts = true;
+      cleanSparePartsStatus = 'recibido';
+      cleanSparePartsNeeded = cleanSparePartsNeeded || waitingSpareReport?.spare_parts_needed || 'Repuesto instalado';
+    }
+    if (request.status === 'espera_repuesto' && cleanSparePartsStatus !== 'recibido' && cleanLifecycleAction !== 'retire') {
+      return res.status(400).json({ message: 'Para cerrar un caso en espera de repuesto debes registrar instalación o baja técnica.' });
+    }
+    if (cleanRequiresSpareParts && !cleanSparePartsNeeded) {
+      return res.status(400).json({ message: 'Describe el repuesto requerido.' });
+    }
+    const requestStatusAfter = cleanRequiresSpareParts && cleanSparePartsStatus !== 'recibido'
+      ? 'espera_repuesto'
+      : 'reportado';
+    if (!cleanSummary || !cleanFindings || !cleanActionsTaken) {
+      return res.status(400).json({ message: 'Completa resumen, hallazgos y acciones realizadas.' });
+    }
+    if (!cleanMaintenanceChecks.length) {
+      return res.status(400).json({ message: 'Selecciona al menos una revisión realizada.' });
+    }
+    if (!cleanMaintenanceActivities.length) {
+      return res.status(400).json({ message: 'Selecciona al menos una actividad técnica realizada.' });
+    }
+    if (cleanAssetStatus !== 'fuera_de_servicio' && !cleanMaintenanceTests.length) {
+      return res.status(400).json({ message: 'Selecciona al menos una prueba o verificación realizada.' });
+    }
+    const reportType = request.status === 'espera_repuesto' ? 'correctivo' : request.type;
+    const reportPayload = {
       clientId: request.client_id,
       requestId,
       assetId: request.asset_id,
-      type: request.type,
-      summary,
-      findings,
-      actionsTaken,
+      type: reportType,
+      summary: cleanSummary,
+      findings: cleanFindings,
+      actionsTaken: cleanActionsTaken,
+      maintenanceChecks: cleanMaintenanceChecks,
+      maintenanceActivities: cleanMaintenanceActivities,
+      maintenanceTests: cleanMaintenanceTests,
       assetStatusAfter: cleanAssetStatus,
       requiresSpareParts: cleanRequiresSpareParts,
       sparePartsNeeded: cleanRequiresSpareParts ? cleanSparePartsNeeded : null,
       sparePartsStatus: cleanSparePartsStatus,
       requestStatusAfter,
       createdBy: req.user.sub
-    });
+    };
+    const correctionReport = request.status === 'correccion'
+      ? await getMaintenanceReportWithOpenCorrectionByRequest(requestId)
+      : null;
+    const result = correctionReport
+      ? await updateMaintenanceReport(correctionReport.id, reportPayload)
+      : await createMaintenanceReport(reportPayload);
+
+    if (correctionReport) {
+      await deleteReportSignatures(result.id);
+      await resolveMaintenanceReportCorrections(result.id);
+    }
 
     const assetStatusToPersist = cleanLifecycleAction === 'retire' ? 'dado_de_baja' : cleanAssetStatus;
     await updateAssetStatus(request.client_id, request.asset_id, assetStatusToPersist);
 
     const reportAsset = await getAssetById(request.client_id, request.asset_id);
     await logEquipmentAudit(req, {
-      action: 'MAINTENANCE_REPORT_CREATE',
+      action: correctionReport ? 'MAINTENANCE_REPORT_CORRECTED' : 'MAINTENANCE_REPORT_CREATE',
       clientId: request.client_id,
       assetId: request.asset_id,
       asset: reportAsset,
-      description: `Reporte de mantenimiento ${request.type} creado para ${assetLabel(reportAsset)}.`,
+      description: correctionReport
+        ? `Reporte de mantenimiento ${reportType} corregido para ${assetLabel(reportAsset)}.`
+        : `Reporte de mantenimiento ${reportType} creado para ${assetLabel(reportAsset)}.`,
       details: {
-        eventType: 'reporte_mantenimiento_creado',
+        eventType: correctionReport ? 'reporte_mantenimiento_corregido' : 'reporte_mantenimiento_creado',
         reportId: result.id,
         requestId,
-        maintenanceType: request.type,
-        summary: summary ?? null,
-        findings: findings ?? null,
+        maintenanceType: reportType,
+        requestType: request.type,
+        summary: cleanSummary,
+        findings: cleanFindings,
+        actionsTaken: cleanActionsTaken,
+        maintenanceChecks: cleanMaintenanceChecks,
+        maintenanceActivities: cleanMaintenanceActivities,
+        maintenanceTests: cleanMaintenanceTests,
         assetStatusAfter: cleanAssetStatus,
         assetLifecycleAction: cleanLifecycleAction,
         assetStatusPersisted: assetStatusToPersist,
@@ -2712,7 +3210,7 @@ app.post(
       await signMaintenanceReport({
         reportId: result.id,
         userId: req.user.sub,
-        role: req.user.roles?.[0] ?? 'ingeniero_biomedico',
+        role: req.user.roles?.includes('ingeniero_biomedico') ? 'ingeniero_biomedico' : (req.user.roles?.[0] ?? 'ingeniero_biomedico'),
         signaturePath: engineer.signature_path
       });
     }
@@ -2720,14 +3218,55 @@ app.post(
     await writeMaintenanceReportPdfFile(result.id);
 
     if (request.type === 'preventivo' && requestStatusAfter !== 'espera_repuesto') {
-      const year = new Date().getFullYear();
-      const schedules = await listSchedules(request.client_id, year);
-      if (schedules.length) {
-        const schedule = schedules[0];
-        const item = await findScheduleItemForAsset(schedule.id, request.asset_id, new Date());
-        if (item) {
-          await markScheduleItemDone(schedule.id, item.id, result.id);
-          await setScheduleClosedIfDone(schedule.id);
+      if (request.schedule_id && request.schedule_item_id) {
+        await markScheduleItemDone(request.schedule_id, request.schedule_item_id, result.id);
+        await setScheduleClosedIfDone(request.schedule_id);
+      } else {
+        const year = new Date().getFullYear();
+        const schedules = await listSchedules(request.client_id, year);
+        if (schedules.length) {
+          const schedule = schedules[0];
+          const item = await findScheduleItemForAsset(schedule.id, request.asset_id, new Date());
+          if (item) {
+            await markScheduleItemDone(schedule.id, item.id, result.id);
+            await setScheduleClosedIfDone(schedule.id);
+          }
+        }
+      }
+    }
+
+    const signingUsers = await listMaintenanceReportSigningUsers(request.client_id, reportAsset, request);
+    for (const signer of signingUsers) {
+      const title = reportType === 'preventivo'
+        ? 'Reporte preventivo pendiente de firma'
+        : 'Reporte correctivo pendiente de firma';
+      const message = requestStatusAfter === 'espera_repuesto'
+        ? `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)} y requiere firma. El caso queda en espera del repuesto: ${cleanSparePartsNeeded}.`
+        : `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)}. Debe ser firmado para quedar validado en la hoja de vida.`;
+      await createNotification({
+        userId: signer.id,
+        clientId: request.client_id,
+        title,
+        message,
+        link: '/mantenimiento',
+        type: 'maintenance_report_ready',
+        priority: 'high',
+        data: {
+          reportId: result.id,
+          requestId,
+          assetId: request.asset_id,
+          maintenanceType: reportType
+        }
+      });
+      if (signer.email) {
+        try {
+          await sendNotificationEmail({
+            to: signer.email,
+            subject: title,
+            text: message
+          });
+        } catch (error) {
+          console.error('Email notificación falló', error);
         }
       }
     }
@@ -2764,35 +3303,6 @@ app.post(
           }
         }
       }
-    } else if (request.requested_by) {
-      const title = 'Reporte de mantenimiento listo';
-      const message = `Se generó el reporte ${request.type}. Requiere tu firma.`;
-      await createNotification({
-        userId: request.requested_by,
-        clientId: request.client_id,
-        title,
-        message,
-        link: '/mantenimiento',
-        type: 'maintenance_report_ready',
-        priority: 'high',
-        data: {
-          reportId: result.id,
-          requestId,
-          assetId: request.asset_id,
-          maintenanceType: request.type
-        }
-      });
-      if (request.requester_email) {
-        try {
-          await sendNotificationEmail({
-            to: request.requester_email,
-            subject: title,
-            text: message
-          });
-        } catch (error) {
-          console.error('Email notificación falló', error);
-        }
-      }
     }
 
     return res.status(201).json(result);
@@ -2802,7 +3312,7 @@ app.post(
 app.post(
   '/maintenance/reports/:id/sign',
   requireAuth,
-  requirePermission('maintenance:report:sign'),
+  requireAnyPermissionOrRole(['maintenance:report:sign'], MAINTENANCE_ACCEPTANCE_SIGNER_ROLES),
   async (req, res) => {
     const report = await getMaintenanceReportById(req.params.id);
     if (!report) {
@@ -2811,10 +3321,14 @@ app.post(
     if (req.user.clientId && req.user.clientId !== report.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (report.requires_spare_parts && report.spare_parts_status !== 'recibido') {
-      return res.status(400).json({
-        message: 'Este reporte queda en espera de repuesto. Se firma cuando se registre la instalación del repuesto.'
-      });
+    if (req.user.roles?.includes('lector')) {
+      const allowed = await readerCanAccessAsset(report.client_id, req.user.sub, report.asset_id);
+      if (!allowed) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+    }
+    if (report.correction_requested) {
+      return res.status(409).json({ message: 'Este reporte tiene una corrección solicitada y no puede firmarse todavía.' });
     }
     const user = await getUserById(req.user.sub);
     if (!user?.signature_path) {
@@ -2851,7 +3365,6 @@ app.post(
 
     const signatures = await listReportSignatures(report.id);
     const hasEngineer = signatures.some((sig) => sig.role === 'ingeniero_biomedico');
-    const hasRequester = signatures.some((sig) => sig.user_id === report.requested_by);
     if (!hasEngineer) {
       const engineerUser = await getUserById(report.created_by);
       if (engineerUser?.signature_path) {
@@ -2864,19 +3377,24 @@ app.post(
       }
     }
     const signaturesAfter = await listReportSignatures(report.id);
-    const hasEngineerFinal = signaturesAfter.some((sig) => sig.role === 'ingeniero_biomedico');
-    const hasRequesterFinal = signaturesAfter.some((sig) => sig.user_id === report.requested_by);
-    if (hasEngineerFinal && hasRequesterFinal) {
-      await updateMaintenanceRequestStatus(report.request_id, 'firmado');
-      await markMaintenanceRequestNotificationsResolved(report.request_id);
+    const isFullySigned = isMaintenanceReportFullySigned(report, signaturesAfter);
+    const waitsForSpare = report.requires_spare_parts && report.spare_parts_status !== 'recibido';
+    if (isFullySigned) {
+      await markMaintenanceReportNotificationsResolved(report.id);
+      if (!waitsForSpare) {
+        await updateMaintenanceRequestStatus(report.request_id, 'firmado');
+        await markMaintenanceRequestNotificationsResolved(report.request_id);
+      }
       await logEquipmentAudit(req, {
-        action: 'MAINTENANCE_REPORT_FINALIZED',
+        action: waitsForSpare ? 'MAINTENANCE_REPORT_SIGNED_WAITING_SPARE' : 'MAINTENANCE_REPORT_FINALIZED',
         clientId: report.client_id,
         assetId: report.asset_id,
         asset: signedAsset,
-        description: `Reporte de mantenimiento finalizado para ${assetLabel(signedAsset)}.`,
+        description: waitsForSpare
+          ? `Reporte de mantenimiento firmado y en espera de repuesto para ${assetLabel(signedAsset)}.`
+          : `Reporte de mantenimiento finalizado para ${assetLabel(signedAsset)}.`,
         details: {
-          eventType: 'reporte_mantenimiento_finalizado',
+          eventType: waitsForSpare ? 'reporte_mantenimiento_firmado_espera_repuesto' : 'reporte_mantenimiento_finalizado',
           reportId: report.id,
           requestId: report.request_id
         }
@@ -2903,7 +3421,11 @@ app.post(
 
     if (report.created_by) {
       const title = 'Reporte firmado';
-      const message = 'El reporte fue firmado y queda finalizado.';
+      const message = isFullySigned
+        ? waitsForSpare
+          ? 'El reporte fue firmado y validado. El caso continúa abierto en espera de repuesto.'
+          : 'El reporte fue firmado y queda finalizado.'
+        : 'El reporte recibió una firma, pero aún tiene firmas pendientes.';
       await createNotification({
         userId: report.created_by,
         clientId: report.client_id,
@@ -2921,6 +3443,104 @@ app.post(
     }
 
     return res.json(result);
+  }
+);
+
+app.post(
+  '/maintenance/reports/:id/correction',
+  requireAuth,
+  requireAnyPermissionOrRole(['maintenance:report:sign'], MAINTENANCE_ACCEPTANCE_SIGNER_ROLES),
+  async (req, res) => {
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) {
+      return res.status(400).json({ message: 'Escribe el motivo de la corrección.' });
+    }
+    if (reason.length > 1200) {
+      return res.status(400).json({ message: 'El motivo de corrección es demasiado largo.' });
+    }
+
+    const report = await getMaintenanceReportById(req.params.id);
+    if (!report) {
+      return res.status(404).json({ message: 'Reporte no encontrado.' });
+    }
+    if (req.user.clientId && req.user.clientId !== report.client_id) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (req.user.roles?.includes('lector')) {
+      const allowed = await readerCanAccessAsset(report.client_id, req.user.sub, report.asset_id);
+      if (!allowed) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+    }
+    if (report.correction_requested) {
+      return res.status(409).json({ message: 'Este reporte ya tiene una corrección solicitada.' });
+    }
+
+    const signatures = await listReportSignatures(report.id);
+    if (isMaintenanceReportFullySigned(report, signatures)) {
+      return res.status(409).json({ message: 'Este reporte ya fue firmado y finalizado.' });
+    }
+    if (signatures.some((sig) => sig.user_id === req.user.sub)) {
+      return res.status(409).json({ message: 'Ya firmaste este reporte; no puedes solicitar corrección después de firmar.' });
+    }
+
+    const result = await requestMaintenanceReportCorrection({
+      reportId: report.id,
+      userId: req.user.sub,
+      reason
+    });
+    await updateMaintenanceRequestStatus(report.request_id, 'correccion');
+    await markMaintenanceReportNotificationsResolved(report.id);
+
+    const signedAsset = await getAssetById(report.client_id, report.asset_id);
+    await logEquipmentAudit(req, {
+      action: 'MAINTENANCE_REPORT_CORRECTION_REQUESTED',
+      clientId: report.client_id,
+      assetId: report.asset_id,
+      asset: signedAsset,
+      description: `Solicitud de corrección de reporte de mantenimiento para ${assetLabel(signedAsset)}.`,
+      details: {
+        eventType: 'reporte_mantenimiento_correccion_solicitada',
+        reportId: report.id,
+        requestId: report.request_id,
+        correctionId: result.id,
+        reason
+      }
+    });
+
+    if (report.created_by) {
+      const title = 'Corrección solicitada en reporte';
+      const message = `Se solicitó corrección del reporte ${report.type} de ${assetLabel(signedAsset)}. Motivo: ${reason}`;
+      await createNotification({
+        userId: report.created_by,
+        clientId: report.client_id,
+        title,
+        message,
+        link: '/mantenimiento',
+        type: 'maintenance_report_correction_requested',
+        priority: 'high',
+        data: {
+          reportId: report.id,
+          requestId: report.request_id,
+          assetId: report.asset_id,
+          correctionId: result.id
+        }
+      });
+      const engineer = await getUserById(report.created_by);
+      if (engineer?.email) {
+        try {
+          await sendNotificationEmail({
+            to: engineer.email,
+            subject: title,
+            text: message
+          });
+        } catch (error) {
+          console.error('Email notificación falló', error);
+        }
+      }
+    }
+
+    return res.status(201).json(result);
   }
 );
 
@@ -2950,7 +3570,10 @@ async function writeMaintenanceReportPdfFile(reportId) {
 app.get(
   '/maintenance/reports/:id/pdf',
   requireAuth,
-  requireAnyPermission(['maintenance:report:create', 'maintenance:report:sign', 'read:all']),
+  requireAnyPermissionOrRole(
+    ['maintenance:report:create', 'maintenance:report:sign', 'read:all'],
+    MAINTENANCE_REPORT_ACCESS_ROLES
+  ),
   async (req, res) => {
     const report = await getMaintenanceReportById(req.params.id);
     if (!report) {
@@ -3050,20 +3673,62 @@ async function writeTrainingSchedulePdf({ client, schedule, items }) {
   return publicPath;
 }
 
+function todayInBogota() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+  const value = (type) => parts.find((part) => part.type === type)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
 async function syncDueScheduleRequests(clientId, fallbackUserId) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInBogota();
   const client = await getClientById(clientId);
   if (!client?.schema_name) return;
+
+  await query(
+    `UPDATE maintenance_requests
+     SET status = 'vencido', updated_at = NOW()
+     WHERE client_id = $1
+       AND type = 'preventivo'
+       AND source = 'cronograma'
+       AND status = 'abierto'
+       AND deadline_date < $2`,
+    [clientId, today]
+  );
+
+  await query(
+    `UPDATE maintenance_schedule_items i
+     SET status = 'expired'
+     FROM maintenance_schedules s
+     WHERE s.id = i.schedule_id
+       AND s.client_id = $1
+       AND s.status = 'approved'
+       AND i.status IN ('pending', 'active')
+       AND i.deadline_date < $2
+       AND NOT EXISTS (
+         SELECT 1
+         FROM maintenance_requests r
+         WHERE r.schedule_item_id = i.id
+           AND r.status IN ('en_proceso', 'espera_repuesto', 'reportado', 'firmado')
+       )`,
+    [clientId, today]
+  );
+
   const { rows } = await query(
-    `SELECT i.id, i.asset_id, i.planned_date, i.deadline_date, s.created_by
+    `SELECT i.id, i.schedule_id, i.asset_id, i.planned_date, i.deadline_date, s.created_by
      FROM maintenance_schedule_items i
      JOIN maintenance_schedules s ON s.id = i.schedule_id
      JOIN "${client.schema_name}".assets a ON a.id = i.asset_id
      WHERE s.client_id = $1
        AND s.status = 'approved'
-       AND i.status <> 'done'
+       AND i.status IN ('pending', 'active')
        AND COALESCE(a.status, 'activo') <> 'dado_de_baja'
-       AND i.planned_date <= $2`,
+       AND i.planned_date <= $2
+       AND i.deadline_date >= $2`,
     [clientId, today]
   );
 
@@ -3071,20 +3736,35 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
 
   for (const item of rows) {
     const exists = await query(
-      `SELECT 1
+      `SELECT id
        FROM maintenance_requests
        WHERE client_id = $1
          AND asset_id = $2
          AND source = 'cronograma'
-         AND planned_date = $3
+         AND (
+           schedule_item_id = $3
+           OR (schedule_item_id IS NULL AND planned_date = $4)
+         )
        LIMIT 1`,
-      [clientId, item.asset_id, item.planned_date]
+      [clientId, item.asset_id, item.id, item.planned_date]
     );
     if (exists.rows.length) {
+      await query(
+        `UPDATE maintenance_requests
+         SET schedule_id = $1, schedule_item_id = $2
+         WHERE id = $3 AND schedule_item_id IS NULL`,
+        [item.schedule_id, item.id, exists.rows[0].id]
+      );
+      await query(
+        `UPDATE maintenance_schedule_items
+         SET status = 'active'
+         WHERE id = $1 AND status = 'pending'`,
+        [item.id]
+      );
       continue;
     }
 
-    const result = await createMaintenanceRequest({
+    await createMaintenanceRequest({
       clientId,
       assetId: item.asset_id,
       type: 'preventivo',
@@ -3092,28 +3772,17 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
       plannedDate: item.planned_date,
       deadlineDate: item.deadline_date,
       source: 'cronograma',
+      scheduleId: item.schedule_id,
+      scheduleItemId: item.id,
       requestedBy: item.created_by ?? fallbackUserId
     });
 
-    const engineers = await listUsersByRoleAndClient('ingeniero_biomedico', clientId);
-    for (const engineer of engineers) {
-      const title = 'Solicitud de mantenimiento preventivo';
-      const message = 'Se generó una solicitud preventiva según cronograma.';
-      await createNotification({
-        userId: engineer.id,
-        clientId,
-        title,
-        message,
-        link: '/mantenimiento',
-        type: 'maintenance_preventive_generated',
-        priority: 'normal',
-        data: {
-          requestId: result.id,
-          scheduleItemId: item.id,
-          assetId: item.asset_id
-        }
-      });
-    }
+    await query(
+      `UPDATE maintenance_schedule_items
+       SET status = 'active'
+       WHERE id = $1 AND status = 'pending'`,
+      [item.id]
+    );
   }
 }
 
@@ -3247,6 +3916,7 @@ app.get(
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     const client = await getClientById(schedule.client_id);
+    await syncDueScheduleRequests(schedule.client_id, req.user.sub);
     const items = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
     return res.json(items);
   }

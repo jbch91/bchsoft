@@ -58,7 +58,7 @@ input[type='file'].file-input {
 }
 
 input[type='file'].file-input::file-selector-button {
-  background: linear-gradient(135deg, var(--brand-700), var(--brand-600));
+  background: var(--table-header-bg);
   border: none;
   border-radius: 8px;
   color: #ffffff;
@@ -129,10 +129,11 @@ input[type='file'].file-input:hover::file-selector-button {
 }
 
 .row.header {
-  background: linear-gradient(135deg, var(--brand-700), var(--brand-600));
+  background: var(--table-header-bg);
   color: #ffffff;
   font-weight: 900;
   border: none;
+  box-shadow: var(--table-header-shadow);
 }
 
 .actions {
@@ -266,13 +267,18 @@ input[type='file'].file-input:hover::file-selector-button {
   border-color: color-mix(in srgb, var(--brand-600) 32%, var(--border));
 }
 
+.history-row.guide-pinned {
+  background: linear-gradient(135deg, #fffaf0, #ffffff);
+}
+
 .history-row.header {
-  background: linear-gradient(135deg, var(--brand-700), #5f1f25);
+  background: var(--table-header-bg);
   color: #ffffff;
   font-weight: 800;
   position: sticky;
   top: 0;
   z-index: 1;
+  box-shadow: var(--table-header-shadow);
 }
 
 .history-more {

@@ -715,8 +715,38 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
            r.created_at
          ) AS created_at
        FROM maintenance_reports r
+       JOIN maintenance_requests req ON req.id = r.request_id
        WHERE r.asset_id = $1
          AND r.client_id = $2
+         AND EXISTS (
+           SELECT 1
+           FROM report_signatures s
+           WHERE s.report_id = r.id
+             AND s.role = 'ingeniero_biomedico'
+         )
+         AND (
+           (
+             r.type = 'preventivo'
+             AND EXISTS (
+               SELECT 1
+               FROM report_signatures s
+               WHERE s.report_id = r.id
+                 AND s.role IN ('almacenista', 'lector', 'viewer', 'visor', 'superuser')
+             )
+           )
+           OR (
+             r.type <> 'preventivo'
+             AND EXISTS (
+               SELECT 1
+               FROM report_signatures s
+               WHERE s.report_id = r.id
+                 AND (
+                   s.user_id = req.requested_by
+                   OR s.role IN ('almacenista', 'lector', 'viewer', 'visor', 'superuser')
+                 )
+             )
+           )
+         )
 
        UNION ALL
 

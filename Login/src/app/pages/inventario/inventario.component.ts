@@ -9,6 +9,8 @@ import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 import { InventoryPanelComponent, InventoryPanelItem } from '../../shared/inventory-panel/inventory-panel.component';
+import * as QRCode from 'qrcode';
+import jsPDF from 'jspdf';
 
 interface ClientOption {
   id: string;
@@ -19,6 +21,8 @@ interface ClientOption {
   address?: string | null;
   logoPath?: string | null;
 }
+
+type InventoryView = 'listado' | 'qr';
 
 @Component({
   selector: 'app-inventario',
@@ -35,6 +39,15 @@ export class InventarioComponent {
   items: InventoryPanelItem[] = [];
   loading = false;
   errorMessage = '';
+  activeInventoryView: InventoryView = 'listado';
+  qrSearchTerm = '';
+  qrAreaFilter = '';
+  qrStatusFilter = '';
+  qrCodes: Record<string, string> = {};
+  qrSelectedIds = new Set<string>();
+  qrGenerating = false;
+  qrError = '';
+  qrSuccess = '';
 
   constructor(
     private readonly biomed: BiomedService,
@@ -111,6 +124,11 @@ export class InventarioComponent {
         locationName: row.location_name ?? null,
         status: row.status
       }));
+      this.qrCodes = {};
+      this.qrSelectedIds.clear();
+      if (this.activeInventoryView === 'qr') {
+        await this.generateQrCodes(this.qrFilteredItems);
+      }
     } catch (error) {
       console.error(error);
       this.errorMessage = 'No se pudo cargar el inventario.';
@@ -118,6 +136,147 @@ export class InventarioComponent {
       this.loading = false;
       this.cdr.detectChanges();
     }
+  }
+
+  setInventoryView(view: InventoryView): void {
+    this.activeInventoryView = view;
+    this.qrError = '';
+    this.qrSuccess = '';
+    if (view === 'qr') {
+      void this.generateQrCodes(this.qrFilteredItems);
+    }
+  }
+
+  get qrAreaOptions(): string[] {
+    return Array.from(new Set(this.items.map((item) => item.areaName || '').filter(Boolean))).sort();
+  }
+
+  get qrStatusOptions(): string[] {
+    return Array.from(new Set(this.items.map((item) => item.status || '').filter(Boolean))).sort();
+  }
+
+  get qrFilteredItems(): InventoryPanelItem[] {
+    const term = this.normalize(this.qrSearchTerm);
+    return this.items.filter((item) => {
+      if (item.status === 'dado_de_baja') return false;
+      if (this.qrAreaFilter && item.areaName !== this.qrAreaFilter) return false;
+      if (this.qrStatusFilter && item.status !== this.qrStatusFilter) return false;
+      if (!term) return true;
+      const haystack = [
+        item.code,
+        item.name,
+        item.brand,
+        item.model,
+        item.serial,
+        item.siteName,
+        item.areaName,
+        item.locationName
+      ]
+        .map((value) => this.normalize(value))
+        .join(' ');
+      return haystack.includes(term);
+    });
+  }
+
+  get qrSelectedItems(): InventoryPanelItem[] {
+    return this.qrFilteredItems.filter((item) => this.qrSelectedIds.has(item.id));
+  }
+
+  isQrSelected(item: InventoryPanelItem): boolean {
+    return this.qrSelectedIds.has(item.id);
+  }
+
+  toggleQrSelection(item: InventoryPanelItem): void {
+    if (this.qrSelectedIds.has(item.id)) {
+      this.qrSelectedIds.delete(item.id);
+      return;
+    }
+    this.qrSelectedIds.add(item.id);
+  }
+
+  selectAllQrFiltered(): void {
+    this.qrFilteredItems.forEach((item) => this.qrSelectedIds.add(item.id));
+  }
+
+  clearQrSelection(): void {
+    this.qrSelectedIds.clear();
+  }
+
+  clearQrFilters(): void {
+    this.qrSearchTerm = '';
+    this.qrAreaFilter = '';
+    this.qrStatusFilter = '';
+    void this.generateQrCodes(this.qrFilteredItems);
+  }
+
+  async generateVisibleQrCodes(): Promise<void> {
+    await this.generateQrCodes(this.qrFilteredItems, true);
+  }
+
+  async downloadQrPng(item: InventoryPanelItem): Promise<void> {
+    const dataUrl = await this.ensureQrCode(item);
+    const anchor = document.createElement('a');
+    anchor.href = dataUrl;
+    anchor.download = `${this.safeFilename(item.code || item.name)}-qr.png`;
+    anchor.click();
+  }
+
+  async downloadQrPdf(): Promise<void> {
+    const targets = this.qrSelectedItems.length ? this.qrSelectedItems : this.qrFilteredItems;
+    if (!targets.length) {
+      this.qrError = 'No hay equipos para generar el PDF de códigos QR.';
+      return;
+    }
+
+    await this.generateQrCodes(targets);
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 10;
+    const gap = 4;
+    const columns = 3;
+    const cardWidth = (pageWidth - margin * 2 - gap * (columns - 1)) / columns;
+    const cardHeight = 54;
+    const qrSize = 24;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(143, 50, 55);
+    doc.text('Códigos QR de inventario biomédico', margin, 10);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    doc.text('Cada QR identifica un equipo para solicitudes, reportes e historial.', margin, 15);
+
+    targets.forEach((item, index) => {
+      const position = index % (columns * 5);
+      if (index > 0 && position === 0) {
+        doc.addPage();
+      }
+      const col = position % columns;
+      const row = Math.floor(position / columns);
+      const x = margin + col * (cardWidth + gap);
+      const y = 20 + row * (cardHeight + gap);
+      const qr = this.qrCodes[item.id];
+
+      doc.setDrawColor(226, 232, 240);
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(x, y, cardWidth, cardHeight, 3, 3, 'FD');
+      if (qr) {
+        doc.addImage(qr, 'PNG', x + (cardWidth - qrSize) / 2, y + 4, qrSize, qrSize);
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(15, 23, 42);
+      doc.text(this.truncate(item.code || '-', 24), x + 4, y + 33, { maxWidth: cardWidth - 8 });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.text(this.truncate(item.name || '-', 32), x + 4, y + 38, { maxWidth: cardWidth - 8 });
+      doc.setTextColor(71, 85, 105);
+      doc.text(this.truncate(`Serie: ${item.serial || '-'}`, 34), x + 4, y + 43, { maxWidth: cardWidth - 8 });
+      doc.text(this.truncate(`Área: ${item.areaName || '-'}`, 34), x + 4, y + 48, { maxWidth: cardWidth - 8 });
+    });
+
+    doc.save('codigos-qr-inventario.pdf');
   }
 
   async deleteItem(item: InventoryPanelItem): Promise<void> {
@@ -128,5 +287,61 @@ export class InventarioComponent {
 
   goEdit(item: InventoryPanelItem): void {
     void this.router.navigate(['/hojas-de-vida'], { queryParams: { assetId: item.id } });
+  }
+
+  async generateQrCodes(items: InventoryPanelItem[], force = false): Promise<void> {
+    if (!items.length) return;
+    this.qrGenerating = true;
+    this.qrError = '';
+    this.qrSuccess = '';
+    try {
+      await Promise.all(items.map((item) => this.ensureQrCode(item, force)));
+      this.qrSuccess = `Códigos QR listos para ${items.length} equipo${items.length === 1 ? '' : 's'}.`;
+    } catch (error) {
+      console.error(error);
+      this.qrError = 'No se pudieron generar los códigos QR.';
+    } finally {
+      this.qrGenerating = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  private async ensureQrCode(item: InventoryPanelItem, force = false): Promise<string> {
+    if (!force && this.qrCodes[item.id]) return this.qrCodes[item.id];
+    const dataUrl = await QRCode.toDataURL(this.qrPayload(item), {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 240,
+      color: {
+        dark: '#0f172a',
+        light: '#ffffff'
+      }
+    });
+    this.qrCodes[item.id] = dataUrl;
+    return dataUrl;
+  }
+
+  private qrPayload(item: InventoryPanelItem): string {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const params = new URLSearchParams({
+      clientId: this.selectedClientId,
+      assetId: item.id,
+      code: item.code || ''
+    });
+    return `${origin}/mantenimiento?${params.toString()}`;
+  }
+
+  private normalize(value: string | null | undefined): string {
+    return (value || '').toLowerCase().trim();
+  }
+
+  private safeFilename(value: string): string {
+    return this.normalize(value)
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'equipo';
+  }
+
+  private truncate(value: string, max: number): string {
+    return value.length > max ? `${value.slice(0, Math.max(0, max - 1))}…` : value;
   }
 }

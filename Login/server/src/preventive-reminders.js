@@ -1,50 +1,66 @@
 import { query } from './db.js';
-import { createNotification, listUsersByRoleAndClient } from './maintenance.js';
+import { createNotification, listUsersByClient, listUsersByRoleAndClient } from './maintenance.js';
 import { sendNotificationEmail } from './mailer.js';
+
+function dateStringInBogota(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const value = (type) => parts.find((part) => part.type === type)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
+function toDateOnly(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value.slice(0, 10);
+  return dateStringInBogota(value);
+}
 
 export async function sendPreventiveRemindersForClient(clientId) {
   const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = dateStringInBogota(today);
   const threeDays = new Date(today);
   threeDays.setDate(threeDays.getDate() + 3);
-  const threeDaysStr = threeDays.toISOString().slice(0, 10);
+  const threeDaysStr = dateStringInBogota(threeDays);
 
   const { rows } = await query(
-    `SELECT id, planned_date
+    `SELECT planned_date::text AS planned_date,
+            MAX(deadline_date)::text AS deadline_date,
+            COUNT(*)::int AS request_count,
+            COUNT(DISTINCT asset_id)::int AS asset_count
      FROM maintenance_requests
      WHERE client_id = $1
        AND type = 'preventivo'
        AND source = 'cronograma'
-       AND status NOT IN ('reportado', 'firmado')
-       AND (planned_date = $2 OR planned_date = $3)`,
+       AND status NOT IN ('reportado', 'firmado', 'vencido')
+       AND (
+         (planned_date = $2 AND reminder_day_sent_at IS NULL)
+         OR (planned_date = $3 AND reminder_3_sent_at IS NULL)
+       )
+     GROUP BY planned_date
+     ORDER BY planned_date ASC`,
     [clientId, todayStr, threeDaysStr]
   );
 
   if (!rows.length) return;
 
-  const engineers = await listUsersByRoleAndClient('ingeniero_biomedico', clientId);
-  const almacenistas = await listUsersByRoleAndClient('almacenista', clientId);
-  const lectores = await listUsersByRoleAndClient('lector', clientId);
-  const recipients = [...engineers, ...almacenistas, ...lectores];
+  const recipients = await listUsersByClient(clientId);
 
-  for (const request of rows) {
-    const isToday = request.planned_date === todayStr;
+  for (const group of rows) {
+    const plannedDate = toDateOnly(group.planned_date);
+    const deadlineDate = toDateOnly(group.deadline_date);
+    const isToday = plannedDate === todayStr;
     const reminderField = isToday ? 'reminder_day_sent_at' : 'reminder_3_sent_at';
-
-    const alreadySent = await query(
-      `SELECT 1
-       FROM maintenance_requests
-       WHERE id = $1 AND ${reminderField} IS NOT NULL`,
-      [request.id]
-    );
-    if (alreadySent.rows.length) continue;
 
     const title = isToday
       ? 'Inicio de mantenimiento preventivo'
       : 'Recordatorio: mantenimiento preventivo próximo';
     const message = isToday
-      ? `Hoy inicia el mantenimiento preventivo programado (${request.planned_date}).`
-      : `Faltan 3 días para iniciar el mantenimiento preventivo (${request.planned_date}).`;
+      ? `Hoy inicia el mantenimiento preventivo programado. Equipos incluidos: ${group.asset_count}. Ventana de ejecución: ${plannedDate} a ${deadlineDate}.`
+      : `Faltan 3 días para iniciar el mantenimiento preventivo. Equipos incluidos: ${group.asset_count}. Fecha de inicio: ${plannedDate}.`;
 
     for (const user of recipients) {
       await createNotification({
@@ -56,7 +72,10 @@ export async function sendPreventiveRemindersForClient(clientId) {
         type: isToday ? 'preventive_maintenance_start' : 'preventive_maintenance_reminder',
         priority: isToday ? 'high' : 'normal',
         data: {
-          plannedDate: request.planned_date,
+          plannedDate,
+          deadlineDate,
+          assetCount: group.asset_count,
+          requestCount: group.request_count,
           reminderKind: isToday ? 'day_start' : 'three_days_before'
         }
       });
@@ -76,8 +95,12 @@ export async function sendPreventiveRemindersForClient(clientId) {
     await query(
       `UPDATE maintenance_requests
        SET ${reminderField} = NOW()
-       WHERE id = $1`,
-      [request.id]
+       WHERE client_id = $1
+         AND type = 'preventivo'
+         AND source = 'cronograma'
+         AND planned_date = $2
+         AND ${reminderField} IS NULL`,
+      [clientId, plannedDate]
     );
   }
 }

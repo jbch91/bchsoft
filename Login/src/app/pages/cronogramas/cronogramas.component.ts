@@ -35,6 +35,24 @@ interface AreaOption {
   id: string;
   name: string;
 }
+
+interface MaintenanceAreaDateGroup {
+  key: string;
+  plannedDate: string;
+  minDate: string;
+  maxDate: string;
+  items: ScheduleItemDto[];
+}
+
+interface MaintenanceItemGroup {
+  areaKey: string;
+  areaName: string;
+  siteName: string;
+  assetCount: number;
+  frequencies: string[];
+  items: ScheduleItemDto[];
+  dateGroups: MaintenanceAreaDateGroup[];
+}
 @Component({
   selector: 'app-cronogramas',
   standalone: true,
@@ -74,6 +92,7 @@ export class CronogramasComponent implements OnInit {
   trainingItemsBySchedule: Record<string, TrainingItemDto[]> = {};
   trainingLoading = false;
   maintenanceStatusFilter = '';
+  maintenanceItemStatusFilter = '';
   trainingStatusFilter = '';
   maintenanceDetailSearch = '';
   maintenanceAreaFilter = '';
@@ -629,6 +648,23 @@ export class CronogramasComponent implements OnInit {
     return status;
   }
 
+  maintenanceItemStatusLabel(status: string): string {
+    const value = String(status || '').toLowerCase();
+    if (value === 'pending') return 'Programado';
+    if (value === 'active') return 'Activo';
+    if (value === 'done') return 'Realizado';
+    if (value === 'expired') return 'Vencido';
+    return status || '-';
+  }
+
+  maintenanceItemStatusClass(status: string): string {
+    const value = String(status || '').toLowerCase();
+    if (value === 'active') return 'active';
+    if (value === 'done') return 'done';
+    if (value === 'expired') return 'expired';
+    return 'pending';
+  }
+
   isApprovedSelected(): boolean {
     const schedule = this.schedules.find((s) => s.id === this.selectedScheduleId);
     return schedule?.status === 'approved';
@@ -752,23 +788,38 @@ export class CronogramasComponent implements OnInit {
     }
   }
 
-  get groupedItems(): { assetId: string; code: string; name: string; brand: string | null; model: string | null; frequency: string; items: ScheduleItemDto[] }[] {
-    const map = new Map<string, { assetId: string; code: string; name: string; brand: string | null; model: string | null; frequency: string; items: ScheduleItemDto[] }>();
+  get groupedItems(): MaintenanceItemGroup[] {
+    const map = new Map<string, Omit<MaintenanceItemGroup, 'dateGroups' | 'assetCount' | 'frequencies'> & { assets: Set<string>; frequenciesSet: Set<string> }>();
     for (const item of this.items) {
-      if (!map.has(item.asset_id)) {
-        map.set(item.asset_id, {
-          assetId: item.asset_id,
-          code: item.code ?? '',
-          name: item.name ?? '',
-          brand: item.brand ?? null,
-          model: item.model ?? null,
-          frequency: item.frequency,
-          items: []
+      const areaName = item.area_name || 'Sin área';
+      const siteName = item.site_name || 'Sin sede';
+      const key = `${item.site_id || 'no-site'}:${item.area_id || areaName.toLowerCase()}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          areaKey: key,
+          areaName,
+          siteName,
+          items: [],
+          assets: new Set<string>(),
+          frequenciesSet: new Set<string>()
         });
       }
-      map.get(item.asset_id)!.items.push(item);
+      const group = map.get(key)!;
+      group.items.push(item);
+      group.assets.add(item.asset_id);
+      if (item.frequency) group.frequenciesSet.add(item.frequency);
     }
-    return Array.from(map.values());
+    return Array.from(map.values())
+      .map((group) => ({
+        areaKey: group.areaKey,
+        areaName: group.areaName,
+        siteName: group.siteName,
+        assetCount: group.assets.size,
+        frequencies: Array.from(group.frequenciesSet).sort((a, b) => a.localeCompare(b)),
+        items: group.items,
+        dateGroups: this.buildAreaDateGroups(group.items)
+      }))
+      .sort((a, b) => `${a.siteName} ${a.areaName}`.localeCompare(`${b.siteName} ${b.areaName}`));
   }
 
   get maintenanceAreaOptions(): string[] {
@@ -787,15 +838,85 @@ export class CronogramasComponent implements OnInit {
     return Array.from(freqs);
   }
 
-  get filteredGroupedItems(): { assetId: string; code: string; name: string; brand: string | null; model: string | null; frequency: string; items: ScheduleItemDto[] }[] {
+  get filteredGroupedItems(): MaintenanceItemGroup[] {
     const query = this.maintenanceDetailSearch.trim().toLowerCase();
-    return this.groupedItems.filter((group) => {
-      const areaNames = group.items.map((item) => item.area_name ?? '').join(' ').toLowerCase();
-      const matchesArea = this.maintenanceAreaFilter ? areaNames.includes(this.maintenanceAreaFilter.toLowerCase()) : true;
-      const matchesFreq = this.maintenanceFrequencyFilter ? group.frequency === this.maintenanceFrequencyFilter : true;
-      const haystack = `${group.code} ${group.name} ${group.brand ?? ''} ${group.model ?? ''} ${areaNames}`.toLowerCase();
-      const matchesSearch = query ? haystack.includes(query) : true;
-      return matchesArea && matchesFreq && matchesSearch;
-    });
+    return this.groupedItems
+      .map((group) => ({
+        ...group,
+        items: this.maintenanceItemStatusFilter
+          ? group.items.filter((item) => item.status === this.maintenanceItemStatusFilter)
+          : group.items
+      }))
+      .map((group) => ({
+        ...group,
+        assetCount: new Set(group.items.map((item) => item.asset_id)).size,
+        frequencies: Array.from(new Set(group.items.map((item) => item.frequency).filter(Boolean))).sort((a, b) =>
+          a.localeCompare(b)
+        ),
+        dateGroups: this.buildAreaDateGroups(group.items)
+      }))
+      .filter((group) => {
+        const areaNames = group.items.map((item) => item.area_name ?? '').join(' ').toLowerCase();
+        const matchesArea = this.maintenanceAreaFilter
+          ? areaNames.includes(this.maintenanceAreaFilter.toLowerCase())
+          : true;
+        const matchesFreq = this.maintenanceFrequencyFilter ? group.frequencies.includes(this.maintenanceFrequencyFilter) : true;
+        const assetNames = group.items
+          .map((item) => `${item.code ?? ''} ${item.name ?? ''} ${item.brand ?? ''} ${item.model ?? ''} ${item.serial ?? ''}`)
+          .join(' ');
+        const haystack = `${group.siteName} ${group.areaName} ${assetNames}`.toLowerCase();
+        const matchesSearch = query ? haystack.includes(query) : true;
+        return group.items.length > 0 && matchesArea && matchesFreq && matchesSearch;
+      });
+  }
+
+  buildAreaDateGroups(items: ScheduleItemDto[]): MaintenanceAreaDateGroup[] {
+    const map = new Map<string, MaintenanceAreaDateGroup>();
+    for (const item of items) {
+      const minDate = this.rangeMin(item);
+      const maxDate = this.rangeMax(item);
+      const key = `${minDate}:${maxDate}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          plannedDate: item.planned_date,
+          minDate,
+          maxDate,
+          items: []
+        });
+      }
+      map.get(key)!.items.push(item);
+    }
+    return Array.from(map.values()).sort((a, b) => a.minDate.localeCompare(b.minDate));
+  }
+
+  areaStatusItems(group: MaintenanceItemGroup): { status: string; count: number }[] {
+    const counts = new Map<string, number>();
+    for (const item of group.items) {
+      counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([status, count]) => ({ status, count }));
+  }
+
+  frequencyLabel(group: MaintenanceItemGroup): string {
+    return group.frequencies.length ? group.frequencies.map((freq) => this.titleCase(freq)).join(', ') : '-';
+  }
+
+  titleCase(value: string): string {
+    return String(value || '')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  onAreaPlannedDateChange(dateGroup: MaintenanceAreaDateGroup, value: string): void {
+    for (const item of dateGroup.items) {
+      this.onPlannedDateChange(item, value);
+    }
+    const first = dateGroup.items[0];
+    if (first) {
+      dateGroup.plannedDate = first.planned_date;
+      dateGroup.minDate = this.rangeMin(first);
+      dateGroup.maxDate = this.rangeMax(first);
+    }
   }
 }
