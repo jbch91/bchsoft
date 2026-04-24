@@ -11,10 +11,6 @@
   grid-template-columns: 1fr;
 }
 
-.filters-top.only-client-preview {
-  grid-template-columns: minmax(0, 1fr);
-}
-
 .tab-bar {
   display: flex;
   flex-wrap: wrap;
