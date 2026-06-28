@@ -71,15 +71,12 @@ El superuser administra la plataforma SaaS, clientes, planes, suscripciones, usu
 10. [x] Ingreso con usuario SaaS limitado.
 11. [x] Ingreso con administrador del cliente.
 12. [x] Auditoria SaaS.
-13. [ ] Cierre produccion: typecheck, build, permisos backend, estados vacios y responsive basico.
+13. [x] Cierre produccion: typecheck, build, permisos backend, estados vacios y responsive basico.
 
 ## Pendiente inmediato
 
-- Siguiente bloque: cierre de produccion para Administracion SaaS.
-- Revisar/stagear cambios con cuidado antes del commit: no incluir backups locales ni eliminar `bchoperativo` accidentalmente.
-- Preparar commit/push y desplegar siguiendo `docs/aws-operacion.md`.
-- Antes de actualizar servidor: backup manual de base de datos y volumen uploads.
-- Despues de actualizar servidor: validar superuser, usuario SaaS limitado, administrador del cliente, auditoria SaaS, correos y logs del API.
+- Modulo Administracion SaaS desplegado en produccion el 2026-06-28.
+- Siguiente bloque: monitorear uso real, validar correos productivos con usuarios reales y continuar con el siguiente modulo cuando se decida.
 
 ## Notas de verificacion
 
@@ -206,4 +203,5 @@ El superuser administra la plataforma SaaS, clientes, planes, suscripciones, usu
 - Cierre local pre-produccion del 2026-06-28: node --check server/src/server.js OK, npm run typecheck OK, build de produccion OK usando Node 20.20.2.
 - Build con Node global 18.18.0 falla por version minima de Angular; usar Node >=20.19 en local/servidor.
 - Build de produccion mantiene warnings no bloqueantes por presupuestos SCSS en odontologia/clientes/maintenance/users y dependencias CommonJS existentes.
+- Produccion actualizada el 2026-06-28: commit b2b5300 desplegado en AWS/Lightsail, backup DB `db-2026-06-28-165722.sql`, backup uploads `uploads-2026-06-28-165722.tar.gz`, contenedores api/web/db arriba, web publica HTTP 200 y `/api/health` OK.
 - Build de produccion previamente fallo por entorno: Node 18 en el script por defecto y luego proceso Angular con codigo 134 sin diagnostico usando Node 20.20.2.
