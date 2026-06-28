@@ -321,6 +321,11 @@
       </div>
 
       <div class="edit-form">
+        <div class="modal-notices" *ngIf="errorMessage || successMessage">
+          <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+          <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+        </div>
+
         <div class="edit-section">
           <h4>Datos principales</h4>
           <div class="edit-grid">
@@ -407,8 +412,10 @@
         </div>
 
         <div class="edit-actions">
-          <button type="button" class="save-edit" (click)="saveUser(user)">Guardar</button>
-          <button type="button" class="cancel-edit" (click)="cancelEditUser()">Cancelar</button>
+          <button type="button" class="save-edit" [disabled]="savingUser" (click)="saveUser(user)">
+            {{ savingUser ? 'Guardando...' : 'Guardar' }}
+          </button>
+          <button type="button" class="cancel-edit" [disabled]="savingUser" (click)="cancelEditUser()">Cancelar</button>
         </div>
       </div>
     </article>

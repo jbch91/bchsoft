@@ -62,6 +62,7 @@ export class UsersComponent implements OnInit {
   activeUserTab: UserTab = 'list';
   createUserModalOpen = false;
   editingUserId: string | null = null;
+  savingUser = false;
   temporaryPanelUserId: string | null = null;
   editUser = {
     displayName: '',
@@ -690,6 +691,9 @@ export class UsersComponent implements OnInit {
   startEditUser(user: UserView): void {
     this.editingUserId = user.id;
     this.temporaryPanelUserId = null;
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.savingUser = false;
     this.editUser = {
       displayName: user.displayName,
       email: user.email,
@@ -715,6 +719,7 @@ export class UsersComponent implements OnInit {
     this.editingUserId = null;
     this.readerAccessUserId = null;
     this.editSignatureFile = null;
+    this.savingUser = false;
     this.temporaryPermissionLoading = false;
   }
 
@@ -738,6 +743,7 @@ export class UsersComponent implements OnInit {
   }
 
   async saveUser(user: UserView): Promise<void> {
+    if (this.savingUser) return;
     if (!this.editUser.documentType || !this.editUser.documentNumber.trim()) {
       this.errorMessage = 'Completa tipo de documento y número de documento.';
       return;
@@ -747,31 +753,43 @@ export class UsersComponent implements OnInit {
       return;
     }
 
-    const securityCode = await this.requestSecurityCode(
-      'USER_UPDATE',
-      `Editar usuario ${user.username}`
-    );
-    if (!securityCode) return;
-    await this.admin.updateUserProfile(user.id, {
-      displayName: this.editUser.displayName.trim(),
-      email: this.editUser.email.trim(),
-      clientId: this.editUser.clientId || null,
-      documentType: this.editUser.documentType,
-      documentNumber: this.editUser.documentNumber.trim(),
-      invimaRegistration: this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')
-        ? this.editUser.invimaRegistration.trim()
-        : null,
-      securityCode
-    });
-    if (this.editSignatureFile && this.requiresSignature(user.roles[0] || 'viewer')) {
-      await this.admin.updateUserSignature(user.id, this.editSignatureFile);
+    this.savingUser = true;
+    this.errorMessage = '';
+    this.successMessage = '';
+    try {
+      const securityCode = await this.requestSecurityCode(
+        'USER_UPDATE',
+        `Editar usuario ${user.username}`
+      );
+      if (!securityCode) return;
+      await this.admin.updateUserProfile(user.id, {
+        displayName: this.editUser.displayName.trim(),
+        email: this.editUser.email.trim(),
+        clientId: this.editUser.clientId || null,
+        documentType: this.editUser.documentType,
+        documentNumber: this.editUser.documentNumber.trim(),
+        invimaRegistration: this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')
+          ? this.editUser.invimaRegistration.trim()
+          : null,
+        securityCode
+      });
+      if (this.editSignatureFile && this.requiresSignature(user.roles[0] || 'viewer')) {
+        await this.admin.updateUserSignature(user.id, this.editSignatureFile);
+      }
+      if (this.isReader(user) && user.clientId) {
+        await this.saveReaderAccess(user.id, user.clientId);
+      }
+      this.editingUserId = null;
+      this.editSignatureFile = null;
+      this.successMessage = 'Usuario actualizado correctamente.';
+      await this.load();
+    } catch (error: any) {
+      console.error(error);
+      this.errorMessage = error?.error?.message ?? 'No se pudo actualizar el usuario.';
+    } finally {
+      this.savingUser = false;
+      this.cdr.detectChanges();
     }
-    if (this.isReader(user) && user.clientId) {
-      await this.saveReaderAccess(user.id, user.clientId);
-    }
-    this.editingUserId = null;
-    this.editSignatureFile = null;
-    await this.load();
   }
 
   async removeUser(user: UserView): Promise<void> {
