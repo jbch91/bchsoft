@@ -48,7 +48,7 @@ export class LoginComponent implements OnInit {
       const result = await this.auth.login(this.username.trim(), this.password.trim());
 
       if (result.ok) {
-        void this.router.navigateByUrl('/dashboard');
+        void this.router.navigateByUrl(this.postLoginRoute());
         return;
       }
 
@@ -100,5 +100,22 @@ export class LoginComponent implements OnInit {
     }
 
     this.recoveryMessage = 'Código inválido o expirado.';
+  }
+
+  private postLoginRoute(): string {
+    const user = this.auth.currentUser();
+    if (
+      user
+      && !user.clientId
+      && (
+        this.auth.hasRole('superuser')
+        || this.auth.hasPermission('saas:access')
+        || this.auth.hasPermission('saas:clients:view')
+        || this.auth.hasPermission('users:manage')
+      )
+    ) {
+      return '/administracion-saas';
+    }
+    return '/dashboard';
   }
 }
