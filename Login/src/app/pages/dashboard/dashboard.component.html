@@ -1,58 +1,93 @@
 <section class="dashboard">
-  <app-user-menu></app-user-menu>
-
-  <header>
-    <div class="header-left">
-      <div class="client-inline" *ngIf="clientInfo">
-        <div class="client-info">
-          <strong>{{ clientInfo.name }}</strong>
-          <span>NIT: {{ clientInfo.nit }}</span>
-          <span>Ciudad: {{ clientInfo.city }}</span>
-          <span *ngIf="clientInfo.address">Dirección: {{ clientInfo.address }}</span>
-          <span>Correo: {{ clientInfo.email }}</span>
-        </div>
-        <div class="client-logo" *ngIf="clientLogoUrl()">
-          <img [src]="clientLogoUrl()!" alt="Logo cliente" />
-        </div>
-      </div>
-      <p>Selecciona el módulo con el que quieres trabajar.</p>
+  <section class="suite-context" *ngIf="selectedSuite">
+    <button type="button" class="suite-context-back" (click)="backToSuites()">Menú principal</button>
+    <div>
+      <span>Software activo</span>
+      <h2>{{ selectedSuite.name }}</h2>
+      <p>{{ selectedSuite.description }}</p>
     </div>
-  </header>
+  </section>
 
-  <div class="cards">
-    <a
-      routerLink="/clientes"
-      class="ui-card module-card"
-      *ngIf="auth.hasRole('superuser') && canShow('clientes')"
-    >
-      <h2>Clientes</h2>
-      <p>Ver y administrar la base de clientes.</p>
+  <section
+    class="subscription-alert"
+    *ngIf="showSubscriptionNotice()"
+    [class.blocked]="subscription?.is_blocked"
+    [class.readonly]="subscription?.is_read_only"
+  >
+    <strong>{{ subscriptionStatusLabel() }}</strong>
+    <span>{{ subscriptionMessage() }}</span>
+  </section>
+
+  <section
+    class="admin-shortcuts"
+    *ngIf="!selectedSuite && (canOpenSaasAdministration() || auth.hasPermission('users:manage') || canOpenAuditAdministration())"
+  >
+    <a routerLink="/administracion-saas" class="ui-card module-card" *ngIf="canOpenSaasAdministration()">
+      <h2>Administración SaaS</h2>
+      <p>Clientes, planes, suscripciones, renovaciones y personalizaciones comerciales.</p>
     </a>
-    <a
-      routerLink="/usuarios"
-      class="ui-card module-card"
-      *ngIf="auth.hasRole('superuser') && canShow('usuarios')"
-    >
+    <a routerLink="/usuarios" class="ui-card module-card" *ngIf="canShow('usuarios')">
       <h2>Usuarios</h2>
-      <p>Crear y administrar cuentas.</p>
+      <p>Crear cuentas, roles, firmas digitales y permisos temporales.</p>
     </a>
-
-    <a
-      routerLink="/auditoria"
-      class="ui-card module-card"
-      *ngIf="auth.hasPermission('users:manage') && canShow('auditoria')"
-    >
+    <a routerLink="/roles-permisos" class="ui-card module-card" *ngIf="auth.hasPermission('users:manage')">
+      <h2>Roles y permisos</h2>
+      <p>Consulta alcances por rol y permisos activos del cliente.</p>
+    </a>
+    <a routerLink="/auditoria" class="ui-card module-card" *ngIf="canOpenAuditAdministration()">
       <h2>Auditoría</h2>
-      <p>Historial de cambios del sistema.</p>
+      <p>Historial de cambios del sistema y trazabilidad administrativa.</p>
     </a>
+  </section>
 
+  <section class="suite-section" *ngIf="!selectedSuite && auth.currentUser()?.clientId">
+    <div class="section-heading compact-heading">
+      <span>Softwares disponibles</span>
+    </div>
+
+    <div class="suite-grid" *ngIf="visibleSoftwareSuites.length">
+      <button
+        type="button"
+        class="ui-card suite-card"
+        *ngFor="let suite of visibleSoftwareSuites"
+        (click)="selectSuite(suite.key)"
+      >
+        <span class="suite-badge">{{ suiteStatusLabel(suite) }}</span>
+        <h2>{{ suite.name }}</h2>
+        <p>{{ suite.description }}</p>
+        <strong>Entrar</strong>
+      </button>
+    </div>
+
+    <div class="ui-card empty-suite" *ngIf="!visibleSoftwareSuites.length">
+      <h2>Sin softwares habilitados</h2>
+      <p>Este usuario no tiene un software activo. Revisa la licencia del cliente o los permisos del rol.</p>
+    </div>
+  </section>
+
+  <section class="client-module-panel" *ngIf="selectedSuiteKey && canShowClientModuleSummary()">
+    <div class="section-heading">
+      <span>Módulos habilitados</span>
+      <h2>Configuración del cliente</h2>
+      <p>Estos módulos están activos para este cliente. El acceso operativo depende del rol asignado al usuario.</p>
+    </div>
+
+    <div class="client-module-grid">
+      <article class="ui-card client-module-card" *ngFor="let module of enabledModulesForSelectedSuite">
+        <strong>{{ module.label }}</strong>
+        <span>{{ module.description }}</span>
+      </article>
+    </div>
+  </section>
+
+  <section class="cards" *ngIf="selectedSuiteKey === 'biomedico'">
     <a
       routerLink="/hojas-de-vida"
       class="ui-card module-card"
       *ngIf="!auth.hasRole('lector') && (auth.hasPermission('hb:create') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('hojas_de_vida')"
     >
       <h2>Hojas de vida</h2>
-      <p>Equipos biomédicos por cliente.</p>
+      <p>Registro técnico, historial y documentación de equipos biomédicos.</p>
     </a>
 
     <a
@@ -61,7 +96,7 @@
       *ngIf="(auth.hasPermission('hb:create') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('inventario')"
     >
       <h2>Inventario</h2>
-      <p>Listado básico de equipos.</p>
+      <p>Listado, ubicación, QR e historial de equipos.</p>
     </a>
 
     <a
@@ -70,7 +105,7 @@
       *ngIf="(auth.hasPermission('quick_guides:view') || auth.hasPermission('quick_guides:create') || auth.hasPermission('quick_guides:edit') || auth.hasPermission('quick_guides:approve') || auth.hasPermission('quick_guides:delete') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('guias_rapidas')"
     >
       <h2>Guías rápidas de uso</h2>
-      <p>Consulta y crea guías por marca y modelo.</p>
+      <p>Guías por marca y modelo para operación segura.</p>
     </a>
 
     <a
@@ -79,7 +114,7 @@
       *ngIf="(auth.hasPermission('maintenance:request:create') || auth.hasPermission('maintenance:report:create') || auth.hasPermission('maintenance:report:sign') || auth.hasPermission('read:all')) && canShow('reportes_mantenimiento')"
     >
       <h2>Reportes de mantenimiento</h2>
-      <p>Solicitudes, reportes y firmas.</p>
+      <p>Solicitudes, preventivos, correctivos, repuestos y firmas.</p>
     </a>
 
     <a
@@ -88,7 +123,7 @@
       *ngIf="auth.hasPermission('schedules:manage') && canShow('cronogramas')"
     >
       <h2>Cronogramas y Capacitaciones</h2>
-      <p>Plan anual de preventivos y capacitaciones.</p>
+      <p>Plan anual de preventivos, capacitaciones y control documental.</p>
     </a>
 
     <a
@@ -99,5 +134,40 @@
       <h2>Calibraciones</h2>
       <p>Cronograma y certificados de calibración.</p>
     </a>
-  </div>
+  </section>
+
+  <section class="suite-placeholder" *ngIf="selectedSuiteKey === 'odontologico'">
+    <div class="ui-card placeholder-card">
+      <span>Software odontológico</span>
+      <h2>Odontología clínica y administrativa</h2>
+      <p>Base inicial para pacientes, historias clínicas odontológicas, agenda, odontograma, tratamientos, consentimientos y documentos PDF.</p>
+      <div class="placeholder-grid">
+        <div>Pacientes</div>
+        <div>Historia clínica</div>
+        <div>Agenda</div>
+        <div>Tratamientos</div>
+      </div>
+      <a
+        routerLink="/odontologia"
+        class="primary suite-action"
+        *ngIf="canOpenOdontology()"
+      >
+        Entrar a Odontología
+      </a>
+    </div>
+  </section>
+
+  <section class="suite-placeholder" *ngIf="selectedSuiteKey === 'laboratorio'">
+    <div class="ui-card placeholder-card">
+      <span>Software laboratorio clínico</span>
+      <h2>Base profesional lista para construir</h2>
+      <p>Este entorno quedará preparado para pacientes, órdenes, muestras, resultados, validación profesional, impresión de reportes y trazabilidad.</p>
+      <div class="placeholder-grid">
+        <div>Órdenes</div>
+        <div>Muestras</div>
+        <div>Resultados</div>
+        <div>Reportes PDF</div>
+      </div>
+    </div>
+  </section>
 </section>

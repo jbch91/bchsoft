@@ -3,8 +3,12 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "start": "ng serve",
+    "start": "ng serve --prebundle=false --host 127.0.0.1",
+    "start:fast": "ng serve --prebundle=false --poll 2000",
     "build": "ng build",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit",
+    "verify": "npm run typecheck && npm run build -- --configuration production --progress=false",
+    "repair:deps": "npm install --no-audit --no-fund && ng cache clean",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },
@@ -21,7 +25,11 @@
     ]
   },
   "private": true,
-  "packageManager": "npm@10.9.4",
+  "packageManager": "npm@10.8.2",
+  "engines": {
+    "node": ">=20.19.0 <23",
+    "npm": ">=10.8.0"
+  },
   "dependencies": {
     "@angular/common": "^21.1.0",
     "@angular/compiler": "^21.1.0",

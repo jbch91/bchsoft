@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../auth.service';
 
 @Component({
@@ -11,7 +11,7 @@ import { AuthService } from '../auth.service';
   templateUrl: './login.component.html',
   styleUrl: './login.component.scss'
 })
-export class LoginComponent {
+export class LoginComponent implements OnInit {
   username = '';
   password = '';
   errorMessage = '';
@@ -21,15 +21,28 @@ export class LoginComponent {
   recoveryCode = '';
   recoveryPassword = '';
   recoveryMessage = '';
+  sessionMessage = '';
 
   constructor(
     private readonly auth: AuthService,
+    private readonly route: ActivatedRoute,
     private readonly router: Router,
     private readonly cdr: ChangeDetectorRef
   ) {}
 
+  ngOnInit(): void {
+    const reason = this.route.snapshot.queryParamMap.get('reason') || this.auth.consumeLogoutReason();
+    if (reason === 'idle') {
+      this.sessionMessage = 'Tu sesión se cerró automáticamente por 15 minutos de inactividad.';
+    }
+    if (reason === 'expired') {
+      this.sessionMessage = 'Tu sesión expiró. Inicia sesión nuevamente para continuar.';
+    }
+  }
+
   async onSubmit(): Promise<void> {
     this.errorMessage = '';
+    this.sessionMessage = '';
     this.isSubmitting = true;
     try {
       const result = await this.auth.login(this.username.trim(), this.password.trim());

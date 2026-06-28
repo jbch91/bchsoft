@@ -2,11 +2,100 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import { query } from './db.js';
+import { listClientModules } from './admin.js';
+import { getClientSubscriptionAccess } from './subscriptions.js';
 
 dotenv.config();
 
 const tokenTtl = process.env.TOKEN_TTL || '15m';
 const refreshTtl = process.env.REFRESH_TTL || '7d';
+const CLIENT_CONFIGURABLE_ROLES = [
+  'almacenista',
+  'ingeniero_biomedico',
+  'calibracion',
+  'lector',
+  'odontologo',
+  'auxiliar_odontologia',
+  'recepcion_odontologia',
+  'admin_odontologia',
+  'auditor_odontologia',
+  'bacteriologo',
+  'auxiliar_laboratorio'
+];
+
+async function listAllowedClientPermissions(clientId) {
+  const modules = await listClientModules(clientId);
+  const enabledModules = new Set(
+    modules.filter((module) => module.enabled).map((module) => module.key)
+  );
+  const enabledSuites = new Set(
+    modules
+      .filter((module) => module.enabled)
+      .map((module) => module.suite_key || 'biomedico')
+  );
+  const allowed = new Set();
+  const add = (values) => values.forEach((value) => allowed.add(value));
+
+  if (enabledSuites.has('biomedico')) {
+    add(['software:biomedico:access', 'areas:manage', 'read:all']);
+  }
+  if (enabledModules.has('hojas_de_vida')) {
+    add(['hb:create', 'hb:view', 'hb:import', 'asset_history:upload']);
+  }
+  if (enabledModules.has('inventario')) {
+    add(['hb:view', 'inventory:move', 'inventory:request']);
+  }
+  if (enabledModules.has('guias_rapidas')) {
+    add(['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete']);
+  }
+  if (enabledModules.has('reportes_mantenimiento')) {
+    add([
+      'hb:view',
+      'maintenance:request:create',
+      'maintenance:report:create',
+      'maintenance:report:sign',
+      'maintenance:order:create',
+      'maintenance:order:close',
+      'service:order:create',
+      'spareparts:order:create'
+    ]);
+  }
+  if (enabledModules.has('cronogramas')) {
+    allowed.add('schedules:manage');
+  }
+  if (enabledModules.has('calibraciones')) {
+    add(['calibration:schedule:manage', 'calibration:report:upload']);
+  }
+  if (enabledSuites.has('odontologico') || enabledModules.has('odontologia')) {
+    add([
+      'software:odontologico:access',
+      'odontology:access',
+      'odontology:settings:manage',
+      'odontology:patients:manage',
+      'odontology:patients:import',
+      'odontology:clinical_records:manage',
+      'odontology:appointments:manage',
+      'odontology:odontogram:manage',
+      'odontology:periodontogram:manage',
+      'odontology:consents:manage',
+      'odontology:attachments:manage',
+      'odontology:inventory:manage',
+      'odontology:sterilization:manage',
+      'odontology:treatment_plans:manage',
+      'odontology:payments:manage',
+      'odontology:financial:view',
+      'odontology:prescriptions:manage',
+      'odontology:documents:manage',
+      'odontology:reports:view',
+      'audit:odontology:view'
+    ]);
+  }
+  if (enabledSuites.has('laboratorio') || enabledModules.has('laboratorio')) {
+    add(['software:laboratorio:access', 'laboratory:orders:manage', 'laboratory:results:manage']);
+  }
+
+  return allowed;
+}
 
 function calculateExpiry(ttl) {
   const value = ttl.trim().toLowerCase();
@@ -45,7 +134,7 @@ async function loadUserRoles(userId) {
   return roleRows.rows.map((row) => row.name);
 }
 
-async function loadUserPermissions(userId) {
+async function loadUserPermissions(userId, clientId, roles = []) {
   const permRows = await query(
     `SELECT DISTINCT name
      FROM (
@@ -53,7 +142,30 @@ async function loadUserPermissions(userId) {
        FROM permissions p
        JOIN role_permissions rp ON rp.permission_id = p.id
        JOIN user_roles ur ON ur.role_id = rp.role_id
+       JOIN roles r ON r.id = ur.role_id
        WHERE ur.user_id = $1
+         AND NOT (
+           $2::uuid IS NOT NULL
+           AND r.name = ANY($3::text[])
+           AND EXISTS (
+             SELECT 1
+             FROM client_role_permission_sets crps
+             WHERE crps.client_id = $2::uuid
+               AND crps.role_id = ur.role_id
+           )
+         )
+
+       UNION
+
+       SELECT p.name
+       FROM permissions p
+       JOIN client_role_permissions crp ON crp.permission_id = p.id
+       JOIN user_roles ur ON ur.role_id = crp.role_id
+       JOIN roles r ON r.id = ur.role_id
+       WHERE ur.user_id = $1
+         AND $2::uuid IS NOT NULL
+         AND crp.client_id = $2::uuid
+         AND r.name = ANY($3::text[])
 
        UNION
 
@@ -64,9 +176,33 @@ async function loadUserPermissions(userId) {
          AND utp.expires_at > NOW()
      ) active_permissions
      ORDER BY name`,
-    [userId]
+    [userId, clientId || null, CLIENT_CONFIGURABLE_ROLES]
   );
-  return permRows.rows.map((row) => row.name);
+  const permissions = permRows.rows.map((row) => row.name);
+  if (!clientId || roles.includes('client_admin')) {
+    return permissions;
+  }
+  const allowed = await listAllowedClientPermissions(clientId);
+  return permissions.filter((permission) => allowed.has(permission));
+}
+
+async function loadClientSubscription(clientId) {
+  if (!clientId) return null;
+  try {
+    const subscription = await getClientSubscriptionAccess(clientId);
+    return {
+      status: subscription.effective_status,
+      accessMode: subscription.effective_access_mode,
+      billingCycle: subscription.billing_cycle,
+      currentPeriodEndsAt: subscription.current_period_ends_at,
+      graceEndsAt: subscription.grace_ends_at,
+      daysRemaining: subscription.days_remaining,
+      isReadOnly: subscription.is_read_only,
+      isBlocked: subscription.is_blocked
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function authenticateUser(username, password) {
@@ -88,13 +224,15 @@ export async function authenticateUser(username, password) {
   }
 
   const roles = await loadUserRoles(user.id);
-  const permissions = await loadUserPermissions(user.id);
+  const permissions = await loadUserPermissions(user.id, user.client_id, roles);
+  const subscription = await loadClientSubscription(user.client_id);
 
   const payload = {
     sub: user.id,
     username: user.username,
     displayName: user.display_name,
     clientId: user.client_id,
+    subscription,
     roles,
     permissions
   };
@@ -149,13 +287,15 @@ export async function refreshSession(refreshToken) {
   }
 
   const roles = await loadUserRoles(user.id);
-  const permissions = await loadUserPermissions(user.id);
+  const permissions = await loadUserPermissions(user.id, user.client_id, roles);
+  const subscription = await loadClientSubscription(user.client_id);
 
   const payload = {
     sub: user.id,
     username: user.username,
     displayName: user.display_name,
     clientId: user.client_id,
+    subscription,
     roles,
     permissions
   };

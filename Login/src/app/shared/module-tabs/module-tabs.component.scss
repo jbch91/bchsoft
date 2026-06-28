@@ -1,55 +1,103 @@
-.module-tabs {
-  display: flex;
+.module-tabs-shell {
+  display: grid;
+  grid-template-areas: 'tabs home';
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
-  margin: 18px 0 4px;
-  padding: 8px;
+  margin: 0 0 8px;
+  padding: 6px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--brand-500) 14%, var(--border));
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 20px rgba(80, 25, 30, 0.06);
+}
+
+.module-home {
+  align-items: center;
+  background: color-mix(in srgb, var(--brand-50) 68%, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--brand-600) 18%, var(--border));
+  border-radius: 9px;
+  color: var(--brand-700);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 900;
+  grid-area: home;
+  justify-self: end;
+  min-height: 34px;
+  padding: 7px 10px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    color 140ms ease;
+}
+
+.module-home:hover {
+  background: #ffffff;
+  border-color: var(--brand-600);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-100) 62%, transparent);
+}
+
+.module-tabs {
+  display: flex;
+  gap: 6px;
+  grid-area: tabs;
+  align-items: center;
   overflow-x: auto;
-  border: 1px solid color-mix(in srgb, var(--brand-500) 16%, var(--border));
-  border-radius: 18px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--brand-50) 74%, #ffffff), #ffffff 64%),
-    #ffffff;
-  box-shadow: 0 14px 28px rgba(80, 25, 30, 0.08);
+  padding: 1px 2px 3px;
+  scrollbar-width: thin;
 }
 
 .module-tabs a {
+  position: relative;
   flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: 999px;
-  padding: 9px 14px;
+  min-height: 34px;
+  padding: 8px 12px;
   color: var(--ink);
   text-decoration: none;
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 900;
   white-space: nowrap;
   transition:
     background 0.18s ease,
     border-color 0.18s ease,
     color 0.18s ease,
-    transform 0.18s ease;
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .module-tabs a:hover {
-  background: var(--brand-50);
+  background: #ffffff;
   border-color: color-mix(in srgb, var(--brand-500) 38%, var(--border));
   color: var(--brand-700);
 }
 
 .module-tabs a.active {
-  background: var(--brand-600);
+  background: linear-gradient(135deg, var(--brand-700), var(--brand-600));
+  border-color: transparent;
   color: #ffffff;
-  box-shadow: 0 12px 22px color-mix(in srgb, var(--brand-600) 24%, transparent);
+  box-shadow: 0 8px 16px color-mix(in srgb, var(--brand-600) 20%, transparent);
 }
 
-@media (max-width: 720px) {
-  .module-tabs {
-    margin-top: 14px;
-    border-radius: 14px;
+@media (max-width: 760px) {
+  .module-tabs-shell {
+    grid-template-areas:
+      'tabs'
+      'home';
+    grid-template-columns: 1fr;
+    border-radius: 13px;
   }
 
-  .module-tabs a {
-    padding: 8px 12px;
-    font-size: 12px;
+  .module-home {
+    justify-self: end;
+  }
+
+  .module-tabs {
+    width: 100%;
   }
 }

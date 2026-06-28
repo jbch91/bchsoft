@@ -1,101 +1,144 @@
 import { Routes } from '@angular/router';
 import { accessGuard } from './auth/auth.guard';
-import { LoginComponent } from './auth/login/login.component';
-import { DashboardComponent } from './pages/dashboard/dashboard.component';
-import { ClientsComponent } from './pages/clients/clients.component';
-import { ClientsCreateComponent } from './pages/clients-create/clients-create.component';
-import { ClientsManageComponent } from './pages/clients-manage/clients-manage.component';
-import { ReportsComponent } from './pages/reports/reports.component';
-import { NotAuthorizedComponent } from './pages/not-authorized/not-authorized.component';
-import { UsersComponent } from './pages/users/users.component';
-import { AuditComponent } from './pages/audit/audit.component';
-import { HojasDeVidaComponent } from './pages/hojas-de-vida/hojas-de-vida.component';
-import { InventarioComponent } from './pages/inventario/inventario.component';
-import { MaintenanceComponent } from './pages/maintenance/maintenance.component';
-import { CronogramasComponent } from './pages/cronogramas/cronogramas.component';
-import { CalibracionesComponent } from './pages/calibraciones/calibraciones.component';
-import { QuickGuidesComponent } from './pages/quick-guides/quick-guides.component';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'login' },
-  { path: 'login', component: LoginComponent },
+  {
+    path: 'login',
+    loadComponent: () => import('./auth/login/login.component').then((m) => m.LoginComponent)
+  },
   {
     path: 'dashboard',
-    component: DashboardComponent,
+    loadComponent: () => import('./pages/dashboard/dashboard.component').then((m) => m.DashboardComponent),
     canActivate: [accessGuard]
   },
   {
-    path: 'clientes',
-    component: ClientsComponent,
+    path: 'administracion-saas',
+    loadComponent: () => import('./pages/clients/clients.component').then((m) => m.ClientsComponent),
     canActivate: [accessGuard],
-    data: { permissions: ['clients:manage'] }
+    data: {
+      permissionsAny: [
+        'clients:manage',
+        'saas:access',
+        'saas:clients:view',
+        'saas:clients:update',
+        'saas:subscriptions:manage',
+        'saas:plans:manage',
+        'saas:client_admins:reset_password'
+      ]
+    }
+  },
+  {
+    path: 'clientes',
+    loadComponent: () => import('./pages/clients/clients.component').then((m) => m.ClientsComponent),
+    canActivate: [accessGuard],
+    data: { roles: ['superuser'], permissions: ['clients:manage'] }
   },
   {
     path: 'clientes/nuevo',
-    component: ClientsCreateComponent,
+    loadComponent: () => import('./pages/clients-create/clients-create.component').then((m) => m.ClientsCreateComponent),
     canActivate: [accessGuard],
-    data: { permissions: ['clients:create'] }
+    data: { roles: ['superuser'], permissions: ['clients:create'] }
   },
   {
     path: 'clientes/administrar',
-    component: ClientsManageComponent,
+    loadComponent: () => import('./pages/clients-manage/clients-manage.component').then((m) => m.ClientsManageComponent),
     canActivate: [accessGuard],
-    data: { permissions: ['clients:manage'] }
+    data: { roles: ['superuser'], permissions: ['clients:manage'] }
   },
   {
     path: 'reportes',
-    component: ReportsComponent,
+    loadComponent: () => import('./pages/reports/reports.component').then((m) => m.ReportsComponent),
     canActivate: [accessGuard],
     data: { permissions: ['reports:view'] }
   },
   {
     path: 'usuarios',
-    component: UsersComponent,
+    loadComponent: () => import('./pages/users/users.component').then((m) => m.UsersComponent),
+    canActivate: [accessGuard],
+    data: { permissions: ['users:manage'] }
+  },
+  {
+    path: 'roles-permisos',
+    loadComponent: () => import('./pages/users/users.component').then((m) => m.UsersComponent),
     canActivate: [accessGuard],
     data: { permissions: ['users:manage'] }
   },
   {
     path: 'auditoria',
-    component: AuditComponent,
+    loadComponent: () => import('./pages/audit/audit.component').then((m) => m.AuditComponent),
     canActivate: [accessGuard],
-    data: { permissions: ['users:manage'] }
+    data: { permissionsAny: ['users:manage', 'audit:client:view', 'saas:audit:view'] }
   },
   {
     path: 'hojas-de-vida',
-    component: HojasDeVidaComponent,
+    loadComponent: () => import('./pages/hojas-de-vida/hojas-de-vida.component').then((m) => m.HojasDeVidaComponent),
     canActivate: [accessGuard],
-    data: { permissionsAny: ['hb:create', 'hb:view', 'read:all'] }
+    data: { suiteKey: 'biomedico', moduleKey: 'hojas_de_vida', permissionsAny: ['hb:create', 'hb:view', 'read:all'] }
   },
   {
     path: 'inventario',
-    component: InventarioComponent,
+    loadComponent: () => import('./pages/inventario/inventario.component').then((m) => m.InventarioComponent),
     canActivate: [accessGuard],
-    data: { permissionsAny: ['hb:create', 'hb:view', 'read:all'] }
+    data: { suiteKey: 'biomedico', moduleKey: 'inventario', permissionsAny: ['hb:create', 'hb:view', 'read:all'] }
   },
   {
     path: 'guias-rapidas',
-    component: QuickGuidesComponent,
+    loadComponent: () => import('./pages/quick-guides/quick-guides.component').then((m) => m.QuickGuidesComponent),
     canActivate: [accessGuard],
-    data: { permissionsAny: ['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete', 'hb:view', 'read:all'] }
+    data: { suiteKey: 'biomedico', moduleKey: 'guias_rapidas', permissionsAny: ['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete', 'hb:view', 'read:all'] }
   },
   {
     path: 'mantenimiento',
-    component: MaintenanceComponent,
+    loadComponent: () => import('./pages/maintenance/maintenance.component').then((m) => m.MaintenanceComponent),
     canActivate: [accessGuard],
-    data: { permissionsAny: ['maintenance:request:create', 'maintenance:report:create', 'maintenance:report:sign', 'read:all'] }
+    data: { suiteKey: 'biomedico', moduleKey: 'reportes_mantenimiento', permissionsAny: ['maintenance:request:create', 'maintenance:report:create', 'maintenance:report:sign', 'read:all'] }
   },
   {
     path: 'cronogramas',
-    component: CronogramasComponent,
+    loadComponent: () => import('./pages/cronogramas/cronogramas.component').then((m) => m.CronogramasComponent),
     canActivate: [accessGuard],
-    data: { permissionsAny: ['schedules:manage'] }
+    data: { suiteKey: 'biomedico', moduleKey: 'cronogramas', permissionsAny: ['schedules:manage'] }
   },
   {
     path: 'calibraciones',
-    component: CalibracionesComponent,
+    loadComponent: () => import('./pages/calibraciones/calibraciones.component').then((m) => m.CalibracionesComponent),
     canActivate: [accessGuard],
-    data: { permissionsAny: ['calibration:schedule:manage', 'calibration:report:upload', 'read:all'] }
+    data: { suiteKey: 'biomedico', moduleKey: 'calibraciones', permissionsAny: ['calibration:schedule:manage', 'calibration:report:upload', 'read:all'] }
   },
-  { path: 'no-autorizado', component: NotAuthorizedComponent },
+  {
+    path: 'odontologia',
+    loadComponent: () => import('./pages/odontologia/odontologia.component').then((m) => m.OdontologiaComponent),
+    canActivate: [accessGuard],
+    data: {
+      suiteKey: 'odontologico',
+      moduleKey: 'odontologia',
+      permissionsAny: [
+        'software:odontologico:access',
+        'odontology:access',
+        'odontology:patients:manage',
+        'odontology:patients:import',
+        'odontology:clinical_records:manage',
+        'odontology:appointments:manage',
+        'odontology:settings:manage',
+        'odontology:odontogram:manage',
+        'odontology:periodontogram:manage',
+        'odontology:consents:manage',
+        'odontology:treatment_plans:manage',
+        'odontology:attachments:manage',
+        'odontology:inventory:manage',
+        'odontology:sterilization:manage',
+        'odontology:payments:manage',
+        'odontology:financial:view',
+        'odontology:prescriptions:manage',
+        'odontology:documents:manage',
+        'odontology:reports:view'
+      ]
+    }
+  },
+  {
+    path: 'no-autorizado',
+    loadComponent: () => import('./pages/not-authorized/not-authorized.component').then((m) => m.NotAuthorizedComponent)
+  },
   { path: '**', redirectTo: 'login' }
 ];

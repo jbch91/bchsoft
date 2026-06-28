@@ -2,14 +2,12 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
-import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
 import { BiomedService } from '../../biomed/biomed.service';
 import { getApiBase, getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
-import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 import { QuickGuideDto, QuickGuidePayload, QuickGuidesService } from '../../quick-guides/quick-guides.service';
 
 interface ClientOption {
@@ -41,7 +39,7 @@ interface BrandModelOption {
 @Component({
   selector: 'app-quick-guides',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
+  imports: [CommonModule, FormsModule, ModuleTabsComponent],
   templateUrl: './quick-guides.component.html',
   styleUrl: './quick-guides.component.scss'
 })

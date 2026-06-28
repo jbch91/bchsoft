@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { execFile } from 'child_process';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { finished } from 'stream/promises';
 import { promisify } from 'util';
 import multer from 'multer';
@@ -15,26 +15,47 @@ import { authenticateUser, refreshSession, revokeRefreshToken } from './auth.js'
 import { requireAnyPermission, requireAuth, requirePermission } from './middleware.js';
 import {
   createUser,
+  getClientRolePermissions,
   grantTemporaryPermission,
   getUserById,
   getRolePermissions,
+  listClientAdmins,
+  listClientUsers,
+  listClientSoftwareAccess,
   listClientModules,
   listModules,
   listPermissions,
   listRoles,
+  listSoftwareSuites,
   listUsers,
   revokeTemporaryPermission,
   updateUserSignature,
   updateUserProfile,
   deleteUser,
   updateClientModules,
+  updateClientRolePermissions,
+  updateClientSoftwareAccess,
   updateRolePermissions,
   updateUserActive,
-  updateUserPassword,
   updateUserRole
 } from './admin.js';
-import { requestPasswordReset, resetPasswordWithCode } from './password-reset.js';
+import { requestPasswordReset, requestPasswordSetup, resetPasswordWithCode } from './password-reset.js';
+import {
+  requestAdminActionConfirmation,
+  verifyAdminActionConfirmation
+} from './action-confirmations.js';
 import { logAudit, listAuditLogs } from './audit.js';
+import {
+  applySubscriptionPlanToClients,
+  clientHasActiveAdmin,
+  createSubscriptionPlan,
+  getClientSubscription,
+  getClientSubscriptionAccess,
+  listSubscriptionPlans,
+  recordSubscriptionPayment,
+  updateSubscriptionPlan,
+  updateClientSubscription
+} from './subscriptions.js';
 import {
   createClient,
   listClients,
@@ -44,6 +65,123 @@ import {
   updateClient,
   deleteClient
 } from './clients.js';
+import {
+  acceptOdontologyTreatmentPlan,
+  canAccessOdontology,
+  canImportOdontologyPatients,
+  canManageOdontologyAttachments,
+  canManageOdontologyAppointments,
+  canManageOdontologyClinicalRecords,
+  canManageOdontologyClinicalDocuments,
+  canManageOdontologyConsents,
+  canManageOdontologyInventory,
+  canManageOdontologySterilization,
+  canManageOdontologyOdontogram,
+  canManageOdontologyPeriodontogram,
+  canManageOdontologyPatients,
+  canManageOdontologyPayments,
+  canManageOdontologyPrescriptions,
+  canManageOdontologySettings,
+  canManageOdontologyTreatmentPlans,
+  canViewOdontologyFinancialValues,
+  canViewOdontologyReports,
+  createOdontologyChair,
+  createOdontologyAppointment,
+  createOdontologyAttachment,
+  createOdontologyCatalogItem,
+  createOdontologyClinicalRecord,
+  createOdontologyClinicalRecordNote,
+  createOdontologyClinicalDocument,
+  createOdontologyConsentTemplate,
+  createOdontologyAppointmentReminderLog,
+  createOdontologyInventoryItem,
+  createOdontologyInventoryMovement,
+  createOdontologyInstrument,
+  createOdontologyOdontogramEntry,
+  createOdontologyPeriodontogram,
+  createOdontologyPatientConsent,
+  createOdontologyPatient,
+  createOdontologyCashClosure,
+  createOdontologyPayment,
+  createOdontologyMedication,
+  createOdontologyProcedureType,
+  createOdontologyPrescription,
+  createOdontologySite,
+  createOdontologySterilizationCycle,
+  createOdontologySupplier,
+  createOdontologyTreatmentPlan,
+  deleteOdontologyAttachment,
+  getOdontologyConsentForPdf,
+  getOdontologyAppointmentById,
+  getOdontologyAttachmentById,
+  getOdontologyClinicalRecordById,
+  getOdontologyOdontogram,
+  getOdontologyPeriodontogramById,
+  getOdontologyPatientById,
+  getOdontologyCashClosureById,
+  getOdontologyPaymentById,
+  getOdontologySterilizationCycleById,
+  getOdontologyDashboard,
+  getOdontologyReportDetails,
+  getOdontologyReports,
+  getOdontologySettings,
+  getOdontologyTreatmentPlan,
+  listOdontologyAttachments,
+  listOdontologyAppointments,
+  listOdontologyAppointmentReminders,
+  listOdontologyClinicalRecords,
+  listOdontologyClinicalRecordNotes,
+  listOdontologyClinicalDocuments,
+  listOdontologyConsentTemplates,
+  listOdontologyDentistSchedules,
+  listOdontologyInventoryItems,
+  listOdontologyInventoryMovements,
+  listOdontologyInstruments,
+  listOdontologyPatientConsents,
+  listOdontologyPatients,
+  listOdontologyCashClosures,
+  listOdontologyPayments,
+  listOdontologyPeriodontograms,
+  listOdontologyMedications,
+  listOdontologyPrescriptions,
+  listOdontologyPurchaseRequests,
+  listOdontologyCatalog,
+  listOdontologyChairs,
+  listOdontologyDentists,
+  listOdontologyProcedureTypes,
+  listOdontologyProcedureInventoryKit,
+  listOdontologySites,
+  listOdontologySterilizationCycles,
+  listOdontologySuppliers,
+  listOdontologyTreatmentPlans,
+  setOdontologyConsentPdf,
+  setOdontologyClinicalRecordPdf,
+  setOdontologyClinicalDocumentPdf,
+  setOdontologyCashClosurePdf,
+  setOdontologyPrescriptionPdf,
+  setOdontologySterilizationCyclePdf,
+  updateOdontologySettings,
+  updateOdontologyChair,
+  updateOdontologyAppointment,
+  updateOdontologyCatalogItem,
+  replaceOdontologyProcedureInventoryKit,
+  replaceOdontologyDentistSchedules,
+  signOdontologyPatientConsent,
+  signOdontologyClinicalRecord,
+  updateOdontologyConsentTemplate,
+  updateOdontologyClinicalRecord,
+  updateOdontologyInventoryItem,
+  updateOdontologyInstrument,
+  createOdontologyPurchaseRequest,
+  updateOdontologyPurchaseRequestStatus,
+  updateOdontologySite,
+  updateOdontologySupplier,
+  updateOdontologyPatient,
+  updateOdontologyProcedureType,
+  updateOdontologyTreatmentPlan,
+  validateOdontologyPatientPayload,
+  voidOdontologyPayment
+} from './odontology.js';
 import {
   createArea,
   createAsset,
@@ -177,6 +315,10 @@ import {
 import { sendNotificationEmail } from './mailer.js';
 import { listReaderAccess, replaceReaderAccess } from './reader-access.js';
 import { sendPreventiveRemindersForClient } from './preventive-reminders.js';
+import {
+  sendManualOdontologyAppointmentWhatsappReminder,
+  sendOdontologyAppointmentRemindersForAllClients
+} from './odontology-reminders.js';
 
 dotenv.config();
 
@@ -200,7 +342,7 @@ app.use(
     }
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -258,6 +400,397 @@ const SIGNATURE_ALLOWED_MIME_TYPES = [
   'image/webp',
   'application/pdf'
 ];
+const CLIENT_ADMIN_ROLE = 'client_admin';
+const SAAS_ADMIN_ROLES = ['saas_admin', 'saas_billing', 'saas_clients', 'saas_support', 'saas_auditor'];
+const PLATFORM_LEGACY_ROLES = ['viewer'];
+const PLATFORM_ASSIGNABLE_ROLES = ['superuser', 'admin', ...SAAS_ADMIN_ROLES];
+const PLATFORM_ADMIN_ROLES = [...PLATFORM_ASSIGNABLE_ROLES, ...PLATFORM_LEGACY_ROLES];
+const SAAS_READ_PERMISSIONS = [
+  'clients:manage',
+  'saas:access',
+  'saas:clients:view',
+  'saas:clients:update',
+  'saas:subscriptions:manage',
+  'saas:plans:manage',
+  'saas:client_admins:reset_password',
+  'saas:audit:view'
+];
+const SAAS_CLIENT_UPDATE_PERMISSIONS = ['clients:manage', 'saas:clients:update'];
+const SAAS_SUBSCRIPTION_PERMISSIONS = ['clients:manage', 'saas:subscriptions:manage'];
+const SAAS_PLAN_MANAGE_PERMISSIONS = ['clients:manage', 'saas:plans:manage'];
+const SAAS_CLIENT_ADMIN_RESET_PERMISSIONS = [
+  'clients:manage',
+  'users:manage',
+  'saas:client_admins:reset_password'
+];
+const CLIENT_ASSIGNABLE_ROLES = [
+  'almacenista',
+  'ingeniero_biomedico',
+  'calibracion',
+  'lector',
+  'odontologo',
+  'auxiliar_odontologia',
+  'recepcion_odontologia',
+  'admin_odontologia',
+  'auditor_odontologia',
+  'bacteriologo',
+  'auxiliar_laboratorio'
+];
+const BIOMEDICAL_CLIENT_ROLES = ['almacenista', 'ingeniero_biomedico', 'lector'];
+const ODONTOLOGY_CLIENT_ROLES = [
+  'odontologo',
+  'auxiliar_odontologia',
+  'recepcion_odontologia',
+  'admin_odontologia',
+  'auditor_odontologia'
+];
+const LABORATORY_CLIENT_ROLES = ['bacteriologo', 'auxiliar_laboratorio'];
+const BIOMEDICAL_MODULE_KEYS = [
+  'hojas_de_vida',
+  'inventario',
+  'guias_rapidas',
+  'reportes_mantenimiento',
+  'cronogramas',
+  'calibraciones'
+];
+const SUPERUSER_VISIBLE_USER_ROLES = [...SAAS_ADMIN_ROLES];
+const SUPERUSER_ASSIGNABLE_USER_ROLES = [...SAAS_ADMIN_ROLES];
+const SUPERUSER_VISIBLE_ROLE_PERMISSIONS = [
+  'clients:create',
+  'clients:manage',
+  'clients:view',
+  'reports:view',
+  'users:manage',
+  'audit:client:view',
+  'platform:templates:manage',
+  'saas:access',
+  'saas:clients:view',
+  'saas:clients:update',
+  'saas:subscriptions:manage',
+  'saas:plans:manage',
+  'saas:client_admins:reset_password',
+  'saas:audit:view'
+];
+
+function hasRole(user, role) {
+  return Boolean(user?.roles?.includes(role));
+}
+
+function isSuperuser(user) {
+  return hasRole(user, 'superuser');
+}
+
+function isPlatformUser(user) {
+  return !user?.clientId && PLATFORM_ADMIN_ROLES.some((role) => hasRole(user, role));
+}
+
+function isClientAdmin(user) {
+  return hasRole(user, CLIENT_ADMIN_ROLE);
+}
+
+function isOperationalClientRole(role) {
+  return CLIENT_ASSIGNABLE_ROLES.includes(role);
+}
+
+function clientModuleAccessContext(modules) {
+  const enabledModules = new Set(
+    modules.filter((module) => module.enabled).map((module) => module.key)
+  );
+  const enabledSuites = new Set(
+    modules
+      .filter((module) => module.enabled)
+      .map((module) => module.suite_key || 'biomedico')
+  );
+  return { enabledModules, enabledSuites };
+}
+
+async function listEnabledClientRoleNames(clientId) {
+  if (!clientId) return new Set();
+  const modules = await listClientModules(clientId);
+  const { enabledModules, enabledSuites } = clientModuleAccessContext(modules);
+  const roles = new Set();
+  const add = (values) => values.forEach((value) => roles.add(value));
+
+  const hasBiomedicalSoftware = enabledSuites.has('biomedico')
+    || BIOMEDICAL_MODULE_KEYS.some((key) => enabledModules.has(key));
+  if (hasBiomedicalSoftware) {
+    add(BIOMEDICAL_CLIENT_ROLES);
+  }
+  if (enabledModules.has('calibraciones')) {
+    roles.add('calibracion');
+  }
+  if (enabledSuites.has('odontologico') || enabledModules.has('odontologia')) {
+    add(ODONTOLOGY_CLIENT_ROLES);
+  }
+  if (enabledSuites.has('laboratorio') || enabledModules.has('laboratorio')) {
+    add(LABORATORY_CLIENT_ROLES);
+  }
+
+  return roles;
+}
+
+async function canClientUseRole(clientId, role) {
+  if (!isOperationalClientRole(role)) return false;
+  const enabledRoles = await listEnabledClientRoleNames(clientId);
+  return enabledRoles.has(role);
+}
+
+function isClientVisiblePermission(permission) {
+  return Boolean(
+    permission?.startsWith('software:')
+    || permission?.startsWith('hb:')
+    || permission?.startsWith('quick_guides:')
+    || permission?.startsWith('inventory:')
+    || permission?.startsWith('maintenance:')
+    || permission?.startsWith('service:')
+    || permission?.startsWith('spareparts:')
+    || permission?.startsWith('calibration:')
+    || permission?.startsWith('odontology:')
+    || permission?.startsWith('laboratory:')
+    || permission === 'areas:manage'
+    || permission === 'asset_history:upload'
+    || permission === 'schedules:manage'
+    || permission === 'audit:odontology:view'
+    || permission === 'read:all'
+  );
+}
+
+async function listAllowedClientRolePermissions(clientId) {
+  const modules = await listClientModules(clientId);
+  const { enabledModules, enabledSuites } = clientModuleAccessContext(modules);
+  const allowed = new Set();
+  const add = (values) => values.forEach((value) => allowed.add(value));
+
+  if (enabledSuites.has('biomedico')) {
+    allowed.add('software:biomedico:access');
+    allowed.add('areas:manage');
+    allowed.add('read:all');
+  }
+  if (enabledModules.has('hojas_de_vida')) {
+    add(['hb:create', 'hb:view']);
+  }
+  if (enabledModules.has('inventario')) {
+    add(['hb:view', 'inventory:move', 'inventory:request']);
+  }
+  if (enabledModules.has('guias_rapidas')) {
+    add([
+      'quick_guides:view',
+      'quick_guides:create',
+      'quick_guides:edit',
+      'quick_guides:approve',
+      'quick_guides:delete'
+    ]);
+  }
+  if (enabledModules.has('reportes_mantenimiento')) {
+    add([
+      'hb:view',
+      'maintenance:request:create',
+      'maintenance:report:create',
+      'maintenance:report:sign',
+      'maintenance:order:create',
+      'maintenance:order:close',
+      'service:order:create',
+      'spareparts:order:create'
+    ]);
+  }
+  if (enabledModules.has('cronogramas')) {
+    allowed.add('schedules:manage');
+  }
+  if (enabledModules.has('calibraciones')) {
+    add(['calibration:schedule:manage', 'calibration:report:upload']);
+  }
+  if (enabledSuites.has('odontologico') || enabledModules.has('odontologia')) {
+    add([
+      'software:odontologico:access',
+      'odontology:access',
+      'odontology:settings:manage',
+      'odontology:patients:manage',
+      'odontology:patients:import',
+      'odontology:clinical_records:manage',
+      'odontology:appointments:manage',
+      'odontology:odontogram:manage',
+      'odontology:periodontogram:manage',
+      'odontology:consents:manage',
+      'odontology:attachments:manage',
+      'odontology:inventory:manage',
+      'odontology:sterilization:manage',
+      'odontology:treatment_plans:manage',
+      'odontology:payments:manage',
+      'odontology:financial:view',
+      'odontology:prescriptions:manage',
+      'odontology:documents:manage',
+      'odontology:reports:view',
+      'audit:odontology:view'
+    ]);
+  }
+  if (enabledSuites.has('laboratorio') || enabledModules.has('laboratorio')) {
+    add([
+      'software:laboratorio:access',
+      'laboratory:orders:manage',
+      'laboratory:results:manage'
+    ]);
+  }
+
+  return allowed;
+}
+
+async function getRoleNameById(roleId) {
+  const { rows } = await query('SELECT name FROM roles WHERE id = $1', [roleId]);
+  return rows[0]?.name || null;
+}
+
+function cleanPermissionList(values) {
+  return Array.from(new Set((Array.isArray(values) ? values : []).filter(Boolean).map(String)));
+}
+
+function isSuperuserAssignableRole(role) {
+  return SUPERUSER_ASSIGNABLE_USER_ROLES.includes(role);
+}
+
+function isSaasUserCreatableRole(role) {
+  return SAAS_ADMIN_ROLES.includes(role);
+}
+
+function isSuperuserVisibleRole(role) {
+  return SUPERUSER_VISIBLE_USER_ROLES.includes(role);
+}
+
+function isSuperuserVisibleRolePermission(permission) {
+  return SUPERUSER_VISIBLE_ROLE_PERMISSIONS.includes(permission);
+}
+
+function denyPlatformOperationalAccess(req, res, next) {
+  if (isSuperuser(req.user)) {
+    return res.status(403).json({
+      message: 'El superadmin administra la plataforma. Para ver datos operativos usa un administrador del cliente.'
+    });
+  }
+  return next();
+}
+
+async function enforceTenantSubscription(req, res, next) {
+  if (isSuperuser(req.user) || !req.user?.clientId) {
+    return next();
+  }
+
+  try {
+    const subscription = await getClientSubscriptionAccess(req.user.clientId);
+    req.subscription = subscription;
+
+    if (subscription.is_blocked) {
+      return res.status(423).json({
+        message: 'La suscripción del cliente está suspendida. Contacta al administrador de la plataforma.',
+        subscription
+      });
+    }
+
+    if (subscription.is_read_only && req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+      return res.status(402).json({
+        message: 'La suscripción del cliente está en modo solo lectura. Puedes consultar información, pero no realizar cambios.',
+        subscription
+      });
+    }
+
+    return next();
+  } catch (error) {
+    console.error('No se pudo validar la suscripción del cliente', error);
+    return res.status(500).json({ message: 'No se pudo validar la suscripción.' });
+  }
+}
+
+async function enforceOperationalSubscription(req, res, next) {
+  if (isSuperuser(req.user) || !req.user?.clientId) {
+    return next();
+  }
+
+  try {
+    const subscription = await getClientSubscriptionAccess(req.user.clientId);
+    req.subscription = subscription;
+
+    if (subscription.is_blocked) {
+      return res.status(423).json({
+        message: 'La suscripción del cliente está suspendida. Contacta al administrador de la plataforma.',
+        subscription
+      });
+    }
+
+    if (subscription.is_read_only && req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+      return res.status(402).json({
+        message: 'La suscripción del cliente está en modo solo lectura. Puedes consultar información, pero no realizar cambios.',
+        subscription
+      });
+    }
+
+    return next();
+  } catch (error) {
+    console.error('No se pudo validar la suscripción operativa', error);
+    return res.status(500).json({ message: 'No se pudo validar la suscripción.' });
+  }
+}
+
+function subscriptionRequiresClientAdmin(payload = {}) {
+  const status = payload.status || 'active';
+  const accessMode = payload.accessMode || payload.access_mode || 'full';
+  return ['active', 'grace'].includes(status) && accessMode === 'full';
+}
+
+async function getAdminTargetUser(userId) {
+  return getUserById(userId);
+}
+
+function canManageTargetUser(actor, target) {
+  if (!actor || !target) return false;
+  const targetRoles = target.roles || [];
+  if (isSuperuser(actor)) {
+    return !target.client_id || targetRoles.includes(CLIENT_ADMIN_ROLE);
+  }
+  if (isClientAdmin(actor)) {
+    return Boolean(actor.clientId)
+      && target.client_id === actor.clientId
+      && !targetRoles.includes('superuser')
+      && !targetRoles.includes(CLIENT_ADMIN_ROLE);
+  }
+  return false;
+}
+
+async function ensureCanManageTargetUser(req, res, userId) {
+  const target = await getAdminTargetUser(userId);
+  if (!target) {
+    res.status(404).json({ message: 'Usuario no encontrado.' });
+    return null;
+  }
+  if (!canManageTargetUser(req.user, target)) {
+    res.status(403).json({ message: 'Sin acceso para administrar este usuario.' });
+    return null;
+  }
+  return target;
+}
+
+async function resolveManagedUserClientId(req, requestedRole, requestedClientId) {
+  if (isSuperuser(req.user)) {
+    if (!isSaasUserCreatableRole(requestedRole)) {
+      return {
+        error: 'Desde Usuarios solo se crean usuarios administrativos SaaS.'
+      };
+    }
+    if (requestedClientId) {
+      return { error: 'Los usuarios de plataforma no deben quedar ligados a un cliente.' };
+    }
+    return { clientId: null };
+  }
+
+  if (isClientAdmin(req.user)) {
+    if (!req.user.clientId) {
+      return { error: 'El administrador del cliente no tiene cliente asignado.' };
+    }
+    if (!(await canClientUseRole(req.user.clientId, requestedRole))) {
+      return { error: 'Este rol no está habilitado para los softwares y módulos de tu cliente.' };
+    }
+    return { clientId: req.user.clientId };
+  }
+
+  return { error: 'Sin permisos para crear usuarios.' };
+}
 const uploadAssetFiles = upload.fields([
   { name: 'photo', maxCount: 1 },
   { name: 'manualOperacion', maxCount: 1 },
@@ -418,6 +951,30 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+app.use('/admin', requireAuth, enforceTenantSubscription);
+app.use('/biomed', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
+app.use('/odontology', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
+app.use('/maintenance', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
+app.use('/training', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
+app.use('/calibration', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
+app.use('/quick-guides', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
+
+async function requireActionConfirmation(req, res, action) {
+  const code = req.body?.securityCode
+    || req.body?.actionConfirmationCode
+    || req.headers['x-action-confirmation-code'];
+  const ok = await verifyAdminActionConfirmation({
+    userId: req.user.sub,
+    action,
+    code
+  });
+  if (!ok) {
+    res.status(428).json({ message: 'Código de confirmación requerido o inválido.' });
+    return false;
+  }
+  return true;
+}
+
 app.post('/auth/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
@@ -490,14 +1047,47 @@ app.post('/auth/reset-password', async (req, res) => {
   }
 });
 
-app.get('/admin/roles', requireAuth, requirePermission('users:manage'), async (_req, res) => {
-  const roles = await listRoles();
-  return res.json(roles);
+app.post('/admin/security/action-confirmation', requireAuth, async (req, res) => {
+  const { action, summary } = req.body || {};
+  if (!action) {
+    return res.status(400).json({ message: 'Acción requerida.' });
+  }
+
+  try {
+    const result = await requestAdminActionConfirmation({
+      userId: req.user.sub,
+      action: String(action),
+      summary: summary ? String(summary).slice(0, 500) : ''
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo enviar el código de confirmación.' });
+  }
 });
 
-app.get('/admin/permissions', requireAuth, requirePermission('users:manage'), async (_req, res) => {
+app.get('/admin/roles', requireAuth, requirePermission('users:manage'), async (req, res) => {
+  const roles = await listRoles();
+  if (isSuperuser(req.user)) {
+    return res.json(roles.filter((role) => isSuperuserVisibleRole(role.name)));
+  }
+  if (isClientAdmin(req.user)) {
+    const enabledRoles = await listEnabledClientRoleNames(req.user.clientId);
+    return res.json(roles.filter((role) => enabledRoles.has(role.name)));
+  }
+  return res.status(403).json({ message: 'Sin permisos.' });
+});
+
+app.get('/admin/permissions', requireAuth, requirePermission('users:manage'), async (req, res) => {
   const permissions = await listPermissions();
-  return res.json(permissions);
+  if (isSuperuser(req.user)) {
+    return res.json(permissions.filter((permission) => isSuperuserVisibleRolePermission(permission.name)));
+  }
+  if (isClientAdmin(req.user)) {
+    const allowed = await listAllowedClientRolePermissions(req.user.clientId);
+    return res.json(permissions.filter((permission) => allowed.has(permission.name)));
+  }
+  return res.json([]);
 });
 
 app.get(
@@ -505,8 +1095,24 @@ app.get(
   requireAuth,
   requirePermission('users:manage'),
   async (req, res) => {
+    if (isClientAdmin(req.user)) {
+      const roleName = await getRoleNameById(req.params.id);
+      if (!(await canClientUseRole(req.user.clientId, roleName))) {
+        return res.status(403).json({ message: 'Este rol no está habilitado para los softwares y módulos de tu cliente.' });
+      }
+      const allowed = await listAllowedClientRolePermissions(req.user.clientId);
+      const permissions = await getClientRolePermissions(req.user.clientId, req.params.id);
+      return res.json(permissions.filter((permission) => allowed.has(permission)));
+    }
+    if (!isSuperuser(req.user)) {
+      return res.json([]);
+    }
+    const roleName = await getRoleNameById(req.params.id);
+    if (!isSuperuserVisibleRole(roleName)) {
+      return res.status(403).json({ message: 'Este rol no se administra desde Roles y permisos SaaS.' });
+    }
     const permissions = await getRolePermissions(req.params.id);
-    return res.json(permissions);
+    return res.json(permissions.filter((permission) => isSuperuserVisibleRolePermission(permission)));
   }
 );
 
@@ -520,27 +1126,92 @@ app.put(
       return res.status(400).json({ message: 'Permisos inválidos.' });
     }
 
-    await updateRolePermissions(req.params.id, permissions);
+    if (isClientAdmin(req.user)) {
+      const roleName = await getRoleNameById(req.params.id);
+      if (!(await canClientUseRole(req.user.clientId, roleName))) {
+        return res.status(403).json({ message: 'Este rol no está habilitado para los softwares y módulos de tu cliente.' });
+      }
+
+      const requested = cleanPermissionList(permissions);
+      const allowed = await listAllowedClientRolePermissions(req.user.clientId);
+      const invalid = requested.filter((permission) => !allowed.has(permission));
+      if (invalid.length) {
+        return res.status(400).json({
+          message: 'Algunos permisos no están habilitados para este cliente.',
+          invalid
+        });
+      }
+      if (!(await requireActionConfirmation(req, res, 'CLIENT_ROLE_PERMISSIONS_UPDATE'))) return;
+
+      await updateClientRolePermissions({
+        clientId: req.user.clientId,
+        roleId: req.params.id,
+        permissions: requested,
+        actorUserId: req.user.sub
+      });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'CLIENT_ROLE_PERMISSIONS_UPDATE',
+        details: {
+          clientId: req.user.clientId,
+          role: roleName,
+          permissions: requested
+        }
+      });
+      return res.json({ ok: true });
+    }
+
+    if (!isSuperuser(req.user)) {
+      return res.status(403).json({ message: 'Solo superadmin de plataforma.' });
+    }
+    const roleName = await getRoleNameById(req.params.id);
+    if (!isSuperuserVisibleRole(roleName)) {
+      return res.status(403).json({ message: 'Este rol no se administra desde Roles y permisos SaaS.' });
+    }
+    const requested = cleanPermissionList(permissions);
+    const invalid = requested.filter((permission) => !isSuperuserVisibleRolePermission(permission));
+    if (invalid.length) {
+      return res.status(400).json({
+        message: 'Algunos permisos no pertenecen a Administración SaaS.',
+        invalid
+      });
+    }
+    if (!(await requireActionConfirmation(req, res, 'ROLE_PERMISSIONS_UPDATE'))) return;
+
+    await updateRolePermissions(req.params.id, requested);
     return res.json({ ok: true });
   }
 );
 
 app.get('/admin/users', requireAuth, requirePermission('users:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
-  }
-  const users = await listUsers();
+  const users = await listUsers({
+    actorRoles: req.user.roles || [],
+    actorClientId: req.user.clientId || null
+  });
   return res.json(users);
 });
+
+app.get(
+  '/admin/client-users',
+  requireAuth,
+  requireAnyPermission(['clients:manage', 'saas:clients:view', 'saas:clients:update', 'users:manage', 'saas:client_admins:reset_password']),
+  async (req, res) => {
+    if (req.user.clientId) {
+      return res.status(403).json({ message: 'Solo usuarios de plataforma pueden consultar usuarios de clientes.' });
+    }
+    const users = await listClientUsers();
+    return res.json(users);
+  }
+);
 
 app.post(
   '/admin/users/:id/temporary-permissions',
   requireAuth,
   requirePermission('users:manage'),
   async (req, res) => {
-    if (!req.user.roles?.includes('superuser')) {
-      return res.status(403).json({ message: 'Solo superuser.' });
-    }
+    const target = await ensureCanManageTargetUser(req, res, req.params.id);
+    if (!target) return;
 
     const { permission, expiresAt, reason } = req.body || {};
     const allowedTemporaryPermissions = ['hb:import', 'asset_history:upload'];
@@ -555,6 +1226,7 @@ app.post(
     if (parsedExpiresAt.getTime() <= Date.now()) {
       return res.status(400).json({ message: 'La fecha de vencimiento debe ser futura.' });
     }
+    if (!(await requireActionConfirmation(req, res, 'USER_TEMPORARY_PERMISSION_GRANT'))) return;
 
     const result = await grantTemporaryPermission({
       userId: req.params.id,
@@ -577,6 +1249,7 @@ app.post(
       targetUserId: req.params.id,
       targetUsername: result.username,
       details: {
+        clientId: target.client_id ?? null,
         permission,
         expiresAt: parsedExpiresAt.toISOString(),
         reason: reason || null
@@ -592,14 +1265,14 @@ app.delete(
   requireAuth,
   requirePermission('users:manage'),
   async (req, res) => {
-    if (!req.user.roles?.includes('superuser')) {
-      return res.status(403).json({ message: 'Solo superuser.' });
-    }
+    const target = await ensureCanManageTargetUser(req, res, req.params.id);
+    if (!target) return;
 
     const permission = req.query.permission || req.body?.permission;
     if (!permission) {
       return res.status(400).json({ message: 'Permiso requerido.' });
     }
+    if (!(await requireActionConfirmation(req, res, 'USER_TEMPORARY_PERMISSION_REVOKE'))) return;
 
     const result = await revokeTemporaryPermission({
       userId: req.params.id,
@@ -616,6 +1289,7 @@ app.delete(
       targetUserId: req.params.id,
       targetUsername: result.username,
       details: {
+        clientId: target.client_id ?? null,
         permission: result.permission
       }
     });
@@ -624,30 +1298,107 @@ app.delete(
   }
 );
 
-app.get('/admin/modules', requireAuth, requirePermission('clients:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
-  }
+app.get('/admin/modules', requireAuth, requireAnyPermission(SAAS_READ_PERMISSIONS), async (req, res) => {
   const modules = await listModules();
   return res.json(modules);
 });
 
-app.get('/admin/clients/:id/modules', requireAuth, requirePermission('clients:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
+app.get('/admin/software-suites', requireAuth, requireAnyPermission(SAAS_READ_PERMISSIONS), async (req, res) => {
+  const suites = await listSoftwareSuites();
+  return res.json(suites);
+});
+
+app.get('/admin/subscription-plans', requireAuth, requireAnyPermission(SAAS_READ_PERMISSIONS), async (req, res) => {
+  const plans = await listSubscriptionPlans({ includeInactive: req.query.includeInactive === 'true' });
+  return res.json(plans);
+});
+
+app.post('/admin/subscription-plans', requireAuth, requireAnyPermission(SAAS_PLAN_MANAGE_PERMISSIONS), async (req, res) => {
+  try {
+    if (!(await requireActionConfirmation(req, res, 'SUBSCRIPTION_PLAN_CREATE'))) return;
+    const plan = await createSubscriptionPlan(req.body || {});
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'SUBSCRIPTION_PLAN_CREATE',
+      details: { plan }
+    });
+    return res.status(201).json(plan);
+  } catch (error) {
+    console.error(error);
+    const message = error?.code === '23505'
+      ? 'Ya existe un plan con ese código.'
+      : 'No se pudo crear el plan.';
+    return res.status(400).json({ message });
   }
+});
+
+app.put('/admin/subscription-plans/:key', requireAuth, requireAnyPermission(SAAS_PLAN_MANAGE_PERMISSIONS), async (req, res) => {
+  try {
+    if (!(await requireActionConfirmation(req, res, 'SUBSCRIPTION_PLAN_UPDATE'))) return;
+    const plan = await updateSubscriptionPlan(req.params.key, req.body || {});
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'SUBSCRIPTION_PLAN_UPDATE',
+      details: { planKey: req.params.key, plan }
+    });
+    return res.json(plan);
+  } catch (error) {
+    console.error(error);
+    return res.status(400).json({ message: 'No se pudo actualizar el plan.' });
+  }
+});
+
+app.post('/admin/subscription-plans/:key/apply', requireAuth, requireAnyPermission(SAAS_PLAN_MANAGE_PERMISSIONS), async (req, res) => {
+  try {
+    if (!(await requireActionConfirmation(req, res, 'SUBSCRIPTION_PLAN_APPLY_TO_CLIENTS'))) return;
+    const result = await applySubscriptionPlanToClients(req.params.key);
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'SUBSCRIPTION_PLAN_APPLY_TO_CLIENTS',
+      details: { planKey: req.params.key, ...result }
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error(error);
+    return res.status(400).json({ message: 'No se pudo aplicar el plan a los clientes adheridos.' });
+  }
+});
+
+app.get('/admin/clients/:id/software-suites', requireAuth, requireAnyPermission(SAAS_READ_PERMISSIONS), async (req, res) => {
+  const suites = await listClientSoftwareAccess(req.params.id);
+  return res.json(suites);
+});
+
+app.put('/admin/clients/:id/software-suites', requireAuth, requireAnyPermission(SAAS_CLIENT_UPDATE_PERMISSIONS), async (req, res) => {
+  const { suites } = req.body || {};
+  if (!Array.isArray(suites)) {
+    return res.status(400).json({ message: 'Softwares inválidos.' });
+  }
+  if (!(await requireActionConfirmation(req, res, 'CLIENT_SOFTWARE_ACCESS_UPDATE'))) return;
+  await updateClientSoftwareAccess(req.params.id, suites);
+  await logAudit({
+    actorUserId: req.user.sub,
+    actorUsername: req.user.username,
+    action: 'CLIENT_SOFTWARE_ACCESS_UPDATE',
+    details: { clientId: req.params.id, suites }
+  });
+  return res.json({ ok: true });
+});
+
+app.get('/admin/clients/:id/modules', requireAuth, requireAnyPermission(SAAS_READ_PERMISSIONS), async (req, res) => {
   const modules = await listClientModules(req.params.id);
   return res.json(modules);
 });
 
-app.put('/admin/clients/:id/modules', requireAuth, requirePermission('clients:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
-  }
+app.put('/admin/clients/:id/modules', requireAuth, requireAnyPermission(SAAS_CLIENT_UPDATE_PERMISSIONS), async (req, res) => {
   const { modules } = req.body || {};
   if (!Array.isArray(modules)) {
     return res.status(400).json({ message: 'Módulos inválidos.' });
   }
+  if (!(await requireActionConfirmation(req, res, 'CLIENT_MODULES_UPDATE'))) return;
   await updateClientModules(req.params.id, modules);
   await logAudit({
     actorUserId: req.user.sub,
@@ -660,12 +1411,101 @@ app.put('/admin/clients/:id/modules', requireAuth, requirePermission('clients:ma
 
 app.get('/modules/me', requireAuth, async (req, res) => {
   const clientId = req.user.clientId;
+  if (isPlatformUser(req.user)) {
+    return res.json([]);
+  }
   if (!clientId) {
     const all = await listModules();
-    return res.json(all.map((m) => ({ key: m.key, enabled: true })));
+    return res.json(all.map((m) => ({ key: m.key, suite_key: m.suite_key, enabled: true })));
+  }
+  const subscription = await getClientSubscription(clientId);
+  if (subscription.is_blocked) {
+    const all = await listModules();
+    return res.json(all.map((m) => ({ key: m.key, suite_key: m.suite_key, enabled: false })));
   }
   const modules = await listClientModules(clientId);
-  return res.json(modules.map((m) => ({ key: m.key, enabled: m.enabled })));
+  return res.json(modules.map((m) => ({ key: m.key, suite_key: m.suite_key, enabled: m.enabled })));
+});
+
+function canAccessSuite(req, suiteKey) {
+  if (isSuperuser(req.user)) return false;
+  if (isClientAdmin(req.user)) return true;
+  const permissions = new Set(req.user.permissions || []);
+  const suitePermissions = {
+    biomedico: [
+      'software:biomedico:access',
+      'hb:create',
+      'hb:view',
+      'read:all',
+      'maintenance:request:create',
+      'maintenance:report:create',
+      'maintenance:report:sign',
+      'schedules:manage',
+      'calibration:schedule:manage',
+      'calibration:report:upload'
+    ],
+    odontologico: [
+      'software:odontologico:access',
+      'odontology:access',
+      'odontology:patients:manage',
+      'odontology:clinical_records:manage',
+      'odontology:appointments:manage',
+      'odontology:settings:manage',
+      'odontology:odontogram:manage',
+      'odontology:periodontogram:manage',
+      'odontology:consents:manage',
+      'odontology:treatment_plans:manage',
+      'odontology:attachments:manage',
+      'odontology:inventory:manage',
+      'odontology:sterilization:manage',
+      'odontology:payments:manage',
+      'odontology:prescriptions:manage',
+      'odontology:documents:manage',
+      'odontology:reports:view'
+    ],
+    laboratorio: [
+      'software:laboratorio:access',
+      'laboratory:orders:manage',
+      'laboratory:results:manage'
+    ]
+  };
+  return (suitePermissions[suiteKey] || []).some((permission) => permissions.has(permission));
+}
+
+app.get('/software-suites/me', requireAuth, async (req, res) => {
+  const clientId = req.user.clientId;
+  if (isPlatformUser(req.user)) {
+    return res.json([]);
+  }
+  if (!clientId) {
+    const all = await listSoftwareSuites();
+    return res.json(all.map((suite) => ({
+      ...suite,
+      enabled: true,
+      client_enabled: true,
+      can_access: true,
+      license_status: 'active'
+    })));
+  }
+
+  const subscription = await getClientSubscription(clientId);
+  const suites = await listClientSoftwareAccess(clientId);
+  return res.json(suites.map((suite) => {
+    const roleCanAccess = canAccessSuite(req, suite.key);
+    const clientEnabled = Boolean(suite.enabled);
+    const subscriptionAllowsOpen = !subscription.is_blocked;
+    return {
+      ...suite,
+      subscription_status: subscription.effective_status,
+      subscription_access_mode: subscription.effective_access_mode,
+      client_enabled: clientEnabled,
+      can_access: roleCanAccess,
+      enabled: subscriptionAllowsOpen
+        && clientEnabled
+        && roleCanAccess
+        && !['suspended', 'expired'].includes(suite.license_status)
+    };
+  }));
 });
 
 app.get('/clients/me', requireAuth, async (req, res) => {
@@ -677,30 +1517,5046 @@ app.get('/clients/me', requireAuth, async (req, res) => {
   return res.json(client);
 });
 
-app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.single('signature'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
+app.get('/subscription/me', requireAuth, async (req, res) => {
+  const clientId = req.user.clientId;
+  if (!clientId || isSuperuser(req.user)) {
+    return res.json(null);
   }
+  const subscription = await getClientSubscription(clientId);
+  return res.json(subscription);
+});
+
+async function ensureOdontologyApiAccess(req, res) {
+  const clientId = req.params.clientId;
+  const allowed = await canAccessOdontology({ user: req.user, clientId });
+  if (!allowed) {
+    res.status(403).json({ message: 'Sin acceso al software odontológico.' });
+    return false;
+  }
+  return true;
+}
+
+function formatOdontologyConsentDate(value) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('es-CO', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'America/Bogota'
+  }).format(new Date(value));
+}
+
+function formatOdontologyAppointmentDate(value) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('es-CO', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'America/Bogota'
+  }).format(new Date(`${String(value).slice(0, 10)}T00:00:00`));
+}
+
+function formatDateOnly(value) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('es-CO', {
+    dateStyle: 'medium',
+    timeZone: 'America/Bogota'
+  }).format(new Date(`${String(value).slice(0, 10)}T00:00:00`));
+}
+
+function documentTypeLabel(value) {
+  const labels = {
+    cedula_ciudadania: 'Cédula de ciudadanía',
+    cedula_extranjeria: 'Cédula de extranjería',
+    tarjeta_identidad: 'Tarjeta de identidad',
+    registro_civil: 'Registro civil',
+    pasaporte: 'Pasaporte',
+    permiso_especial: 'Permiso especial',
+    otro: 'Otro'
+  };
+  return labels[value] || value || '-';
+}
+
+function sexLabel(value) {
+  const labels = {
+    femenino: 'Femenino',
+    masculino: 'Masculino',
+    otro: 'Otro',
+    no_especifica: 'No especifica'
+  };
+  return labels[value] || value || '-';
+}
+
+async function buildOdontologyConsentPdf(consent) {
+  const client = await getClientById(consent.client_id).catch(() => null);
+  const relativeDir = path.join('uploads', 'clients', consent.client_id, 'odontology', 'consents');
+  const fileName = `consentimiento-${consent.id}.pdf`;
+  const relativePath = path.join(relativeDir, fileName);
+  const fullDir = path.join(process.cwd(), relativeDir);
+  const fullPath = path.join(process.cwd(), relativePath);
+  const publicPath = `/${relativePath}`.replace(/\\/g, '/');
+
+  await fs.promises.mkdir(fullDir, { recursive: true });
+
+  const doc = new PDFDocument({ size: 'A4', margin: 46 });
+  const stream = fs.createWriteStream(fullPath);
+  doc.pipe(stream);
+
+  const brand = '#a64045';
+  const brandDark = '#5f1f25';
+  const ink = '#111827';
+  const muted = '#64748b';
+  const light = '#fef2f2';
+  const border = '#f0cfd3';
+  const pale = '#fff7f7';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+  const ensureSpace = (height) => {
+    if (doc.y + height > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+    }
+  };
+  const sectionTitle = (title) => {
+    ensureSpace(28);
+    doc.moveDown(0.6);
+    doc
+      .fillColor(brandDark)
+      .font('Helvetica-Bold')
+      .fontSize(10)
+      .text(title.toUpperCase());
+    doc
+      .moveTo(doc.page.margins.left, doc.y + 3)
+      .lineTo(doc.page.margins.left + pageWidth, doc.y + 3)
+      .strokeColor(border)
+      .stroke();
+    doc.moveDown(0.7);
+  };
+  const infoRows = (rows) => {
+    const labelWidth = 112;
+    rows.forEach(([label, value]) => {
+      ensureSpace(22);
+      const y = doc.y;
+      doc
+        .roundedRect(doc.page.margins.left, y, pageWidth, 20, 6)
+        .fill('#ffffff')
+        .stroke(border);
+      doc
+        .fillColor(brand)
+        .font('Helvetica-Bold')
+        .fontSize(7.8)
+        .text(label, doc.page.margins.left + 9, y + 6, { width: labelWidth });
+      doc
+        .fillColor(ink)
+        .font('Helvetica')
+        .fontSize(8.2)
+        .text(value || '-', doc.page.margins.left + labelWidth + 14, y + 6, {
+          width: pageWidth - labelWidth - 24
+        });
+      doc.y = y + 24;
+    });
+  };
+
+  doc
+    .roundedRect(doc.page.margins.left, 30, pageWidth, 92, 16)
+    .fill(pale)
+    .stroke(border);
+  drawClientLogoOrBadge(doc, client, {
+    x: doc.page.margins.left + 14,
+    y: 46,
+    fit: [74, 44]
+  });
+  doc
+    .fillColor(brand)
+    .font('Helvetica-Bold')
+    .fontSize(15)
+    .text('Consentimiento informado odontológico', doc.page.margins.left + 104, 48, {
+      width: pageWidth - 120
+    });
+  doc
+    .fillColor(ink)
+    .font('Helvetica-Bold')
+    .fontSize(9)
+    .text(client?.name || 'INBIHOSPITALARIO', doc.page.margins.left + 104, 68, {
+      width: pageWidth - 120
+    });
+  doc
+    .fillColor(muted)
+    .font('Helvetica')
+    .fontSize(8)
+    .text(
+      [
+        client?.nit ? `NIT: ${client.nit}` : '',
+        client?.habilitation_code ? `Código habilitación: ${client.habilitation_code}` : '',
+        client?.city || ''
+      ].filter(Boolean).join(' · ') || 'Formato institucional',
+      doc.page.margins.left + 104,
+      84,
+      { width: pageWidth - 120 }
+    )
+    .text(`Generado: ${formatOdontologyConsentDate(new Date())}`, {
+      width: pageWidth - 120
+    });
+
+  doc.y = 142;
+  sectionTitle('Datos principales');
+
+  const rows = [
+    ['Paciente', `${consent.patient_name} · ${documentTypeLabel(consent.patient_document_type)} ${consent.patient_document_number || ''}`],
+    ['Plantilla', `${consent.template_title} · versión ${consent.template_version}`],
+    ['Procedimiento', consent.procedure_name || 'Procedimiento odontológico'],
+    ['Estado', consent.status === 'signed' ? 'Firmado' : 'Borrador'],
+    ['Fecha de firma', consent.signed_at ? formatOdontologyConsentDate(consent.signed_at) : 'Pendiente']
+  ];
+  infoRows(rows);
+
+  sectionTitle('Texto del consentimiento');
+  ensureSpace(80);
+  const bodyStartY = doc.y;
+  doc
+    .roundedRect(doc.page.margins.left, bodyStartY, pageWidth, 38, 10)
+    .fill(light)
+    .stroke(border);
+  doc
+    .font('Helvetica')
+    .fillColor(ink)
+    .fontSize(9)
+    .text(consent.rendered_body || '', doc.page.margins.left + 12, bodyStartY + 12, {
+      width: pageWidth - 24,
+      align: 'justify',
+      lineGap: 2.8
+    });
+
+  doc.moveDown(1.6);
+  ensureSpace(132);
+  sectionTitle('Firmas');
+  const signatureTop = doc.y;
+  const signatureWidth = (pageWidth - 18) / 2;
+  const signerSignatureFullPath = consent.signer_signature_path
+    ? path.join(process.cwd(), String(consent.signer_signature_path).replace(/^\//, ''))
+    : '';
+  const providerSignatureFullPath = consent.signed_by_signature_path
+    ? path.join(process.cwd(), String(consent.signed_by_signature_path).replace(/^\//, ''))
+    : '';
+  doc.roundedRect(doc.page.margins.left, signatureTop, signatureWidth, 64, 10).fill('#ffffff').stroke(border);
+  doc.roundedRect(doc.page.margins.left + signatureWidth + 18, signatureTop, signatureWidth, 64, 10).fill('#ffffff').stroke(border);
+
+  if (signerSignatureFullPath && fs.existsSync(signerSignatureFullPath)) {
+    doc.image(signerSignatureFullPath, doc.page.margins.left + 12, signatureTop + 7, {
+      fit: [signatureWidth - 24, 46],
+      align: 'center',
+      valign: 'center'
+    });
+  } else {
+    doc
+      .font('Helvetica')
+      .fillColor(muted)
+      .fontSize(7.5)
+      .text('Firma pendiente', doc.page.margins.left, signatureTop + 26, {
+        width: signatureWidth,
+        align: 'center'
+      });
+  }
+
+  if (providerSignatureFullPath && fs.existsSync(providerSignatureFullPath)) {
+    doc.image(providerSignatureFullPath, doc.page.margins.left + signatureWidth + 30, signatureTop + 7, {
+      fit: [signatureWidth - 24, 46],
+      align: 'center',
+      valign: 'center'
+    });
+  } else {
+    doc
+      .font('Helvetica')
+      .fillColor(muted)
+      .fontSize(7.5)
+      .text('Firma digital no cargada', doc.page.margins.left + signatureWidth + 18, signatureTop + 26, {
+        width: signatureWidth,
+        align: 'center'
+      });
+  }
+
+  doc
+    .font('Helvetica-Bold')
+    .fillColor(ink)
+    .fontSize(9)
+    .text('Paciente / acudiente', doc.page.margins.left, signatureTop + 72, { width: signatureWidth, align: 'center' });
+  doc
+    .font('Helvetica')
+    .fillColor(muted)
+    .fontSize(8.5)
+    .text(consent.signer_name || '-', { width: signatureWidth, align: 'center' })
+    .text(`${documentTypeLabel(consent.signer_document_type)} ${consent.signer_document_number || ''}`.trim() || '-', {
+      width: signatureWidth,
+      align: 'center'
+    });
+  if (consent.signer_relationship) {
+    doc.text(`Parentesco: ${consent.signer_relationship}`, { width: signatureWidth, align: 'center' });
+  }
+
+  doc
+    .font('Helvetica-Bold')
+    .fillColor(ink)
+    .fontSize(9)
+    .text('Odontólogo / responsable', doc.page.margins.left + signatureWidth + 18, signatureTop + 72, {
+      width: signatureWidth,
+      align: 'center'
+    });
+  doc
+    .font('Helvetica')
+    .fillColor(muted)
+    .fontSize(8.5)
+    .text(consent.signed_by_name || 'Pendiente', { width: signatureWidth, align: 'center' })
+    .text(`Documento: ${documentTypeLabel(consent.signed_by_document_type)} ${consent.signed_by_document_number || '-'}`, {
+      width: signatureWidth,
+      align: 'center'
+    });
+  if (consent.signed_by_invima_registration) {
+    doc.text(`Registro profesional / INVIMA: ${consent.signed_by_invima_registration}`, {
+      width: signatureWidth,
+      align: 'center'
+    });
+  }
+
+  doc
+    .font('Helvetica')
+    .fillColor(muted)
+    .fontSize(7)
+    .text('Documento generado por INBIHOSPITALARIO. La firma digital deja trazabilidad de responsable, fecha y bloqueo documental.', doc.page.margins.left, doc.page.height - 42, {
+      width: pageWidth,
+      align: 'center'
+    });
+
+  doc.end();
+  await finished(stream);
+  return publicPath;
+}
+
+async function buildOdontologyPrescriptionPdf(prescription) {
+  const relativeDir = path.join('uploads', 'clients', prescription.client_id, 'odontology', 'prescriptions');
+  const fileName = `receta-${prescription.id}.pdf`;
+  const relativePath = path.join(relativeDir, fileName);
+  const fullDir = path.join(process.cwd(), relativeDir);
+  const fullPath = path.join(process.cwd(), relativePath);
+  await fs.promises.mkdir(fullDir, { recursive: true });
+
+  const client = await getClientById(prescription.client_id).catch(() => null);
+  const doc = new PDFDocument({ size: 'A4', margin: 42 });
+  const stream = fs.createWriteStream(fullPath);
+  doc.pipe(stream);
+
+  const brand = '#a64045';
+  const ink = '#172033';
+  const muted = '#64748b';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+  doc
+    .roundedRect(doc.page.margins.left, 34, pageWidth, 58, 14)
+    .fill('#fff7f7');
+  doc
+    .fillColor(brand)
+    .font('Helvetica-Bold')
+    .fontSize(17)
+    .text('Receta odontológica', doc.page.margins.left + 16, 48);
+  doc
+    .fillColor(muted)
+    .font('Helvetica')
+    .fontSize(9)
+    .text(client?.name || 'INBIHOSPITALARIO', doc.page.margins.left + 16, 70, { width: pageWidth - 32 });
+
+  doc.y = 112;
+  doc.fillColor(ink).font('Helvetica-Bold').fontSize(10).text('Paciente');
+  doc
+    .font('Helvetica')
+    .fontSize(9)
+    .fillColor(ink)
+    .text(`${prescription.patient_name || '-'} · ${prescription.patient_code || ''}`)
+    .fillColor(muted)
+    .text(`Documento: ${prescription.patient_document_number || '-'}   Fecha: ${formatDateOnly(prescription.prescription_date)}`);
+
+  if (prescription.diagnosis) {
+    doc.moveDown(0.7).fillColor(ink).font('Helvetica-Bold').fontSize(10).text('Diagnóstico / motivo');
+    doc.fillColor(muted).font('Helvetica').fontSize(9).text(prescription.diagnosis, { width: pageWidth });
+  }
+
+  doc.moveDown(0.9).fillColor(brand).font('Helvetica-Bold').fontSize(11).text('Medicamentos');
+  const tableTop = doc.y + 8;
+  const columns = [0, 145, 245, 338, 430];
+  const widths = [137, 90, 85, 84, 80];
+  const headers = ['Medicamento', 'Dosis', 'Frecuencia', 'Duración', 'Cantidad'];
+  doc.roundedRect(doc.page.margins.left, tableTop, pageWidth, 24, 8).fill(brand);
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8.5);
+  headers.forEach((header, index) => {
+    doc.text(header, doc.page.margins.left + columns[index] + 8, tableTop + 7, { width: widths[index] });
+  });
+  doc.y = tableTop + 30;
+
+  for (const item of prescription.items || []) {
+    const rowTop = doc.y;
+    const medication = [
+      item.medication_name,
+      item.concentration,
+      item.pharmaceutical_form
+    ].filter(Boolean).join(' · ');
+    const notes = item.instructions ? `\n${item.instructions}` : '';
+    const rowHeight = Math.max(
+      doc.heightOfString(`${medication}${notes}`, { width: widths[0], lineGap: 2 }) + 12,
+      34
+    );
+    if (rowTop + rowHeight > doc.page.height - 118) {
+      doc.addPage();
+      doc.y = 48;
+    }
+    doc.roundedRect(doc.page.margins.left, doc.y, pageWidth, rowHeight, 8).fill('#ffffff').stroke('#e2e8f0');
+    const y = doc.y + 7;
+    doc.fillColor(ink).font('Helvetica-Bold').fontSize(8.5).text(medication || '-', doc.page.margins.left + 8, y, { width: widths[0] });
+    if (item.instructions) {
+      doc.fillColor(muted).font('Helvetica').fontSize(7.8).text(item.instructions, doc.page.margins.left + 8, y + 12, { width: widths[0], lineGap: 1 });
+    }
+    doc.fillColor(ink).font('Helvetica').fontSize(8.2)
+      .text(item.dose || '-', doc.page.margins.left + columns[1] + 8, y, { width: widths[1] })
+      .text(item.frequency || '-', doc.page.margins.left + columns[2] + 8, y, { width: widths[2] })
+      .text(item.duration || '-', doc.page.margins.left + columns[3] + 8, y, { width: widths[3] })
+      .text(item.quantity || '-', doc.page.margins.left + columns[4] + 8, y, { width: widths[4] });
+    doc.y = rowTop + rowHeight + 7;
+  }
+
+  if (prescription.general_instructions) {
+    doc.moveDown(0.6).fillColor(ink).font('Helvetica-Bold').fontSize(10).text('Indicaciones generales');
+    doc.fillColor(muted).font('Helvetica').fontSize(9).text(prescription.general_instructions, { width: pageWidth });
+  }
+
+  const signatureTop = Math.min(doc.y + 32, doc.page.height - 118);
+  doc.strokeColor('#cbd5e1')
+    .moveTo(doc.page.margins.left, signatureTop)
+    .lineTo(doc.page.margins.left + 220, signatureTop)
+    .stroke();
+  doc
+    .fillColor(ink)
+    .font('Helvetica-Bold')
+    .fontSize(9)
+    .text(prescription.issued_by_name || 'Odontólogo responsable', doc.page.margins.left, signatureTop + 8, { width: 260 });
+  doc
+    .fillColor(muted)
+    .font('Helvetica')
+    .fontSize(8)
+    .text(`Documento: ${prescription.issued_by_document_number || '-'}`, { width: 260 });
+  if (prescription.issued_by_invima_registration) {
+    doc.text(`Registro: ${prescription.issued_by_invima_registration}`, { width: 260 });
+  }
+
+  doc.end();
+  await finished(stream);
+  return relativePath;
+}
+
+function clinicalDocumentTypeLabel(type) {
+  const labels = {
+    certificado: 'Certificado odontológico',
+    incapacidad: 'Incapacidad odontológica',
+    constancia: 'Constancia odontológica',
+    remision: 'Remisión odontológica',
+    otro: 'Documento odontológico'
+  };
+  return labels[type] || 'Documento odontológico';
+}
+
+async function buildOdontologyClinicalDocumentPdf(documentRow) {
+  const relativeDir = path.join('uploads', 'clients', documentRow.client_id, 'odontology', 'documents');
+  const fileName = `${documentRow.document_type}-${documentRow.id}.pdf`;
+  const relativePath = path.join(relativeDir, fileName);
+  const fullDir = path.join(process.cwd(), relativeDir);
+  const fullPath = path.join(process.cwd(), relativePath);
+  await fs.promises.mkdir(fullDir, { recursive: true });
+
+  const client = await getClientById(documentRow.client_id).catch(() => null);
+  const doc = new PDFDocument({ size: 'A4', margin: 46 });
+  const stream = fs.createWriteStream(fullPath);
+  doc.pipe(stream);
+
+  const brand = '#a64045';
+  const ink = '#172033';
+  const muted = '#64748b';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+  doc.roundedRect(doc.page.margins.left, 34, pageWidth, 62, 16).fill('#fff7f7');
+  doc
+    .fillColor(brand)
+    .font('Helvetica-Bold')
+    .fontSize(17)
+    .text(clinicalDocumentTypeLabel(documentRow.document_type), doc.page.margins.left + 16, 48);
+  doc
+    .fillColor(muted)
+    .font('Helvetica')
+    .fontSize(9)
+    .text(client?.name || 'INBIHOSPITALARIO', doc.page.margins.left + 16, 72, { width: pageWidth - 32 });
+
+  doc.y = 118;
+  doc.fillColor(ink).font('Helvetica-Bold').fontSize(11).text(documentRow.title || clinicalDocumentTypeLabel(documentRow.document_type));
+  doc.moveDown(0.6);
+  doc
+    .font('Helvetica')
+    .fontSize(9)
+    .fillColor(muted)
+    .text(`Fecha: ${formatDateOnly(documentRow.document_date)}`)
+    .text(`Paciente: ${documentRow.patient_name || '-'} · Documento: ${documentRow.patient_document_number || '-'}`);
+  if (documentRow.document_type === 'incapacidad') {
+    const period = [documentRow.start_date ? formatDateOnly(documentRow.start_date) : null, documentRow.end_date ? formatDateOnly(documentRow.end_date) : null]
+      .filter(Boolean)
+      .join(' - ');
+    doc.text(`Periodo: ${period || '-'}${documentRow.days !== null && documentRow.days !== undefined ? ` · ${documentRow.days} día(s)` : ''}`);
+  }
+
+  doc.moveDown(1.2);
+  doc
+    .fillColor(ink)
+    .font('Helvetica')
+    .fontSize(10)
+    .text(documentRow.body || '-', {
+      width: pageWidth,
+      align: 'justify',
+      lineGap: 4
+    });
+
+  if (documentRow.recommendations) {
+    doc.moveDown(1);
+    doc.fillColor(brand).font('Helvetica-Bold').fontSize(10).text('Recomendaciones');
+    doc.fillColor(muted).font('Helvetica').fontSize(9).text(documentRow.recommendations, { width: pageWidth, lineGap: 3 });
+  }
+
+  const signatureTop = Math.min(doc.y + 42, doc.page.height - 122);
+  doc.strokeColor('#cbd5e1')
+    .moveTo(doc.page.margins.left, signatureTop)
+    .lineTo(doc.page.margins.left + 230, signatureTop)
+    .stroke();
+  doc
+    .fillColor(ink)
+    .font('Helvetica-Bold')
+    .fontSize(9)
+    .text(documentRow.issued_by_name || 'Odontólogo responsable', doc.page.margins.left, signatureTop + 8, { width: 270 });
+  doc
+    .fillColor(muted)
+    .font('Helvetica')
+    .fontSize(8)
+    .text(`Documento: ${documentRow.issued_by_document_number || '-'}`, { width: 270 });
+  if (documentRow.issued_by_invima_registration) {
+    doc.text(`Registro: ${documentRow.issued_by_invima_registration}`, { width: 270 });
+  }
+
+  doc.end();
+  await finished(stream);
+  return relativePath;
+}
+
+async function buildOdontologyClinicalRecordPdf(record) {
+  const relativeDir = path.join('uploads', 'clients', record.client_id, 'odontology', 'clinical-records');
+  const fileName = `historia-clinica-${record.id}.pdf`;
+  const relativePath = path.join(relativeDir, fileName);
+  const fullDir = path.join(process.cwd(), relativeDir);
+  const fullPath = path.join(process.cwd(), relativePath);
+  const publicPath = `/${relativePath}`.replace(/\\/g, '/');
+
+  await fs.promises.mkdir(fullDir, { recursive: true });
+
+  const client = await getClientById(record.client_id).catch(() => null);
+  const doc = new PDFDocument({ size: 'A4', margin: 42 });
+  const stream = fs.createWriteStream(fullPath);
+  doc.pipe(stream);
+
+  const brand = '#a64045';
+  const brandDark = '#7f1d1d';
+  const ink = '#172033';
+  const muted = '#64748b';
+  const border = '#f0cfd3';
+  const soft = '#fff7f7';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const bottomLimit = () => doc.page.height - doc.page.margins.bottom;
+  const safe = (value) => (value === null || value === undefined || String(value).trim() === '' ? '-' : String(value).trim());
+
+  const ensureSpace = (height = 96) => {
+    if (doc.y + height > bottomLimit()) {
+      doc.addPage();
+      doc.y = 42;
+    }
+  };
+
+  const section = (title) => {
+    ensureSpace(56);
+    doc.moveDown(0.7);
+    doc
+      .roundedRect(doc.page.margins.left, doc.y, pageWidth, 22, 8)
+      .fill(brand);
+    doc
+      .fillColor('#ffffff')
+      .font('Helvetica-Bold')
+      .fontSize(10)
+      .text(title, doc.page.margins.left + 10, doc.y + 6, { width: pageWidth - 20 });
+    doc.y += 28;
+  };
+
+  const rows = (items, options = {}) => {
+    const labelWidth = options.labelWidth || 145;
+    const valueWidth = pageWidth - labelWidth;
+    for (const [label, value] of items) {
+      const cleanValue = safe(value);
+      const height = Math.max(
+        24,
+        doc.heightOfString(cleanValue, { width: valueWidth - 14, lineGap: 2 }) + 12
+      );
+      ensureSpace(height + 4);
+      const y = doc.y;
+      doc.roundedRect(doc.page.margins.left, y, pageWidth, height, 6).fill('#ffffff').stroke(border);
+      doc
+        .fillColor(brandDark)
+        .font('Helvetica-Bold')
+        .fontSize(8.5)
+        .text(label, doc.page.margins.left + 8, y + 7, { width: labelWidth - 14 });
+      doc
+        .fillColor(ink)
+        .font('Helvetica')
+        .fontSize(8.7)
+        .text(cleanValue, doc.page.margins.left + labelWidth + 6, y + 7, {
+          width: valueWidth - 14,
+          lineGap: 2
+        });
+      doc.y = y + height + 5;
+    }
+  };
+
+  doc.roundedRect(doc.page.margins.left, 34, pageWidth, 82, 16).fill(soft);
+  drawClientLogoOrBadge(doc, client, { x: doc.page.margins.left + 14, y: 46, fit: [92, 46] });
+  doc
+    .fillColor(brand)
+    .font('Helvetica-Bold')
+    .fontSize(16)
+    .text('Historia clínica odontológica', doc.page.margins.left + 120, 48, { width: pageWidth - 134 });
+  doc
+    .fillColor(muted)
+    .font('Helvetica')
+    .fontSize(8.5)
+    .text(client?.name || 'INBIHOSPITALARIO', doc.page.margins.left + 120, 72, { width: pageWidth - 134 })
+    .text(`Generado: ${formatOdontologyConsentDate(new Date())}`, { width: pageWidth - 134 });
+
+  doc.y = 132;
+  section('DATOS DEL PACIENTE');
+  rows([
+    ['Paciente', `${safe(record.patient_name)} · Código ${safe(record.patient_code)}`],
+    ['Documento', `${documentTypeLabel(record.patient_document_type)} ${safe(record.patient_document_number)}`],
+    ['Nacimiento / sexo', `${formatDateOnly(record.patient_birth_date) || '-'} · ${sexLabel(record.patient_sex)}`],
+    ['Contacto', `Tel: ${safe(record.patient_phone)} · Correo: ${safe(record.patient_email)}`],
+    ['Dirección', record.patient_address]
+  ]);
+
+  section('DATOS DE ATENCIÓN');
+  rows([
+    ['Fecha creación', formatOdontologyConsentDate(record.created_at)],
+    ['Cita relacionada', record.appointment_date
+      ? `${formatDateOnly(record.appointment_date)} ${String(record.appointment_start_time || '').slice(0, 5)}`
+      : 'Sin cita relacionada'],
+    ['Odontólogo de la cita', record.dentist_name],
+    ['Estado', record.status === 'signed' ? 'Firmada' : 'Borrador']
+  ]);
+
+  section('ANAMNESIS Y ANTECEDENTES');
+  rows([
+    ['Motivo de consulta', record.chief_complaint],
+    ['Enfermedad actual', record.current_illness],
+    ['Antecedentes médicos', record.medical_history],
+    ['Antecedentes odontológicos', record.dental_history],
+    ['Antecedentes familiares', record.family_history],
+    ['Medicamentos actuales', record.current_medications],
+    ['Alergias', record.allergies],
+    ['Hábitos', record.habits]
+  ]);
+
+  section('EXAMEN, DIAGNÓSTICO Y PLAN');
+  rows([
+    ['Examen extraoral', record.extraoral_exam],
+    ['Examen intraoral', record.intraoral_exam],
+    ['Código diagnóstico', record.diagnosis_code],
+    ['Diagnóstico', record.diagnosis_text],
+    ['Plan de manejo', record.treatment_plan],
+    ['Notas clínicas', record.clinical_notes]
+  ]);
+
+  if (Array.isArray(record.sterilization_cycles) && record.sterilization_cycles.length) {
+    section('TRAZABILIDAD DE ESTERILIZACIÓN');
+    rows(record.sterilization_cycles.map((cycle) => [
+      cycle.cycle_code || cycle.id,
+      [
+        `Fecha: ${formatDateOnly(cycle.cycle_date)}`,
+        `Método: ${odontologySterilizationMethodLabel(cycle.method)}`,
+        `Resultado: ${odontologySterilizationResultLabel(cycle.result)}`,
+        `Responsable: ${pdfSafe(cycle.operator_name)}`,
+        `Instrumental: ${cycle.item_count || 0}`
+      ].join(' · ')
+    ]), { labelWidth: 130 });
+  }
+
+  section('FIRMAS Y RESPONSABLES');
+  ensureSpace(144);
+  const signatureTop = doc.y;
+  const signatureWidth = (pageWidth - 18) / 2;
+  const patientSignaturePath = record.patient_signature_path
+    ? path.join(process.cwd(), String(record.patient_signature_path).replace(/^\//, ''))
+    : null;
+  const signaturePath = record.signed_by_signature_path
+    ? path.join(process.cwd(), String(record.signed_by_signature_path).replace(/^\//, ''))
+    : null;
+  doc.roundedRect(doc.page.margins.left, signatureTop, signatureWidth, 72, 8).fill('#ffffff').stroke(border);
+  doc.roundedRect(doc.page.margins.left + signatureWidth + 18, signatureTop, signatureWidth, 72, 8).fill('#ffffff').stroke(border);
+  if (patientSignaturePath && fs.existsSync(patientSignaturePath)) {
+    doc.image(patientSignaturePath, doc.page.margins.left + 12, signatureTop + 8, {
+      fit: [signatureWidth - 24, 56],
+      align: 'center',
+      valign: 'center'
+    });
+  } else {
+    doc
+      .fillColor(muted)
+      .font('Helvetica')
+      .fontSize(8.5)
+      .text('Firma paciente/acudiente no registrada.', doc.page.margins.left, signatureTop + 28, {
+        width: signatureWidth,
+        align: 'center'
+      });
+  }
+  if (signaturePath && fs.existsSync(signaturePath)) {
+    doc.image(signaturePath, doc.page.margins.left + signatureWidth + 30, signatureTop + 8, {
+      fit: [signatureWidth - 24, 56],
+      align: 'center',
+      valign: 'center'
+    });
+  } else {
+    doc
+      .fillColor(muted)
+      .font('Helvetica')
+      .fontSize(8.5)
+      .text('Firma digital no cargada.', doc.page.margins.left + signatureWidth + 18, signatureTop + 30, {
+        width: signatureWidth,
+        align: 'center'
+      });
+  }
+
+  const infoTop = signatureTop + 80;
+  doc
+    .fillColor(ink)
+    .font('Helvetica-Bold')
+    .fontSize(9.5)
+    .text('Paciente / acudiente', doc.page.margins.left, infoTop, { width: signatureWidth });
+  doc
+    .fillColor(muted)
+    .font('Helvetica')
+    .fontSize(8.2)
+    .text(record.patient_signer_name || '-', { width: signatureWidth })
+    .text(`${documentTypeLabel(record.patient_signer_document_type)} ${safe(record.patient_signer_document_number)}`, {
+      width: signatureWidth
+    });
+  if (record.patient_signer_relationship) {
+    doc.text(`Relación: ${record.patient_signer_relationship}`, { width: signatureWidth });
+  }
+  doc.text(`Fecha firma: ${formatOdontologyConsentDate(record.patient_signed_at) || '-'}`, { width: signatureWidth });
+
+  const infoX = doc.page.margins.left + signatureWidth + 18;
+  doc
+    .fillColor(ink)
+    .font('Helvetica-Bold')
+    .fontSize(9.5)
+    .text(record.signed_by_name || 'Odontólogo responsable', infoX, infoTop, {
+      width: signatureWidth
+    });
+  doc
+    .fillColor(muted)
+    .font('Helvetica')
+    .fontSize(8.2)
+    .text(`Documento: ${documentTypeLabel(record.signed_by_document_type)} ${safe(record.signed_by_document_number)}`, {
+      width: signatureWidth
+    })
+    .text(`Registro profesional / INVIMA: ${safe(record.signed_by_invima_registration)}`, {
+      width: signatureWidth
+    })
+    .text(`Fecha de firma: ${formatOdontologyConsentDate(record.signed_at) || '-'}`, {
+      width: signatureWidth
+    })
+    .moveDown(0.4)
+    .fillColor(brandDark)
+    .font('Helvetica-Bold')
+    .text('Historia clínica firmada digitalmente y bloqueada para edición.', {
+      width: signatureWidth
+    });
+
+  doc.end();
+  await finished(stream);
+  return publicPath;
+}
+
+function pdfSafe(value, fallback = '-') {
+  const text = String(value ?? '').trim();
+  return text || fallback;
+}
+
+function pdfFilename(value) {
+  return String(value || 'documento')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+function odontogramSurfaceLabel(value) {
+  const labels = {
+    whole: 'Diente completo',
+    occlusal: 'Oclusal',
+    mesial: 'Mesial',
+    distal: 'Distal',
+    vestibular: 'Vestibular',
+    lingual: 'Lingual',
+    palatal: 'Palatal'
+  };
+  return labels[value] || value || '-';
+}
+
+function odontologyDentitionLabel(value) {
+  const labels = {
+    permanent: 'Permanente',
+    temporary: 'Temporal',
+    mixed: 'Mixta'
+  };
+  return labels[value] || value || '-';
+}
+
+function drawOdontologyReportHeader(doc, { title, subtitle, client }) {
+  const brand = '#a64045';
+  const muted = '#64748b';
+  const soft = '#fff7f7';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+  doc.roundedRect(doc.page.margins.left, 34, pageWidth, 72, 16).fill(soft);
+  drawClientLogoOrBadge(doc, client, { x: doc.page.margins.left + 14, y: 46, fit: [84, 42] });
+  doc
+    .fillColor(brand)
+    .font('Helvetica-Bold')
+    .fontSize(16)
+    .text(title, doc.page.margins.left + 112, 50, { width: pageWidth - 126 });
+  doc
+    .fillColor(muted)
+    .font('Helvetica')
+    .fontSize(8.5)
+    .text(subtitle || client?.name || 'INBIHOSPITALARIO', doc.page.margins.left + 112, 74, {
+      width: pageWidth - 126
+    })
+    .text(`Generado: ${formatOdontologyConsentDate(new Date())}`, {
+      width: pageWidth - 126
+    });
+  doc.y = 126;
+}
+
+function drawOdontologyInfoGrid(doc, items) {
+  const brand = '#7f1d1d';
+  const ink = '#172033';
+  const border = '#f0cfd3';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const columnWidth = (pageWidth - 8) / 2;
+  let x = doc.page.margins.left;
+  let y = doc.y;
+
+  items.forEach(([label, value], index) => {
+    if (index > 0 && index % 2 === 0) {
+      x = doc.page.margins.left;
+      y += 38;
+    }
+    const boxHeight = 30;
+    doc.roundedRect(x, y, columnWidth, boxHeight, 7).fill('#ffffff').stroke(border);
+    doc.fillColor(brand).font('Helvetica-Bold').fontSize(7.5).text(label, x + 8, y + 6, { width: columnWidth - 16 });
+    doc.fillColor(ink).font('Helvetica').fontSize(8.2).text(pdfSafe(value), x + 8, y + 17, { width: columnWidth - 16 });
+    x += columnWidth + 8;
+  });
+  doc.y = y + 42;
+}
+
+function drawOdontologySectionTitle(doc, title) {
+  const brand = '#a64045';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  if (doc.y + 42 > doc.page.height - doc.page.margins.bottom) {
+    doc.addPage();
+    doc.y = 42;
+  }
+  doc.moveDown(0.5);
+  doc.roundedRect(doc.page.margins.left, doc.y, pageWidth, 22, 8).fill(brand);
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(9).text(title, doc.page.margins.left + 10, doc.y + 6, {
+    width: pageWidth - 20
+  });
+  doc.y += 30;
+}
+
+function buildOdontologyOdontogramPdf(doc, { client, odontogram }) {
+  const brand = '#a64045';
+  const ink = '#172033';
+  const muted = '#64748b';
+  const border = '#f0cfd3';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const patient = odontogram.patient || {};
+  const latest = odontogram.latest || [];
+  const history = odontogram.history || [];
+
+  drawOdontologyReportHeader(doc, {
+    title: 'Odontograma',
+    subtitle: client?.name || 'INBIHOSPITALARIO',
+    client
+  });
+  drawOdontologyInfoGrid(doc, [
+    ['Paciente', `${pdfSafe(patient.full_name)} · ${pdfSafe(patient.internal_code)}`],
+    ['Documento', `${documentTypeLabel(patient.document_type)} ${pdfSafe(patient.document_number)}`],
+    ['Nacimiento / sexo', `${formatDateOnly(patient.birth_date) || '-'} · ${sexLabel(patient.sex)}`],
+    ['Contacto', `${pdfSafe(patient.phone)} · ${pdfSafe(patient.email)}`]
+  ]);
+
+  drawOdontologySectionTitle(doc, 'ESTADO ACTUAL POR DIENTE');
+  if (!latest.length) {
+    doc.fillColor(muted).font('Helvetica').fontSize(9).text('No hay registros de odontograma para este paciente.');
+  } else {
+    const col = [0, 58, 128, 268, 342, 424];
+    const widths = [48, 62, 130, 64, 74, 74];
+    const headers = ['Diente', 'Superficie', 'Condición', 'Fecha', 'Responsable', 'Notas'];
+    doc.roundedRect(doc.page.margins.left, doc.y, pageWidth, 22, 7).fill(brand);
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.4);
+    headers.forEach((header, index) => {
+      doc.text(header, doc.page.margins.left + col[index] + 6, doc.y + 7, { width: widths[index] });
+    });
+    doc.y += 28;
+
+    latest.forEach((entry) => {
+      const y = doc.y;
+      const notes = pdfSafe(entry.notes, '');
+      const rowHeight = Math.max(
+        30,
+        doc.heightOfString(notes || '-', { width: widths[5], lineGap: 1 }) + 14,
+        doc.heightOfString(entry.condition_name || '-', { width: widths[2], lineGap: 1 }) + 14
+      );
+      if (y + rowHeight > doc.page.height - doc.page.margins.bottom) {
+        doc.addPage();
+        doc.y = 42;
+      }
+      const rowY = doc.y;
+      doc.roundedRect(doc.page.margins.left, rowY, pageWidth, rowHeight, 7).fill('#ffffff').stroke(border);
+      doc.circle(doc.page.margins.left + col[2] + 11, rowY + 15, 4).fill(entry.condition_color || brand);
+      doc.fillColor(ink).font('Helvetica').fontSize(7.5)
+        .text(pdfSafe(entry.tooth_number), doc.page.margins.left + col[0] + 6, rowY + 9, { width: widths[0] })
+        .text(odontogramSurfaceLabel(entry.surface), doc.page.margins.left + col[1] + 6, rowY + 9, { width: widths[1] })
+        .text(pdfSafe(entry.condition_name), doc.page.margins.left + col[2] + 20, rowY + 9, { width: widths[2] - 14 })
+        .text(formatDateOnly(entry.record_date) || '-', doc.page.margins.left + col[3] + 6, rowY + 9, { width: widths[3] })
+        .text(pdfSafe(entry.created_by_name, 'Usuario'), doc.page.margins.left + col[4] + 6, rowY + 9, { width: widths[4] })
+        .text(notes || '-', doc.page.margins.left + col[5] + 6, rowY + 9, { width: widths[5], lineGap: 1 });
+      doc.y = rowY + rowHeight + 5;
+    });
+  }
+
+  drawOdontologySectionTitle(doc, 'HISTORIAL DE CAMBIOS');
+  const historyRows = history.slice(0, 80);
+  if (!historyRows.length) {
+    doc.fillColor(muted).font('Helvetica').fontSize(9).text('Sin historial odontológico registrado.');
+  } else {
+    historyRows.forEach((entry) => {
+      const text = `Diente ${entry.tooth_number} · ${entry.condition_name} · ${formatDateOnly(entry.record_date) || '-'} · ${entry.created_by_name || 'Usuario'}`;
+      const y = doc.y;
+      const height = Math.max(24, doc.heightOfString(`${text}\n${entry.notes || ''}`, { width: pageWidth - 18, lineGap: 1 }) + 12);
+      if (y + height > doc.page.height - doc.page.margins.bottom) {
+        doc.addPage();
+        doc.y = 42;
+      }
+      doc.roundedRect(doc.page.margins.left, doc.y, pageWidth, height, 7).fill('#ffffff').stroke(border);
+      doc.circle(doc.page.margins.left + 12, doc.y + 13, 4).fill(entry.condition_color || brand);
+      doc.fillColor(ink).font('Helvetica-Bold').fontSize(7.8).text(text, doc.page.margins.left + 24, doc.y + 7, {
+        width: pageWidth - 34
+      });
+      if (entry.notes) {
+        doc.fillColor(muted).font('Helvetica').fontSize(7.3).text(entry.notes, doc.page.margins.left + 24, doc.y + 17, {
+          width: pageWidth - 34
+        });
+      }
+      doc.y += height + 5;
+    });
+  }
+}
+
+function periodontalLine(item, prefix) {
+  return [
+    item[`${prefix}_mb`],
+    item[`${prefix}_b`],
+    item[`${prefix}_db`],
+    item[`${prefix}_ml`],
+    item[`${prefix}_l`],
+    item[`${prefix}_dl`]
+  ].map((value) => value === null || value === undefined ? '-' : value).join(' / ');
+}
+
+function periodontalBleedingLine(item) {
+  const labels = [
+    ['bleeding_mb', 'MB'],
+    ['bleeding_b', 'B'],
+    ['bleeding_db', 'DB'],
+    ['bleeding_ml', 'ML'],
+    ['bleeding_l', 'L'],
+    ['bleeding_dl', 'DL']
+  ];
+  const active = labels.filter(([key]) => item[key]).map(([, label]) => label);
+  return active.length ? active.join(', ') : 'No';
+}
+
+function buildOdontologyPeriodontogramPdf(doc, { client, chart }) {
+  const brand = '#a64045';
+  const ink = '#172033';
+  const muted = '#64748b';
+  const border = '#f0cfd3';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const measurements = chart.measurements || [];
+
+  drawOdontologyReportHeader(doc, {
+    title: 'Periodontograma',
+    subtitle: client?.name || 'INBIHOSPITALARIO',
+    client
+  });
+  drawOdontologyInfoGrid(doc, [
+    ['Paciente', `${pdfSafe(chart.patient_name)} · ${pdfSafe(chart.patient_code)}`],
+    ['Documento', pdfSafe(chart.patient_document_number)],
+    ['Fecha', formatDateOnly(chart.chart_date) || '-'],
+    ['Dentición', odontologyDentitionLabel(chart.dentition)]
+  ]);
+
+  if (chart.notes) {
+    drawOdontologySectionTitle(doc, 'NOTAS GENERALES');
+    doc.roundedRect(doc.page.margins.left, doc.y, pageWidth, 42, 8).fill('#ffffff').stroke(border);
+    doc.fillColor(ink).font('Helvetica').fontSize(8.4).text(chart.notes, doc.page.margins.left + 10, doc.y + 9, {
+      width: pageWidth - 20,
+      lineGap: 2
+    });
+    doc.y += 50;
+  }
+
+  drawOdontologySectionTitle(doc, 'MEDICIONES PERIODONTALES');
+  if (!measurements.length) {
+    doc.fillColor(muted).font('Helvetica').fontSize(9).text('No hay mediciones registradas.');
+    return;
+  }
+
+  const col = [0, 42, 132, 222, 298, 368, 444];
+  const widths = [34, 82, 82, 68, 62, 66, 62];
+  const drawHeader = () => {
+    doc.roundedRect(doc.page.margins.left, doc.y, pageWidth, 22, 7).fill(brand);
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.1);
+    ['Diente', 'Sondaje', 'Recesión', 'Sangrado', 'Placa/Cálc.', 'Mov/Furca', 'Notas'].forEach((header, index) => {
+      doc.text(header, doc.page.margins.left + col[index] + 5, doc.y + 7, { width: widths[index] });
+    });
+    doc.y += 28;
+  };
+
+  drawHeader();
+  measurements.forEach((item) => {
+    const plaqueCalculus = [
+      item.plaque ? 'Placa' : null,
+      item.calculus ? 'Cálculo' : null
+    ].filter(Boolean).join(', ') || '-';
+    const mobilityFurcation = [
+      item.mobility ? `Mov: ${item.mobility}` : null,
+      item.furcation ? `Furca: ${item.furcation}` : null
+    ].filter(Boolean).join(' · ') || '-';
+    const notes = pdfSafe(item.notes, '-');
+    const rowHeight = Math.max(32, doc.heightOfString(notes, { width: widths[6], lineGap: 1 }) + 14);
+    if (doc.y + rowHeight > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+      doc.y = 42;
+      drawHeader();
+    }
+    const y = doc.y;
+    doc.roundedRect(doc.page.margins.left, y, pageWidth, rowHeight, 7).fill('#ffffff').stroke(border);
+    doc.fillColor(ink).font('Helvetica').fontSize(7.1)
+      .text(pdfSafe(item.tooth_number), doc.page.margins.left + col[0] + 5, y + 8, { width: widths[0] })
+      .text(periodontalLine(item, 'probing'), doc.page.margins.left + col[1] + 5, y + 8, { width: widths[1] })
+      .text(periodontalLine(item, 'recession'), doc.page.margins.left + col[2] + 5, y + 8, { width: widths[2] })
+      .text(periodontalBleedingLine(item), doc.page.margins.left + col[3] + 5, y + 8, { width: widths[3] })
+      .text(plaqueCalculus, doc.page.margins.left + col[4] + 5, y + 8, { width: widths[4] })
+      .text(mobilityFurcation, doc.page.margins.left + col[5] + 5, y + 8, { width: widths[5] })
+      .text(notes, doc.page.margins.left + col[6] + 5, y + 8, { width: widths[6], lineGap: 1 });
+    doc.y = y + rowHeight + 5;
+  });
+}
+
+function odontologyReportStatusLabel(status) {
+  const labels = {
+    draft: 'Borrador',
+    signed: 'Firmado',
+    proposed: 'Propuesto',
+    accepted: 'Aceptado',
+    in_progress: 'En tratamiento',
+    completed: 'Completado',
+    cancelled: 'Cancelado'
+  };
+  return labels[status] || status || '-';
+}
+
+function odontologyTreatmentFinancialStatusLabel(status) {
+  const labels = {
+    'no-value': 'Sin valor',
+    unpaid: 'Sin abonos',
+    partial: 'Abono parcial',
+    paid: 'Pagado'
+  };
+  return labels[status] || status || '-';
+}
+
+function odontologyTreatmentItemStatusLabel(status) {
+  const labels = {
+    pending: 'Pendiente',
+    in_progress: 'En proceso',
+    completed: 'Realizado',
+    cancelled: 'Cancelado'
+  };
+  return labels[status] || status || '-';
+}
+
+function odontologyPaymentMethodLabel(method) {
+  const labels = {
+    efectivo: 'Efectivo',
+    transferencia: 'Transferencia',
+    tarjeta: 'Tarjeta',
+    tarjeta_credito: 'Tarjeta de crédito',
+    tarjeta_debito: 'Tarjeta débito',
+    nequi: 'Nequi',
+    daviplata: 'Daviplata',
+    cheque: 'Cheque',
+    convenio: 'Convenio',
+    otro: 'Otro'
+  };
+  return labels[method] || method || '-';
+}
+
+function odontologyPaymentStatusLabel(status) {
+  const labels = {
+    registered: 'Registrado',
+    voided: 'Anulado'
+  };
+  return labels[status] || status || '-';
+}
+
+function maskOdontologyPaymentFinancialFields(payment, canViewFinancial) {
+  if (canViewFinancial || !payment) return payment;
+  return {
+    ...payment,
+    amount: null,
+    treatment_plan_total: null
+  };
+}
+
+function maskOdontologyCashClosureFinancialFields(closure, canViewFinancial) {
+  if (canViewFinancial || !closure) return closure;
+  return {
+    ...closure,
+    total_registered: null,
+    total_voided: null
+  };
+}
+
+function maskOdontologyTreatmentPlanFinancialFields(plan, canViewFinancial) {
+  if (canViewFinancial || !plan) return plan;
+  return {
+    ...plan,
+    total_amount: null,
+    paid_amount: null,
+    balance_amount: null,
+    items: (plan.items || []).map((item) => ({
+      ...item,
+      unit_price: null
+    }))
+  };
+}
+
+function maskOdontologyDashboardFinancialFields(dashboard, canViewFinancial) {
+  if (canViewFinancial || !dashboard) return dashboard;
+  return {
+    ...dashboard,
+    counters: {
+      ...(dashboard.counters || {}),
+      paymentsToday: null
+    }
+  };
+}
+
+function maskOdontologyReportFinancialFields(report, canViewFinancial) {
+  if (canViewFinancial || !report) return report;
+  return {
+    ...report,
+    counters: {
+      ...(report.counters || {}),
+      treatmentPlanAmount: null,
+      paymentAmount: null
+    },
+    paymentsByMethod: (report.paymentsByMethod || []).map((row) => ({ ...row, total_amount: null })),
+    treatmentPlanValuesByStatus: (report.treatmentPlanValuesByStatus || []).map((row) => ({ ...row, total_amount: null })),
+    treatmentPlanFinancialSummary: (report.treatmentPlanFinancialSummary || []).map((row) => ({
+      ...row,
+      total_amount: null,
+      paid_amount: null,
+      balance_amount: null
+    })),
+    revenueByPeriod: (report.revenueByPeriod || []).map((row) => ({ ...row, total_amount: null })),
+    inventoryConsumptionByProcedureDentist: (report.inventoryConsumptionByProcedureDentist || []).map((row) => ({
+      ...row,
+      estimated_total_cost: null
+    }))
+  };
+}
+
+function maskOdontologyReportDetailsFinancialFields(details, canViewFinancial) {
+  if (canViewFinancial || !details) return details;
+  return {
+    ...details,
+    payments: (details.payments || []).map((payment) => maskOdontologyPaymentFinancialFields(payment, false))
+  };
+}
+
+function formatCopValue(value) {
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0
+  }).format(Number(value || 0));
+}
+
+function clientInitials(client) {
+  const words = String(client?.name || 'INBIHOSPITALARIO')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : words[0]?.slice(0, 2) || 'IN').toUpperCase();
+}
+
+function resolveStoredFilePath(filePath) {
+  const clean = String(filePath || '').replace(/^\/+/, '');
+  if (!clean) return null;
+  const fullPath = path.join(process.cwd(), clean);
+  return fs.existsSync(fullPath) ? fullPath : null;
+}
+
+function drawClientLogoOrBadge(doc, client, { x, y, fit = [84, 42] }) {
+  const logoPath = resolveStoredFilePath(client?.logo_path);
+  if (logoPath) {
+    try {
+      doc.image(logoPath, x, y, { fit });
+      return;
+    } catch (error) {
+      console.warn('No se pudo dibujar el logo del cliente en PDF', error.message);
+    }
+  }
+
+  const [width, height] = fit;
+  doc
+    .roundedRect(x, y, width, height, 10)
+    .fill('#ffffff')
+    .stroke('#f0cfd3');
+  doc
+    .fillColor('#a64045')
+    .font('Helvetica-Bold')
+    .fontSize(Math.min(15, height / 2.2))
+    .text(clientInitials(client), x, y + height / 2 - 8, {
+      width,
+      align: 'center'
+    });
+}
+
+function drawReportMetricCard(doc, { x, y, width, title, value, caption, accent = '#a64045' }) {
+  doc.roundedRect(x, y, width, 52, 12).fill('#ffffff').stroke('#f0cfd3');
+  doc.fillColor(accent).font('Helvetica-Bold').fontSize(7.4).text(title, x + 10, y + 9, {
+    width: width - 20
+  });
+  doc.fillColor('#172033').font('Helvetica-Bold').fontSize(13).text(String(value ?? '-'), x + 10, y + 21, {
+    width: width - 20
+  });
+  doc.fillColor('#64748b').font('Helvetica').fontSize(7.2).text(caption || '', x + 10, y + 39, {
+    width: width - 20
+  });
+}
+
+function drawReportList(doc, title, rows, columns) {
+  const brand = '#a64045';
+  const ink = '#172033';
+  const muted = '#64748b';
+  const border = '#f0cfd3';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+  drawOdontologySectionTitle(doc, title);
+  if (!rows.length) {
+    doc.fillColor(muted).font('Helvetica').fontSize(8.5).text('Sin datos en el rango seleccionado.');
+    doc.moveDown(0.4);
+    return;
+  }
+
+  const totalWidth = columns.reduce((sum, column) => sum + column.width, 0);
+  const scale = pageWidth / totalWidth;
+  const scaledColumns = columns.map((column) => ({ ...column, width: column.width * scale }));
+
+  doc.roundedRect(doc.page.margins.left, doc.y, pageWidth, 21, 7).fill(brand);
+  let x = doc.page.margins.left;
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.4);
+  scaledColumns.forEach((column) => {
+    doc.text(column.label, x + 6, doc.y + 7, { width: column.width - 12, align: column.align || 'left' });
+    x += column.width;
+  });
+  doc.y += 27;
+
+  rows.forEach((row) => {
+    const rowHeight = 28;
+    if (doc.y + rowHeight > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+      doc.y = 42;
+    }
+    const y = doc.y;
+    doc.roundedRect(doc.page.margins.left, y, pageWidth, rowHeight, 7).fill('#ffffff').stroke(border);
+    x = doc.page.margins.left;
+    doc.fillColor(ink).font('Helvetica').fontSize(7.8);
+    scaledColumns.forEach((column) => {
+      const value = typeof column.value === 'function' ? column.value(row) : row[column.value];
+      doc.text(pdfSafe(value), x + 6, y + 9, { width: column.width - 12, align: column.align || 'left' });
+      x += column.width;
+    });
+    doc.y = y + rowHeight + 5;
+  });
+}
+
+function buildOdontologyReportsPdf(doc, { client, report }) {
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const cardGap = 8;
+  const cardWidth = (pageWidth - cardGap * 3) / 4;
+
+  drawOdontologyReportHeader(doc, {
+    title: 'Reporte odontológico',
+    subtitle: `${client?.name || 'INBIHOSPITALARIO'} · ${formatDateOnly(report.range.startDate)} al ${formatDateOnly(report.range.endDate)}`,
+    client
+  });
+
+  drawOdontologyInfoGrid(doc, [
+    ['Cliente', client?.name || 'INBIHOSPITALARIO'],
+    ['Rango', `${formatDateOnly(report.range.startDate)} - ${formatDateOnly(report.range.endDate)}`],
+    ['Generado por', 'INBIHOSPITALARIO'],
+    ['Tipo de reporte', 'Clínico, agenda, pagos y soportes']
+  ]);
+
+  const cards = [
+    ['Pacientes nuevos', report.counters.newPatients, 'Registros creados'],
+    ['Citas', report.counters.appointments, `${report.counters.attendedAppointments} atendidas`],
+    ['Pagos', formatCopValue(report.counters.paymentAmount), `${report.counters.payments} pagos`],
+    ['Planes', formatCopValue(report.counters.treatmentPlanAmount), `${report.counters.treatmentPlans} creados`],
+    ['Historias firmadas', report.counters.clinicalSigned, `${report.counters.clinicalDrafts} borrador`],
+    ['Consentimientos', report.counters.consentsSigned, `${report.counters.consentsDraft} borrador`],
+    ['Adjuntos', report.counters.attachments, 'Soportes cargados'],
+    ['Canceladas / no asistió', report.counters.cancelledOrMissedAppointments, 'Seguimiento agenda']
+  ];
+
+  let x = doc.page.margins.left;
+  let y = doc.y;
+  cards.forEach(([title, value, caption], index) => {
+    if (index > 0 && index % 4 === 0) {
+      x = doc.page.margins.left;
+      y += 62;
+    }
+    drawReportMetricCard(doc, { x, y, width: cardWidth, title, value, caption });
+    x += cardWidth + cardGap;
+  });
+  doc.y = y + 66;
+
+  drawReportList(doc, 'CITAS POR ESTADO', report.appointmentsByStatus || [], [
+    { label: 'Estado', value: 'status', width: 340 },
+    { label: 'Cantidad', value: 'total', width: 100, align: 'right' }
+  ]);
+  drawReportList(doc, 'PROCEDIMIENTOS PRINCIPALES', report.topProcedures || [], [
+    { label: 'Procedimiento', value: 'name', width: 340 },
+    { label: 'Cantidad', value: 'total', width: 100, align: 'right' }
+  ]);
+  drawReportList(doc, 'PAGOS POR MÉTODO', report.paymentsByMethod || [], [
+    { label: 'Método', value: (row) => odontologyPaymentMethodLabel(row.method), width: 230 },
+    { label: 'Cantidad', value: 'total', width: 90, align: 'right' },
+    { label: 'Valor', value: (row) => formatCopValue(row.total_amount), width: 120, align: 'right' }
+  ]);
+  drawReportList(doc, 'INGRESOS POR PERIODO', report.revenueByPeriod || [], [
+    { label: 'Fecha', value: (row) => formatDateOnly(row.period_date), width: 180 },
+    { label: 'Pagos', value: 'total', width: 90, align: 'right' },
+    { label: 'Valor', value: (row) => formatCopValue(row.total_amount), width: 170, align: 'right' }
+  ]);
+  drawReportList(doc, 'TRATAMIENTOS POR ESTADO', report.treatmentPlanValuesByStatus || [], [
+    { label: 'Estado', value: (row) => odontologyReportStatusLabel(row.status), width: 220 },
+    { label: 'Cantidad', value: 'total', width: 90, align: 'right' },
+    { label: 'Valor proyectado', value: (row) => formatCopValue(row.total_amount), width: 170, align: 'right' }
+  ]);
+  drawReportList(doc, 'PLANES POR ESTADO DE PAGO', report.treatmentPlanFinancialSummary || [], [
+    { label: 'Estado pago', value: (row) => odontologyTreatmentFinancialStatusLabel(row.financial_status), width: 142 },
+    { label: 'Planes', value: 'total', width: 58, align: 'right' },
+    { label: 'Total', value: (row) => formatCopValue(row.total_amount), width: 104, align: 'right' },
+    { label: 'Pagado', value: (row) => formatCopValue(row.paid_amount), width: 104, align: 'right' },
+    { label: 'Saldo', value: (row) => formatCopValue(row.balance_amount), width: 104, align: 'right' }
+  ]);
+  drawReportList(doc, 'CONSUMO DE INVENTARIO POR PROCEDIMIENTO Y ODONTÓLOGO', report.inventoryConsumptionByProcedureDentist || [], [
+    { label: 'Procedimiento', value: 'procedure_name', width: 128 },
+    { label: 'Odontólogo', value: 'dentist_name', width: 116 },
+    { label: 'Insumo', value: 'item_name', width: 112 },
+    { label: 'Cantidad', value: (row) => `${row.total_quantity} ${row.item_unit || ''}`, width: 74, align: 'right' },
+    { label: 'Costo', value: (row) => formatCopValue(row.estimated_total_cost), width: 90, align: 'right' }
+  ]);
+  drawReportList(doc, 'PRODUCCIÓN POR ODONTÓLOGO', report.productionByDentist || [], [
+    { label: 'Odontólogo', value: 'dentist_name', width: 220 },
+    { label: 'Citas', value: 'total', width: 70, align: 'right' },
+    { label: 'Atendidas', value: 'attended', width: 80, align: 'right' },
+    { label: 'Canceladas / no asistió', value: 'cancelled_or_missed', width: 110, align: 'right' }
+  ]);
+  drawReportList(doc, 'INASISTENCIAS Y CANCELACIONES', report.cancellationsAndNoShows || [], [
+    { label: 'Fecha', value: (row) => `${formatDateOnly(row.scheduled_date)} ${String(row.start_time || '').slice(0, 5)}`, width: 94 },
+    { label: 'Estado', value: 'status', width: 74 },
+    { label: 'Paciente', value: 'patient_name', width: 126 },
+    { label: 'Odontólogo', value: 'dentist_name', width: 126 },
+    { label: 'Motivo', value: (row) => String(row.cancellation_reason || '-').slice(0, 80), width: 130 }
+  ]);
+  drawReportList(doc, 'PLANES POR ESTADO', report.treatmentPlansByStatus || [], [
+    { label: 'Estado', value: (row) => odontologyReportStatusLabel(row.status), width: 340 },
+    { label: 'Cantidad', value: 'total', width: 100, align: 'right' }
+  ]);
+  drawReportList(doc, 'HISTORIAS CLÍNICAS', report.clinicalByStatus || [], [
+    { label: 'Estado', value: (row) => odontologyReportStatusLabel(row.status), width: 340 },
+    { label: 'Cantidad', value: 'total', width: 100, align: 'right' }
+  ]);
+  drawReportList(doc, 'CONSENTIMIENTOS', report.consentsByStatus || [], [
+    { label: 'Estado', value: (row) => odontologyReportStatusLabel(row.status), width: 340 },
+    { label: 'Cantidad', value: 'total', width: 100, align: 'right' }
+  ]);
+}
+
+function buildOdontologyTreatmentPlanPdf(doc, { client, plan }) {
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const paid = Number(plan.paid_amount || 0);
+  const balance = Number(plan.balance_amount || 0);
+
+  drawOdontologyReportHeader(doc, {
+    title: 'Presupuesto / Plan de tratamiento',
+    subtitle: `${client?.name || 'INBIHOSPITALARIO'} · ${plan.title}`,
+    client
+  });
+
+  drawOdontologyInfoGrid(doc, [
+    ['Paciente', `${plan.patient_name} · ${plan.patient_code || 'Sin código'}`],
+    ['Documento', plan.patient_document_number || '-'],
+    ['Estado del plan', odontologyReportStatusLabel(plan.status)],
+    ['Historia asociada', plan.clinical_record_status ? odontologyReportStatusLabel(plan.clinical_record_status) : 'Sin historia asociada'],
+    ['Total plan', formatCopValue(plan.total_amount)],
+    ['Pagado', formatCopValue(paid)],
+    ['Saldo', formatCopValue(balance)],
+    ['Fecha', formatOdontologyConsentDate(plan.created_at)]
+  ]);
+
+  drawReportList(doc, 'PROCEDIMIENTOS PROPUESTOS', plan.items || [], [
+    { label: 'Procedimiento', value: 'procedure_name', width: 190 },
+    { label: 'Diente', value: (row) => row.tooth_number || '-', width: 54 },
+    { label: 'Cant.', value: 'quantity', width: 46, align: 'right' },
+    { label: 'Ses.', value: 'estimated_sessions', width: 46, align: 'right' },
+    { label: 'Estado', value: (row) => odontologyTreatmentItemStatusLabel(row.status), width: 76 },
+    { label: 'Valor unit.', value: (row) => formatCopValue(row.unit_price), width: 86, align: 'right' },
+    { label: 'Subtotal', value: (row) => formatCopValue(Number(row.quantity || 0) * Number(row.unit_price || 0)), width: 92, align: 'right' }
+  ]);
+
+  const descriptiveRows = [
+    ['Diagnóstico', plan.diagnosis_text],
+    ['Objetivo', plan.objective],
+    ['Notas clínicas / administrativas', plan.notes]
+  ].filter(([, value]) => String(value || '').trim());
+
+  if (descriptiveRows.length) {
+    drawReportList(doc, 'DESCRIPCIÓN DEL PLAN', descriptiveRows.map(([label, value]) => ({ label, value })), [
+      { label: 'Campo', value: 'label', width: 150 },
+      { label: 'Detalle', value: 'value', width: 390 }
+    ]);
+  }
+
+  drawOdontologySectionTitle(doc, 'RESUMEN ECONÓMICO');
+  const y = doc.y;
+  const cardWidth = (pageWidth - 16) / 3;
+  drawReportMetricCard(doc, {
+    x: doc.page.margins.left,
+    y,
+    width: cardWidth,
+    title: 'Valor total',
+    value: formatCopValue(plan.total_amount),
+    caption: `${(plan.items || []).length} procedimiento(s)`
+  });
+  drawReportMetricCard(doc, {
+    x: doc.page.margins.left + cardWidth + 8,
+    y,
+    width: cardWidth,
+    title: 'Pagado',
+    value: formatCopValue(paid),
+    caption: 'Pagos registrados'
+  });
+  drawReportMetricCard(doc, {
+    x: doc.page.margins.left + (cardWidth + 8) * 2,
+    y,
+    width: cardWidth,
+    title: 'Saldo',
+    value: formatCopValue(balance),
+    caption: 'Pendiente por pagar'
+  });
+  doc.y = y + 66;
+
+  drawOdontologySectionTitle(doc, 'ACEPTACIÓN');
+  doc
+    .fillColor('#172033')
+    .font('Helvetica')
+    .fontSize(8.4)
+    .text('Este documento presenta una propuesta de tratamiento y presupuesto. La aceptación del paciente/acudiente confirma que conoce el alcance económico y clínico del plan, sin reemplazar los consentimientos específicos que apliquen por procedimiento.', {
+      align: 'justify',
+      lineGap: 2
+    });
+  doc.moveDown(1.2);
+  const signatureY = doc.y;
+  const signatureWidth = (pageWidth - 28) / 2;
+  const patientSignaturePath = plan.accepted_signature_path
+    ? path.join(process.cwd(), String(plan.accepted_signature_path).replace(/^\//, ''))
+    : null;
+  const creatorSignaturePath = plan.created_by_signature_path
+    ? path.join(process.cwd(), String(plan.created_by_signature_path).replace(/^\//, ''))
+    : null;
+  doc.roundedRect(doc.page.margins.left, signatureY, signatureWidth, 64, 10).fill('#ffffff').stroke('#f0cfd3');
+  doc.roundedRect(doc.page.margins.left + signatureWidth + 28, signatureY, signatureWidth, 64, 10).fill('#ffffff').stroke('#f0cfd3');
+  if (patientSignaturePath && fs.existsSync(patientSignaturePath)) {
+    doc.image(patientSignaturePath, doc.page.margins.left + 12, signatureY + 8, {
+      fit: [signatureWidth - 24, 46],
+      align: 'center',
+      valign: 'center'
+    });
+  } else {
+    doc
+      .fillColor('#64748b')
+      .font('Helvetica')
+      .fontSize(7.8)
+      .text('Aceptación pendiente', doc.page.margins.left, signatureY + 27, { width: signatureWidth, align: 'center' });
+  }
+  if (creatorSignaturePath && fs.existsSync(creatorSignaturePath)) {
+    doc.image(creatorSignaturePath, doc.page.margins.left + signatureWidth + 40, signatureY + 8, {
+      fit: [signatureWidth - 24, 46],
+      align: 'center',
+      valign: 'center'
+    });
+  }
+  doc
+    .fillColor('#64748b')
+    .font('Helvetica-Bold')
+    .fontSize(7.8)
+    .text('Firma paciente / acudiente', doc.page.margins.left, signatureY + 72, { width: signatureWidth, align: 'center' });
+  doc
+    .font('Helvetica')
+    .fontSize(7.6)
+    .text(plan.accepted_signer_name || '-', { width: signatureWidth, align: 'center' })
+    .text(`${documentTypeLabel(plan.accepted_signer_document_type)} ${plan.accepted_signer_document_number || ''}`.trim() || '-', {
+      width: signatureWidth,
+      align: 'center'
+    });
+  if (plan.accepted_signer_relationship) {
+    doc.text(`Relación: ${plan.accepted_signer_relationship}`, { width: signatureWidth, align: 'center' });
+  }
+  doc.text(`Fecha aceptación: ${formatOdontologyConsentDate(plan.accepted_at) || 'Pendiente'}`, { width: signatureWidth, align: 'center' });
+
+  doc
+    .fillColor('#64748b')
+    .font('Helvetica-Bold')
+    .fontSize(7.8)
+    .text('Profesional / responsable', doc.page.margins.left + signatureWidth + 28, signatureY + 72, { width: signatureWidth, align: 'center' });
+  doc
+    .font('Helvetica')
+    .fontSize(7.6)
+    .text(plan.created_by_name || 'No registrado', { width: signatureWidth, align: 'center' })
+    .text(`Registró aceptación: ${plan.accepted_by_name || '-'}`, { width: signatureWidth, align: 'center' });
+}
+
+function buildOdontologyPaymentReceiptPdf(doc, { client, payment }) {
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const receiptNumber = String(payment.id || '').slice(0, 8).toUpperCase();
+
+  drawOdontologyReportHeader(doc, {
+    title: 'Recibo de pago odontológico',
+    subtitle: `${client?.name || 'INBIHOSPITALARIO'} · Recibo ${receiptNumber}`,
+    client
+  });
+
+  drawOdontologyInfoGrid(doc, [
+    ['Recibo', receiptNumber],
+    ['Estado', odontologyPaymentStatusLabel(payment.status)],
+    ['Paciente', `${payment.patient_name} · ${payment.patient_code || 'Sin código'}`],
+    ['Documento', payment.patient_document_number || '-'],
+    ['Fecha de pago', formatDateOnly(payment.payment_date)],
+    ['Método', odontologyPaymentMethodLabel(payment.payment_method)],
+    ['Valor recibido', formatCopValue(payment.amount)],
+    ['Registrado por', payment.created_by_name || 'No registrado']
+  ]);
+
+  drawOdontologySectionTitle(doc, 'DETALLE DEL PAGO');
+  drawReportList(doc, 'CONCEPTO Y REFERENCIA', [
+    { label: 'Concepto', value: payment.concept },
+    { label: 'Plan de tratamiento', value: payment.treatment_plan_title || 'Pago general' },
+    { label: 'Valor del plan', value: payment.treatment_plan_total ? formatCopValue(payment.treatment_plan_total) : 'No aplica' },
+    { label: 'Referencia', value: payment.reference || '-' },
+    { label: 'Notas', value: payment.notes || '-' }
+  ], [
+    { label: 'Campo', value: 'label', width: 160 },
+    { label: 'Detalle', value: 'value', width: 380 }
+  ]);
+
+  const y = doc.y;
+  const cardWidth = (pageWidth - 16) / 3;
+  drawReportMetricCard(doc, {
+    x: doc.page.margins.left,
+    y,
+    width: cardWidth,
+    title: 'Valor pagado',
+    value: formatCopValue(payment.amount),
+    caption: odontologyPaymentMethodLabel(payment.payment_method)
+  });
+  drawReportMetricCard(doc, {
+    x: doc.page.margins.left + cardWidth + 8,
+    y,
+    width: cardWidth,
+    title: 'Fecha',
+    value: formatDateOnly(payment.payment_date),
+    caption: 'Fecha contable'
+  });
+  drawReportMetricCard(doc, {
+    x: doc.page.margins.left + (cardWidth + 8) * 2,
+    y,
+    width: cardWidth,
+    title: 'Estado',
+    value: odontologyPaymentStatusLabel(payment.status),
+    caption: payment.status === 'voided' ? 'Pago anulado' : 'Pago válido'
+  });
+  doc.y = y + 68;
+
+  if (payment.status === 'voided') {
+    drawOdontologySectionTitle(doc, 'ANULACIÓN');
+    drawReportList(doc, 'DETALLE DE ANULACIÓN', [
+      { label: 'Motivo', value: payment.void_reason || '-' },
+      { label: 'Anulado por', value: payment.voided_by_name || '-' },
+      { label: 'Fecha anulación', value: payment.voided_at ? formatOdontologyConsentDate(payment.voided_at) : '-' }
+    ], [
+      { label: 'Campo', value: 'label', width: 160 },
+      { label: 'Detalle', value: 'value', width: 380 }
+    ]);
+  }
+
+  drawOdontologySectionTitle(doc, 'CONSTANCIA');
+  doc
+    .fillColor('#172033')
+    .font('Helvetica')
+    .fontSize(8.6)
+    .text('Este recibo certifica el registro del pago en el software odontológico. Su validez administrativa depende de la verificación interna del cliente y de los comprobantes externos cuando apliquen.', {
+      align: 'justify',
+      lineGap: 2
+    });
+  doc.moveDown(1.3);
+  doc
+    .moveTo(doc.page.margins.left, doc.y + 34)
+    .lineTo(doc.page.margins.left + 220, doc.y + 34)
+    .stroke('#f0cfd3');
+  doc
+    .fillColor('#64748b')
+    .font('Helvetica-Bold')
+    .fontSize(7.8)
+    .text('Firma / sello de recepción', doc.page.margins.left, doc.y + 40, { width: 220, align: 'center' });
+}
+
+function buildOdontologyPaymentCashierReportPdf(doc, { client, payments, filters }) {
+  const registered = payments.filter((payment) => payment.status === 'registered');
+  const voided = payments.filter((payment) => payment.status === 'voided');
+  const totalRegistered = registered.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const totalVoided = voided.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const byCashier = Array.from(payments.reduce((map, payment) => {
+    const key = payment.created_by_name || 'No registrado';
+    const row = map.get(key) || { cashier: key, total: 0, registered: 0, voided: 0, amount: 0 };
+    row.total += 1;
+    if (payment.status === 'registered') {
+      row.registered += 1;
+      row.amount += Number(payment.amount || 0);
+    } else {
+      row.voided += 1;
+    }
+    map.set(key, row);
+    return map;
+  }, new Map()).values());
+
+  drawOdontologyReportHeader(doc, {
+    title: 'Reporte de pagos por cajero',
+    subtitle: `${client?.name || 'INBIHOSPITALARIO'} · ${formatDateOnly(filters.startDate)} al ${formatDateOnly(filters.endDate)}`,
+    client
+  });
+
+  drawOdontologyInfoGrid(doc, [
+    ['Cliente', client?.name || 'INBIHOSPITALARIO'],
+    ['Rango', `${formatDateOnly(filters.startDate)} - ${formatDateOnly(filters.endDate)}`],
+    ['Cajero / usuario', filters.cashier || 'Todos'],
+    ['Estado', filters.status ? odontologyPaymentStatusLabel(filters.status) : 'Todos'],
+    ['Pagos registrados', registered.length],
+    ['Pagos anulados', voided.length],
+    ['Total recibido', formatCopValue(totalRegistered)],
+    ['Total anulado', formatCopValue(totalVoided)]
+  ]);
+
+  drawReportList(doc, 'RESUMEN POR CAJERO / USUARIO', byCashier, [
+    { label: 'Cajero / usuario', value: 'cashier', width: 230 },
+    { label: 'Registrados', value: 'registered', width: 90, align: 'right' },
+    { label: 'Anulados', value: 'voided', width: 80, align: 'right' },
+    { label: 'Total pagos', value: 'total', width: 80, align: 'right' },
+    { label: 'Valor recibido', value: (row) => formatCopValue(row.amount), width: 130, align: 'right' }
+  ]);
+
+  drawReportList(doc, 'DETALLE DE PAGOS', payments, [
+    { label: 'Fecha', value: (row) => formatDateOnly(row.payment_date), width: 74 },
+    { label: 'Paciente', value: 'patient_name', width: 126 },
+    { label: 'Concepto', value: 'concept', width: 120 },
+    { label: 'Método', value: (row) => odontologyPaymentMethodLabel(row.payment_method), width: 78 },
+    { label: 'Cajero', value: (row) => row.created_by_name || '-', width: 94 },
+    { label: 'Estado', value: (row) => odontologyPaymentStatusLabel(row.status), width: 66 },
+    { label: 'Valor', value: (row) => formatCopValue(row.amount), width: 82, align: 'right' }
+  ]);
+}
+
+function buildOdontologyCashClosurePdf(doc, { client, closure, payments }) {
+  const registered = payments.filter((payment) => payment.status === 'registered');
+  const voided = payments.filter((payment) => payment.status === 'voided');
+  const totalRegistered = Number(closure.total_registered || 0);
+  const totalVoided = Number(closure.total_voided || 0);
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const cardWidth = (pageWidth - 16) / 3;
+
+  drawOdontologyReportHeader(doc, {
+    title: 'Cierre de caja odontológico',
+    subtitle: `${client?.name || 'INBIHOSPITALARIO'} · ${formatDateOnly(closure.date_from)} al ${formatDateOnly(closure.date_to)}`,
+    client
+  });
+
+  drawOdontologyInfoGrid(doc, [
+    ['Cliente', client?.name || 'INBIHOSPITALARIO'],
+    ['Rango cerrado', `${formatDateOnly(closure.date_from)} - ${formatDateOnly(closure.date_to)}`],
+    ['Cajero / usuario', closure.cashier_filter || 'Todos'],
+    ['Cerrado por', closure.created_by_name || 'No registrado'],
+    ['Fecha de cierre', formatOdontologyConsentDate(closure.created_at)],
+    ['Estado', 'Cierre generado']
+  ]);
+
+  const metricY = doc.y + 12;
+  drawReportMetricCard(doc, {
+    x: doc.page.margins.left,
+    y: metricY,
+    width: cardWidth,
+    title: 'Total recibido',
+    value: formatCopValue(totalRegistered),
+    caption: `${closure.registered_count || registered.length} pagos registrados`
+  });
+  drawReportMetricCard(doc, {
+    x: doc.page.margins.left + cardWidth + 8,
+    y: metricY,
+    width: cardWidth,
+    title: 'Total anulado',
+    value: formatCopValue(totalVoided),
+    caption: `${closure.voided_count || voided.length} pagos anulados`
+  });
+  drawReportMetricCard(doc, {
+    x: doc.page.margins.left + (cardWidth + 8) * 2,
+    y: metricY,
+    width: cardWidth,
+    title: 'Neto operativo',
+    value: formatCopValue(totalRegistered - totalVoided),
+    caption: 'Recibido menos anulados'
+  });
+  doc.y = metricY + 72;
+
+  if (closure.notes) {
+    drawOdontologySectionTitle(doc, 'OBSERVACIONES DEL CIERRE');
+    doc
+      .fillColor('#172033')
+      .font('Helvetica')
+      .fontSize(8.4)
+      .text(pdfSafe(closure.notes), { align: 'justify', lineGap: 2 });
+  }
+
+  drawReportList(doc, 'DETALLE DE PAGOS DEL CIERRE', payments, [
+    { label: 'Fecha', value: (row) => formatDateOnly(row.payment_date), width: 72 },
+    { label: 'Paciente', value: 'patient_name', width: 132 },
+    { label: 'Concepto', value: 'concept', width: 130 },
+    { label: 'Método', value: (row) => odontologyPaymentMethodLabel(row.payment_method), width: 80 },
+    { label: 'Estado', value: (row) => odontologyPaymentStatusLabel(row.status), width: 70 },
+    { label: 'Valor', value: (row) => formatCopValue(row.amount), width: 86, align: 'right' }
+  ]);
+
+  doc.moveDown(0.8);
+  const signatureY = doc.y + 8;
+  doc
+    .moveTo(doc.page.margins.left, signatureY + 34)
+    .lineTo(doc.page.margins.left + 230, signatureY + 34)
+    .stroke('#f0cfd3');
+  doc
+    .fillColor('#64748b')
+    .font('Helvetica-Bold')
+    .fontSize(7.8)
+    .text('Firma / responsable de cierre', doc.page.margins.left, signatureY + 40, { width: 230, align: 'center' });
+}
+
+async function buildOdontologyCashClosurePdfFile({ client, closure, payments }) {
+  const relativeDir = path.join('uploads', 'clients', closure.client_id, 'odontology', 'payments', 'cash-closures');
+  const fileName = `${pdfFilename(`cierre-caja-${closure.date_from}-${closure.date_to}-${closure.id}`)}.pdf`;
+  const relativePath = path.join(relativeDir, fileName);
+  const fullDir = path.join(process.cwd(), relativeDir);
+  const fullPath = path.join(process.cwd(), relativePath);
+  const publicPath = `/${relativePath}`.replace(/\\/g, '/');
+
+  await fs.promises.mkdir(fullDir, { recursive: true });
+
+  const doc = new PDFDocument({ size: 'A4', margin: 42 });
+  const stream = fs.createWriteStream(fullPath);
+  doc.pipe(stream);
+  buildOdontologyCashClosurePdf(doc, { client, closure, payments });
+  doc.end();
+  await finished(stream);
+  return publicPath;
+}
+
+function odontologySterilizationMethodLabel(value) {
+  const labels = {
+    autoclave: 'Autoclave',
+    chemical: 'Químico',
+    dry_heat: 'Calor seco',
+    other: 'Otro'
+  };
+  return labels[value] || value || '-';
+}
+
+function odontologySterilizationResultLabel(value) {
+  const labels = {
+    successful: 'Exitoso',
+    failed: 'Fallido',
+    pending: 'Pendiente'
+  };
+  return labels[value] || value || '-';
+}
+
+function buildOdontologySterilizationCyclePdf(doc, { client, cycle }) {
+  drawOdontologyReportHeader(doc, {
+    title: 'Certificado interno de esterilización',
+    subtitle: `${client?.name || 'INBIHOSPITALARIO'} · Ciclo ${cycle.cycle_code || cycle.id}`,
+    client
+  });
+
+  drawOdontologyInfoGrid(doc, [
+    ['Código / lote', cycle.cycle_code || cycle.id],
+    ['Fecha del ciclo', formatDateOnly(cycle.cycle_date)],
+    ['Método', odontologySterilizationMethodLabel(cycle.method)],
+    ['Resultado', odontologySterilizationResultLabel(cycle.result)],
+    ['Hora de inicio', cycle.start_time ? String(cycle.start_time).slice(0, 5) : '-'],
+    ['Hora de fin', cycle.end_time ? String(cycle.end_time).slice(0, 5) : '-'],
+    ['Responsable', cycle.operator_name || cycle.created_by_name || 'No registrado'],
+    ['Instrumental procesado', cycle.item_count || cycle.items?.length || 0]
+  ]);
+
+  drawReportList(doc, 'PARÁMETROS E INDICADORES', [
+    { label: 'Temperatura', value: cycle.temperature || '-' },
+    { label: 'Presión', value: cycle.pressure || '-' },
+    { label: 'Indicador biológico', value: cycle.biological_indicator || '-' },
+    { label: 'Indicador químico', value: cycle.chemical_indicator || '-' }
+  ], [
+    { label: 'Campo', value: 'label', width: 190 },
+    { label: 'Registro', value: 'value', width: 350 }
+  ]);
+
+  drawReportList(doc, 'TRAZABILIDAD CLÍNICA', [
+    { label: 'Paciente', value: cycle.patient_name || 'Sin cita asociada' },
+    { label: 'Procedimiento', value: cycle.procedure_name || 'No aplica' },
+    {
+      label: 'Cita',
+      value: cycle.appointment_date
+        ? `${formatDateOnly(cycle.appointment_date)} ${cycle.appointment_start_time ? String(cycle.appointment_start_time).slice(0, 5) : ''}`.trim()
+        : 'No aplica'
+    }
+  ], [
+    { label: 'Campo', value: 'label', width: 190 },
+    { label: 'Detalle', value: 'value', width: 350 }
+  ]);
+
+  drawReportList(doc, 'INSTRUMENTAL PROCESADO', cycle.items || [], [
+    { label: 'Código', value: (row) => row.instrument_code || '-', width: 90 },
+    { label: 'Instrumental', value: 'instrument_name', width: 220 },
+    { label: 'Categoría', value: (row) => row.instrument_category || '-', width: 120 },
+    { label: 'Cantidad', value: 'quantity', width: 70, align: 'right' },
+    { label: 'Nota', value: (row) => row.notes || '-', width: 130 }
+  ]);
+
+  if (cycle.observations) {
+    drawOdontologySectionTitle(doc, 'OBSERVACIONES');
+    doc
+      .fillColor('#172033')
+      .font('Helvetica')
+      .fontSize(8.6)
+      .text(pdfSafe(cycle.observations), {
+        align: 'justify',
+        lineGap: 2
+      });
+  }
+
+  drawOdontologySectionTitle(doc, 'RESPONSABLE Y CONTROL DOCUMENTAL');
+  doc
+    .fillColor('#172033')
+    .font('Helvetica')
+    .fontSize(8.4)
+    .text(`Registrado por: ${pdfSafe(cycle.created_by_name || cycle.operator_name)}`)
+    .text(`Generado: ${formatOdontologyConsentDate(new Date())}`)
+    .text('Documento interno para soporte de trazabilidad, auditoría y control de esterilización odontológica.');
+}
+
+async function buildOdontologySterilizationCyclePdfFile({ client, cycle }) {
+  const relativeDir = path.join('uploads', 'clients', cycle.client_id, 'odontology', 'sterilization');
+  const fileName = `${pdfFilename(`ciclo-esterilizacion-${cycle.cycle_code || cycle.id}`)}.pdf`;
+  const relativePath = path.join(relativeDir, fileName);
+  const fullDir = path.join(process.cwd(), relativeDir);
+  const fullPath = path.join(process.cwd(), relativePath);
+  const publicPath = `/${relativePath}`.replace(/\\/g, '/');
+
+  await fs.promises.mkdir(fullDir, { recursive: true });
+
+  const doc = new PDFDocument({ size: 'A4', margin: 42 });
+  const stream = fs.createWriteStream(fullPath);
+  doc.pipe(stream);
+  buildOdontologySterilizationCyclePdf(doc, { client, cycle });
+  doc.end();
+  await finished(stream);
+  return publicPath;
+}
+
+function buildOdontologySterilizationLabelsPdf(doc, { client, cycle }) {
+  const brand = '#a64045';
+  const brandDark = '#7f1d1d';
+  const ink = '#172033';
+  const muted = '#64748b';
+  const border = '#f0cfd3';
+  const soft = '#fff7f7';
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const gap = 10;
+  const labelWidth = (pageWidth - gap) / 2;
+  const labelHeight = 92;
+  const labels = [];
+
+  for (const item of cycle.items || []) {
+    const quantity = Math.max(1, Math.min(Number(item.quantity || 1), 120 - labels.length));
+    for (let index = 0; index < quantity; index += 1) {
+      labels.push({
+        ...item,
+        copyIndex: index + 1,
+        copyTotal: Number(item.quantity || 1)
+      });
+      if (labels.length >= 120) break;
+    }
+    if (labels.length >= 120) break;
+  }
+
+  const drawPageHeader = () => {
+    doc.fillColor(brand).font('Helvetica-Bold').fontSize(13).text('Etiquetas de esterilización', doc.page.margins.left, 22, {
+      width: pageWidth - 110
+    });
+    doc
+      .fillColor(muted)
+      .font('Helvetica')
+      .fontSize(7.8)
+      .text(`${client?.name || 'INBIHOSPITALARIO'} · Ciclo ${cycle.cycle_code || cycle.id}`, {
+        width: pageWidth - 110
+      });
+    drawClientLogoOrBadge(doc, client, { x: doc.page.width - doc.page.margins.right - 86, y: 18, fit: [82, 34] });
+    doc.y = 62;
+  };
+
+  drawPageHeader();
+
+  if (!labels.length) {
+    doc.fillColor(muted).font('Helvetica').fontSize(9).text('Este ciclo no tiene instrumental asociado.');
+    return;
+  }
+
+  labels.forEach((item, index) => {
+    const column = index % 2;
+    const row = Math.floor((index % 10) / 2);
+    if (index > 0 && index % 10 === 0) {
+      doc.addPage();
+      drawPageHeader();
+    }
+
+    const x = doc.page.margins.left + column * (labelWidth + gap);
+    const y = 70 + row * (labelHeight + 8);
+    const resultColor = cycle.result === 'successful' ? '#15803d' : cycle.result === 'failed' ? '#b91c1c' : '#92400e';
+
+    doc.roundedRect(x, y, labelWidth, labelHeight, 10).fill('#ffffff').stroke(border);
+    doc.roundedRect(x + 8, y + 8, labelWidth - 16, 19, 7).fill(soft);
+    doc.fillColor(brandDark).font('Helvetica-Bold').fontSize(7.3).text('LOTE / CICLO', x + 14, y + 13, { width: 72 });
+    doc.fillColor(ink).font('Helvetica-Bold').fontSize(8.4).text(pdfSafe(cycle.cycle_code || cycle.id), x + 84, y + 12, {
+      width: labelWidth - 104,
+      align: 'right'
+    });
+
+    doc
+      .fillColor(ink)
+      .font('Helvetica-Bold')
+      .fontSize(9)
+      .text(pdfSafe(item.instrument_name), x + 12, y + 34, { width: labelWidth - 24, height: 24 });
+    doc
+      .fillColor(muted)
+      .font('Helvetica')
+      .fontSize(7.2)
+      .text(`Código: ${pdfSafe(item.instrument_code)} · ${pdfSafe(item.instrument_category, 'Sin categoría')}`, x + 12, y + 55, {
+        width: labelWidth - 24
+      });
+    doc
+      .fillColor(muted)
+      .fontSize(7.2)
+      .text(`Fecha: ${formatDateOnly(cycle.cycle_date)} · Método: ${odontologySterilizationMethodLabel(cycle.method)}`, x + 12, y + 67, {
+        width: labelWidth - 24
+      });
+    doc
+      .fillColor(resultColor)
+      .font('Helvetica-Bold')
+      .fontSize(7.4)
+      .text(`Resultado: ${odontologySterilizationResultLabel(cycle.result)}`, x + 12, y + 79, {
+        width: labelWidth - 95
+      });
+    doc
+      .fillColor(brand)
+      .font('Helvetica-Bold')
+      .fontSize(7.4)
+      .text(`${item.copyIndex}/${item.copyTotal}`, x + labelWidth - 70, y + 79, {
+        width: 58,
+        align: 'right'
+      });
+  });
+
+  if ((cycle.items || []).some((item) => Number(item.quantity || 0) > 120) || (cycle.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0) > 120) {
+    doc.addPage();
+    drawPageHeader();
+    doc
+      .fillColor(muted)
+      .font('Helvetica')
+      .fontSize(9)
+      .text('Nota: por control de tamaño se generaron máximo 120 etiquetas. Si necesitas más, divide el ciclo en grupos de impresión.');
+  }
+}
+
+function buildOdontologySterilizationReportPdf(doc, { client, cycles, filters }) {
+  const totalItems = cycles.reduce((sum, cycle) => sum + Number(cycle.item_count || cycle.items?.length || 0), 0);
+  const successful = cycles.filter((cycle) => cycle.result === 'successful').length;
+  const failed = cycles.filter((cycle) => cycle.result === 'failed').length;
+  const pending = cycles.filter((cycle) => cycle.result === 'pending').length;
+
+  drawOdontologyReportHeader(doc, {
+    title: 'Reporte de ciclos de esterilización',
+    subtitle: `${client?.name || 'INBIHOSPITALARIO'} · ${formatDateOnly(filters.startDate)} al ${formatDateOnly(filters.endDate)}`,
+    client
+  });
+
+  drawOdontologyInfoGrid(doc, [
+    ['Cliente', client?.name || 'INBIHOSPITALARIO'],
+    ['Rango', `${formatDateOnly(filters.startDate)} - ${formatDateOnly(filters.endDate)}`],
+    ['Resultado', filters.result ? odontologySterilizationResultLabel(filters.result) : 'Todos'],
+    ['Método', filters.method ? odontologySterilizationMethodLabel(filters.method) : 'Todos'],
+    ['Responsable', filters.responsible || 'Todos'],
+    ['Ciclos listados', cycles.length],
+    ['Ciclos exitosos', successful],
+    ['Instrumentales procesados', totalItems]
+  ]);
+
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const cardWidth = (pageWidth - 16) / 3;
+  const y = doc.y;
+  drawReportMetricCard(doc, { x: doc.page.margins.left, y, width: cardWidth, title: 'Exitosos', value: successful, caption: 'Ciclos finalizados', accent: '#15803d' });
+  drawReportMetricCard(doc, { x: doc.page.margins.left + cardWidth + 8, y, width: cardWidth, title: 'Pendientes', value: pending, caption: 'Requieren seguimiento', accent: '#92400e' });
+  drawReportMetricCard(doc, { x: doc.page.margins.left + (cardWidth + 8) * 2, y, width: cardWidth, title: 'Fallidos', value: failed, caption: 'No conformes', accent: '#b91c1c' });
+  doc.y = y + 62;
+
+  drawReportList(doc, 'CICLOS DE ESTERILIZACIÓN', cycles, [
+    { label: 'Fecha', value: (row) => formatDateOnly(row.cycle_date), width: 80 },
+    { label: 'Lote', value: (row) => row.cycle_code || row.id, width: 105 },
+    { label: 'Método', value: (row) => odontologySterilizationMethodLabel(row.method), width: 82 },
+    { label: 'Resultado', value: (row) => odontologySterilizationResultLabel(row.result), width: 74 },
+    { label: 'Responsable', value: (row) => row.operator_name || row.created_by_name || '-', width: 118 },
+    { label: 'Instrumental', value: (row) => row.item_count || row.items?.length || 0, width: 70, align: 'right' }
+  ]);
+
+  const instrumentRows = cycles.flatMap((cycle) =>
+    (cycle.items || []).map((item) => ({
+      cycle_code: cycle.cycle_code || cycle.id,
+      cycle_date: cycle.cycle_date,
+      instrument_name: item.instrument_name,
+      quantity: item.quantity,
+      notes: item.notes
+    }))
+  );
+  drawReportList(doc, 'DETALLE DE INSTRUMENTAL PROCESADO', instrumentRows, [
+    { label: 'Fecha', value: (row) => formatDateOnly(row.cycle_date), width: 80 },
+    { label: 'Lote', value: 'cycle_code', width: 110 },
+    { label: 'Instrumental', value: 'instrument_name', width: 230 },
+    { label: 'Cantidad', value: 'quantity', width: 70, align: 'right' },
+    { label: 'Nota', value: (row) => row.notes || '-', width: 120 }
+  ]);
+}
+
+app.get('/odontology/:clientId/bootstrap', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    const dashboard = await getOdontologyDashboard(req.params.clientId);
+    return res.json(maskOdontologyDashboardFinancialFields(dashboard, canViewOdontologyFinancialValues(req.user)));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar odontología.' });
+  }
+});
+
+app.get('/odontology/:clientId/dashboard', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    const dashboard = await getOdontologyDashboard(req.params.clientId);
+    return res.json(maskOdontologyDashboardFinancialFields(dashboard, canViewOdontologyFinancialValues(req.user)));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el tablero odontológico.' });
+  }
+});
+
+app.get('/odontology/:clientId/reports', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canViewOdontologyReports(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver reportes odontológicos.' });
+    }
+    const report = await getOdontologyReports({
+      clientId: req.params.clientId,
+      startDate: req.query.startDate || '',
+      endDate: req.query.endDate || ''
+    });
+    return res.json(maskOdontologyReportFinancialFields(report, canViewOdontologyFinancialValues(req.user)));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los reportes odontológicos.' });
+  }
+});
+
+app.get('/odontology/:clientId/reports/details', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canViewOdontologyReports(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver reportes odontológicos.' });
+    }
+    const details = await getOdontologyReportDetails({
+      clientId: req.params.clientId,
+      startDate: req.query.startDate || '',
+      endDate: req.query.endDate || ''
+    });
+    return res.json(maskOdontologyReportDetailsFinancialFields(details, canViewOdontologyFinancialValues(req.user)));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el detalle de reportes odontológicos.' });
+  }
+});
+
+app.get('/odontology/:clientId/reports/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canViewOdontologyReports(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver reportes odontológicos.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para exportar valores económicos.' });
+    }
+    const report = await getOdontologyReports({
+      clientId: req.params.clientId,
+      startDate: req.query.startDate || '',
+      endDate: req.query.endDate || ''
+    });
+    const client = await getClientById(req.params.clientId).catch(() => null);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFilename(`reporte-odontologia-${report.range.startDate}-${report.range.endDate}`)}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 42 });
+    doc.pipe(res);
+    buildOdontologyReportsPdf(doc, { client, report });
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo generar el PDF de reportes odontológicos.' });
+  }
+});
+
+app.get('/odontology/:clientId/settings', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    const settings = await getOdontologySettings(req.params.clientId);
+    return res.json(settings);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar la configuración odontológica.' });
+  }
+});
+
+app.patch('/odontology/:clientId/settings', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar odontología.' });
+    }
+    const result = await updateOdontologySettings({
+      clientId: req.params.clientId,
+      payload: req.body || {}
+    });
+    if (result.error) return res.status(400).json({ message: result.message });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_SETTINGS_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        defaultLandingPage: result.settings.default_landing_page
+      }
+    });
+    return res.json(result.settings);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar la configuración odontológica.' });
+  }
+});
+
+app.get('/odontology/:clientId/sites', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    const sites = await listOdontologySites(req.params.clientId);
+    return res.json(sites);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar las sedes odontológicas.' });
+  }
+});
+
+app.get('/odontology/:clientId/chairs', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    const chairs = await listOdontologyChairs(req.params.clientId);
+    return res.json(chairs);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar las unidades odontológicas.' });
+  }
+});
+
+app.post('/odontology/:clientId/sites', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar odontología.' });
+    }
+    const result = await createOdontologySite({
+      clientId: req.params.clientId,
+      payload: req.body || {}
+    });
+    if (result.error) {
+      const status = result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_SITE_CREATE',
+      details: { clientId: req.params.clientId, siteId: result.site.id, name: result.site.name }
+    });
+    return res.status(201).json(result.site);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear la sede odontológica.' });
+  }
+});
+
+app.patch('/odontology/:clientId/sites/:siteId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar odontología.' });
+    }
+    const result = await updateOdontologySite({
+      clientId: req.params.clientId,
+      siteId: req.params.siteId,
+      payload: req.body || {}
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_SITE_UPDATE',
+      details: { clientId: req.params.clientId, siteId: result.site.id, name: result.site.name }
+    });
+    return res.json(result.site);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar la sede odontológica.' });
+  }
+});
+
+app.post('/odontology/:clientId/chairs', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar odontología.' });
+    }
+    const result = await createOdontologyChair({
+      clientId: req.params.clientId,
+      payload: req.body || {}
+    });
+    if (result.error) {
+      const status = result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CHAIR_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        chairId: result.chair.id,
+        siteId: result.chair.site_id,
+        name: result.chair.name
+      }
+    });
+    return res.status(201).json(result.chair);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear la unidad odontológica.' });
+  }
+});
+
+app.patch('/odontology/:clientId/chairs/:chairId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar odontología.' });
+    }
+    const result = await updateOdontologyChair({
+      clientId: req.params.clientId,
+      chairId: req.params.chairId,
+      payload: req.body || {}
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CHAIR_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        chairId: result.chair.id,
+        siteId: result.chair.site_id,
+        name: result.chair.name
+      }
+    });
+    return res.json(result.chair);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar la unidad odontológica.' });
+  }
+});
+
+app.get('/odontology/:clientId/procedure-types', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    const procedures = await listOdontologyProcedureTypes(req.params.clientId);
+    return res.json(procedures);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los procedimientos odontológicos.' });
+  }
+});
+
+app.post('/odontology/:clientId/procedure-types', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar procedimientos odontológicos.' });
+    }
+    const result = await createOdontologyProcedureType({
+      clientId: req.params.clientId,
+      payload: req.body || {}
+    });
+    if (result.error) {
+      const status = result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PROCEDURE_TYPE_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        procedureTypeId: result.procedure?.id,
+        name: result.procedure?.name
+      }
+    });
+    return res.status(201).json(result.procedure);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el procedimiento odontológico.' });
+  }
+});
+
+app.patch('/odontology/:clientId/procedure-types/:procedureTypeId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar procedimientos odontológicos.' });
+    }
+    const result = await updateOdontologyProcedureType({
+      clientId: req.params.clientId,
+      procedureTypeId: req.params.procedureTypeId,
+      payload: req.body || {}
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PROCEDURE_TYPE_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        procedureTypeId: result.procedure?.id,
+        name: result.procedure?.name,
+        isActive: result.procedure?.is_active
+      }
+    });
+    return res.json(result.procedure);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar el procedimiento odontológico.' });
+  }
+});
+
+app.get('/odontology/:clientId/catalog', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    const catalog = await listOdontologyCatalog(
+      req.params.clientId,
+      req.query.type ? String(req.query.type) : null
+    );
+    return res.json(catalog);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el catálogo odontológico.' });
+  }
+});
+
+app.post('/odontology/:clientId/catalog', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar catálogos odontológicos.' });
+    }
+    const result = await createOdontologyCatalogItem({
+      clientId: req.params.clientId,
+      payload: req.body || {}
+    });
+    if (result.error) {
+      const status = result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CATALOG_ITEM_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        catalogItemId: result.item?.id,
+        catalogType: result.item?.catalog_type,
+        name: result.item?.name
+      }
+    });
+    return res.status(201).json(result.item);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el elemento del catálogo.' });
+  }
+});
+
+app.patch('/odontology/:clientId/catalog/:itemId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar catálogos odontológicos.' });
+    }
+    const result = await updateOdontologyCatalogItem({
+      clientId: req.params.clientId,
+      itemId: req.params.itemId,
+      payload: req.body || {}
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CATALOG_ITEM_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        catalogItemId: result.item?.id,
+        catalogType: result.item?.catalog_type,
+        name: result.item?.name,
+        isActive: result.item?.is_active
+      }
+    });
+    return res.json(result.item);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar el elemento del catálogo.' });
+  }
+});
+
+app.get('/odontology/:clientId/dentists', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyAppointments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver agenda odontológica.' });
+    }
+    const dentists = await listOdontologyDentists(req.params.clientId);
+    return res.json(dentists);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los odontólogos.' });
+  }
+});
+
+app.get('/odontology/:clientId/dentist-schedules', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver horarios odontológicos.' });
+    }
+    const schedules = await listOdontologyDentistSchedules({
+      clientId: req.params.clientId,
+      dentistUserId: req.query.dentistId || ''
+    });
+    return res.json(schedules);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los horarios odontológicos.' });
+  }
+});
+
+app.put('/odontology/:clientId/dentist-schedules/:dentistId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySettings(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar horarios odontológicos.' });
+    }
+    const result = await replaceOdontologyDentistSchedules({
+      clientId: req.params.clientId,
+      dentistUserId: req.params.dentistId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) return res.status(400).json({ message: result.message });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_DENTIST_SCHEDULES_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        dentistUserId: req.params.dentistId,
+        schedulesCount: result.schedules.length
+      }
+    });
+    return res.json(result.schedules);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron guardar los horarios odontológicos.' });
+  }
+});
+
+app.get('/odontology/:clientId/appointments', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyAppointments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver agenda odontológica.' });
+    }
+    const appointments = await listOdontologyAppointments({
+      clientId: req.params.clientId,
+      date: req.query.date || '',
+      dateFrom: req.query.dateFrom || '',
+      dateTo: req.query.dateTo || '',
+      status: req.query.status || '',
+      dentistId: req.query.dentistId || '',
+      patientId: req.query.patientId || '',
+      siteId: req.query.siteId || '',
+      chairId: req.query.chairId || '',
+      search: req.query.search || ''
+    });
+    return res.json(appointments);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar las citas.' });
+  }
+});
+
+app.get('/odontology/:clientId/appointment-reminders', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyAppointments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver recordatorios odontológicos.' });
+    }
+    const reminders = await listOdontologyAppointmentReminders({
+      clientId: req.params.clientId,
+      date: req.query.date || '',
+      dateFrom: req.query.dateFrom || '',
+      dateTo: req.query.dateTo || '',
+      status: req.query.status || '',
+      channel: req.query.channel || '',
+      reminderKind: req.query.reminderKind || '',
+      search: req.query.search || ''
+    });
+    return res.json(reminders);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los recordatorios odontológicos.' });
+  }
+});
+
+app.post('/odontology/:clientId/appointments', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyAppointments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear citas odontológicas.' });
+    }
+    const result = await createOdontologyAppointment({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'CONFLICT' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_APPOINTMENT_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        appointmentId: result.appointment.id,
+        patientId: result.appointment.patient_id,
+        dentistUserId: result.appointment.dentist_user_id,
+        scheduledDate: result.appointment.scheduled_date
+      }
+    });
+    return res.status(201).json(result.appointment);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear la cita.' });
+  }
+});
+
+app.patch('/odontology/:clientId/appointments/:appointmentId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyAppointments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para editar citas odontológicas.' });
+    }
+    const result = await updateOdontologyAppointment({
+      clientId: req.params.clientId,
+      appointmentId: req.params.appointmentId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'CONFLICT' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_APPOINTMENT_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        appointmentId: result.appointment.id,
+        patientId: result.appointment.patient_id,
+        dentistUserId: result.appointment.dentist_user_id,
+        scheduledDate: result.appointment.scheduled_date,
+        status: result.appointment.status,
+        inventoryConsumptions: result.inventoryConsumptions?.length || 0
+      }
+    });
+    return res.json(result.appointment);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar la cita.' });
+  }
+});
+
+app.post('/odontology/:clientId/appointments/:appointmentId/reminders/email', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyAppointments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para enviar recordatorios odontológicos.' });
+    }
+
+    const appointment = await getOdontologyAppointmentById({
+      clientId: req.params.clientId,
+      appointmentId: req.params.appointmentId
+    });
+    if (!appointment) return res.status(404).json({ message: 'Cita no encontrada.' });
+    if (!appointment.patient_email) {
+      return res.status(400).json({ message: 'El paciente no tiene correo registrado.' });
+    }
+
+    const client = await getClientById(req.params.clientId).catch(() => null);
+    const dateLabel = formatOdontologyAppointmentDate(appointment.scheduled_date);
+    const timeLabel = `${String(appointment.start_time || '').slice(0, 5)} - ${String(appointment.end_time || '').slice(0, 5)}`;
+    const subject = `Recordatorio de cita odontológica - ${dateLabel}`;
+    const message = [
+      `Hola ${appointment.patient_name},`,
+      '',
+      `Te recordamos tu cita odontológica en ${client?.name || 'nuestra institución'}.`,
+      `Fecha: ${dateLabel}`,
+      `Hora: ${timeLabel}`,
+      `Odontólogo: ${appointment.dentist_name || 'Por confirmar'}`,
+      `Procedimiento: ${appointment.procedure_name || 'Consulta odontológica'}`,
+      `Sede: ${appointment.site_name || 'Por confirmar'}`,
+      appointment.chair_name ? `Unidad: ${appointment.chair_name}` : '',
+      '',
+      'Si necesitas reprogramar o cancelar, por favor comunícate con la institución.',
+      '',
+      'INBIHOSPITALARIO'
+    ].filter(Boolean).join('\n');
+
+    try {
+      await sendNotificationEmail({
+        to: appointment.patient_email,
+        subject,
+        text: message
+      });
+      const reminder = await createOdontologyAppointmentReminderLog({
+        clientId: req.params.clientId,
+        appointmentId: appointment.id,
+        channel: 'email',
+        recipientName: appointment.patient_name,
+        recipientEmail: appointment.patient_email,
+        subject,
+        message,
+        status: 'sent',
+        actorUserId: req.user.sub
+      });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'ODONTOLOGY_APPOINTMENT_REMINDER_EMAIL',
+        details: {
+          clientId: req.params.clientId,
+          appointmentId: appointment.id,
+          patientId: appointment.patient_id,
+          recipientEmail: appointment.patient_email,
+          reminderId: reminder.id
+        }
+      });
+      return res.json({ ok: true, reminder });
+    } catch (emailError) {
+      const reminder = await createOdontologyAppointmentReminderLog({
+        clientId: req.params.clientId,
+        appointmentId: appointment.id,
+        channel: 'email',
+        recipientName: appointment.patient_name,
+        recipientEmail: appointment.patient_email,
+        subject,
+        message,
+        status: 'failed',
+        errorMessage: emailError?.message || 'No se pudo enviar el correo.',
+        actorUserId: req.user.sub
+      });
+      console.error('Email recordatorio odontológico falló', emailError);
+      return res.status(502).json({
+        message: 'No se pudo enviar el correo de recordatorio.',
+        reminderId: reminder.id
+      });
+    }
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo procesar el recordatorio de la cita.' });
+  }
+});
+
+app.post('/odontology/:clientId/appointments/:appointmentId/reminders/whatsapp', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyAppointments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para enviar recordatorios odontológicos.' });
+    }
+
+    const result = await sendManualOdontologyAppointmentWhatsappReminder({
+      clientId: req.params.clientId,
+      appointmentId: req.params.appointmentId,
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'SEND_FAILED' ? 502 : 400;
+      return res.status(status).json({ message: result.message, reminderId: result.reminder?.id });
+    }
+
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_APPOINTMENT_REMINDER_WHATSAPP',
+      details: {
+        clientId: req.params.clientId,
+        appointmentId: req.params.appointmentId,
+        reminderId: result.reminder.id,
+        mode: 'manual'
+      }
+    });
+    return res.json({ ok: true, reminder: result.reminder });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo procesar el recordatorio por WhatsApp.' });
+  }
+});
+
+app.get('/odontology/:clientId/clinical-records', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyClinicalRecords(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver historias clínicas odontológicas.' });
+    }
+    const records = await listOdontologyClinicalRecords({
+      clientId: req.params.clientId,
+      patientId: req.query.patientId || '',
+      status: req.query.status || '',
+      search: req.query.search || ''
+    });
+    return res.json(records);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar las historias clínicas.' });
+  }
+});
+
+app.get('/odontology/:clientId/clinical-record-notes', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyClinicalRecords(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver notas aclaratorias odontológicas.' });
+    }
+    const notes = await listOdontologyClinicalRecordNotes({
+      clientId: req.params.clientId,
+      clinicalRecordId: req.query.clinicalRecordId || '',
+      patientId: req.query.patientId || ''
+    });
+    return res.json(notes);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar las notas aclaratorias.' });
+  }
+});
+
+app.post('/odontology/:clientId/clinical-records', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyClinicalRecords(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear historias clínicas odontológicas.' });
+    }
+    const result = await createOdontologyClinicalRecord({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) return res.status(400).json({ message: result.message });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CLINICAL_RECORD_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        clinicalRecordId: result.clinicalRecord.id,
+        patientId: result.clinicalRecord.patient_id
+      }
+    });
+    return res.status(201).json(result.clinicalRecord);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear la historia clínica.' });
+  }
+});
+
+app.post('/odontology/:clientId/clinical-records/:recordId/notes', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyClinicalRecords(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear notas aclaratorias odontológicas.' });
+    }
+    const result = await createOdontologyClinicalRecordNote({
+      clientId: req.params.clientId,
+      clinicalRecordId: req.params.recordId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CLINICAL_RECORD_NOTE_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        clinicalRecordId: result.note.clinical_record_id,
+        patientId: result.note.patient_id,
+        noteId: result.note.id
+      }
+    });
+    return res.status(201).json(result.note);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear la nota aclaratoria.' });
+  }
+});
+
+app.patch('/odontology/:clientId/clinical-records/:recordId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyClinicalRecords(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para editar historias clínicas odontológicas.' });
+    }
+    const result = await updateOdontologyClinicalRecord({
+      clientId: req.params.clientId,
+      clinicalRecordId: req.params.recordId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'SIGNED' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CLINICAL_RECORD_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        clinicalRecordId: result.clinicalRecord.id,
+        patientId: result.clinicalRecord.patient_id
+      }
+    });
+    return res.json(result.clinicalRecord);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar la historia clínica.' });
+  }
+});
+
+app.post('/odontology/:clientId/clinical-records/:recordId/sign', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyClinicalRecords(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para firmar historias clínicas odontológicas.' });
+    }
+    let patientSignaturePath = null;
+    try {
+      patientSignaturePath = await saveOdontologyClinicalRecordPatientSignature(
+        req.params.clientId,
+        req.params.recordId,
+        req.body?.patientSignatureDataUrl
+      );
+    } catch (signatureError) {
+      if (signatureError?.code === 'INVALID_SIGNATURE') {
+        return res.status(400).json({ message: signatureError.message });
+      }
+      throw signatureError;
+    }
+    if (!patientSignaturePath) {
+      return res.status(400).json({ message: 'Dibuja la firma del paciente o acudiente antes de firmar la historia clínica.' });
+    }
+    const result = await signOdontologyClinicalRecord({
+      clientId: req.params.clientId,
+      clinicalRecordId: req.params.recordId,
+      actorUserId: req.user.sub,
+      patientSignaturePath,
+      patientSignerName: req.body?.patientSignerName,
+      patientSignerDocumentType: req.body?.patientSignerDocumentType,
+      patientSignerDocumentNumber: req.body?.patientSignerDocumentNumber,
+      patientSignerRelationship: req.body?.patientSignerRelationship
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'SIGNED' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    const signedRecord = await getOdontologyClinicalRecordById({
+      clientId: req.params.clientId,
+      clinicalRecordId: result.clinicalRecord.id
+    });
+    if (!signedRecord) return res.status(404).json({ message: 'Historia clínica no encontrada.' });
+    const pdfPath = await buildOdontologyClinicalRecordPdf(signedRecord);
+    const clinicalRecord = await setOdontologyClinicalRecordPdf({
+      clientId: req.params.clientId,
+      clinicalRecordId: result.clinicalRecord.id,
+      pdfPath
+    });
+
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CLINICAL_RECORD_SIGN',
+      details: {
+        clientId: req.params.clientId,
+        clinicalRecordId: clinicalRecord.id,
+        patientId: clinicalRecord.patient_id,
+        pdfPath,
+        attendedAppointmentId: result.attendedAppointment?.id || null,
+        inventoryConsumptions: result.inventoryConsumptions?.length || 0
+      }
+    });
+    return res.json(clinicalRecord);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo firmar la historia clínica.' });
+  }
+});
+
+app.get('/odontology/:clientId/clinical-records/:recordId/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyClinicalRecords(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver el PDF de la historia clínica.' });
+    }
+
+    let record = await getOdontologyClinicalRecordById({
+      clientId: req.params.clientId,
+      clinicalRecordId: req.params.recordId
+    });
+    if (!record) return res.status(404).json({ message: 'Historia clínica no encontrada.' });
+    if (record.status !== 'signed') {
+      return res.status(400).json({ message: 'La historia clínica debe estar firmada para generar el PDF.' });
+    }
+
+    const currentPdfPath = record.pdf_path ? path.join(process.cwd(), record.pdf_path.replace(/^\//, '')) : '';
+    if (!record.pdf_path || !fs.existsSync(currentPdfPath)) {
+      const pdfPath = await buildOdontologyClinicalRecordPdf(record);
+      record = await setOdontologyClinicalRecordPdf({
+        clientId: req.params.clientId,
+        clinicalRecordId: req.params.recordId,
+        pdfPath
+      });
+    }
+
+    const pdfFilePath = path.join(process.cwd(), record.pdf_path.replace(/^\//, ''));
+    if (!fs.existsSync(pdfFilePath)) {
+      return res.status(404).json({ message: 'PDF de historia clínica no encontrado.' });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="historia-clinica-${record.id}.pdf"`);
+    return fs.createReadStream(pdfFilePath).pipe(res);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo abrir el PDF de la historia clínica.' });
+  }
+});
+
+app.get('/odontology/:clientId/treatment-plans', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyTreatmentPlans(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver planes de tratamiento.' });
+    }
+    const plans = await listOdontologyTreatmentPlans({
+      clientId: req.params.clientId,
+      patientId: req.query.patientId || '',
+      status: req.query.status || '',
+      search: req.query.search || ''
+    });
+    const canViewFinancial = canViewOdontologyFinancialValues(req.user);
+    return res.json(plans.map((plan) => maskOdontologyTreatmentPlanFinancialFields(plan, canViewFinancial)));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los planes de tratamiento.' });
+  }
+});
+
+app.get('/odontology/:clientId/treatment-plans/:planId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyTreatmentPlans(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver planes de tratamiento.' });
+    }
+    const plan = await getOdontologyTreatmentPlan({
+      clientId: req.params.clientId,
+      treatmentPlanId: req.params.planId
+    });
+    if (!plan) return res.status(404).json({ message: 'Plan de tratamiento no encontrado.' });
+    return res.json(maskOdontologyTreatmentPlanFinancialFields(plan, canViewOdontologyFinancialValues(req.user)));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el plan de tratamiento.' });
+  }
+});
+
+app.get('/odontology/:clientId/treatment-plans/:planId/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyTreatmentPlans(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver el PDF del plan de tratamiento.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver valores económicos del plan.' });
+    }
+    const plan = await getOdontologyTreatmentPlan({
+      clientId: req.params.clientId,
+      treatmentPlanId: req.params.planId
+    });
+    if (!plan) return res.status(404).json({ message: 'Plan de tratamiento no encontrado.' });
+    const client = await getClientById(req.params.clientId).catch(() => null);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFilename(`plan-tratamiento-${plan.patient_name}-${plan.title}`)}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 42 });
+    doc.pipe(res);
+    buildOdontologyTreatmentPlanPdf(doc, { client, plan });
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo generar el PDF del plan de tratamiento.' });
+  }
+});
+
+app.post('/odontology/:clientId/treatment-plans', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyTreatmentPlans(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear planes de tratamiento.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para registrar valores económicos del plan.' });
+    }
+    const result = await createOdontologyTreatmentPlan({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_TREATMENT_PLAN_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        treatmentPlanId: result.treatmentPlan.id,
+        patientId: result.treatmentPlan.patient_id,
+        totalAmount: result.treatmentPlan.total_amount
+      }
+    });
+    return res.status(201).json(result.treatmentPlan);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el plan de tratamiento.' });
+  }
+});
+
+app.patch('/odontology/:clientId/treatment-plans/:planId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyTreatmentPlans(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para editar planes de tratamiento.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para editar valores económicos del plan.' });
+    }
+    const result = await updateOdontologyTreatmentPlan({
+      clientId: req.params.clientId,
+      treatmentPlanId: req.params.planId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_TREATMENT_PLAN_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        treatmentPlanId: result.treatmentPlan.id,
+        patientId: result.treatmentPlan.patient_id,
+        status: result.treatmentPlan.status,
+        totalAmount: result.treatmentPlan.total_amount
+      }
+    });
+    return res.json(result.treatmentPlan);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar el plan de tratamiento.' });
+  }
+});
+
+app.post('/odontology/:clientId/treatment-plans/:planId/accept', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyTreatmentPlans(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para aceptar planes de tratamiento.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para aceptar valores económicos del plan.' });
+    }
+    let signaturePath = null;
+    try {
+      signaturePath = await saveOdontologyTreatmentPlanAcceptanceSignature(
+        req.params.clientId,
+        req.params.planId,
+        req.body?.signatureDataUrl
+      );
+    } catch (signatureError) {
+      if (signatureError?.code === 'INVALID_SIGNATURE') {
+        return res.status(400).json({ message: signatureError.message });
+      }
+      throw signatureError;
+    }
+    if (!signaturePath) {
+      return res.status(400).json({ message: 'Dibuja la firma del paciente o acudiente antes de aceptar el plan.' });
+    }
+
+    const result = await acceptOdontologyTreatmentPlan({
+      clientId: req.params.clientId,
+      treatmentPlanId: req.params.planId,
+      actorUserId: req.user.sub,
+      signerName: req.body?.signerName,
+      signerDocumentType: req.body?.signerDocumentType,
+      signerDocumentNumber: req.body?.signerDocumentNumber,
+      signerRelationship: req.body?.signerRelationship,
+      signaturePath
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_TREATMENT_PLAN_ACCEPT',
+      details: {
+        clientId: req.params.clientId,
+        treatmentPlanId: result.treatmentPlan.id,
+        patientId: result.treatmentPlan.patient_id,
+        signerName: result.treatmentPlan.accepted_signer_name
+      }
+    });
+    return res.json(maskOdontologyTreatmentPlanFinancialFields(result.treatmentPlan, true));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo aceptar el plan de tratamiento.' });
+  }
+});
+
+app.get('/odontology/:clientId/payments', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPayments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver pagos odontológicos.' });
+    }
+    const payments = await listOdontologyPayments({
+      clientId: req.params.clientId,
+      patientId: req.query.patientId || '',
+      treatmentPlanId: req.query.treatmentPlanId || '',
+      status: req.query.status || '',
+      search: req.query.search || '',
+      startDate: req.query.startDate || '',
+      endDate: req.query.endDate || '',
+      cashier: req.query.cashier || ''
+    });
+    const canViewFinancial = canViewOdontologyFinancialValues(req.user);
+    return res.json(payments.map((payment) => maskOdontologyPaymentFinancialFields(payment, canViewFinancial)));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los pagos odontológicos.' });
+  }
+});
+
+app.get('/odontology/:clientId/payments/report/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPayments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para generar reportes de pagos.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para exportar valores económicos.' });
+    }
+    const filters = {
+      patientId: req.query.patientId || '',
+      treatmentPlanId: req.query.treatmentPlanId || '',
+      status: req.query.status || '',
+      search: req.query.search || '',
+      startDate: req.query.startDate || '',
+      endDate: req.query.endDate || '',
+      cashier: req.query.cashier || ''
+    };
+    const payments = await listOdontologyPayments({
+      clientId: req.params.clientId,
+      ...filters
+    });
+    const client = await getClientById(req.params.clientId).catch(() => null);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFilename(`reporte-pagos-${filters.startDate || 'inicio'}-${filters.endDate || 'fin'}`)}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 42 });
+    doc.pipe(res);
+    buildOdontologyPaymentCashierReportPdf(doc, { client, payments, filters });
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo generar el reporte de pagos.' });
+  }
+});
+
+app.get('/odontology/:clientId/payments/cash-closures', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPayments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver cierres de caja.' });
+    }
+    const closures = await listOdontologyCashClosures({
+      clientId: req.params.clientId,
+      startDate: req.query.startDate || '',
+      endDate: req.query.endDate || '',
+      cashier: req.query.cashier || ''
+    });
+    const canViewFinancial = canViewOdontologyFinancialValues(req.user);
+    return res.json(closures.map((closure) => maskOdontologyCashClosureFinancialFields(closure, canViewFinancial)));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los cierres de caja.' });
+  }
+});
+
+app.post('/odontology/:clientId/payments/cash-closures', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPayments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para realizar cierres de caja.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para cerrar caja con valores económicos.' });
+    }
+    const result = await createOdontologyCashClosure({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    const client = await getClientById(req.params.clientId).catch(() => null);
+    const pdfPath = await buildOdontologyCashClosurePdfFile({
+      client,
+      closure: result.closure,
+      payments: result.payments
+    });
+    await setOdontologyCashClosurePdf({
+      clientId: req.params.clientId,
+      closureId: result.closure.id,
+      pdfPath
+    });
+    const closure = await getOdontologyCashClosureById({
+      clientId: req.params.clientId,
+      closureId: result.closure.id
+    });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CASH_CLOSURE_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        closureId: closure.id,
+        dateFrom: closure.date_from,
+        dateTo: closure.date_to,
+        cashier: closure.cashier_filter,
+        totalRegistered: closure.total_registered,
+        registeredCount: closure.registered_count
+      }
+    });
+    return res.status(201).json(closure);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo generar el cierre de caja.' });
+  }
+});
+
+app.get('/odontology/:clientId/payments/cash-closures/:closureId/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPayments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver cierres de caja.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver valores económicos del cierre.' });
+    }
+    let closure = await getOdontologyCashClosureById({
+      clientId: req.params.clientId,
+      closureId: req.params.closureId
+    });
+    if (!closure) return res.status(404).json({ message: 'Cierre de caja no encontrado.' });
+    let fullPath = resolveStoredFilePath(closure.pdf_path);
+    if (!fullPath) {
+      const [client, payments] = await Promise.all([
+        getClientById(req.params.clientId).catch(() => null),
+        listOdontologyPayments({
+          clientId: req.params.clientId,
+          startDate: closure.date_from,
+          endDate: closure.date_to,
+          cashier: closure.cashier_filter || '',
+          limit: 5000
+        })
+      ]);
+      const pdfPath = await buildOdontologyCashClosurePdfFile({ client, closure, payments });
+      await setOdontologyCashClosurePdf({
+        clientId: req.params.clientId,
+        closureId: closure.id,
+        pdfPath
+      });
+      closure = await getOdontologyCashClosureById({
+        clientId: req.params.clientId,
+        closureId: req.params.closureId
+      });
+      fullPath = resolveStoredFilePath(closure.pdf_path);
+    }
+    if (!fullPath) return res.status(404).json({ message: 'PDF de cierre no encontrado.' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFilename(`cierre-caja-${closure.date_from}-${closure.date_to}`)}.pdf"`);
+    return fs.createReadStream(fullPath).pipe(res);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo abrir el cierre de caja.' });
+  }
+});
+
+app.get('/odontology/:clientId/payments/:paymentId/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPayments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver recibos de pago.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver valores económicos del recibo.' });
+    }
+    const payment = await getOdontologyPaymentById({
+      clientId: req.params.clientId,
+      paymentId: req.params.paymentId
+    });
+    if (!payment) return res.status(404).json({ message: 'Pago no encontrado.' });
+    const client = await getClientById(req.params.clientId).catch(() => null);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFilename(`recibo-pago-${payment.patient_name}-${payment.id}`)}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 42 });
+    doc.pipe(res);
+    buildOdontologyPaymentReceiptPdf(doc, { client, payment });
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo generar el recibo de pago.' });
+  }
+});
+
+app.post('/odontology/:clientId/payments', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPayments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para registrar pagos odontológicos.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para registrar valores económicos.' });
+    }
+    const result = await createOdontologyPayment({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PAYMENT_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        paymentId: result.payment.id,
+        patientId: result.payment.patient_id,
+        treatmentPlanId: result.payment.treatment_plan_id,
+        amount: result.payment.amount,
+        paymentMethod: result.payment.payment_method
+      }
+    });
+    return res.status(201).json(result.payment);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo registrar el pago odontológico.' });
+  }
+});
+
+app.post('/odontology/:clientId/payments/:paymentId/void', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPayments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para anular pagos odontológicos.' });
+    }
+    if (!canViewOdontologyFinancialValues(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para anular valores económicos.' });
+    }
+    const result = await voidOdontologyPayment({
+      clientId: req.params.clientId,
+      paymentId: req.params.paymentId,
+      reason: req.body?.reason || '',
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PAYMENT_VOID',
+      details: {
+        clientId: req.params.clientId,
+        paymentId: result.payment.id,
+        patientId: result.payment.patient_id,
+        treatmentPlanId: result.payment.treatment_plan_id,
+        amount: result.payment.amount,
+        reason: req.body?.reason || ''
+      }
+    });
+    return res.json(result.payment);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo anular el pago odontológico.' });
+  }
+});
+
+app.get('/odontology/:clientId/medications', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPrescriptions(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver medicamentos odontológicos.' });
+    }
+    const medications = await listOdontologyMedications({
+      clientId: req.params.clientId,
+      activeOnly: req.query.activeOnly === 'true',
+      search: req.query.search || ''
+    });
+    return res.json(medications);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los medicamentos odontológicos.' });
+  }
+});
+
+app.post('/odontology/:clientId/medications', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPrescriptions(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear medicamentos odontológicos.' });
+    }
+    const result = await createOdontologyMedication({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_MEDICATION_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        medicationId: result.medication.id,
+        name: result.medication.name
+      }
+    });
+    return res.status(201).json(result.medication);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el medicamento odontológico.' });
+  }
+});
+
+app.get('/odontology/:clientId/prescriptions', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPrescriptions(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver recetas odontológicas.' });
+    }
+    const prescriptions = await listOdontologyPrescriptions({
+      clientId: req.params.clientId,
+      patientId: req.query.patientId || '',
+      status: req.query.status || '',
+      search: req.query.search || ''
+    });
+    return res.json(prescriptions);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar las recetas odontológicas.' });
+  }
+});
+
+app.post('/odontology/:clientId/prescriptions', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPrescriptions(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear recetas odontológicas.' });
+    }
+    const result = await createOdontologyPrescription({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+
+    const pdfPath = await buildOdontologyPrescriptionPdf(result.prescription);
+    const prescription = await setOdontologyPrescriptionPdf({
+      clientId: req.params.clientId,
+      prescriptionId: result.prescription.id,
+      pdfPath
+    });
+
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PRESCRIPTION_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        prescriptionId: result.prescription.id,
+        patientId: result.prescription.patient_id,
+        pdfPath
+      }
+    });
+    return res.status(201).json(prescription);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear la receta odontológica.' });
+  }
+});
+
+app.get('/odontology/:clientId/clinical-documents', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyClinicalDocuments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver documentos clínicos odontológicos.' });
+    }
+    const documents = await listOdontologyClinicalDocuments({
+      clientId: req.params.clientId,
+      patientId: req.query.patientId || '',
+      documentType: req.query.documentType || '',
+      status: req.query.status || '',
+      search: req.query.search || ''
+    });
+    return res.json(documents);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los documentos clínicos odontológicos.' });
+  }
+});
+
+app.post('/odontology/:clientId/clinical-documents', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyClinicalDocuments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear documentos clínicos odontológicos.' });
+    }
+    const result = await createOdontologyClinicalDocument({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+
+    const pdfPath = await buildOdontologyClinicalDocumentPdf(result.document);
+    const documentRow = await setOdontologyClinicalDocumentPdf({
+      clientId: req.params.clientId,
+      documentId: result.document.id,
+      pdfPath
+    });
+
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CLINICAL_DOCUMENT_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        documentId: result.document.id,
+        patientId: result.document.patient_id,
+        documentType: result.document.document_type,
+        pdfPath
+      }
+    });
+    return res.status(201).json(documentRow);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el documento clínico odontológico.' });
+  }
+});
+
+app.get('/odontology/:clientId/attachments', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyAttachments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver adjuntos odontológicos.' });
+    }
+    const attachments = await listOdontologyAttachments({
+      clientId: req.params.clientId,
+      patientId: req.query.patientId || '',
+      category: req.query.category || '',
+      search: req.query.search || ''
+    });
+    return res.json(attachments);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los adjuntos odontológicos.' });
+  }
+});
+
+app.post('/odontology/:clientId/attachments', requireAuth, upload.single('file'), async (req, res) => {
+  const { clientId } = req.params;
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyAttachments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para cargar adjuntos odontológicos.' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: 'Archivo requerido.' });
+    }
+    if (!isAllowedOdontologyAttachment(req.file)) {
+      return res.status(400).json({ message: 'Solo se permiten archivos PDF, JPG, PNG o WEBP.' });
+    }
+    if (req.file.size > 15 * 1024 * 1024) {
+      return res.status(400).json({ message: 'El archivo no puede superar 15 MB.' });
+    }
+
+    const extension = odontologyAttachmentExtension(req.file);
+    const relativeDir = path.join('uploads', 'clients', clientId, 'odontology', 'attachments');
+    const fullDir = path.join(process.cwd(), relativeDir);
+    await fs.promises.mkdir(fullDir, { recursive: true });
+    const fileName = `adjunto-${Date.now()}-${randomUUID()}${extension}`;
+    const relativePath = path.join(relativeDir, fileName);
+    const fullPath = path.join(process.cwd(), relativePath);
+    const publicPath = `/${relativePath}`.replace(/\\/g, '/');
+    await fs.promises.writeFile(fullPath, req.file.buffer);
+
+    const result = await createOdontologyAttachment({
+      clientId,
+      payload: {
+        ...req.body,
+        title: String(req.body?.title || '').trim() || req.file.originalname,
+        filePath: publicPath,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        sizeBytes: req.file.size
+      },
+      actorUserId: req.user.sub
+    });
+
+    if (result.error) {
+      await fs.promises.rm(fullPath, { force: true });
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_ATTACHMENT_UPLOAD',
+      details: {
+        clientId,
+        attachmentId: result.attachment.id,
+        patientId: result.attachment.patient_id,
+        category: result.attachment.category,
+        filePath: publicPath
+      }
+    });
+    return res.status(201).json(result.attachment);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el adjunto odontológico.' });
+  }
+});
+
+app.delete('/odontology/:clientId/attachments/:attachmentId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyAttachments(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para eliminar adjuntos odontológicos.' });
+    }
+    const existing = await getOdontologyAttachmentById({
+      clientId: req.params.clientId,
+      attachmentId: req.params.attachmentId
+    });
+    if (!existing) return res.status(404).json({ message: 'Adjunto odontológico no encontrado.' });
+    const deleted = await deleteOdontologyAttachment({
+      clientId: req.params.clientId,
+      attachmentId: req.params.attachmentId
+    });
+    const fullPath = path.join(process.cwd(), String(existing.file_path || '').replace(/^\//, ''));
+    if (fs.existsSync(fullPath)) {
+      await fs.promises.rm(fullPath, { force: true });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_ATTACHMENT_DELETE',
+      details: {
+        clientId: req.params.clientId,
+        attachmentId: deleted.id,
+        patientId: deleted.patient_id,
+        category: deleted.category,
+        filePath: existing.file_path
+      }
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo eliminar el adjunto odontológico.' });
+  }
+});
+
+app.get('/odontology/:clientId/inventory/items', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver inventario odontológico.' });
+    }
+    const items = await listOdontologyInventoryItems({
+      clientId: req.params.clientId,
+      status: req.query.status || '',
+      lowStockOnly: req.query.lowStockOnly === 'true',
+      search: req.query.search || ''
+    });
+    return res.json(items);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el inventario odontológico.' });
+  }
+});
+
+app.post('/odontology/:clientId/inventory/items', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear insumos odontológicos.' });
+    }
+    const result = await createOdontologyInventoryItem({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_INVENTORY_ITEM_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        itemId: result.item.id,
+        name: result.item.name,
+        code: result.item.code
+      }
+    });
+    await syncOdontologyInventoryLowStockNotifications({
+      clientId: req.params.clientId,
+      item: result.item
+    });
+    return res.status(201).json(result.item);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el insumo odontológico.' });
+  }
+});
+
+app.put('/odontology/:clientId/inventory/items/:itemId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para editar insumos odontológicos.' });
+    }
+    const result = await updateOdontologyInventoryItem({
+      clientId: req.params.clientId,
+      itemId: req.params.itemId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_INVENTORY_ITEM_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        itemId: result.item.id,
+        name: result.item.name,
+        code: result.item.code,
+        isActive: result.item.is_active
+      }
+    });
+    await syncOdontologyInventoryLowStockNotifications({
+      clientId: req.params.clientId,
+      item: result.item
+    });
+    return res.json(result.item);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo editar el insumo odontológico.' });
+  }
+});
+
+app.get('/odontology/:clientId/inventory/movements', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver movimientos de inventario.' });
+    }
+    const movements = await listOdontologyInventoryMovements({
+      clientId: req.params.clientId,
+      itemId: req.query.itemId || '',
+      movementType: req.query.movementType || '',
+      search: req.query.search || ''
+    });
+    return res.json(movements);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los movimientos de inventario.' });
+  }
+});
+
+app.post('/odontology/:clientId/inventory/movements', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para registrar movimientos de inventario.' });
+    }
+    const result = await createOdontologyInventoryMovement({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_INVENTORY_MOVEMENT_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        movementId: result.movement?.id,
+        itemId: result.item?.id,
+        movementType: result.movement?.movement_type,
+        quantity: result.movement?.quantity,
+        stockAfter: result.movement?.stock_after
+      }
+    });
+    await syncOdontologyInventoryLowStockNotifications({
+      clientId: req.params.clientId,
+      item: result.item
+    });
+    return res.status(201).json(result);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo registrar el movimiento de inventario.' });
+  }
+});
+
+app.get('/odontology/:clientId/inventory/suppliers', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver proveedores odontológicos.' });
+    }
+    const suppliers = await listOdontologySuppliers({
+      clientId: req.params.clientId,
+      status: req.query.status || 'active',
+      search: req.query.search || ''
+    });
+    return res.json(suppliers);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los proveedores odontológicos.' });
+  }
+});
+
+app.post('/odontology/:clientId/inventory/suppliers', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear proveedores odontológicos.' });
+    }
+    const result = await createOdontologySupplier({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_SUPPLIER_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        supplierId: result.supplier?.id,
+        name: result.supplier?.name
+      }
+    });
+    return res.status(201).json(result.supplier);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el proveedor odontológico.' });
+  }
+});
+
+app.put('/odontology/:clientId/inventory/suppliers/:supplierId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para editar proveedores odontológicos.' });
+    }
+    const result = await updateOdontologySupplier({
+      clientId: req.params.clientId,
+      supplierId: req.params.supplierId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_SUPPLIER_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        supplierId: result.supplier?.id,
+        name: result.supplier?.name,
+        isActive: result.supplier?.is_active
+      }
+    });
+    return res.json(result.supplier);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo editar el proveedor odontológico.' });
+  }
+});
+
+app.get('/odontology/:clientId/inventory/purchase-requests', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver solicitudes de compra.' });
+    }
+    const requests = await listOdontologyPurchaseRequests({
+      clientId: req.params.clientId,
+      status: req.query.status || '',
+      search: req.query.search || ''
+    });
+    return res.json(requests);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar las solicitudes de compra.' });
+  }
+});
+
+app.post('/odontology/:clientId/inventory/purchase-requests', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear solicitudes de compra.' });
+    }
+    const result = await createOdontologyPurchaseRequest({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PURCHASE_REQUEST_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        purchaseRequestId: result.request?.id,
+        itemId: result.request?.item_id,
+        quantity: result.request?.quantity
+      }
+    });
+    return res.status(201).json(result.request);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear la solicitud de compra.' });
+  }
+});
+
+app.patch('/odontology/:clientId/inventory/purchase-requests/:requestId/status', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para actualizar solicitudes de compra.' });
+    }
+    const result = await updateOdontologyPurchaseRequestStatus({
+      clientId: req.params.clientId,
+      requestId: req.params.requestId,
+      status: req.body?.status || '',
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PURCHASE_REQUEST_STATUS_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        purchaseRequestId: result.request?.id,
+        status: result.request?.status
+      }
+    });
+    return res.json(result.request);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar la solicitud de compra.' });
+  }
+});
+
+app.get('/odontology/:clientId/inventory/procedure-kits', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver kits de inventario.' });
+    }
+    const kit = await listOdontologyProcedureInventoryKit({
+      clientId: req.params.clientId,
+      procedureTypeId: req.query.procedureTypeId || ''
+    });
+    return res.json(kit);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el kit del procedimiento.' });
+  }
+});
+
+app.put('/odontology/:clientId/inventory/procedure-kits/:procedureTypeId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyInventory(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para configurar kits de inventario.' });
+    }
+    const result = await replaceOdontologyProcedureInventoryKit({
+      clientId: req.params.clientId,
+      procedureTypeId: req.params.procedureTypeId,
+      items: req.body?.items || [],
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PROCEDURE_KIT_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        procedureTypeId: req.params.procedureTypeId,
+        items: result.kit.length
+      }
+    });
+    return res.json(result.kit);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo guardar el kit del procedimiento.' });
+  }
+});
+
+app.get('/odontology/:clientId/instruments', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySterilization(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver instrumental odontológico.' });
+    }
+    const instruments = await listOdontologyInstruments({
+      clientId: req.params.clientId,
+      status: req.query.status || 'active',
+      search: req.query.search || ''
+    });
+    return res.json(instruments);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el instrumental odontológico.' });
+  }
+});
+
+app.post('/odontology/:clientId/instruments', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySterilization(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear instrumental odontológico.' });
+    }
+    const result = await createOdontologyInstrument({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_INSTRUMENT_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        instrumentId: result.instrument.id,
+        name: result.instrument.name,
+        code: result.instrument.code
+      }
+    });
+    return res.status(201).json(result.instrument);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el instrumental odontológico.' });
+  }
+});
+
+app.put('/odontology/:clientId/instruments/:instrumentId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySterilization(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para editar instrumental odontológico.' });
+    }
+    const result = await updateOdontologyInstrument({
+      clientId: req.params.clientId,
+      instrumentId: req.params.instrumentId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_INSTRUMENT_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        instrumentId: result.instrument.id,
+        name: result.instrument.name,
+        isActive: result.instrument.is_active
+      }
+    });
+    return res.json(result.instrument);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo editar el instrumental odontológico.' });
+  }
+});
+
+app.get('/odontology/:clientId/sterilization-cycles', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySterilization(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver ciclos de esterilización.' });
+    }
+    const cycles = await listOdontologySterilizationCycles({
+      clientId: req.params.clientId,
+      result: req.query.result || '',
+      method: req.query.method || '',
+      search: req.query.search || '',
+      startDate: req.query.startDate || '',
+      endDate: req.query.endDate || '',
+      responsible: req.query.responsible || ''
+    });
+    return res.json(cycles);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los ciclos de esterilización.' });
+  }
+});
+
+app.get('/odontology/:clientId/sterilization-cycles/report/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySterilization(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para generar reportes de esterilización.' });
+    }
+
+    const filters = {
+      startDate: req.query.startDate || '',
+      endDate: req.query.endDate || '',
+      result: req.query.result || '',
+      method: req.query.method || '',
+      responsible: req.query.responsible || '',
+      search: req.query.search || ''
+    };
+    const cycles = await listOdontologySterilizationCycles({
+      clientId: req.params.clientId,
+      ...filters
+    });
+    const client = await getClientById(req.params.clientId).catch(() => null);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFilename(`reporte-esterilizacion-${filters.startDate || 'inicio'}-${filters.endDate || 'fin'}`)}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 42 });
+    doc.pipe(res);
+    buildOdontologySterilizationReportPdf(doc, { client, cycles, filters });
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo generar el reporte de esterilización.' });
+  }
+});
+
+app.post('/odontology/:clientId/sterilization-cycles', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySterilization(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear ciclos de esterilización.' });
+    }
+    const result = await createOdontologySterilizationCycle({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    let cycle = result.cycle;
+    try {
+      const client = await getClientById(req.params.clientId).catch(() => null);
+      const pdfPath = await buildOdontologySterilizationCyclePdfFile({ client, cycle });
+      cycle = await setOdontologySterilizationCyclePdf({
+        clientId: req.params.clientId,
+        cycleId: cycle.id,
+        pdfPath
+      }) || cycle;
+    } catch (pdfError) {
+      console.warn('No se pudo generar PDF del ciclo de esterilización', pdfError.message);
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_STERILIZATION_CYCLE_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        cycleId: cycle.id,
+        cycleCode: cycle.cycle_code,
+        result: cycle.result,
+        itemCount: cycle.items?.length || 0,
+        pdfPath: cycle.pdf_path || null
+      }
+    });
+    return res.status(201).json(cycle);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el ciclo de esterilización.' });
+  }
+});
+
+app.get('/odontology/:clientId/sterilization-cycles/:cycleId/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySterilization(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver el PDF de esterilización.' });
+    }
+
+    let cycle = await getOdontologySterilizationCycleById({
+      clientId: req.params.clientId,
+      cycleId: req.params.cycleId
+    });
+    if (!cycle) return res.status(404).json({ message: 'Ciclo de esterilización no encontrado.' });
+
+    const currentPdfPath = cycle.pdf_path ? path.join(process.cwd(), cycle.pdf_path.replace(/^\//, '')) : '';
+    if (!cycle.pdf_path || !fs.existsSync(currentPdfPath)) {
+      const client = await getClientById(req.params.clientId).catch(() => null);
+      const pdfPath = await buildOdontologySterilizationCyclePdfFile({ client, cycle });
+      cycle = await setOdontologySterilizationCyclePdf({
+        clientId: req.params.clientId,
+        cycleId: req.params.cycleId,
+        pdfPath
+      }) || cycle;
+    }
+
+    const pdfFilePath = path.join(process.cwd(), cycle.pdf_path.replace(/^\//, ''));
+    if (!fs.existsSync(pdfFilePath)) {
+      return res.status(404).json({ message: 'PDF de esterilización no encontrado.' });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFilename(`ciclo-esterilizacion-${cycle.cycle_code || cycle.id}`)}.pdf"`);
+    return fs.createReadStream(pdfFilePath).pipe(res);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo abrir el PDF del ciclo de esterilización.' });
+  }
+});
+
+app.get('/odontology/:clientId/sterilization-cycles/:cycleId/labels/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologySterilization(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para imprimir etiquetas de esterilización.' });
+    }
+
+    const cycle = await getOdontologySterilizationCycleById({
+      clientId: req.params.clientId,
+      cycleId: req.params.cycleId
+    });
+    if (!cycle) return res.status(404).json({ message: 'Ciclo de esterilización no encontrado.' });
+
+    const client = await getClientById(req.params.clientId).catch(() => null);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFilename(`etiquetas-esterilizacion-${cycle.cycle_code || cycle.id}`)}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 26 });
+    doc.pipe(res);
+    buildOdontologySterilizationLabelsPdf(doc, { client, cycle });
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron generar las etiquetas de esterilización.' });
+  }
+});
+
+app.get('/odontology/:clientId/consent-templates', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyConsents(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver plantillas de consentimiento.' });
+    }
+    const templates = await listOdontologyConsentTemplates({
+      clientId: req.params.clientId,
+      activeOnly: req.query.activeOnly === 'true'
+    });
+    return res.json(templates);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar las plantillas de consentimiento.' });
+  }
+});
+
+app.post('/odontology/:clientId/consent-templates', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyConsents(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear plantillas de consentimiento.' });
+    }
+    const result = await createOdontologyConsentTemplate({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) return res.status(400).json({ message: result.message });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CONSENT_TEMPLATE_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        templateId: result.template.id,
+        title: result.template.title
+      }
+    });
+    return res.status(201).json(result.template);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear la plantilla de consentimiento.' });
+  }
+});
+
+app.patch('/odontology/:clientId/consent-templates/:templateId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyConsents(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para editar plantillas de consentimiento.' });
+    }
+    const result = await updateOdontologyConsentTemplate({
+      clientId: req.params.clientId,
+      templateId: req.params.templateId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CONSENT_TEMPLATE_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        templateId: result.template.id,
+        title: result.template.title,
+        isActive: result.template.is_active
+      }
+    });
+    return res.json(result.template);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar la plantilla de consentimiento.' });
+  }
+});
+
+app.get('/odontology/:clientId/consents', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyConsents(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver consentimientos.' });
+    }
+    const consents = await listOdontologyPatientConsents({
+      clientId: req.params.clientId,
+      patientId: req.query.patientId || '',
+      status: req.query.status || '',
+      search: req.query.search || ''
+    });
+    return res.json(consents);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los consentimientos.' });
+  }
+});
+
+app.post('/odontology/:clientId/consents', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyConsents(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear consentimientos.' });
+    }
+    const result = await createOdontologyPatientConsent({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CONSENT_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        consentId: result.consent.id,
+        patientId: result.consent.patient_id,
+        templateTitle: result.consent.template_title
+      }
+    });
+    return res.status(201).json(result.consent);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el consentimiento.' });
+  }
+});
+
+app.post('/odontology/:clientId/consents/:consentId/sign', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyConsents(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para firmar consentimientos.' });
+    }
+    let signerSignaturePath = null;
+    try {
+      signerSignaturePath = await saveOdontologyConsentSignerSignature(
+        req.params.clientId,
+        req.params.consentId,
+        req.body?.signerSignatureDataUrl
+      );
+    } catch (signatureError) {
+      if (signatureError?.code === 'INVALID_SIGNATURE') {
+        return res.status(400).json({ message: signatureError.message });
+      }
+      throw signatureError;
+    }
+    if (!signerSignaturePath) {
+      return res.status(400).json({ message: 'Dibuja la firma del paciente o acudiente antes de firmar.' });
+    }
+    const result = await signOdontologyPatientConsent({
+      clientId: req.params.clientId,
+      consentId: req.params.consentId,
+      actorUserId: req.user.sub,
+      signerSignaturePath
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+
+    const consentForPdf = await getOdontologyConsentForPdf({
+      clientId: req.params.clientId,
+      consentId: req.params.consentId
+    });
+    if (!consentForPdf) {
+      return res.status(404).json({ message: 'Consentimiento firmado no encontrado para generar PDF.' });
+    }
+    const pdfPath = await buildOdontologyConsentPdf(consentForPdf);
+    const signedConsent = await setOdontologyConsentPdf({
+      clientId: req.params.clientId,
+      consentId: req.params.consentId,
+      pdfPath
+    });
+
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_CONSENT_SIGN',
+      details: {
+        clientId: req.params.clientId,
+        consentId: req.params.consentId,
+        patientId: result.consent.patient_id,
+        pdfPath
+      }
+    });
+    return res.json(signedConsent || result.consent);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo firmar el consentimiento.' });
+  }
+});
+
+app.get('/odontology/:clientId/patients/:patientId/odontogram', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyOdontogram(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver odontograma.' });
+    }
+    const result = await getOdontologyOdontogram({
+      clientId: req.params.clientId,
+      patientId: req.params.patientId
+    });
+    if (result.error) return res.status(404).json({ message: result.message });
+    return res.json(result);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el odontograma.' });
+  }
+});
+
+app.get('/odontology/:clientId/patients/:patientId/odontogram/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyOdontogram(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver odontograma.' });
+    }
+    const odontogram = await getOdontologyOdontogram({
+      clientId: req.params.clientId,
+      patientId: req.params.patientId
+    });
+    if (odontogram.error) return res.status(404).json({ message: odontogram.message });
+    const client = await getClientById(req.params.clientId).catch(() => null);
+    const patientCode = odontogram.patient?.internal_code || req.params.patientId;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFilename(`odontograma-${patientCode}`)}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 42 });
+    doc.pipe(res);
+    buildOdontologyOdontogramPdf(doc, { client, odontogram });
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo generar el PDF del odontograma.' });
+  }
+});
+
+app.post('/odontology/:clientId/odontogram', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyOdontogram(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para modificar odontograma.' });
+    }
+    const result = await createOdontologyOdontogramEntry({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_ODONTOGRAM_ENTRY_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        patientId: result.entry.patient_id,
+        toothNumber: result.entry.tooth_number,
+        condition: result.entry.condition_name
+      }
+    });
+    return res.status(201).json(result.entry);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo guardar el odontograma.' });
+  }
+});
+
+app.get('/odontology/:clientId/periodontograms', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPeriodontogram(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver periodontogramas.' });
+    }
+    const charts = await listOdontologyPeriodontograms({
+      clientId: req.params.clientId,
+      patientId: req.query.patientId || '',
+      search: req.query.search || ''
+    });
+    return res.json(charts);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los periodontogramas.' });
+  }
+});
+
+app.get('/odontology/:clientId/periodontograms/:chartId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPeriodontogram(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver periodontogramas.' });
+    }
+    const chart = await getOdontologyPeriodontogramById({
+      clientId: req.params.clientId,
+      chartId: req.params.chartId
+    });
+    if (!chart) return res.status(404).json({ message: 'Periodontograma no encontrado.' });
+    return res.json(chart);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el periodontograma.' });
+  }
+});
+
+app.get('/odontology/:clientId/periodontograms/:chartId/pdf', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPeriodontogram(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para ver periodontogramas.' });
+    }
+    const chart = await getOdontologyPeriodontogramById({
+      clientId: req.params.clientId,
+      chartId: req.params.chartId
+    });
+    if (!chart) return res.status(404).json({ message: 'Periodontograma no encontrado.' });
+    const client = await getClientById(req.params.clientId).catch(() => null);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFilename(`periodontograma-${chart.patient_code || chart.id}`)}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 42 });
+    doc.pipe(res);
+    buildOdontologyPeriodontogramPdf(doc, { client, chart });
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo generar el PDF del periodontograma.' });
+  }
+});
+
+app.post('/odontology/:clientId/periodontograms', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPeriodontogram(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear periodontogramas.' });
+    }
+    const result = await createOdontologyPeriodontogram({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PERIODONTOGRAM_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        chartId: result.chart.id,
+        patientId: result.chart.patient_id,
+        chartDate: result.chart.chart_date,
+        measurementCount: result.chart.measurement_count
+      }
+    });
+    return res.status(201).json(result.chart);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el periodontograma.' });
+  }
+});
+
+app.get('/odontology/:clientId/patients', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (
+      !canManageOdontologyPatients(req.user) &&
+      !canManageOdontologyAppointments(req.user) &&
+      !canManageOdontologyClinicalRecords(req.user) &&
+      !canManageOdontologyTreatmentPlans(req.user) &&
+      !canManageOdontologyAttachments(req.user) &&
+      !canManageOdontologyPayments(req.user)
+    ) {
+      return res.status(403).json({ message: 'Sin permiso para ver pacientes odontológicos.' });
+    }
+    const patients = await listOdontologyPatients({
+      clientId: req.params.clientId,
+      search: req.query.search || '',
+      status: req.query.status || ''
+    });
+    return res.json(patients);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cargar los pacientes.' });
+  }
+});
+
+app.get('/odontology/:clientId/patients/:patientId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (
+      !canManageOdontologyPatients(req.user) &&
+      !canManageOdontologyAppointments(req.user) &&
+      !canManageOdontologyClinicalRecords(req.user) &&
+      !canManageOdontologyTreatmentPlans(req.user) &&
+      !canManageOdontologyAttachments(req.user) &&
+      !canManageOdontologyPayments(req.user)
+    ) {
+      return res.status(403).json({ message: 'Sin permiso para ver pacientes odontológicos.' });
+    }
+    const patient = await getOdontologyPatientById({
+      clientId: req.params.clientId,
+      patientId: req.params.patientId
+    });
+    if (!patient) {
+      return res.status(404).json({ message: 'Paciente no encontrado.' });
+    }
+    return res.json(patient);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cargar el paciente.' });
+  }
+});
+
+app.post('/odontology/:clientId/patients', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPatients(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para crear pacientes odontológicos.' });
+    }
+    const result = await createOdontologyPatient({
+      clientId: req.params.clientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PATIENT_CREATE',
+      details: {
+        clientId: req.params.clientId,
+        patientId: result.patient.id,
+        internalCode: result.patient.internal_code,
+        documentType: result.patient.document_type
+      }
+    });
+    return res.status(201).json(result.patient);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo crear el paciente.' });
+  }
+});
+
+app.post('/odontology/:clientId/patients/import', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canImportOdontologyPatients(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para importar pacientes odontológicos.' });
+    }
+
+    const patients = Array.isArray(req.body?.patients) ? req.body.patients : [];
+    if (!patients.length) {
+      return res.status(400).json({ message: 'No hay pacientes para importar.' });
+    }
+    if (patients.length > 500) {
+      return res.status(400).json({ message: 'Importa máximo 500 pacientes por archivo.' });
+    }
+
+    const settings = await getOdontologySettings(req.params.clientId);
+    const requiredFields = settings?.required_patient_fields;
+    const normalized = [];
+    for (const [index, patient] of patients.entries()) {
+      const validation = validateOdontologyPatientPayload(patient || {}, { requiredFields });
+      if (!validation.ok) {
+        return res.status(400).json({ message: `Fila ${index + 2}: ${validation.message}` });
+      }
+      normalized.push(validation.data);
+    }
+
+    const fileKeys = normalized.map((patient) =>
+      `${patient.documentType}|${patient.documentNumber}`.toLowerCase()
+    );
+    const repeatedKeys = fileKeys.filter((key, index) => fileKeys.indexOf(key) !== index);
+    if (repeatedKeys.length) {
+      return res.status(400).json({ message: 'Hay documentos repetidos dentro del archivo.' });
+    }
+
+    const documentNumbers = Array.from(new Set(normalized.map((patient) => patient.documentNumber)));
+    const { rows: existingRows } = await query(
+      `SELECT document_type, document_number
+       FROM odontology_patients
+       WHERE client_id = $1
+         AND document_number = ANY($2::text[])`,
+      [req.params.clientId, documentNumbers]
+    );
+    const existingKeys = new Set(existingRows.map((row) =>
+      `${row.document_type}|${row.document_number}`.toLowerCase()
+    ));
+    const existingMatches = normalized.filter((patient) =>
+      existingKeys.has(`${patient.documentType}|${patient.documentNumber}`.toLowerCase())
+    );
+    if (existingMatches.length) {
+      return res.status(409).json({
+        message: `Ya existen pacientes con estos documentos: ${existingMatches.map((patient) => patient.documentNumber).join(', ')}.`
+      });
+    }
+
+    const imported = [];
+    for (const patient of normalized) {
+      const result = await createOdontologyPatient({
+        clientId: req.params.clientId,
+        payload: patient,
+        actorUserId: req.user.sub,
+        requiredFields
+      });
+      if (result.error) {
+        return res.status(400).json({ message: result.message });
+      }
+      imported.push(result.patient.id);
+    }
+
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PATIENT_IMPORT',
+      details: {
+        clientId: req.params.clientId,
+        imported: imported.length,
+        patientIds: imported
+      }
+    });
+    return res.status(201).json({ imported: imported.length, ids: imported });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo completar la importación de pacientes.' });
+  }
+});
+
+app.patch('/odontology/:clientId/patients/:patientId', requireAuth, async (req, res) => {
+  try {
+    if (!(await ensureOdontologyApiAccess(req, res))) return;
+    if (!canManageOdontologyPatients(req.user)) {
+      return res.status(403).json({ message: 'Sin permiso para editar pacientes odontológicos.' });
+    }
+    const result = await updateOdontologyPatient({
+      clientId: req.params.clientId,
+      patientId: req.params.patientId,
+      payload: req.body || {},
+      actorUserId: req.user.sub
+    });
+    if (result.error) {
+      const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'DUPLICATE' ? 409 : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'ODONTOLOGY_PATIENT_UPDATE',
+      details: {
+        clientId: req.params.clientId,
+        patientId: result.patient.id,
+        internalCode: result.patient.internal_code,
+        documentType: result.patient.document_type
+      }
+    });
+    return res.json(result.patient);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar el paciente.' });
+  }
+});
+
+app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.single('signature'), async (req, res) => {
   const {
     username,
     displayName,
     email,
-    password,
     role,
     clientId,
     documentType,
     documentNumber,
     invimaRegistration
   } = req.body || {};
-  if (!username || !displayName || !email || !password || !role) {
+  if (!username || !displayName || !email || !role) {
     return res.status(400).json({ message: 'Datos incompletos.' });
   }
   if (!String(email).includes('@')) {
     return res.status(400).json({ message: 'Correo inválido.' });
   }
-  const clientScopedRoles = ['almacenista', 'ingeniero_biomedico', 'calibracion', 'lector'];
-  if (clientScopedRoles.includes(role) && !clientId) {
-    return res.status(400).json({ message: 'Debes seleccionar un cliente para este rol.' });
+  const resolvedScope = await resolveManagedUserClientId(req, role, clientId || null);
+  if (resolvedScope.error) {
+    return res.status(403).json({ message: resolvedScope.error });
   }
   const cleanDocumentType = documentType?.trim?.() || null;
   const cleanDocumentNumber = documentNumber?.trim?.() || null;
@@ -721,15 +6577,16 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       message: 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.'
     });
   }
+  if (!(await requireActionConfirmation(req, res, 'USER_CREATE'))) return;
 
   try {
     const result = await createUser({
       username,
       displayName,
       email,
-      password,
+      password: randomBytes(32).toString('base64url'),
       role,
-      clientId,
+      clientId: resolvedScope.clientId,
       documentType: cleanDocumentType,
       documentNumber: cleanDocumentNumber,
       invimaRegistration: cleanInvimaRegistration
@@ -743,6 +6600,16 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       await updateUserSignature(result.id, signaturePath);
     }
 
+    let invitationSent = false;
+    if (result?.id) {
+      try {
+        const client = resolvedScope.clientId ? await getClientById(resolvedScope.clientId) : null;
+        invitationSent = await requestPasswordSetup(String(email).trim(), { clientName: client?.name });
+      } catch (inviteError) {
+        console.error('No se pudo enviar invitación al administrador de cliente', inviteError);
+      }
+    }
+
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,
@@ -751,12 +6618,13 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       details: {
         role,
         email,
-        clientId: clientId ?? null,
+        clientId: resolvedScope.clientId ?? null,
         documentType: documentType ?? null,
-        hasInvimaRegistration: Boolean(invimaRegistration)
+        hasInvimaRegistration: Boolean(invimaRegistration),
+        invitationSent
       }
     });
-    return res.status(201).json(result);
+    return res.status(201).json({ ...result, invitation_sent: invitationSent });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'No se pudo crear el usuario.' });
@@ -771,6 +6639,20 @@ function isPdfUploadFile(file) {
   const mimetype = String(file?.mimetype || '').toLowerCase();
   const extension = path.extname(String(file?.originalname || '')).toLowerCase();
   return extension === '.pdf' && (mimetype === 'application/pdf' || isPdfBuffer(file?.buffer));
+}
+
+function odontologyAttachmentExtension(file) {
+  const mimetype = String(file?.mimetype || '').toLowerCase();
+  const extension = path.extname(String(file?.originalname || '')).toLowerCase();
+  if (extension === '.pdf' && (mimetype === 'application/pdf' || isPdfBuffer(file?.buffer))) return '.pdf';
+  if (['.jpg', '.jpeg'].includes(extension) || mimetype === 'image/jpeg') return '.jpg';
+  if (extension === '.png' || mimetype === 'image/png') return '.png';
+  if (extension === '.webp' || mimetype === 'image/webp') return '.webp';
+  return '';
+}
+
+function isAllowedOdontologyAttachment(file) {
+  return Boolean(odontologyAttachmentExtension(file));
 }
 
 function isAllowedSignatureFile(file) {
@@ -825,6 +6707,78 @@ async function saveUserSignature(userId, file) {
   await processSignatureImage(imageBuffer, filename);
   const publicPath = `/${path.join('uploads', 'users', userId, 'signature.png')}`;
   return publicPath.replace(/\\/g, '/');
+}
+
+async function saveOdontologyConsentSignerSignature(clientId, consentId, dataUrl) {
+  const cleanDataUrl = String(dataUrl || '').trim();
+  if (!cleanDataUrl) return null;
+  const match = cleanDataUrl.match(/^data:image\/(?:png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) {
+    const error = new Error('La firma debe enviarse como imagen válida.');
+    error.code = 'INVALID_SIGNATURE';
+    throw error;
+  }
+  const buffer = Buffer.from(match[1], 'base64');
+  if (!buffer.length || buffer.length > 2 * 1024 * 1024) {
+    const error = new Error('La firma está vacía o supera el tamaño permitido.');
+    error.code = 'INVALID_SIGNATURE';
+    throw error;
+  }
+  const relativeDir = path.join('uploads', 'clients', clientId, 'odontology', 'consents', 'signatures');
+  const dir = path.join(process.cwd(), relativeDir);
+  await fs.promises.mkdir(dir, { recursive: true });
+  const fileName = `firma-firmante-${consentId}-${randomUUID()}.png`;
+  const fullPath = path.join(dir, fileName);
+  await processSignatureImage(buffer, fullPath);
+  return `/${path.join(relativeDir, fileName)}`.replace(/\\/g, '/');
+}
+
+async function saveOdontologyClinicalRecordPatientSignature(clientId, recordId, dataUrl) {
+  const cleanDataUrl = String(dataUrl || '').trim();
+  if (!cleanDataUrl) return null;
+  const match = cleanDataUrl.match(/^data:image\/(?:png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) {
+    const error = new Error('La firma debe enviarse como imagen válida.');
+    error.code = 'INVALID_SIGNATURE';
+    throw error;
+  }
+  const buffer = Buffer.from(match[1], 'base64');
+  if (!buffer.length || buffer.length > 2 * 1024 * 1024) {
+    const error = new Error('La firma está vacía o supera el tamaño permitido.');
+    error.code = 'INVALID_SIGNATURE';
+    throw error;
+  }
+  const relativeDir = path.join('uploads', 'clients', clientId, 'odontology', 'clinical-records', 'signatures');
+  const dir = path.join(process.cwd(), relativeDir);
+  await fs.promises.mkdir(dir, { recursive: true });
+  const fileName = `firma-paciente-${recordId}-${randomUUID()}.png`;
+  const fullPath = path.join(dir, fileName);
+  await processSignatureImage(buffer, fullPath);
+  return `/${path.join(relativeDir, fileName)}`.replace(/\\/g, '/');
+}
+
+async function saveOdontologyTreatmentPlanAcceptanceSignature(clientId, planId, dataUrl) {
+  const cleanDataUrl = String(dataUrl || '').trim();
+  if (!cleanDataUrl) return null;
+  const match = cleanDataUrl.match(/^data:image\/(?:png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) {
+    const error = new Error('La firma debe enviarse como imagen válida.');
+    error.code = 'INVALID_SIGNATURE';
+    throw error;
+  }
+  const buffer = Buffer.from(match[1], 'base64');
+  if (!buffer.length || buffer.length > 2 * 1024 * 1024) {
+    const error = new Error('La firma está vacía o supera el tamaño permitido.');
+    error.code = 'INVALID_SIGNATURE';
+    throw error;
+  }
+  const relativeDir = path.join('uploads', 'clients', clientId, 'odontology', 'treatment-plans', 'signatures');
+  const dir = path.join(process.cwd(), relativeDir);
+  await fs.promises.mkdir(dir, { recursive: true });
+  const fileName = `firma-aceptacion-${planId}-${randomUUID()}.png`;
+  const fullPath = path.join(dir, fileName);
+  await processSignatureImage(buffer, fullPath);
+  return `/${path.join(relativeDir, fileName)}`.replace(/\\/g, '/');
 }
 
 async function processSignatureImage(buffer, filename) {
@@ -1059,6 +7013,73 @@ async function saveClientLogoBuffer(clientId, buffer) {
   return updateClientLogo(clientId, publicPath);
 }
 
+async function listOdontologyInventoryNotificationRecipients(clientId) {
+  const { rows } = await query(
+    `SELECT DISTINCT u.id
+     FROM users u
+     JOIN user_roles ur ON ur.user_id = u.id
+     JOIN roles r ON r.id = ur.role_id
+     LEFT JOIN role_permissions rp ON rp.role_id = r.id
+     LEFT JOIN permissions p ON p.id = rp.permission_id
+     WHERE u.is_active = TRUE
+       AND (u.client_id = $1 OR r.name = 'superuser')
+       AND (r.name = 'superuser' OR p.name = 'odontology:inventory:manage')`,
+    [clientId]
+  );
+  return rows.map((row) => row.id);
+}
+
+async function syncOdontologyInventoryLowStockNotifications({ clientId, item }) {
+  if (!item?.id) return;
+  const isLowStock = Boolean(item.is_active && item.low_stock);
+  if (!isLowStock) {
+    await query(
+      `UPDATE notifications
+       SET read_at = COALESCE(read_at, NOW())
+       WHERE client_id = $1
+         AND type = 'odontology_inventory_low_stock'
+         AND payload->>'itemId' = $2
+         AND read_at IS NULL`,
+      [clientId, item.id]
+    );
+    return;
+  }
+
+  const recipients = await listOdontologyInventoryNotificationRecipients(clientId);
+  await Promise.all(
+    recipients.map(async (userId) => {
+      const { rows } = await query(
+        `SELECT id
+         FROM notifications
+         WHERE user_id = $1
+           AND client_id = $2
+           AND type = 'odontology_inventory_low_stock'
+           AND payload->>'itemId' = $3
+           AND read_at IS NULL
+         LIMIT 1`,
+        [userId, clientId, item.id]
+      );
+      if (rows[0]) return rows[0];
+      return createNotification({
+        userId,
+        clientId,
+        title: 'Stock bajo odontológico',
+        message: `${item.name} está en ${item.current_stock} ${item.unit || 'unidad(es)'}; mínimo ${item.min_stock}.`,
+        link: '/odontologia?tab=inventory&lowStock=true',
+        type: 'odontology_inventory_low_stock',
+        priority: 'high',
+        data: {
+          itemId: item.id,
+          itemName: item.name,
+          currentStock: item.current_stock,
+          minStock: item.min_stock,
+          unit: item.unit
+        }
+      });
+    })
+  );
+}
+
 async function isValidImageBuffer(buffer) {
   try {
     await sharp(buffer).metadata();
@@ -1087,17 +7108,210 @@ async function saveQuickGuideVisual(clientId, guideId, file) {
   return `/${filename}`.replace(/\\/g, '/');
 }
 
-app.get('/admin/clients', requireAuth, requirePermission('clients:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
-  }
+app.get('/admin/clients', requireAuth, requireAnyPermission(SAAS_READ_PERMISSIONS), async (req, res) => {
   const clients = await listClients();
   return res.json(clients);
 });
 
+app.get('/admin/clients/:id/subscription', requireAuth, requireAnyPermission(SAAS_READ_PERMISSIONS), async (req, res) => {
+  const client = await getClientById(req.params.id);
+  if (!client) {
+    return res.status(404).json({ message: 'Cliente no encontrado.' });
+  }
+  const subscription = await getClientSubscription(req.params.id, { includeHistory: true });
+  return res.json(subscription);
+});
+
+app.put('/admin/clients/:id/subscription', requireAuth, requireAnyPermission(SAAS_SUBSCRIPTION_PERMISSIONS), async (req, res) => {
+  const client = await getClientById(req.params.id);
+  if (!client) {
+    return res.status(404).json({ message: 'Cliente no encontrado.' });
+  }
+  if (subscriptionRequiresClientAdmin(req.body || {}) && !(await clientHasActiveAdmin(req.params.id))) {
+    return res.status(400).json({
+      message: 'Para activar el cliente con acceso completo primero debe existir un administrador del cliente activo.'
+    });
+  }
+  try {
+    if (!(await requireActionConfirmation(req, res, 'CLIENT_SUBSCRIPTION_UPDATE'))) return;
+    const subscription = await updateClientSubscription(req.params.id, req.body || {}, {
+      userId: req.user.sub,
+      username: req.user.username
+    });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'CLIENT_SUBSCRIPTION_UPDATE',
+      targetUserId: req.params.id,
+      targetUsername: client.name,
+      details: { subscription }
+    });
+    return res.json(subscription);
+  } catch (error) {
+    console.error(error);
+    return res.status(400).json({ message: 'No se pudo actualizar la suscripción.' });
+  }
+});
+
+app.post('/admin/clients/:id/subscription/payments', requireAuth, requireAnyPermission(SAAS_SUBSCRIPTION_PERMISSIONS), async (req, res) => {
+  const client = await getClientById(req.params.id);
+  if (!client) {
+    return res.status(404).json({ message: 'Cliente no encontrado.' });
+  }
+  if (!(await clientHasActiveAdmin(req.params.id))) {
+    return res.status(400).json({
+      message: 'Para registrar renovación y activar el cliente primero debe existir un administrador del cliente activo.'
+    });
+  }
+  try {
+    if (!(await requireActionConfirmation(req, res, 'CLIENT_SUBSCRIPTION_PAYMENT'))) return;
+    const payment = await recordSubscriptionPayment(req.params.id, req.body || {}, {
+      userId: req.user.sub,
+      username: req.user.username
+    });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'CLIENT_SUBSCRIPTION_PAYMENT',
+      targetUserId: req.params.id,
+      targetUsername: client.name,
+      details: { payment }
+    });
+    return res.status(201).json(payment);
+  } catch (error) {
+    console.error(error);
+    return res.status(400).json({ message: 'No se pudo registrar el pago.' });
+  }
+});
+
+app.get('/admin/clients/:id/admin-users', requireAuth, requireAnyPermission(SAAS_CLIENT_ADMIN_RESET_PERMISSIONS), async (req, res) => {
+  if (req.user.clientId) {
+    return res.status(403).json({ message: 'Solo administradores SaaS pueden gestionar administradores del cliente.' });
+  }
+  const client = await getClientById(req.params.id);
+  if (!client) {
+    return res.status(404).json({ message: 'Cliente no encontrado.' });
+  }
+  const admins = await listClientAdmins(req.params.id);
+  return res.json(admins);
+});
+
+app.post(
+  '/admin/clients/:id/admin-users',
+  requireAuth,
+  requireAnyPermission(SAAS_CLIENT_ADMIN_RESET_PERMISSIONS),
+  upload.single('signature'),
+  async (req, res) => {
+    if (req.user.clientId) {
+      return res.status(403).json({ message: 'Solo administradores SaaS pueden crear administradores del cliente.' });
+    }
+    const client = await getClientById(req.params.id);
+    if (!client) {
+      return res.status(404).json({ message: 'Cliente no encontrado.' });
+    }
+    const { username, displayName, email, documentType, documentNumber } = req.body || {};
+    if (!username || !displayName || !email || !documentType || !documentNumber) {
+      return res.status(400).json({ message: 'Datos incompletos.' });
+    }
+    if (!String(email).includes('@')) {
+      return res.status(400).json({ message: 'Correo inválido.' });
+    }
+    const cleanDocumentType = documentType?.trim?.() || null;
+    const cleanDocumentNumber = documentNumber?.trim?.() || null;
+    if (!BIOMED_DOCUMENT_TYPES.includes(cleanDocumentType)) {
+      return res.status(400).json({ message: 'Tipo de documento inválido.' });
+    }
+    if (req.file && !isAllowedSignatureFile(req.file)) {
+      return res.status(400).json({
+        message: 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.'
+      });
+    }
+    if (!(await requireActionConfirmation(req, res, 'CLIENT_ADMIN_CREATE'))) return;
+
+    try {
+      const result = await createUser({
+        username: String(username).trim(),
+        displayName: String(displayName).trim(),
+        email: String(email).trim(),
+        password: randomBytes(32).toString('base64url'),
+        role: CLIENT_ADMIN_ROLE,
+        clientId: req.params.id,
+        documentType: cleanDocumentType,
+        documentNumber: cleanDocumentNumber,
+        invimaRegistration: null
+      });
+      if (result?.error === 'DUPLICATE') {
+        return res.status(409).json({ message: 'Usuario o correo ya existe.' });
+      }
+      if (req.file && result?.id) {
+        const signaturePath = await saveUserSignature(result.id, req.file);
+        await updateUserSignature(result.id, signaturePath);
+      }
+      let invitationSent = false;
+      try {
+        invitationSent = await requestPasswordSetup(String(email).trim(), { clientName: client.name });
+      } catch (inviteError) {
+        console.error('No se pudo enviar invitación al administrador del cliente', inviteError);
+      }
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'CLIENT_ADMIN_CREATE',
+        targetUserId: result.id,
+        targetUsername: username,
+        details: {
+          clientId: req.params.id,
+          clientName: client.name,
+          email,
+          invitationSent
+        }
+      });
+      return res.status(201).json({ ...result, invitation_sent: invitationSent });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo crear el administrador del cliente.' });
+    }
+  }
+);
+
+app.patch(
+  '/admin/clients/:id/admin-users/:userId/password',
+  requireAuth,
+  requireAnyPermission(SAAS_CLIENT_ADMIN_RESET_PERMISSIONS),
+  async (req, res) => {
+    if (req.user.clientId) {
+      return res.status(403).json({ message: 'Solo administradores SaaS pueden enviar acceso al administrador del cliente.' });
+    }
+    const client = await getClientById(req.params.id);
+    if (!client) {
+      return res.status(404).json({ message: 'Cliente no encontrado.' });
+    }
+    const target = await getUserById(req.params.userId);
+    if (!target || target.client_id !== req.params.id || !target.roles?.includes(CLIENT_ADMIN_ROLE)) {
+      return res.status(404).json({ message: 'Administrador del cliente no encontrado.' });
+    }
+    if (!(await requireActionConfirmation(req, res, 'CLIENT_ADMIN_PASSWORD_RESET'))) return;
+    try {
+      await requestPasswordSetup(String(target.email).trim(), { clientName: client.name });
+    } catch (error) {
+      console.error('No se pudo enviar correo de activación al administrador de cliente', error);
+      return res.status(500).json({ message: 'No se pudo enviar el correo de activación.' });
+    }
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'CLIENT_ADMIN_PASSWORD_RESET',
+      targetUserId: req.params.userId,
+      targetUsername: target.username,
+      details: { clientId: req.params.id, clientName: client.name, delivery: 'email' }
+    });
+    return res.json({ ok: true, delivery: 'email' });
+  }
+);
+
 app.get('/admin/clients/:id/areas', requireAuth, requirePermission('users:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
+  if (!isSuperuser(req.user) && req.user.clientId !== req.params.id) {
+    return res.status(403).json({ message: 'Sin acceso al cliente.' });
   }
   try {
     const areas = await listAreas(req.params.id);
@@ -1109,8 +7323,8 @@ app.get('/admin/clients/:id/areas', requireAuth, requirePermission('users:manage
 });
 
 app.get('/admin/clients/:id/locations', requireAuth, requirePermission('users:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
+  if (!isSuperuser(req.user) && req.user.clientId !== req.params.id) {
+    return res.status(403).json({ message: 'Sin acceso al cliente.' });
   }
   try {
     const areas = await listLocations(req.params.id, req.query.areaId);
@@ -1121,52 +7335,174 @@ app.get('/admin/clients/:id/locations', requireAuth, requirePermission('users:ma
   }
 });
 
-app.post('/admin/clients', requireAuth, requirePermission('clients:manage'), upload.single('logo'), async (req, res) => {
+app.post('/admin/clients', requireAuth, requirePermission('clients:manage'), upload.fields([
+  { name: 'logo', maxCount: 1 },
+  { name: 'adminSignature', maxCount: 1 }
+]), async (req, res) => {
   if (!req.user.roles?.includes('superuser')) {
     return res.status(403).json({ message: 'Solo superuser.' });
   }
-  const { name, nit, city, address, habilitationCode, email } = req.body || {};
+  const {
+    name,
+    nit,
+    city,
+    address,
+    habilitationCode,
+    email,
+    adminUsername,
+    adminDisplayName,
+    adminEmail,
+    adminDocumentType,
+    adminDocumentNumber,
+    planKey,
+    billingCycle
+  } = req.body || {};
   if (!name || !nit || !city || !email || !address) {
     return res.status(400).json({ message: 'Datos incompletos.' });
   }
-  if (req.file) {
+  if (!adminUsername || !adminDisplayName || !adminEmail || !adminDocumentType || !adminDocumentNumber) {
+    return res.status(400).json({
+      message: 'Para crear un cliente debes crear también el administrador inicial del cliente.'
+    });
+  }
+  if (!String(adminEmail).includes('@')) {
+    return res.status(400).json({ message: 'Correo del administrador inválido.' });
+  }
+  const cleanPlanKey = String(planKey || 'biomedico_ips').trim();
+  const cleanBillingCycle = ['monthly', 'annual'].includes(billingCycle) ? billingCycle : 'monthly';
+  const plans = await listSubscriptionPlans();
+  if (!plans.some((plan) => plan.key === cleanPlanKey)) {
+    return res.status(400).json({ message: 'Plan comercial inválido.' });
+  }
+  const cleanAdminDocumentType = adminDocumentType?.trim?.() || null;
+  const cleanAdminDocumentNumber = adminDocumentNumber?.trim?.() || null;
+  if (!BIOMED_DOCUMENT_TYPES.includes(cleanAdminDocumentType)) {
+    return res.status(400).json({ message: 'Tipo de documento del administrador inválido.' });
+  }
+  const logoFile = req.files?.logo?.[0] ?? null;
+  const adminSignatureFile = req.files?.adminSignature?.[0] ?? null;
+  if (logoFile) {
     try {
-      await sharp(req.file.buffer).metadata();
+      await sharp(logoFile.buffer).metadata();
     } catch {
       return res.status(400).json({ message: 'El logo debe ser una imagen válida.' });
     }
   }
+  if (adminSignatureFile && !isAllowedSignatureFile(adminSignatureFile)) {
+    return res.status(400).json({
+      message: 'La firma del administrador debe ser una imagen PNG/JPG/WEBP o un PDF.'
+    });
+  }
+
+  const { rows: duplicateAdminRows } = await query(
+    'SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2) LIMIT 1',
+    [adminUsername, adminEmail]
+  );
+  if (duplicateAdminRows.length) {
+    return res.status(409).json({ message: 'El usuario o correo del administrador ya existe.' });
+  }
+  if (!(await requireActionConfirmation(req, res, 'CLIENT_CREATE'))) return;
 
   try {
     const result = await createClient({ name, nit, city, address, habilitationCode, email });
     let logoPath = null;
-    if (req.file) {
-      const updatedLogo = await saveClientLogoBuffer(result.id, req.file.buffer);
+    if (logoFile) {
+      const updatedLogo = await saveClientLogoBuffer(result.id, logoFile.buffer);
       logoPath = updatedLogo?.logo_path ?? null;
     }
+    const adminResult = await createUser({
+      username: String(adminUsername).trim(),
+      displayName: String(adminDisplayName).trim(),
+      email: String(adminEmail).trim(),
+      password: randomBytes(32).toString('base64url'),
+      role: CLIENT_ADMIN_ROLE,
+      clientId: result.id,
+      documentType: cleanAdminDocumentType,
+      documentNumber: cleanAdminDocumentNumber,
+      invimaRegistration: null
+    });
+    if (adminResult?.error === 'DUPLICATE') {
+      return res.status(409).json({ message: 'Usuario o correo del administrador ya existe.' });
+    }
+    let adminSignaturePath = null;
+    if (adminSignatureFile && adminResult?.id) {
+      adminSignaturePath = await saveUserSignature(adminResult.id, adminSignatureFile);
+      await updateUserSignature(adminResult.id, adminSignaturePath);
+    }
+    let adminInvitationSent = false;
+    try {
+      adminInvitationSent = await requestPasswordSetup(String(adminEmail).trim(), { clientName: String(name).trim() });
+    } catch (inviteError) {
+      console.error('No se pudo enviar invitación al administrador inicial', inviteError);
+    }
+    const periodStart = todayLocalISO();
+    const periodEndDate = addMonths(`${periodStart}T00:00:00`, cleanBillingCycle === 'annual' ? 12 : 1);
+    periodEndDate.setDate(periodEndDate.getDate() - 1);
+    const subscription = await updateClientSubscription(result.id, {
+      planKey: cleanPlanKey,
+      billingCycle: cleanBillingCycle,
+      status: 'active',
+      accessMode: 'full',
+      currentPeriodStartsAt: periodStart,
+      currentPeriodEndsAt: toLocalISODate(periodEndDate),
+      graceEndsAt: null,
+      amount: null,
+      notes: 'Suscripción inicial creada con el cliente.'
+    }, {
+      userId: req.user.sub,
+      username: req.user.username
+    });
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,
       action: 'CLIENT_CREATE',
       targetUserId: result.id,
       targetUsername: name,
-      details: { nit, city, address, logo: logoPath }
+      details: {
+        nit,
+        city,
+        address,
+        logo: logoPath,
+        planKey: cleanPlanKey,
+        billingCycle: cleanBillingCycle,
+        subscription,
+        initialAdminUserId: adminResult?.id,
+        initialAdminUsername: adminUsername,
+        initialAdminInvitationSent: adminInvitationSent,
+        hasAdminSignature: Boolean(adminSignaturePath)
+      }
     });
-    return res.status(201).json({ ...result, logo_path: logoPath });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'CLIENT_ADMIN_CREATE',
+      targetUserId: adminResult?.id,
+      targetUsername: adminUsername,
+      details: {
+        clientId: result.id,
+        email: adminEmail,
+        documentType: cleanAdminDocumentType,
+        invitationSent: adminInvitationSent
+      }
+    });
+    return res.status(201).json({
+      ...result,
+      logo_path: logoPath,
+      initial_admin_id: adminResult?.id,
+      initial_admin_invitation_sent: adminInvitationSent
+    });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'No se pudo crear el cliente.' });
   }
 });
 
-app.patch('/admin/clients/:id', requireAuth, requirePermission('clients:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
-  }
+app.patch('/admin/clients/:id', requireAuth, requireAnyPermission(SAAS_CLIENT_UPDATE_PERMISSIONS), async (req, res) => {
   const { name, nit, city, address, habilitationCode, email } = req.body || {};
   if (!name || !nit || !city || !email || !address) {
     return res.status(400).json({ message: 'Datos incompletos.' });
   }
+  if (!(await requireActionConfirmation(req, res, 'CLIENT_UPDATE'))) return;
   await updateClient(req.params.id, { name, nit, city, address, habilitationCode, email });
   await logAudit({
     actorUserId: req.user.sub,
@@ -1182,6 +7518,7 @@ app.delete('/admin/clients/:id', requireAuth, requirePermission('clients:manage'
   if (!req.user.roles?.includes('superuser')) {
     return res.status(403).json({ message: 'Solo superuser.' });
   }
+  if (!(await requireActionConfirmation(req, res, 'CLIENT_DELETE'))) return;
   await deleteClient(req.params.id);
   await logAudit({
     actorUserId: req.user.sub,
@@ -1195,15 +7532,13 @@ app.delete('/admin/clients/:id', requireAuth, requirePermission('clients:manage'
 app.post(
   '/admin/clients/:id/logo',
   requireAuth,
-  requirePermission('clients:manage'),
+  requireAnyPermission(SAAS_CLIENT_UPDATE_PERMISSIONS),
   upload.single('logo'),
   async (req, res) => {
-    if (!req.user.roles?.includes('superuser')) {
-      return res.status(403).json({ message: 'Solo superuser.' });
-    }
     if (!req.file) {
       return res.status(400).json({ message: 'Logo requerido.' });
     }
+    if (!(await requireActionConfirmation(req, res, 'CLIENT_LOGO_UPDATE'))) return;
 
     const updated = await saveClientLogoBuffer(req.params.id, req.file.buffer);
     await logAudit({
@@ -1211,7 +7546,7 @@ app.post(
       actorUsername: req.user.username,
       action: 'CLIENT_LOGO_UPDATE',
       targetUserId: req.params.id,
-      details: { logo: updated?.logo_path }
+      details: { clientId: req.params.id, logo: updated?.logo_path }
     });
 
     return res.json(updated);
@@ -2669,15 +9004,36 @@ app.delete(
 );
 
 app.patch('/admin/users/:id/role', requireAuth, requirePermission('users:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
-  }
   const { role } = req.body || {};
   if (!role) {
     return res.status(400).json({ message: 'Rol requerido.' });
   }
 
   try {
+    const target = await ensureCanManageTargetUser(req, res, req.params.id);
+    if (!target) return;
+    if (isSuperuser(req.user)) {
+      const targetRoles = target.roles || [];
+      if (targetRoles.includes('superuser')) {
+        return res.status(403).json({
+          message: 'El superuser no se modifica desde Usuarios.'
+        });
+      }
+      if (targetRoles.includes(CLIENT_ADMIN_ROLE) || role === CLIENT_ADMIN_ROLE) {
+        return res.status(403).json({
+          message: 'Los administradores del cliente se gestionan desde Clientes / cartera.'
+        });
+      }
+      if (!isSuperuserAssignableRole(role)) {
+        return res.status(403).json({
+          message: 'Desde Usuarios solo se asignan roles SaaS actuales.'
+        });
+      }
+    } else if (isClientAdmin(req.user) && !(await canClientUseRole(req.user.clientId, role))) {
+      return res.status(403).json({
+        message: 'Este rol no está habilitado para los softwares y módulos de tu cliente.'
+      });
+    }
     if (role === 'ingeniero_biomedico') {
       const targetUser = await getUserById(req.params.id);
       if (!targetUser?.document_type || !targetUser?.document_number || !targetUser?.invima_registration) {
@@ -2686,6 +9042,7 @@ app.patch('/admin/users/:id/role', requireAuth, requirePermission('users:manage'
         });
       }
     }
+    if (!(await requireActionConfirmation(req, res, 'USER_ROLE_UPDATE'))) return;
     const { before } = await updateUserRole(req.params.id, role);
     await logAudit({
       actorUserId: req.user.sub,
@@ -2703,9 +9060,8 @@ app.patch('/admin/users/:id/role', requireAuth, requirePermission('users:manage'
 });
 
 app.patch('/admin/users/:id', requireAuth, requirePermission('users:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
-  }
+  const target = await ensureCanManageTargetUser(req, res, req.params.id);
+  if (!target) return;
   const { displayName, email, clientId, documentType, documentNumber, invimaRegistration } = req.body || {};
   if (!displayName || !email) {
     return res.status(400).json({ message: 'Datos incompletos.' });
@@ -2730,10 +9086,13 @@ app.patch('/admin/users/:id', requireAuth, requirePermission('users:manage'), as
   if (isBiomedicalEngineer && !cleanInvimaRegistration) {
     return res.status(400).json({ message: 'Registro INVIMA obligatorio para el ingeniero biomédico.' });
   }
+  if (!(await requireActionConfirmation(req, res, 'USER_UPDATE'))) return;
   await updateUserProfile(req.params.id, {
     displayName,
     email,
-    clientId,
+    clientId: isSuperuser(req.user)
+      ? (target.roles?.includes(CLIENT_ADMIN_ROLE) ? target.client_id : null)
+      : req.user.clientId,
     documentType: cleanDocumentType,
     documentNumber: cleanDocumentNumber,
     invimaRegistration: isBiomedicalEngineer ? cleanInvimaRegistration : null
@@ -2746,7 +9105,9 @@ app.patch('/admin/users/:id', requireAuth, requirePermission('users:manage'), as
     details: {
       displayName,
       email,
-      clientId: clientId ?? null,
+      clientId: (isSuperuser(req.user)
+        ? (target.roles?.includes(CLIENT_ADMIN_ROLE) ? target.client_id : null)
+        : req.user.clientId) ?? null,
       documentType: documentType ?? null,
       hasInvimaRegistration: Boolean(invimaRegistration)
     }
@@ -2755,24 +9116,28 @@ app.patch('/admin/users/:id', requireAuth, requirePermission('users:manage'), as
 });
 
 app.get('/admin/users/:id/reader-access', requireAuth, requirePermission('users:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
-  }
+  const target = await ensureCanManageTargetUser(req, res, req.params.id);
+  if (!target) return;
   const clientId = req.query.clientId;
   if (!clientId || typeof clientId !== 'string') {
     return res.status(400).json({ message: 'clientId requerido.' });
+  }
+  if (isClientAdmin(req.user) && clientId !== req.user.clientId) {
+    return res.status(403).json({ message: 'Sin acceso al cliente.' });
   }
   const rows = await listReaderAccess(req.params.id, clientId);
   return res.json(rows);
 });
 
 app.post('/admin/users/:id/reader-access', requireAuth, requirePermission('users:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
-  }
+  const target = await ensureCanManageTargetUser(req, res, req.params.id);
+  if (!target) return;
   const { clientId, areaIds, locationIds } = req.body || {};
   if (!clientId) {
     return res.status(400).json({ message: 'clientId requerido.' });
+  }
+  if (isClientAdmin(req.user) && clientId !== req.user.clientId) {
+    return res.status(403).json({ message: 'Sin acceso al cliente.' });
   }
   const safeAreaIds = Array.isArray(areaIds) ? areaIds : [];
   const safeLocationIds = Array.isArray(locationIds) ? locationIds : [];
@@ -2793,9 +9158,8 @@ app.post(
   requirePermission('users:manage'),
   upload.single('signature'),
   async (req, res) => {
-    if (!req.user.roles?.includes('superuser')) {
-      return res.status(403).json({ message: 'Solo superuser.' });
-    }
+    const target = await ensureCanManageTargetUser(req, res, req.params.id);
+    if (!target) return;
     if (!req.file) {
       return res.status(400).json({ message: 'Firma requerida.' });
     }
@@ -2812,7 +9176,8 @@ app.post(
         actorUsername: req.user.username,
         action: 'USER_SIGNATURE_UPDATE',
         targetUserId: req.params.id,
-        details: { signaturePath }
+        targetUsername: target.username,
+        details: { clientId: target.client_id ?? null, signaturePath }
       });
       return res.json({ ok: true, signaturePath });
     } catch (error) {
@@ -2825,15 +9190,17 @@ app.post(
 );
 
 app.delete('/admin/users/:id', requireAuth, requirePermission('users:manage'), async (req, res) => {
-  if (!req.user.roles?.includes('superuser')) {
-    return res.status(403).json({ message: 'Solo superuser.' });
-  }
+  const target = await ensureCanManageTargetUser(req, res, req.params.id);
+  if (!target) return;
+  if (!(await requireActionConfirmation(req, res, 'USER_DELETE'))) return;
   await deleteUser(req.params.id);
   await logAudit({
     actorUserId: req.user.sub,
     actorUsername: req.user.username,
     action: 'USER_DELETE',
-    targetUserId: req.params.id
+    targetUserId: req.params.id,
+    targetUsername: target.username,
+    details: { clientId: target.client_id ?? null }
   });
   return res.json({ ok: true });
 });
@@ -2843,13 +9210,13 @@ app.patch(
   requireAuth,
   requirePermission('users:manage'),
   async (req, res) => {
-    if (!req.user.roles?.includes('superuser')) {
-      return res.status(403).json({ message: 'Solo superuser.' });
-    }
+    const target = await ensureCanManageTargetUser(req, res, req.params.id);
+    if (!target) return;
     const { isActive } = req.body || {};
     if (typeof isActive !== 'boolean') {
       return res.status(400).json({ message: 'Estado inválido.' });
     }
+    if (!(await requireActionConfirmation(req, res, 'USER_ACTIVE_UPDATE'))) return;
 
     const { before } = await updateUserActive(req.params.id, isActive);
     await logAudit({
@@ -2858,7 +9225,7 @@ app.patch(
       action: 'USER_ACTIVE_UPDATE',
       targetUserId: req.params.id,
       targetUsername: before?.username,
-      details: { isActive }
+      details: { clientId: target.client_id ?? null, isActive }
     });
     return res.json({ ok: true });
   }
@@ -2869,29 +9236,59 @@ app.patch(
   requireAuth,
   requirePermission('users:manage'),
   async (req, res) => {
-    if (!req.user.roles?.includes('superuser')) {
-      return res.status(403).json({ message: 'Solo superuser.' });
+    const target = await ensureCanManageTargetUser(req, res, req.params.id);
+    if (!target) return;
+    if (!target.email) {
+      return res.status(400).json({ message: 'El usuario no tiene correo registrado.' });
     }
-    const { password } = req.body || {};
-    if (!password) {
-      return res.status(400).json({ message: 'Contraseña requerida.' });
+    if (!(await requireActionConfirmation(req, res, 'USER_PASSWORD_RESET'))) return;
+
+    const client = target.client_id ? await getClientById(target.client_id) : null;
+    const emailSent = await requestPasswordSetup(String(target.email).trim(), {
+      clientName: client?.name
+    });
+    if (!emailSent) {
+      return res.status(400).json({ message: 'No se pudo enviar el correo. Verifica que el usuario esté activo.' });
     }
 
-    const { before } = await updateUserPassword(req.params.id, password);
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,
       action: 'USER_PASSWORD_RESET',
       targetUserId: req.params.id,
-      targetUsername: before?.username,
-      details: {}
+      targetUsername: target.username,
+      details: {
+        clientId: target.client_id ?? null,
+        deliveryEmail: target.email
+      }
     });
-    return res.json({ ok: true });
+    return res.json({ ok: true, email_sent: true });
   }
 );
 
-app.get('/admin/audit', requireAuth, requirePermission('users:manage'), async (_req, res) => {
-  const logs = await listAuditLogs(500);
+app.get('/admin/audit', requireAuth, requireAnyPermission(['users:manage', 'audit:client:view', 'saas:audit:view']), async (req, res) => {
+  const canViewPlatformAudit = isSuperuser(req.user)
+    || (!req.user.clientId && (
+      req.user.permissions?.includes('saas:audit:view')
+      || req.user.permissions?.includes('users:manage')
+    ));
+  const canViewOwnClientAudit = Boolean(
+    req.user.clientId
+    && req.user.permissions?.includes('audit:client:view')
+  );
+  if (!canViewPlatformAudit) {
+    if (!canViewOwnClientAudit) {
+      return res.status(403).json({ message: 'Sin acceso a auditoría.' });
+    }
+    const logs = await listAuditLogs(500, {
+      clientId: req.user.clientId,
+      actorClientId: req.user.clientId
+    });
+    return res.json(logs);
+  }
+  const logs = await listAuditLogs(500, {
+    adminOnly: true
+  });
   return res.json(logs);
 });
 
@@ -4800,7 +11197,37 @@ app.delete(
   }
 );
 
+function startOdontologyReminderScheduler() {
+  if (String(process.env.ODONTOLOGY_REMINDERS_ENABLED || 'true').toLowerCase() === 'false') {
+    console.log('Recordatorios odontologicos automaticos desactivados.');
+    return;
+  }
+
+  const intervalMinutes = Math.max(Number(process.env.ODONTOLOGY_REMINDERS_INTERVAL_MINUTES || 30), 5);
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const stats = await sendOdontologyAppointmentRemindersForAllClients();
+      if (stats.sent || stats.failed) {
+        console.log(
+          `Recordatorios odontologicos: ${stats.sent} enviados, ${stats.failed} fallidos, ${stats.scanned} revisados.`
+        );
+      }
+    } catch (error) {
+      console.error('No se pudieron procesar recordatorios odontologicos automaticos.', error);
+    } finally {
+      running = false;
+    }
+  };
+
+  setTimeout(run, 15000);
+  setInterval(run, intervalMinutes * 60 * 1000);
+}
+
 const port = Number(process.env.PORT || 5050);
 app.listen(port, () => {
   console.log(`API escuchando en http://localhost:${port}`);
+  startOdontologyReminderScheduler();
 });

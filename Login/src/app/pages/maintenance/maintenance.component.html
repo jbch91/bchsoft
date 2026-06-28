@@ -1,15 +1,4 @@
 <section class="page">
-  <app-user-menu></app-user-menu>
-  <header>
-    <div>
-      <h1>Reportes de mantenimiento</h1>
-      <p>Solicitudes, trazabilidad, reportes, firmas y estado operativo de los equipos.</p>
-    </div>
-    <div class="header-actions">
-      <a class="back" routerLink="/dashboard">Menú</a>
-    </div>
-  </header>
-
   <app-module-tabs></app-module-tabs>
 
   <div class="card filters-card" *ngIf="!auth.currentUser()?.clientId">

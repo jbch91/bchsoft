@@ -14,6 +14,8 @@ interface ModuleTab {
   roles?: Role[];
   permissionsAny?: Permission[];
   hiddenForRoles?: Role[];
+  platform?: boolean;
+  platformOnly?: boolean;
 }
 
 @Component({
@@ -29,22 +31,38 @@ export class ModuleTabsComponent implements OnInit {
 
   readonly tabs: ModuleTab[] = [
     {
-      label: 'Clientes',
-      route: '/clientes',
+      label: 'Administración SaaS',
+      route: '/administracion-saas',
       moduleKey: 'clientes',
-      roles: ['superuser']
+      permissionsAny: [
+        'clients:manage',
+        'saas:access',
+        'saas:clients:view',
+        'saas:clients:update',
+        'saas:subscriptions:manage',
+        'saas:plans:manage',
+        'saas:client_admins:reset_password'
+      ],
+      platform: true
     },
     {
       label: 'Usuarios',
       route: '/usuarios',
       moduleKey: 'usuarios',
-      roles: ['superuser']
+      permissionsAny: ['users:manage'],
+      platform: true
+    },
+    {
+      label: 'Roles y permisos',
+      route: '/roles-permisos',
+      permissionsAny: ['users:manage'],
+      platform: true
     },
     {
       label: 'Auditoría',
       route: '/auditoria',
-      moduleKey: 'auditoria',
-      permissionsAny: ['users:manage']
+      permissionsAny: ['users:manage', 'audit:client:view', 'saas:audit:view'],
+      platform: true
     },
     {
       label: 'Hojas de vida',
@@ -82,6 +100,32 @@ export class ModuleTabsComponent implements OnInit {
       route: '/calibraciones',
       moduleKey: 'calibraciones',
       permissionsAny: ['calibration:schedule:manage', 'calibration:report:upload', 'read:all']
+    },
+    {
+      label: 'Odontología',
+      route: '/odontologia',
+      moduleKey: 'odontologia',
+      permissionsAny: [
+        'software:odontologico:access',
+        'odontology:access',
+        'odontology:patients:manage',
+        'odontology:patients:import',
+        'odontology:clinical_records:manage',
+        'odontology:appointments:manage',
+        'odontology:settings:manage',
+        'odontology:odontogram:manage',
+        'odontology:periodontogram:manage',
+        'odontology:consents:manage',
+        'odontology:treatment_plans:manage',
+        'odontology:attachments:manage',
+        'odontology:inventory:manage',
+        'odontology:sterilization:manage',
+        'odontology:payments:manage',
+        'odontology:financial:view',
+        'odontology:prescriptions:manage',
+        'odontology:documents:manage',
+        'odontology:reports:view'
+      ]
     }
   ];
 
@@ -110,6 +154,13 @@ export class ModuleTabsComponent implements OnInit {
   }
 
   private canOpen(tab: ModuleTab): boolean {
+    const user = this.auth.currentUser();
+    if (this.auth.hasRole('superuser') && !tab.platform) {
+      return false;
+    }
+    if (tab.platformOnly && user?.clientId) {
+      return false;
+    }
     if (tab.roles && !this.auth.hasRole(tab.roles)) {
       return false;
     }

@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
 import { query } from './db.js';
-import { sendResetCode } from './mailer.js';
+import { sendPasswordSetupCode, sendResetCode } from './mailer.js';
 
 const CODE_TTL_MINUTES = 30;
 
@@ -13,6 +13,25 @@ function expiryDate() {
 }
 
 export async function requestPasswordReset(email) {
+  const result = await createPasswordResetCode(email);
+  if (!result) {
+    return;
+  }
+
+  await sendResetCode({ to: email, code: result.code });
+}
+
+export async function requestPasswordSetup(email, { clientName } = {}) {
+  const result = await createPasswordResetCode(email);
+  if (!result) {
+    return false;
+  }
+
+  await sendPasswordSetupCode({ to: email, code: result.code, clientName });
+  return true;
+}
+
+async function createPasswordResetCode(email) {
   const { rows } = await query(
     'SELECT id, username FROM users WHERE email = $1 AND is_active = TRUE',
     [email]
@@ -20,7 +39,7 @@ export async function requestPasswordReset(email) {
 
   const user = rows[0];
   if (!user) {
-    return;
+    return null;
   }
 
   const code = generateCode();
@@ -36,7 +55,7 @@ export async function requestPasswordReset(email) {
     [user.id, codeHash, expiryDate()]
   );
 
-  await sendResetCode({ to: email, code });
+  return { user, code };
 }
 
 export async function resetPasswordWithCode({ email, code, newPassword }) {

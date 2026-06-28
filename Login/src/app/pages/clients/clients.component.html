@@ -1,15 +1,4 @@
 <section class="page">
-  <app-user-menu></app-user-menu>
-  <header>
-    <div>
-      <h1>Clientes</h1>
-  <p>Disponible solo para superuser.</p>
-    </div>
-    <div class="header-actions">
-      <a class="back" routerLink="/dashboard">Menú</a>
-    </div>
-  </header>
-
   <app-module-tabs></app-module-tabs>
 
   <nav class="client-tabs" aria-label="Secciones de clientes">
@@ -18,15 +7,17 @@
       [class.active]="activeClientTab === 'list'"
       (click)="setClientTab('list')"
     >
-      Listado clientes
+      Clientes / cartera
       <span>{{ clients.length }}</span>
     </button>
     <button
+      *ngIf="canManagePlans()"
       type="button"
-      [class.active]="activeClientTab === 'create'"
-      (click)="setClientTab('create')"
+      [class.active]="activeClientTab === 'plans'"
+      (click)="setClientTab('plans')"
     >
-      Crear cliente
+      Planes SaaS
+      <span>{{ subscriptionPlans.length }}</span>
     </button>
   </nav>
 
@@ -35,101 +26,479 @@
     <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
   </div>
 
-  <div class="create-layout" *ngIf="activeClientTab === 'create'">
-    <div class="card create-card">
-      <div class="create-title">
-        <span>Nuevo cliente</span>
-        <h2>Crear cliente</h2>
-        <p class="form-intro">Registra la información base del cliente. Luego podrás habilitar módulos desde el listado.</p>
+  <div
+    class="saas-modal-backdrop"
+    *ngIf="creatingClient"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="create-client-title"
+    (click)="cancelCreateClient()"
+  >
+    <article class="create-client-modal" (click)="$event.stopPropagation()">
+      <div class="plan-editor-head">
+        <div>
+          <span class="eyebrow">Nuevo cliente</span>
+          <h3 id="create-client-title">Crear cliente SaaS</h3>
+          <p>Registra el cliente, su plan comercial inicial y el administrador principal.</p>
+        </div>
+        <button type="button" class="modal-close" aria-label="Cerrar creación de cliente" (click)="cancelCreateClient()">×</button>
       </div>
 
-      <form (ngSubmit)="onCreateClient()">
-        <label>
-          Nombre
-          <input type="text" name="name" [(ngModel)]="name" required />
-        </label>
+      <form class="create-client-form" (ngSubmit)="onCreateClient()">
+        <div class="modal-alerts" *ngIf="errorMessage || successMessage">
+          <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+          <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+        </div>
 
-        <label>
-          NIT
-          <input type="text" name="nit" [(ngModel)]="nit" required />
-        </label>
-
-        <label>
-          Ciudad
-          <input type="text" name="city" [(ngModel)]="city" required />
-        </label>
-
-        <label>
-          Dirección
-          <input type="text" name="address" [(ngModel)]="address" required />
-        </label>
-
-        <label>
-          Código habilitación (si aplica)
-          <input type="text" name="habilitationCode" [(ngModel)]="habilitationCode" />
-        </label>
-
-        <label>
-          Correo
-          <input type="email" name="email" [(ngModel)]="email" required />
-        </label>
-
-        <div class="create-logo-field">
-          <div>
-            <strong>Logo del cliente</strong>
-            <span>Opcional al crear. Se ajustará automáticamente para los formatos y encabezados.</span>
+        <section class="create-form-section">
+          <div class="create-section-head">
+            <strong>Datos del cliente</strong>
+            <span>Información comercial y de contacto para cartera SaaS.</span>
           </div>
-          <div class="create-logo-control">
-            <label class="file-button">
-              Seleccionar logo
-              <input
-                #createLogoInput
-                type="file"
-                accept="image/*"
-                (change)="onSelectCreateLogo($event)"
-              />
+          <div class="create-client-grid">
+            <label>
+              Nombre
+              <input type="text" name="name" [(ngModel)]="name" required />
             </label>
-            <button
-              type="button"
-              class="ghost"
-              *ngIf="logoFile"
-              (click)="clearCreateLogo(createLogoInput)"
-            >
-              Quitar
-            </button>
+
+            <label>
+              NIT
+              <input type="text" name="nit" [(ngModel)]="nit" required />
+            </label>
+
+            <label>
+              Ciudad
+              <input type="text" name="city" [(ngModel)]="city" required />
+            </label>
+
+            <label>
+              Dirección
+              <input type="text" name="address" [(ngModel)]="address" required />
+            </label>
+
+            <label>
+              Código habilitación (si aplica)
+              <input type="text" name="habilitationCode" [(ngModel)]="habilitationCode" />
+            </label>
+
+            <label>
+              Correo
+              <input type="email" name="email" [(ngModel)]="email" required />
+            </label>
           </div>
-          <div class="create-logo-preview" *ngIf="logoPreviewUrl">
-            <img [src]="logoPreviewUrl" alt="Vista previa logo cliente" />
-            <span>{{ logoFile?.name }}</span>
+        </section>
+
+        <section class="create-form-section">
+          <div class="create-section-head">
+            <strong>Plan comercial inicial</strong>
+            <span>El plan activa automáticamente los softwares y módulos contratados.</span>
+          </div>
+          <div class="admin-grid">
+            <label>
+              Plan
+              <select name="selectedPlanKey" [(ngModel)]="selectedPlanKey" (ngModelChange)="onCreatePlanChange()">
+                <option *ngFor="let plan of activeSubscriptionPlans" [value]="plan.key">
+                  {{ plan.name }}
+                </option>
+              </select>
+            </label>
+            <label>
+              Ciclo de cobro
+              <select name="selectedBillingCycle" [(ngModel)]="selectedBillingCycle">
+                <option value="monthly">Mensual</option>
+                <option value="annual">Anual</option>
+              </select>
+            </label>
+          </div>
+          <div class="plan-preview" *ngIf="selectedPlan as plan">
+            <div>
+              <strong>{{ clientTypeLabel(plan.client_type) }}</strong>
+              <span>{{ plan.description }}</span>
+            </div>
+            <div class="plan-price">
+              {{ formatMoney(planPrice(plan, selectedBillingCycle), plan.currency) }}
+              <small>{{ billingCycleLabel(selectedBillingCycle) }}</small>
+            </div>
+            <div class="module-pills compact">
+              <span *ngFor="let suite of planSuites(plan)">{{ suite.name }}</span>
+            </div>
+            <div class="module-pills compact">
+              <span *ngFor="let module of planModules(plan)">{{ module.name }}</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="create-form-section admin-initial-field">
+          <div class="create-section-head">
+            <strong>Administrador inicial del cliente</strong>
+            <span>Obligatorio. Este usuario administra usuarios internos sin exponer operación al superuser.</span>
+          </div>
+          <p class="security-note">
+            La contraseña no se crea aquí. El administrador recibirá un correo para definirla de forma privada.
+          </p>
+          <div class="admin-grid create-admin-grid">
+            <label class="wide-field">
+              Nombre completo
+              <input type="text" name="adminDisplayName" [(ngModel)]="adminDisplayName" required />
+            </label>
+            <label>
+              Usuario
+              <input type="text" name="adminUsername" [(ngModel)]="adminUsername" required />
+            </label>
+            <label class="wide-field">
+              Correo
+              <input type="email" name="adminEmail" [(ngModel)]="adminEmail" required />
+            </label>
+            <label>
+              Tipo de documento
+              <select name="adminDocumentType" [(ngModel)]="adminDocumentType" required>
+                <option *ngFor="let option of documentTypes" [value]="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <label>
+              Número de documento
+              <input type="text" name="adminDocumentNumber" [(ngModel)]="adminDocumentNumber" required />
+            </label>
+          </div>
+        </section>
+
+        <section class="create-form-section create-files-section">
+          <div class="create-upload-block">
+            <div class="create-section-head">
+              <strong>Logo del cliente</strong>
+              <span>Opcional al crear. Se ajustará para formatos y encabezados.</span>
+            </div>
+            <div class="create-logo-control">
+              <label class="file-button">
+                Seleccionar logo
+                <input
+                  #createLogoInput
+                  type="file"
+                  accept="image/*"
+                  (change)="onSelectCreateLogo($event)"
+                />
+              </label>
+              <button
+                type="button"
+                class="ghost"
+                *ngIf="logoFile"
+                (click)="clearCreateLogo(createLogoInput)"
+              >
+                Quitar
+              </button>
+            </div>
+            <div class="create-logo-preview" *ngIf="logoPreviewUrl">
+              <img [src]="logoPreviewUrl" alt="Vista previa logo cliente" />
+              <span>{{ logoFile?.name }}</span>
+            </div>
+          </div>
+
+          <div class="create-upload-block">
+            <div class="create-section-head">
+              <strong>Firma del administrador</strong>
+              <span>Opcional para flujos documentales del cliente.</span>
+            </div>
+            <div class="create-logo-control">
+              <label class="file-button">
+                Firma opcional
+                <input
+                  #adminSignatureInput
+                  type="file"
+                  accept="image/*,.pdf,application/pdf"
+                  (change)="onSelectAdminSignature($event)"
+                />
+              </label>
+              <button
+                type="button"
+                class="ghost"
+                *ngIf="adminSignatureFile"
+                (click)="clearAdminSignature(adminSignatureInput)"
+              >
+                Quitar firma
+              </button>
+              <span *ngIf="adminSignatureFileName">{{ adminSignatureFileName }}</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="module-actions create-modal-actions">
+          <button type="submit" class="primary">Crear cliente</button>
+          <button type="button" class="ghost" (click)="cancelCreateClient()">Cancelar</button>
+        </div>
+      </form>
+    </article>
+  </div>
+
+  <section class="plans-section" *ngIf="activeClientTab === 'plans'">
+    <header class="plans-header">
+      <div>
+        <span class="eyebrow">Catálogo comercial</span>
+        <h2>Planes SaaS generales</h2>
+        <p>
+          Define los planes base de la plataforma. Los clientes se adhieren a un plan y solo se personalizan
+          desde su ficha cuando exista una excepción comercial u operativa.
+        </p>
+      </div>
+      <button type="button" class="primary" *ngIf="canManagePlans()" (click)="startCreatePlan()">Nuevo plan</button>
+    </header>
+
+    <div class="plans-helper">
+      <strong>Regla recomendada</strong>
+      <span>
+        Editar un plan general no modifica automáticamente los módulos personalizados de clientes existentes.
+        Usa “Aplicar a clientes” solo cuando quieras alinear todos los adheridos a la nueva configuración del plan.
+      </span>
+    </div>
+
+    <div class="plans-layout">
+      <div class="plans-table-shell">
+        <table class="plans-table">
+          <thead>
+            <tr>
+              <th>Plan</th>
+              <th>Tipo</th>
+              <th>Software</th>
+              <th>Módulos</th>
+              <th>Mensual</th>
+              <th>Anual</th>
+              <th>Gracia</th>
+              <th>Clientes</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngIf="subscriptionPlans.length === 0">
+              <td colspan="10">
+                <div class="plans-empty">
+                  <strong>Sin planes SaaS registrados</strong>
+                  <span>Crea el primer plan para poder asignarlo al alta de clientes.</span>
+                </div>
+              </td>
+            </tr>
+            <tr *ngFor="let plan of subscriptionPlans" [class.inactive]="!plan.is_active">
+              <td>
+                <strong>{{ plan.name }}</strong>
+                <small>{{ plan.key }}</small>
+              </td>
+              <td>{{ clientTypeLabel(plan.client_type) }}</td>
+              <td>
+                <div class="mini-pills">
+                  <span *ngFor="let suite of planSuites(plan)">{{ suite.name }}</span>
+                </div>
+              </td>
+              <td>
+                <strong>{{ plan.included_modules.length }}</strong>
+                <small>módulos</small>
+                <div class="plan-module-preview" *ngIf="planModules(plan).length">
+                  <span *ngFor="let module of planModules(plan).slice(0, 3)">{{ module.name }}</span>
+                  <span *ngIf="planModules(plan).length > 3">+{{ planModules(plan).length - 3 }}</span>
+                </div>
+              </td>
+              <td>{{ formatMoney(plan.monthly_price, plan.currency) }}</td>
+              <td>{{ formatMoney(plan.annual_price, plan.currency) }}</td>
+              <td>
+                <strong>{{ plan.grace_days }}</strong>
+                <small>{{ plan.expiration_access_mode === 'blocked' ? 'bloquea' : 'solo lectura' }}</small>
+              </td>
+              <td>{{ plan.clients_count }}</td>
+              <td>
+                <span class="status-pill" [class.neutral]="!plan.is_active">
+                  {{ plan.is_active ? 'Activo' : 'Inactivo' }}
+                </span>
+              </td>
+              <td>
+                <div class="plan-actions">
+                  <button type="button" class="table-action" (click)="startEditPlan(plan)">Editar</button>
+                  <button
+                    type="button"
+                    class="ghost compact-action"
+                    [disabled]="applyingPlanKey === plan.key || !plan.clients_count || !plan.is_active"
+                    (click)="applyPlanToSubscribedClients(plan)"
+                  >
+                    {{ applyingPlanKey === plan.key ? 'Aplicando...' : 'Aplicar a clientes' }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div
+        class="saas-modal-backdrop"
+        *ngIf="creatingPlan || editingPlanKey"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="plan-editor-title"
+        (click)="cancelPlanEdit()"
+      >
+      <article class="plan-editor" (click)="$event.stopPropagation()">
+        <div class="plan-editor-head">
+          <div>
+            <span class="eyebrow">{{ editingPlanKey ? 'Editar plan' : 'Nuevo plan' }}</span>
+            <h3 id="plan-editor-title">{{ editingPlanKey ? planDraft.name : 'Crear plan SaaS' }}</h3>
+            <p>Los cambios del catálogo se usarán para clientes nuevos y cambios de plan futuros.</p>
+          </div>
+          <button type="button" class="modal-close" aria-label="Cerrar editor de plan" (click)="cancelPlanEdit()">×</button>
+        </div>
+
+        <div class="plan-form-grid">
+          <label>
+            Código del plan
+            <input
+              type="text"
+              [(ngModel)]="planDraft.key"
+              [disabled]="!!editingPlanKey"
+              placeholder="ej: biomedico_ips"
+            />
+          </label>
+          <label>
+            Nombre
+            <input type="text" [(ngModel)]="planDraft.name" />
+          </label>
+          <label>
+            Tipo de cliente
+            <select [(ngModel)]="planDraft.clientType">
+              <option value="ips_hospital">IPS / Hospital</option>
+              <option value="odontologico">Odontológico</option>
+              <option value="laboratorio">Laboratorio</option>
+              <option value="mixto">Mixto</option>
+              <option value="consulta">Consulta / Auditoría</option>
+            </select>
+          </label>
+          <label>
+            Posición en listado
+            <input type="number" min="1" [(ngModel)]="planDraft.displayOrder" />
+            <small class="field-help">Número menor aparece primero en los selectores.</small>
+          </label>
+          <label>
+            Precio mensual
+            <input type="number" min="0" [(ngModel)]="planDraft.monthlyPrice" />
+          </label>
+          <label>
+            Precio anual
+            <input type="number" min="0" [(ngModel)]="planDraft.annualPrice" />
+          </label>
+          <label>
+            Moneda
+            <input type="text" maxlength="3" [(ngModel)]="planDraft.currency" />
+          </label>
+          <label>
+            Días de gracia al vencer
+            <input type="number" min="0" max="365" [(ngModel)]="planDraft.graceDays" />
+            <small class="field-help">Días extra antes de pasar a solo lectura o bloqueo.</small>
+          </label>
+          <label>
+            Al vencer
+            <select [(ngModel)]="planDraft.expirationAccessMode">
+              <option value="read_only">Pasar a solo lectura</option>
+              <option value="blocked">Bloquear acceso</option>
+            </select>
+          </label>
+          <label class="switch-line">
+            <input type="checkbox" [(ngModel)]="planDraft.isActive" />
+            <span>Plan activo para nuevos clientes</span>
+          </label>
+        </div>
+
+        <label>
+          Descripción
+          <textarea rows="3" [(ngModel)]="planDraft.description"></textarea>
+        </label>
+
+        <div class="plan-config-block">
+          <strong>Softwares incluidos</strong>
+          <div class="module-list compact-list">
+            <label *ngFor="let suite of softwareSuites">
+              <input
+                type="checkbox"
+                [checked]="planDraft.includedSuites.includes(suite.key)"
+                (change)="togglePlanSuite(suite.key)"
+              />
+              <span>{{ suite.name }}</span>
+            </label>
           </div>
         </div>
 
-        <button type="submit" class="primary">Crear cliente</button>
-      </form>
-    </div>
+        <div class="plan-config-block">
+          <strong>Módulos incluidos</strong>
+          <small>Solo aparecen módulos de los softwares seleccionados arriba.</small>
+          <div class="module-list compact-list">
+            <label *ngFor="let module of filteredPlanModules()">
+              <input
+                type="checkbox"
+                [checked]="planDraft.includedModules.includes(module.key)"
+                (change)="togglePlanModule(module.key)"
+              />
+              <span>
+                <strong>{{ module.name }}</strong>
+                <small *ngIf="module.description">{{ module.description }}</small>
+              </span>
+            </label>
+            <p class="empty-module-list" *ngIf="filteredPlanModules().length === 0">
+              No hay módulos activos para los softwares seleccionados.
+            </p>
+          </div>
+        </div>
 
-    <aside class="create-helper">
-      <div class="helper-logo">
-        <img src="/assets/inbi-logo.png" alt="INBIHOSPITALARIO" />
+        <div class="module-actions">
+          <button type="button" class="primary" [disabled]="savingPlan" (click)="savePlan()">
+            {{ savingPlan ? 'Guardando...' : 'Guardar plan' }}
+          </button>
+          <button type="button" class="ghost" (click)="cancelPlanEdit()">Cancelar</button>
+        </div>
+      </article>
       </div>
-      <h3>Configuración inicial del cliente</h3>
-      <p>
-        Aquí se crea la clínica u hospital. Después, desde el listado, se habilitan los módulos que
-        ese cliente tendrá disponibles.
-      </p>
-      <div class="helper-steps">
-        <span>1. Datos legales y contacto</span>
-        <span>2. Logo institucional opcional</span>
-        <span>3. Módulos contratados</span>
-      </div>
-    </aside>
-  </div>
+    </div>
+  </section>
 
   <section class="list-section" *ngIf="activeClientTab === 'list'">
+    <div class="saas-overview">
+      <article>
+        <span>Activos</span>
+        <strong>{{ activeClientCount }}</strong>
+      </article>
+      <article class="warning">
+        <span>Vencen pronto</span>
+        <strong>{{ dueSoonClientCount }}</strong>
+      </article>
+      <article class="readonly">
+        <span>Solo lectura</span>
+        <strong>{{ readOnlyClientCount }}</strong>
+      </article>
+      <article class="blocked">
+        <span>Bloqueados</span>
+        <strong>{{ blockedClientCount }}</strong>
+      </article>
+      <article class="blocked">
+        <span>Sin admin</span>
+        <strong>{{ missingAdminCount }}</strong>
+      </article>
+      <article>
+        <span>MRR pactado</span>
+        <strong>{{ formatMoney(monthlyRevenue) }}</strong>
+      </article>
+      <article>
+        <span>Anual pactado</span>
+        <strong>{{ formatMoney(annualRevenue) }}</strong>
+      </article>
+    </div>
+
     <header class="list-header">
       <div>
         <h2>Listado clientes</h2>
-        <p>Busca, filtra y administra cada cliente sin tocar módulos por accidente.</p>
+      </div>
+      <div class="list-header-actions">
+        <button type="button" class="primary" *ngIf="canCreateClients()" (click)="startCreateClient()">
+          Nuevo cliente
+        </button>
+      </div>
+    </header>
+
+    <section class="filters-panel" aria-label="Filtros de clientes">
+      <div class="filters-title">
+        <strong>Filtros</strong>
       </div>
       <div class="list-tools">
         <label>
@@ -150,40 +519,391 @@
             <option *ngFor="let module of modules" [value]="module.key">{{ module.name }}</option>
           </select>
         </label>
+        <label>
+          Plan
+          <select [(ngModel)]="filterPlan">
+            <option value="todos">Todos</option>
+            <option *ngFor="let plan of subscriptionPlans" [value]="plan.key">{{ plan.name }}</option>
+          </select>
+        </label>
+        <label>
+          Tipo cliente
+          <select [(ngModel)]="filterClientType">
+            <option value="todos">Todos</option>
+            <option *ngFor="let type of clientTypeOptions" [value]="type">{{ clientTypeLabel(type) }}</option>
+          </select>
+        </label>
+        <label>
+          Estado
+          <select [(ngModel)]="filterSubscriptionStatus">
+            <option value="todos">Todos</option>
+            <option value="active">Activo</option>
+            <option value="grace">En gracia</option>
+            <option value="read_only">Solo lectura</option>
+            <option value="suspended">Suspendido</option>
+            <option value="cancelled">Cancelado</option>
+          </select>
+        </label>
+        <label>
+          Alerta
+          <select [(ngModel)]="filterCommercialAlert">
+            <option value="todos">Todas</option>
+            <option value="ok">Al día</option>
+            <option value="due_soon">Vence pronto</option>
+            <option value="read_only">Solo lectura</option>
+            <option value="blocked">Bloqueado</option>
+            <option value="missing_admin">Sin administrador</option>
+            <option value="missing_plan">Sin plan</option>
+          </select>
+        </label>
         <button type="button" class="ghost" (click)="clearListFilters()">Limpiar</button>
+        <button type="button" class="primary" (click)="exportClientsCsv()">Exportar Excel</button>
       </div>
-    </header>
+    </section>
 
     <p *ngIf="loading">Cargando...</p>
-    <div class="list" *ngIf="!loading">
+    <div class="clients-table-wrap" *ngIf="!loading">
       <ng-container *ngIf="filteredClients as visibleClients">
-      <p class="result-count">
-        {{ visibleClients.length }} cliente{{ visibleClients.length === 1 ? '' : 's' }} encontrado{{ visibleClients.length === 1 ? '' : 's' }}
-      </p>
-      <p class="empty-list" *ngIf="visibleClients.length === 0">
-        No hay clientes con esos filtros. Prueba limpiar la búsqueda o cambiar el módulo.
-      </p>
-      <div class="client-card" *ngFor="let client of visibleClients">
-        <button type="button" class="client-toggle" (click)="toggleClientOpen(client.id)">
-          <div>
-            <strong>{{ client.name }}</strong>
-            <span>NIT: {{ client.nit }}</span>
-            <span>Ciudad: {{ client.city }}</span>
-            <span *ngIf="client.address">Dirección: {{ client.address }}</span>
-            <span>Correo: {{ client.email }}</span>
-          </div>
-          <span class="chevron">{{ openClientId === client.id ? '▴' : '▾' }}</span>
-        </button>
+        <div class="table-meta">
+          <p class="result-count">
+            {{ visibleClients.length }} cliente{{ visibleClients.length === 1 ? '' : 's' }} encontrado{{ visibleClients.length === 1 ? '' : 's' }}
+          </p>
+        </div>
 
-        <div class="client-body" *ngIf="openClientId === client.id">
-          <div class="client-actions">
-            <button type="button" class="ghost" *ngIf="editingClientId !== client.id" (click)="startEditClient(client)">
-              Editar cliente
+        <p class="empty-list" *ngIf="visibleClients.length === 0">
+          No hay clientes con esos filtros. Prueba limpiar la búsqueda o cambiar el módulo.
+        </p>
+
+        <div class="excel-table-shell module-table-wrap" *ngIf="visibleClients.length">
+          <table class="clients-table module-excel-table">
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>NIT</th>
+                <th>Ciudad</th>
+                <th>Tipo</th>
+                <th>Plan</th>
+                <th>Correo</th>
+                <th>Estado</th>
+                <th>Vence</th>
+                <th>Admin</th>
+                <th>Softwares</th>
+                <th>Módulos</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <ng-container *ngFor="let client of visibleClients">
+                <tr class="client-row" [class.selected]="openClientId === client.id">
+                  <td class="name-cell">
+                    <div class="client-name-block">
+                      <span>
+                        <strong>{{ client.name }}</strong>
+                        <small *ngIf="client.address">{{ client.address }}</small>
+                      </span>
+                    </div>
+                  </td>
+                  <td>{{ client.nit }}</td>
+                  <td>{{ client.city }}</td>
+                  <td>{{ clientTypeLabel(subscriptionFor(client.id)?.plan_client_type) }}</td>
+                  <td>
+                    <strong>{{ subscriptionFor(client.id)?.plan_name || 'Sin plan' }}</strong>
+                  </td>
+                  <td class="email-cell">{{ client.email }}</td>
+                  <td>
+                    <ng-container *ngIf="subscriptionFor(client.id) as subscription; else noSubscription">
+                      <span
+                        class="status-pill"
+                        [class.readonly]="subscriptionTone(subscription) === 'readonly'"
+                        [class.blocked]="subscriptionTone(subscription) === 'blocked'"
+                        [class.grace]="subscriptionTone(subscription) === 'grace'"
+                      >
+                        {{ subscriptionStatusLabel(subscription.effective_status) }}
+                      </span>
+                    </ng-container>
+                    <ng-template #noSubscription>
+                      <span class="status-pill neutral">Sin configurar</span>
+                    </ng-template>
+                  </td>
+                  <td>
+                    <small class="date-mini">{{ formatDate(subscriptionFor(client.id)?.current_period_ends_at) }}</small>
+                    <span
+                      class="alert-chip"
+                      [class.active]="clientCommercialAlert(client).tone === 'active'"
+                      [class.readonly]="clientCommercialAlert(client).tone === 'readonly'"
+                      [class.blocked]="clientCommercialAlert(client).tone === 'blocked'"
+                      [class.grace]="clientCommercialAlert(client).tone === 'grace'"
+                    >
+                      {{ clientCommercialAlert(client).label }}
+                    </span>
+                  </td>
+                  <td>
+                    <span class="status-pill" [class.blocked]="client.clientAdminCount === 0">
+                      {{ client.clientAdminCount || 0 }}
+                    </span>
+                  </td>
+                  <td>
+                    <strong>{{ enabledSoftwareFor(client.id).length }}/{{ softwareSuites.length }}</strong>
+                  </td>
+                  <td>
+                    <strong>{{ enabledModulesFor(client.id).length }}/{{ clientModulesAvailableFor(client.id).length }}</strong>
+                  </td>
+                  <td>
+                    <button type="button" class="table-action" (click)="openClientInfo(client.id)">
+                      Información
+                    </button>
+                  </td>
+                </tr>
+
+              </ng-container>
+            </tbody>
+          </table>
+        </div>
+      </ng-container>
+    </div>
+  </section>
+
+  <div
+    class="saas-modal-backdrop client-info-backdrop"
+    *ngIf="selectedClientForModal as client"
+    (click)="closeClientInfo()"
+  >
+        <article
+          class="client-info-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="client-info-title"
+          (click)="$event.stopPropagation()"
+        >
+          <div class="client-info-head">
+            <div class="client-info-title">
+              <span class="eyebrow">Información del cliente</span>
+              <h3 id="client-info-title">{{ client.name }}</h3>
+              <p>{{ client.nit }} · {{ client.city }}<span *ngIf="client.address"> · {{ client.address }}</span></p>
+            </div>
+            <div class="client-info-kpis">
+              <span>{{ subscriptionFor(client.id)?.plan_name || 'Sin plan' }}</span>
+              <span>{{ enabledSoftwareFor(client.id).length }} software{{ enabledSoftwareFor(client.id).length === 1 ? '' : 's' }}</span>
+              <span>{{ enabledModulesFor(client.id).length }} módulo{{ enabledModulesFor(client.id).length === 1 ? '' : 's' }}</span>
+            </div>
+            <button type="button" class="modal-close" aria-label="Cerrar información del cliente" (click)="closeClientInfo()">×</button>
+          </div>
+
+        <div class="client-body">
+          <nav class="client-detail-tabs" aria-label="Detalle del cliente">
+            <button
+              type="button"
+              [class.active]="activeClientDetailTab === 'summary'"
+              (click)="setClientDetailTab('summary')"
+            >
+              Resumen
             </button>
-            <button type="button" class="danger" (click)="removeClient(client.id)">Eliminar cliente</button>
+            <button
+              type="button"
+              [class.active]="activeClientDetailTab === 'subscription'"
+              (click)="setClientDetailTab('subscription')"
+            >
+              Suscripción
+            </button>
+            <button
+              type="button"
+              [class.active]="activeClientDetailTab === 'customization'"
+              (click)="setClientDetailTab('customization')"
+            >
+              Personalización
+            </button>
+            <button
+              type="button"
+              [class.active]="activeClientDetailTab === 'admins'"
+              (click)="setClientDetailTab('admins')"
+            >
+              Administradores
+            </button>
+          </nav>
+
+          <div class="client-actions" *ngIf="activeClientDetailTab === 'summary'">
+            <button type="button" class="ghost" *ngIf="canUpdateClients() && editingClientId !== client.id" (click)="startEditClient(client)">
+              Editar información
+            </button>
+            <button type="button" class="danger" *ngIf="canDeleteClients()" (click)="removeClient(client.id)">Eliminar cliente</button>
           </div>
 
-          <div class="edit-form" *ngIf="editingClientId === client.id">
+          <div class="missing-admin-card" *ngIf="activeClientDetailTab === 'admins' && client.clientAdminCount === 0">
+            <div>
+              <strong>Este cliente no tiene administrador activo</strong>
+              <p>La regla fuerte impide activar o renovar el cliente con acceso completo hasta crear un administrador.</p>
+            </div>
+            <button
+              type="button"
+              class="ghost"
+              *ngIf="canManageClientAdmins() && adminRepairClientId !== client.id"
+              (click)="startCreateMissingAdmin(client)"
+            >
+              Crear administrador
+            </button>
+          </div>
+
+          <div class="missing-admin-form" *ngIf="activeClientDetailTab === 'admins' && adminRepairClientId === client.id">
+            <p class="security-note">
+              La contraseña no se crea aquí. El administrador recibirá un correo para definirla de forma privada.
+            </p>
+            <div class="admin-grid">
+              <label>
+                Nombre completo
+                <input type="text" [(ngModel)]="repairAdminDisplayName" />
+              </label>
+              <label>
+                Usuario
+                <input type="text" [(ngModel)]="repairAdminUsername" />
+              </label>
+              <label>
+                Correo
+                <input type="email" [(ngModel)]="repairAdminEmail" />
+              </label>
+              <label>
+                Tipo de documento
+                <select [(ngModel)]="repairAdminDocumentType">
+                  <option *ngFor="let option of documentTypes" [value]="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+              <label>
+                Número de documento
+                <input type="text" [(ngModel)]="repairAdminDocumentNumber" />
+              </label>
+            </div>
+            <div class="create-logo-control">
+              <label class="file-button">
+                Firma opcional
+                <input
+                  #repairAdminSignatureInput
+                  type="file"
+                  accept="image/*,.pdf,application/pdf"
+                  (change)="onSelectRepairAdminSignature($event)"
+                />
+              </label>
+              <button
+                type="button"
+                class="ghost"
+                *ngIf="repairAdminSignatureFile"
+                (click)="clearRepairAdminSignature(repairAdminSignatureInput)"
+              >
+                Quitar firma
+              </button>
+              <span *ngIf="repairAdminSignatureFileName">{{ repairAdminSignatureFileName }}</span>
+            </div>
+            <div class="module-actions">
+              <button type="button" class="primary" (click)="createMissingAdmin(client)">Guardar administrador</button>
+              <button type="button" class="ghost" (click)="cancelCreateMissingAdmin()">Cancelar</button>
+            </div>
+          </div>
+
+          <div class="client-admins-card" *ngIf="activeClientDetailTab === 'admins' && canResetClientAdminPasswords()">
+            <div class="client-admins-head">
+              <div>
+                <strong>Administradores del cliente</strong>
+                <p>Soporte puede enviar accesos y gestionar administradores sin entrar a información operativa.</p>
+              </div>
+              <div class="client-admin-head-actions">
+                <button
+                  type="button"
+                  class="ghost"
+                  *ngIf="canManageClientAdmins() && adminRepairClientId !== client.id"
+                  (click)="startCreateMissingAdmin(client)"
+                >
+                  Agregar administrador
+                </button>
+                <button type="button" class="ghost" (click)="loadClientAdmins(client.id)">
+                  {{ loadingAdminsClientId === client.id ? 'Cargando...' : 'Actualizar' }}
+                </button>
+              </div>
+            </div>
+
+            <p class="muted" *ngIf="loadingAdminsClientId === client.id">Cargando administradores...</p>
+            <p class="muted" *ngIf="loadingAdminsClientId !== client.id && !(clientAdmins[client.id] || []).length">
+              No hay administradores del cliente registrados.
+            </p>
+
+            <div class="client-admin-row" *ngFor="let admin of (clientAdmins[client.id] || [])">
+              <div class="client-admin-summary">
+                <strong>{{ admin.displayName }}</strong>
+                <span>{{ admin.username }} · {{ admin.email }}</span>
+                <span *ngIf="admin.documentNumber">{{ admin.documentNumber }}</span>
+                <small>{{ admin.isActive ? 'Activo' : 'Bloqueado' }}</small>
+              </div>
+              <div class="client-admin-actions">
+                <button
+                  type="button"
+                  class="ghost"
+                  [disabled]="resettingAdminUserId === admin.id"
+                  (click)="sendClientAdminPasswordSetup(client, admin)"
+                >
+                  {{ resettingAdminUserId === admin.id ? 'Enviando...' : 'Enviar acceso' }}
+                </button>
+                <button
+                  type="button"
+                  class="ghost"
+                  *ngIf="canManageClientAdmins() && editingClientAdminId !== admin.id"
+                  (click)="startEditClientAdmin(admin)"
+                >
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  class="ghost"
+                  *ngIf="canManageClientAdmins()"
+                  [disabled]="savingClientAdminUserId === admin.id"
+                  (click)="toggleClientAdminActive(client, admin)"
+                >
+                  {{ admin.isActive ? 'Bloquear' : 'Activar' }}
+                </button>
+                <button
+                  type="button"
+                  class="danger small"
+                  *ngIf="canManageClientAdmins()"
+                  [disabled]="deletingClientAdminUserId === admin.id"
+                  (click)="removeClientAdmin(client, admin)"
+                >
+                  {{ deletingClientAdminUserId === admin.id ? 'Eliminando...' : 'Eliminar' }}
+                </button>
+              </div>
+
+              <div class="client-admin-edit" *ngIf="editingClientAdminId === admin.id">
+                <div class="client-admin-edit-grid">
+                  <label>
+                    Nombre completo
+                    <input type="text" [(ngModel)]="clientAdminDraft.displayName" />
+                  </label>
+                  <label>
+                    Correo
+                    <input type="email" [(ngModel)]="clientAdminDraft.email" />
+                  </label>
+                  <label>
+                    Tipo de documento
+                    <select [(ngModel)]="clientAdminDraft.documentType">
+                      <option *ngFor="let option of documentTypes" [value]="option.value">{{ option.label }}</option>
+                    </select>
+                  </label>
+                  <label>
+                    Número de documento
+                    <input type="text" [(ngModel)]="clientAdminDraft.documentNumber" />
+                  </label>
+                </div>
+                <div class="module-actions">
+                  <button
+                    type="button"
+                    class="primary"
+                    [disabled]="savingClientAdminUserId === admin.id"
+                    (click)="saveClientAdmin(client, admin)"
+                  >
+                    {{ savingClientAdminUserId === admin.id ? 'Guardando...' : 'Guardar administrador' }}
+                  </button>
+                  <button type="button" class="ghost" (click)="cancelEditClientAdmin()">Cancelar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="edit-form" *ngIf="activeClientDetailTab === 'summary' && editingClientId === client.id">
             <label>
               Nombre
               <input type="text" [(ngModel)]="editClient.name" />
@@ -214,22 +934,286 @@
             </div>
           </div>
 
-          <div class="modules">
-            <div class="modules-header">
+          <ng-container *ngIf="activeClientDetailTab === 'subscription'">
+            <div
+              class="subscription-card"
+              *ngIf="subscriptionFor(client.id) as subscription"
+              [class.readonly]="subscriptionTone(subscription) === 'readonly'"
+              [class.blocked]="subscriptionTone(subscription) === 'blocked'"
+              [class.grace]="subscriptionTone(subscription) === 'grace'"
+            >
+            <div class="subscription-head">
               <div>
-                <h4>Módulos habilitados</h4>
-                <p>Primero revisa; solo se modifican al presionar editar.</p>
+                <span class="eyebrow">Suscripción comercial</span>
+                <h4>Control de pago y acceso del cliente</h4>
+                <p>
+                  Controla si el cliente trabaja normalmente, solo consulta información o queda suspendido.
+                </p>
               </div>
-              <span class="module-summary">
-                {{ enabledModulesFor(client.id).length }} de {{ modules.length }} activos
+              <span class="subscription-badge">
+                {{ subscriptionStatusLabel(subscription.effective_status) }}
               </span>
               <button
                 type="button"
                 class="ghost"
-                *ngIf="editingModulesClientId !== client.id"
+                *ngIf="canManageSubscriptions() && editingSubscriptionClientId !== client.id"
+                (click)="startEditSubscription(client.id)"
+              >
+                Editar suscripción
+              </button>
+              <button
+                *ngIf="canManageSubscriptions()"
+                type="button"
+                class="primary"
+                [disabled]="savingPaymentClientId === client.id || client.clientAdminCount === 0"
+                (click)="quickRenewClient(client)"
+              >
+                {{ savingPaymentClientId === client.id ? 'Renovando...' : 'Renovar rápido' }}
+              </button>
+            </div>
+
+            <div class="subscription-summary" *ngIf="editingSubscriptionClientId !== client.id">
+              <div>
+                <strong>{{ subscription.plan_name || 'Sin plan' }}</strong>
+                <span>Plan contratado</span>
+              </div>
+              <div>
+                <strong>{{ clientTypeLabel(subscription.plan_client_type) }}</strong>
+                <span>Tipo de cliente</span>
+              </div>
+              <div>
+                <strong>{{ billingCycleLabel(subscription.billing_cycle) }}</strong>
+                <span>Periodo de pago</span>
+              </div>
+              <div>
+                <strong>{{ accessModeLabel(subscription.effective_access_mode) }}</strong>
+                <span>Modo de acceso</span>
+              </div>
+              <div>
+                <strong>{{ formatDate(subscription.current_period_ends_at) }}</strong>
+                <span>Vencimiento</span>
+              </div>
+              <div>
+                <strong>{{ formatMoney(subscription.amount, subscription.currency) }}</strong>
+                <span>Valor pactado</span>
+              </div>
+            </div>
+
+            <p class="subscription-note" *ngIf="editingSubscriptionClientId !== client.id && subscription.notes">
+              {{ subscription.notes }}
+            </p>
+
+            <div class="subscription-edit" *ngIf="editingSubscriptionClientId === client.id">
+              <div class="subscription-grid">
+                <label class="subscription-field wide">
+                  Plan comercial
+                  <select [(ngModel)]="subscriptionDraft.planKey" (ngModelChange)="onSubscriptionPlanChange()">
+                    <option [ngValue]="null">Sin plan</option>
+                    <option *ngFor="let plan of subscriptionPlans" [value]="plan.key">{{ plan.name }}</option>
+                  </select>
+                </label>
+                <label class="subscription-field">
+                  Periodo de pago
+                  <select [(ngModel)]="subscriptionDraft.billingCycle" (ngModelChange)="onSubscriptionCycleChange()">
+                    <option value="monthly">Mensual</option>
+                    <option value="annual">Anual</option>
+                  </select>
+                </label>
+                <label class="subscription-field">
+                  Estado
+                  <select [(ngModel)]="subscriptionDraft.status">
+                    <option value="active">Activo</option>
+                    <option value="grace">En gracia</option>
+                    <option value="read_only">Solo lectura</option>
+                    <option value="suspended">Suspendido</option>
+                    <option value="cancelled">Cancelado</option>
+                  </select>
+                </label>
+                <label class="subscription-field wide">
+                  Modo de acceso
+                  <select [(ngModel)]="subscriptionDraft.accessMode">
+                    <option value="full">Acceso completo</option>
+                    <option value="read_only">Solo lectura</option>
+                    <option value="blocked">Bloqueado</option>
+                  </select>
+                </label>
+                <label class="subscription-field">
+                  Inicio periodo
+                  <input type="date" [(ngModel)]="subscriptionDraft.currentPeriodStartsAt" />
+                </label>
+                <label class="subscription-field">
+                  Vence
+                  <input type="date" [(ngModel)]="subscriptionDraft.currentPeriodEndsAt" />
+                </label>
+                <label class="subscription-field">
+                  Fin gracia
+                  <input type="date" [(ngModel)]="subscriptionDraft.graceEndsAt" />
+                </label>
+                <label class="subscription-field">
+                  Valor
+                  <input type="number" min="0" [(ngModel)]="subscriptionDraft.amount" />
+                </label>
+                <label class="subscription-field currency">
+                  Moneda
+                  <input type="text" maxlength="3" [(ngModel)]="subscriptionDraft.currency" />
+                </label>
+              </div>
+
+              <label>
+                Notas administrativas
+                <textarea rows="2" [(ngModel)]="subscriptionDraft.notes" placeholder="Ejemplo: pago pendiente, acuerdo comercial, contacto..."></textarea>
+              </label>
+
+              <div class="module-actions">
+                <button
+                  type="button"
+                  class="primary"
+                  [disabled]="savingSubscriptionClientId === client.id"
+                  (click)="saveSubscription(client.id)"
+                >
+                  {{ savingSubscriptionClientId === client.id ? 'Guardando...' : 'Guardar suscripción' }}
+                </button>
+                <button type="button" class="ghost" (click)="cancelEditSubscription()">Cancelar</button>
+              </div>
+
+              <div class="payment-box">
+                <div>
+                  <strong>Registrar pago / renovación</strong>
+                  <span>Al registrar pago se activa el cliente y se libera el acceso completo.</span>
+                </div>
+                <div class="subscription-grid payment-grid">
+                  <label class="subscription-field">
+                    Fecha pago
+                    <input type="date" [(ngModel)]="paymentDraft.paidAt" />
+                  </label>
+                  <label class="subscription-field">
+                    Inicio cubierto
+                    <input type="date" [(ngModel)]="paymentDraft.periodStart" />
+                  </label>
+                  <label class="subscription-field">
+                    Fin cubierto
+                    <input type="date" [(ngModel)]="paymentDraft.periodEnd" />
+                  </label>
+                  <label class="subscription-field">
+                    Valor pagado
+                    <input type="number" min="0" [(ngModel)]="paymentDraft.amount" />
+                  </label>
+                  <label class="subscription-field wide">
+                    Referencia
+                    <input type="text" [(ngModel)]="paymentDraft.reference" placeholder="Factura, transferencia..." />
+                  </label>
+                </div>
+                <label>
+                  Nota del pago
+                  <textarea rows="2" [(ngModel)]="paymentDraft.notes"></textarea>
+                </label>
+                <button
+                  type="button"
+                  class="primary"
+                  [disabled]="savingPaymentClientId === client.id"
+                  (click)="registerPayment(client.id)"
+                >
+                  {{ savingPaymentClientId === client.id ? 'Registrando...' : 'Registrar pago y activar' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="subscription-history" *ngIf="editingSubscriptionClientId !== client.id && subscription.payments?.length">
+              <strong>Últimos pagos</strong>
+              <span *ngFor="let payment of subscription.payments?.slice(0, 3)">
+                {{ formatDate(payment.paid_at) }} · {{ formatMoney(payment.amount, payment.currency) }}
+                <small *ngIf="payment.period_end">cubre hasta {{ formatDate(payment.period_end) }}</small>
+              </span>
+            </div>
+            </div>
+          </ng-container>
+
+          <div class="client-checklist" *ngIf="activeClientDetailTab === 'summary'">
+            <div>
+              <strong>Checklist SaaS</strong>
+              <span>Control rápido antes de entregar el cliente al administrador interno.</span>
+            </div>
+            <span
+              *ngFor="let item of clientChecklist(client)"
+              [class.ok]="item.ok"
+              [class.pending]="!item.ok"
+            >
+              {{ item.ok ? '✓' : '!' }} {{ item.label }}
+            </span>
+          </div>
+
+          <div class="modules" *ngIf="activeClientDetailTab === 'customization'">
+            <div class="modules-header">
+              <div>
+                <h4>Personalización del cliente</h4>
+                <p>
+                  Usa esta sección solo para excepciones. La configuración general se administra desde
+                  la pestaña Planes SaaS.
+                </p>
+              </div>
+              <span class="module-summary">
+                {{ enabledSoftwareFor(client.id).length }} de {{ softwareSuites.length }} activos
+              </span>
+              <button
+                type="button"
+                class="ghost"
+                *ngIf="canUpdateClients() && editingSoftwareClientId !== client.id"
+                (click)="startEditSoftware(client.id)"
+              >
+                Personalizar software
+              </button>
+            </div>
+
+            <div class="module-pills software-pills" *ngIf="editingSoftwareClientId !== client.id">
+              <span *ngFor="let suite of enabledSoftwareFor(client.id)">{{ suite.name }}</span>
+              <span class="empty" *ngIf="enabledSoftwareFor(client.id).length === 0">Sin softwares habilitados</span>
+            </div>
+
+            <div class="module-edit" *ngIf="editingSoftwareClientId === client.id">
+              <div class="module-list suite-checks">
+                <label *ngFor="let suite of softwareSuites">
+                  <input
+                    type="checkbox"
+                    [checked]="softwareDraft.has(suite.key)"
+                    (change)="toggleClientSoftware(client.id, suite.key)"
+                  />
+                  <span>
+                    <strong>{{ suite.name }}</strong>
+                    <small *ngIf="suite.description">{{ suite.description }}</small>
+                  </span>
+                </label>
+              </div>
+              <p class="empty-module-list" *ngIf="softwareDraft.size === 0">
+                Selecciona al menos un software para evitar dejar al cliente sin acceso operativo.
+              </p>
+              <div class="module-actions">
+                <button
+                  type="button"
+                  class="primary"
+                  [disabled]="savingSoftwareClientId === client.id || softwareDraft.size === 0"
+                  (click)="saveClientSoftware(client.id)"
+                >
+                  {{ savingSoftwareClientId === client.id ? 'Guardando...' : 'Guardar softwares' }}
+                </button>
+                <button type="button" class="ghost" (click)="cancelEditSoftware()">Cancelar</button>
+              </div>
+            </div>
+
+            <div class="modules-header">
+              <div>
+                <h4>Módulos personalizados</h4>
+                <p>Solo cambia esto si el cliente requiere algo distinto al plan general.</p>
+              </div>
+              <span class="module-summary">
+                {{ enabledModulesFor(client.id).length }} de {{ clientModulesAvailableFor(client.id).length }} activos
+              </span>
+              <button
+                type="button"
+                class="ghost"
+                *ngIf="canUpdateClients() && editingModulesClientId !== client.id"
                 (click)="startEditModules(client.id)"
               >
-                Editar módulos
+                Personalizar módulos
               </button>
             </div>
 
@@ -240,7 +1224,7 @@
 
             <div class="module-edit" *ngIf="editingModulesClientId === client.id">
               <div class="module-list">
-                <label *ngFor="let module of modules">
+                <label *ngFor="let module of clientModulesAvailableFor(client.id)">
                   <input
                     type="checkbox"
                     [checked]="moduleDraft.has(module.key)"
@@ -251,12 +1235,15 @@
                     <small *ngIf="module.description">{{ module.description }}</small>
                   </span>
                 </label>
+                <p class="empty-module-list" *ngIf="clientModulesAvailableFor(client.id).length === 0">
+                  Activa al menos un software para seleccionar sus módulos.
+                </p>
               </div>
               <div class="module-actions">
                 <button
                   type="button"
                   class="primary"
-                  [disabled]="savingModulesClientId === client.id"
+                  [disabled]="savingModulesClientId === client.id || (clientModulesAvailableFor(client.id).length > 0 && moduleDraft.size === 0)"
                   (click)="saveClientModules(client.id)"
                 >
                   {{ savingModulesClientId === client.id ? 'Guardando...' : 'Guardar módulos' }}
@@ -266,14 +1253,20 @@
             </div>
 
             <div class="logo">
-              <strong>Logo del cliente</strong>
-              <img *ngIf="logoUrl(client)" [src]="logoUrl(client)!" alt="Logo" />
-              <input type="file" accept="image/*" (change)="onUploadLogo(client, $event)" />
+              <div>
+                <strong>Logo del cliente</strong>
+                <span>Se usa en encabezados, reportes y documentos del cliente.</span>
+              </div>
+              <img *ngIf="logoUrl(client)" [src]="logoUrl(client)!" alt="Logo de {{ client.name }}" />
+              <span class="empty-logo" *ngIf="!logoUrl(client)">Sin logo cargado</span>
+              <label class="file-button" *ngIf="canUpdateClients()">
+                Cambiar logo
+                <input type="file" accept="image/*" (change)="onUploadLogo(client, $event)" />
+              </label>
             </div>
           </div>
         </div>
-      </div>
-      </ng-container>
-    </div>
-  </section>
+
+        </article>
+  </div>
 </section>

@@ -1,88 +1,251 @@
 <section class="page">
-  <app-user-menu></app-user-menu>
-  <header>
-    <div>
-      <h1>Usuarios</h1>
-      <p>Solo superuser puede crear o administrar usuarios.</p>
-    </div>
-    <div class="header-actions">
-      <a class="back" routerLink="/dashboard">Menú</a>
-    </div>
-  </header>
-
   <app-module-tabs></app-module-tabs>
-
-  <nav class="user-tabs" aria-label="Secciones de usuarios">
-    <button
-      type="button"
-      [class.active]="activeUserTab === 'list'"
-      (click)="setUserTab('list')"
-    >
-      Listado usuarios
-      <span>{{ users.length }}</span>
-    </button>
-    <button
-      type="button"
-      [class.active]="activeUserTab === 'create'"
-      (click)="setUserTab('create')"
-    >
-      Crear usuario
-    </button>
-    <button
-      type="button"
-      [class.active]="activeUserTab === 'roles'"
-      (click)="setUserTab('roles')"
-    >
-      Roles y permisos
-      <span>{{ roles.length }}</span>
-    </button>
-  </nav>
 
   <div class="tab-notices" *ngIf="errorMessage || successMessage">
     <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
     <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
   </div>
 
-  <div class="create-layout" *ngIf="activeUserTab === 'create'">
-    <div class="card create-card">
-      <div class="create-title">
-        <span>Nuevo usuario</span>
-        <h2>Crear usuario</h2>
-        <p class="form-intro">
-          Crea el acceso, asigna rol y deja lista la identificación del usuario desde el inicio.
-        </p>
+  <section class="list-section module-panel" *ngIf="activeUserTab === 'list'">
+    <header class="list-header module-panel-header">
+      <div>
+        <h2>Listado usuarios</h2>
+        <p>Busca y administra usuarios por cliente, rol o datos principales.</p>
+      </div>
+      <div class="list-tools module-panel-tools">
+        <label>
+          Buscar
+          <input type="text" [(ngModel)]="searchTerm" placeholder="Nombre, usuario o correo..." />
+        </label>
+        <button type="button" class="ghost" (click)="clearSearch()">Limpiar</button>
+        <button type="button" class="primary" (click)="openCreateUserModal()">Nuevo usuario</button>
+      </div>
+    </header>
+
+    <p *ngIf="loading">Cargando...</p>
+    <div class="list" *ngIf="!loading">
+      <p class="result-count module-result-count">
+        {{ filteredUsersCount }} usuario{{ filteredUsersCount === 1 ? '' : 's' }} encontrado{{ filteredUsersCount === 1 ? '' : 's' }}
+      </p>
+      <p class="empty-list module-empty" *ngIf="filteredUsersCount === 0">
+        No hay usuarios con esos filtros. Prueba limpiar la búsqueda.
+      </p>
+
+      <div class="excel-table-wrap module-table-wrap" *ngIf="filteredUsersCount > 0">
+        <table class="users-excel-table module-excel-table">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Usuario</th>
+              <th>Nombre</th>
+              <th>Correo</th>
+              <th>Documento</th>
+              <th>Rol</th>
+              <th>Estado</th>
+              <th>Temporal</th>
+              <th>Acciones</th>
+              <th>Acceso</th>
+            </tr>
+          </thead>
+          <tbody>
+            <ng-container *ngFor="let user of filteredUsers; trackBy: trackByUser">
+              <tr>
+                <td>{{ user.clientName || 'Plataforma' }}</td>
+                <td>
+                  <strong>{{ user.username }}</strong>
+                </td>
+                <td>{{ user.displayName }}</td>
+                <td>{{ user.email }}</td>
+                <td>
+                  <span>{{ documentTypeLabel(user.documentType) }}</span>
+                  <small>{{ user.documentNumber || 'Sin documento' }}</small>
+                  <small *ngIf="requiresBiomedicalCredentials(user.roles[0] || 'viewer')">
+                    INVIMA: {{ user.invimaRegistration || 'Sin registro' }}
+                  </small>
+                </td>
+                <td>
+                  <select
+                    *ngIf="canChangeUserRole(user); else fixedUserRole"
+                    [ngModel]="user.roles[0]"
+                    (ngModelChange)="onChangeRole(user, $event)"
+                  >
+                    <option *ngFor="let roleOption of assignableRolesFor(user)" [value]="roleOption">
+                      {{ roleLabel(roleOption) }}
+                    </option>
+                  </select>
+                  <ng-template #fixedUserRole>
+                    <span class="role-static">{{ roleLabel(user.roles[0]) }}</span>
+                  </ng-template>
+                </td>
+                <td>
+                  <span class="status-pill" [class.active]="user.isActive">
+                    {{ user.isActive ? 'Activo' : 'Bloqueado' }}
+                  </span>
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    class="table-button ghost temporary-action"
+                    [class.active]="temporaryPanelUserId === user.id"
+                    (click)="toggleTemporaryAccess(user)"
+                  >
+                    Temporales
+                    <span *ngIf="activeTemporaryPermissions(user).length > 0">
+                      {{ activeTemporaryPermissions(user).length }}
+                    </span>
+                  </button>
+                </td>
+                <td>
+                  <div class="table-actions">
+                    <button type="button" class="table-button" (click)="onToggleActive(user)">
+                      {{ user.isActive ? 'Bloquear' : 'Activar' }}
+                    </button>
+                    <button type="button" class="table-button ghost" (click)="startEditUser(user)">Editar</button>
+                    <button type="button" class="table-button danger" (click)="removeUser(user)">Eliminar</button>
+                  </div>
+                </td>
+                <td>
+                  <div class="table-actions">
+                    <button type="button" class="table-button" (click)="onSendPasswordSetup(user)">
+                      Enviar correo
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="temporary-row" *ngIf="temporaryPanelUserId === user.id">
+                <td colspan="10">
+                  <div class="temporary-access">
+                    <div class="temporary-header">
+                      <div>
+                        <h4>Permisos temporales de alto impacto</h4>
+                        <p>
+                          Activa importación masiva o migración de PDFs solo durante el periodo de creación del cliente.
+                        </p>
+                      </div>
+                      <span>Vencen automáticamente</span>
+                    </div>
+
+                    <div class="temporary-list" *ngIf="activeTemporaryPermissions(user).length > 0">
+                      <div class="temporary-chip" *ngFor="let permission of activeTemporaryPermissions(user)">
+                        <div>
+                          <strong>{{ temporaryPermissionLabel(permission.permission) }}</strong>
+                          <small>Hasta {{ temporaryPermissionDate(permission.expiresAt) }}</small>
+                          <small *ngIf="permission.reason">{{ permission.reason }}</small>
+                        </div>
+                        <button
+                          type="button"
+                          class="danger small"
+                          [disabled]="temporaryPermissionLoading"
+                          (click)="revokeTemporaryPermission(user, permission.permission)"
+                        >
+                          Quitar permiso
+                        </button>
+                      </div>
+                    </div>
+                    <p class="muted" *ngIf="activeTemporaryPermissions(user).length === 0">
+                      Este usuario no tiene permisos temporales activos.
+                    </p>
+
+                    <div class="temporary-permission-options">
+                      <label
+                        class="temporary-permission-option"
+                        *ngFor="let option of temporaryPermissionOptions"
+                        [class.active]="hasActiveTemporaryPermission(user, option.value)"
+                        [class.selected]="isTemporaryPermissionSelected(option.value)"
+                      >
+                        <input
+                          type="checkbox"
+                          [checked]="hasActiveTemporaryPermission(user, option.value) || isTemporaryPermissionSelected(option.value)"
+                          [disabled]="hasActiveTemporaryPermission(user, option.value) || temporaryPermissionLoading"
+                          (change)="toggleTemporaryPermissionSelection(user, option.value)"
+                        />
+                        <span>
+                          <strong>{{ option.label }}</strong>
+                          <small>{{ option.description }}</small>
+                          <small class="active-note" *ngIf="hasActiveTemporaryPermission(user, option.value)">
+                            Activo actualmente
+                          </small>
+                        </span>
+                      </label>
+                    </div>
+
+                    <div class="temporary-grid">
+                      <label>
+                        Vence
+                        <input type="datetime-local" [(ngModel)]="temporaryPermissionForm.expiresAt" />
+                      </label>
+                      <label class="wide">
+                        Motivo
+                        <input type="text" [(ngModel)]="temporaryPermissionForm.reason" />
+                      </label>
+                    </div>
+                    <div class="temporary-panel-actions">
+                      <button
+                        type="button"
+                        class="save-edit temporary-save"
+                        [disabled]="temporaryPermissionLoading || selectedTemporaryPermissionCount(user) === 0"
+                        (click)="grantTemporaryPermission(user)"
+                      >
+                        {{ temporaryPermissionLoading ? 'Activando...' : 'Activar seleccionados' }}
+                      </button>
+                      <button type="button" class="cancel-edit" (click)="cancelTemporaryAccess()">Cerrar</button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </ng-container>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <div
+    class="saas-modal-backdrop"
+    *ngIf="createUserModalOpen"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="create-user-title"
+    (click)="closeCreateUserModal()"
+  >
+    <article class="edit-user-modal create-user-modal" (click)="$event.stopPropagation()">
+      <div class="edit-header">
+        <div>
+          <strong id="create-user-title">Nuevo usuario</strong>
+          <span>Crea el acceso, asigna rol y deja lista la identificación.</span>
+        </div>
+        <button type="button" class="modal-close" aria-label="Cerrar creación de usuario" (click)="closeCreateUserModal()">×</button>
       </div>
 
-      <form (ngSubmit)="onCreateUser()">
-        <label>
-          Usuario
-          <input type="text" name="username" [(ngModel)]="username" required />
-        </label>
+      <form class="edit-form create-user-form" (ngSubmit)="onCreateUser()">
+        <div class="edit-section">
+          <h4>Datos principales</h4>
+          <div class="edit-grid">
+            <label>
+              Usuario
+              <input type="text" name="username" [(ngModel)]="username" required />
+            </label>
+            <label>
+              Nombre completo
+              <input type="text" name="displayName" [(ngModel)]="displayName" placeholder="Nombres y apellidos" required />
+            </label>
+            <label>
+              Correo
+              <input type="email" name="email" [(ngModel)]="email" required />
+            </label>
+            <label>
+              Rol
+              <select name="role" [(ngModel)]="role">
+                <option *ngFor="let roleOption of creatableRoles" [value]="roleOption">
+                  {{ roleLabel(roleOption) }}
+                </option>
+              </select>
+            </label>
+          </div>
+        </div>
 
-        <label>
-          Nombre completo
-          <input type="text" name="displayName" [(ngModel)]="displayName" placeholder="Nombres y apellidos" required />
-        </label>
-
-        <label>
-          Correo
-          <input type="email" name="email" [(ngModel)]="email" required />
-        </label>
-
-        <label>
-          Contraseña
-          <input type="password" name="password" [(ngModel)]="password" required />
-        </label>
-
-        <label>
-          Rol
-          <select name="role" [(ngModel)]="role">
-            <option *ngFor="let roleOption of roles" [value]="roleOption">{{ roleOption }}</option>
-          </select>
-        </label>
-
-        <div class="biomed-fields">
-          <h3>Identificación del usuario</h3>
+        <div class="biomed-fields edit-biomed">
+          <h4>Identificación del usuario</h4>
           <label>
             Tipo de documento
             <select name="documentType" [(ngModel)]="documentType" required>
@@ -91,7 +254,6 @@
               </option>
             </select>
           </label>
-
           <label>
             Número de documento
             <input
@@ -102,7 +264,6 @@
               required
             />
           </label>
-
           <label *ngIf="requiresBiomedicalCredentials(role)">
             Registro INVIMA
             <input
@@ -123,311 +284,160 @@
           </small>
         </label>
 
-        <label *ngIf="isClientScopedRole(role)">
+        <label *ngIf="isPlatformAdmin() && isClientScopedRole(role)">
           Cliente asignado
           <select name="clientId" [(ngModel)]="clientId">
             <option *ngFor="let client of clients" [value]="client.id">{{ client.name }}</option>
           </select>
         </label>
+        <div class="client-fixed" *ngIf="isTenantAdmin() && isClientScopedRole(role)">
+          <strong>Cliente asignado</strong>
+          <span>Tu cliente actual</span>
+        </div>
 
-        <button type="submit" class="primary">Crear usuario</button>
+        <div class="edit-actions">
+          <button type="submit" class="save-edit">Crear usuario</button>
+          <button type="button" class="cancel-edit" (click)="closeCreateUserModal()">Cancelar</button>
+        </div>
       </form>
-    </div>
-
-    <aside class="create-helper">
-      <div class="helper-logo">
-        <img src="/assets/inbi-logo.png" alt="INBIHOSPITALARIO" />
-      </div>
-      <h3>Acceso seguro por rol</h3>
-      <p>
-        Cada usuario queda ligado a sus permisos, cliente asignado y datos de identificación para
-        soportar firmas, reportes y trazabilidad.
-      </p>
-      <div class="helper-steps">
-        <span>1. Identidad y correo</span>
-        <span>2. Rol y cliente asignado</span>
-        <span>3. Firma digital si aplica</span>
-      </div>
-    </aside>
+    </article>
   </div>
 
-  <section class="list-section" *ngIf="activeUserTab === 'list'">
-    <header class="list-header">
-      <div>
-        <h2>Listado usuarios</h2>
-        <p>Busca y administra usuarios por cliente, rol o datos principales.</p>
+  <div
+    class="saas-modal-backdrop"
+    *ngIf="editingUser as user"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="edit-user-title"
+    (click)="cancelEditUser()"
+  >
+    <article class="edit-user-modal" (click)="$event.stopPropagation()">
+      <div class="edit-header">
+        <div>
+          <strong id="edit-user-title">Editar usuario</strong>
+          <span>{{ user.username }} · {{ roleLabel(user.roles[0]) }}</span>
+        </div>
+        <button type="button" class="modal-close" aria-label="Cerrar edición de usuario" (click)="cancelEditUser()">×</button>
       </div>
-      <div class="list-tools">
-        <label>
-          Buscar
-          <input type="text" [(ngModel)]="searchTerm" placeholder="Nombre, usuario o correo..." />
-        </label>
-        <button type="button" class="ghost" (click)="clearSearch()">Limpiar</button>
-      </div>
-    </header>
 
-    <p *ngIf="loading">Cargando...</p>
-    <div class="list" *ngIf="!loading">
-      <p class="result-count">
-        {{ filteredUsersCount }} usuario{{ filteredUsersCount === 1 ? '' : 's' }} encontrado{{ filteredUsersCount === 1 ? '' : 's' }}
-      </p>
-      <p class="empty-list" *ngIf="filteredUsersCount === 0">
-        No hay usuarios con esos filtros. Prueba limpiar la búsqueda.
-      </p>
-
-      <div class="client-card" *ngFor="let group of groupedUsers; trackBy: trackByGroup">
-        <button type="button" class="client-toggle" (click)="toggleClientOpen(group.id)">
-          <div>
-            <strong>{{ group.name }}</strong>
-            <span>{{ group.users.length }} usuarios</span>
+      <div class="edit-form">
+        <div class="edit-section">
+          <h4>Datos principales</h4>
+          <div class="edit-grid">
+            <label>
+              Nombre completo
+              <input type="text" [(ngModel)]="editUser.displayName" />
+            </label>
+            <label>
+              Correo
+              <input type="email" [(ngModel)]="editUser.email" />
+            </label>
           </div>
-          <span class="chevron">{{ openClientId === group.id ? '▴' : '▾' }}</span>
-        </button>
-        <div class="client-body" *ngIf="openClientId === group.id">
-          <div class="user-row" *ngFor="let user of (group.users || []); trackBy: trackByUser">
-            <div class="info">
-              <strong>{{ user.displayName }}</strong>
-              <span>{{ user.username }}</span>
-              <span>{{ user.email }}</span>
-              <span>
-                {{ documentTypeLabel(user.documentType) }}: {{ user.documentNumber || 'Sin documento' }}
-              </span>
-              <span *ngIf="requiresBiomedicalCredentials(user.roles[0] || 'viewer')">
-                Registro INVIMA: {{ user.invimaRegistration || 'Sin registro' }}
-              </span>
-              <span class="temp-inline" *ngIf="activeTemporaryPermissions(user).length > 0">
-                Temporal:
-                <ng-container *ngFor="let permission of activeTemporaryPermissions(user); let last = last">
-                  {{ temporaryPermissionLabel(permission.permission) }}{{ last ? '' : ', ' }}
-                </ng-container>
-              </span>
-            </div>
-            <div class="meta">
-              <select [ngModel]="user.roles[0]" (ngModelChange)="onChangeRole(user, $event)">
-                <option *ngFor="let roleOption of roles" [value]="roleOption">{{ roleOption }}</option>
-              </select>
-              <button type="button" (click)="onToggleActive(user)">
-                {{ user.isActive ? 'Bloquear' : 'Activar' }}
-              </button>
-              <button type="button" class="ghost" (click)="startEditUser(user)">Editar</button>
-              <button
-                type="button"
-                class="ghost temporary-action"
-                [class.active]="temporaryPanelUserId === user.id"
-                (click)="toggleTemporaryAccess(user)"
-              >
-                Permisos temporales
-                <span *ngIf="activeTemporaryPermissions(user).length > 0">
-                  {{ activeTemporaryPermissions(user).length }}
-                </span>
-              </button>
-              <button type="button" class="danger" (click)="removeUser(user)">Eliminar</button>
-            </div>
-            <div class="edit-form" *ngIf="editingUserId === user.id">
-              <div class="edit-header">
-                <div>
-                  <strong>Editar usuario</strong>
-                  <span>Actualiza datos principales, identificación y accesos.</span>
-                </div>
-              </div>
+        </div>
 
-              <div class="edit-section">
-                <h4>Datos principales</h4>
-                <div class="edit-grid">
-                  <label>
-                  Nombre completo
-                  <input type="text" [(ngModel)]="editUser.displayName" />
-                  </label>
-                  <label>
-                    Correo
-                    <input type="email" [(ngModel)]="editUser.email" />
-                  </label>
-                </div>
-              </div>
-              <div class="biomed-fields edit-biomed">
-                <h4>Identificación del usuario</h4>
-                <label>
-                  Tipo de documento
-                  <select [(ngModel)]="editUser.documentType">
-                    <option *ngFor="let option of documentTypes" [value]="option.value">
-                      {{ option.label }}
-                    </option>
-                  </select>
-                </label>
-                <label>
-                  Número de documento
-                  <input type="text" [(ngModel)]="editUser.documentNumber" />
-                </label>
-                <label *ngIf="requiresBiomedicalCredentials(user.roles[0] || 'viewer')">
-                  Registro INVIMA
-                  <input type="text" [(ngModel)]="editUser.invimaRegistration" />
-                </label>
-              </div>
-              <label *ngIf="requiresSignature(user.roles[0] || 'viewer')">
-                Firma digital (imagen o PDF)
-                <input type="file" accept="image/*,.pdf,application/pdf" (change)="onEditSignatureSelected($event)" />
-                <small class="signature-hint">
-                  Se procesará como PNG transparente para usarla en documentos.
-                </small>
-              </label>
-              <label *ngIf="!isClientScopedRole(user.roles[0] || 'viewer')">
-                Cliente
-                <select [(ngModel)]="editUser.clientId">
-                  <option value="">Sin cliente</option>
-                  <option *ngFor="let client of clients" [value]="client.id">{{ client.name }}</option>
-                </select>
-              </label>
-              <div class="client-fixed" *ngIf="isClientScopedRole(user.roles[0] || 'viewer')">
-                <strong>Cliente asignado</strong>
-                <span>{{ user.clientName || 'Sin cliente' }}</span>
-              </div>
-              <div class="reader-access" *ngIf="isReader(user) && (user.clientId || editUser.clientId)">
-                <h4>Accesos del lector (áreas y ubicaciones)</h4>
-                <div class="reader-grid">
-                  <div>
-                    <strong>Áreas</strong>
-                    <div class="reader-list">
-                      <p class="muted" *ngIf="readerAreas.length === 0">Sin áreas creadas.</p>
-                      <label *ngFor="let area of readerAreas">
-                        <input
-                          type="checkbox"
-                          [checked]="readerAreaIds.has(area.id)"
-                          (change)="toggleReaderArea(area.id)"
-                        />
-                        {{ area.name }}
-                      </label>
-                    </div>
-                  </div>
-                  <div>
-                    <strong>Ubicaciones</strong>
-                    <div class="reader-list">
-                      <p class="muted" *ngIf="readerLocations.length === 0">Sin ubicaciones creadas.</p>
-                      <label *ngFor="let location of readerLocations">
-                        <input
-                          type="checkbox"
-                          [checked]="readerLocationIds.has(location.id)"
-                          (change)="toggleReaderLocation(location.id)"
-                        />
-                        {{ location.name }}
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="edit-actions">
-                <button type="button" class="save-edit" (click)="saveUser(user)">Guardar</button>
-                <button type="button" class="cancel-edit" (click)="cancelEditUser()">Cancelar</button>
-              </div>
-            </div>
-            <div class="temporary-access" *ngIf="temporaryPanelUserId === user.id">
-              <div class="temporary-header">
-                <div>
-                  <h4>Permisos temporales de alto impacto</h4>
-                  <p>
-                    Activa importación masiva o migración de PDFs solo durante el periodo de creación del cliente.
-                  </p>
-                </div>
-                <span>Vencen automáticamente</span>
-              </div>
+        <div class="biomed-fields edit-biomed">
+          <h4>Identificación del usuario</h4>
+          <label>
+            Tipo de documento
+            <select [(ngModel)]="editUser.documentType">
+              <option *ngFor="let option of documentTypes" [value]="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            Número de documento
+            <input type="text" [(ngModel)]="editUser.documentNumber" />
+          </label>
+          <label *ngIf="requiresBiomedicalCredentials(user.roles[0] || 'viewer')">
+            Registro INVIMA
+            <input type="text" [(ngModel)]="editUser.invimaRegistration" />
+          </label>
+        </div>
 
-              <div class="temporary-list" *ngIf="activeTemporaryPermissions(user).length > 0">
-                <div class="temporary-chip" *ngFor="let permission of activeTemporaryPermissions(user)">
-                  <div>
-                    <strong>{{ temporaryPermissionLabel(permission.permission) }}</strong>
-                    <small>Hasta {{ temporaryPermissionDate(permission.expiresAt) }}</small>
-                    <small *ngIf="permission.reason">{{ permission.reason }}</small>
-                  </div>
-                  <button
-                    type="button"
-                    class="danger small"
-                    [disabled]="temporaryPermissionLoading"
-                    (click)="revokeTemporaryPermission(user, permission.permission)"
-                  >
-                    Quitar permiso
-                  </button>
-                </div>
-              </div>
-              <p class="muted" *ngIf="activeTemporaryPermissions(user).length === 0">
-                Este usuario no tiene permisos temporales activos.
-              </p>
+        <label *ngIf="requiresSignature(user.roles[0] || 'viewer')">
+          Firma digital (imagen o PDF)
+          <input type="file" accept="image/*,.pdf,application/pdf" (change)="onEditSignatureSelected($event)" />
+          <small class="signature-hint">
+            Se procesará como PNG transparente para usarla en documentos.
+          </small>
+        </label>
 
-              <div class="temporary-permission-options">
-                <label
-                  class="temporary-permission-option"
-                  *ngFor="let option of temporaryPermissionOptions"
-                  [class.active]="hasActiveTemporaryPermission(user, option.value)"
-                  [class.selected]="isTemporaryPermissionSelected(option.value)"
-                >
+        <div class="client-fixed" *ngIf="isPlatformAdmin() && !isClientScopedRole(user.roles[0] || 'viewer')">
+          <strong>Alcance</strong>
+          <span>Plataforma SaaS</span>
+        </div>
+        <div class="client-fixed" *ngIf="isClientScopedRole(user.roles[0] || 'viewer')">
+          <strong>Cliente asignado</strong>
+          <span>{{ user.clientName || 'Sin cliente' }}</span>
+        </div>
+
+        <div class="reader-access" *ngIf="isReader(user) && (user.clientId || editUser.clientId)">
+          <h4>Accesos del lector (áreas y ubicaciones)</h4>
+          <div class="reader-grid">
+            <div>
+              <strong>Áreas</strong>
+              <div class="reader-list">
+                <p class="muted" *ngIf="readerAreas.length === 0">Sin áreas creadas.</p>
+                <label *ngFor="let area of readerAreas">
                   <input
                     type="checkbox"
-                    [checked]="hasActiveTemporaryPermission(user, option.value) || isTemporaryPermissionSelected(option.value)"
-                    [disabled]="hasActiveTemporaryPermission(user, option.value) || temporaryPermissionLoading"
-                    (change)="toggleTemporaryPermissionSelection(user, option.value)"
+                    [checked]="readerAreaIds.has(area.id)"
+                    (change)="toggleReaderArea(area.id)"
                   />
-                  <span>
-                    <strong>{{ option.label }}</strong>
-                    <small>{{ option.description }}</small>
-                    <small class="active-note" *ngIf="hasActiveTemporaryPermission(user, option.value)">
-                      Activo actualmente
-                    </small>
-                  </span>
+                  {{ area.name }}
                 </label>
-              </div>
-
-              <div class="temporary-grid">
-                <label>
-                  Vence
-                  <input type="datetime-local" [(ngModel)]="temporaryPermissionForm.expiresAt" />
-                </label>
-                <label class="wide">
-                  Motivo
-                  <input type="text" [(ngModel)]="temporaryPermissionForm.reason" />
-                </label>
-              </div>
-              <div class="temporary-panel-actions">
-                <button
-                  type="button"
-                  class="save-edit temporary-save"
-                  [disabled]="temporaryPermissionLoading || selectedTemporaryPermissionCount(user) === 0"
-                  (click)="grantTemporaryPermission(user)"
-                >
-                  {{ temporaryPermissionLoading ? 'Activando...' : 'Activar seleccionados' }}
-                </button>
-                <button type="button" class="cancel-edit" (click)="cancelTemporaryAccess()">Cerrar</button>
               </div>
             </div>
-            <div class="password">
-              <input type="password" placeholder="Nueva contraseña" #pwdInput />
-              <button type="button" (click)="onChangePassword(user, pwdInput.value); pwdInput.value=''">
-                Cambiar
-              </button>
+            <div>
+              <strong>Ubicaciones</strong>
+              <div class="reader-list">
+                <p class="muted" *ngIf="readerLocations.length === 0">Sin ubicaciones creadas.</p>
+                <label *ngFor="let location of readerLocations">
+                  <input
+                    type="checkbox"
+                    [checked]="readerLocationIds.has(location.id)"
+                    (change)="toggleReaderLocation(location.id)"
+                  />
+                  {{ location.name }}
+                </label>
+              </div>
             </div>
           </div>
         </div>
+
+        <div class="edit-actions">
+          <button type="button" class="save-edit" (click)="saveUser(user)">Guardar</button>
+          <button type="button" class="cancel-edit" (click)="cancelEditUser()">Cancelar</button>
+        </div>
       </div>
-    </div>
-  </section>
+    </article>
+  </div>
 
   <section class="roles" *ngIf="activeUserTab === 'roles'">
     <header class="roles-header">
       <div>
         <span>Control de accesos</span>
         <h2>Roles y permisos</h2>
-        <p>Activa o desactiva permisos por rol. Estos cambios afectan el acceso del sistema.</p>
+        <p *ngIf="isPlatformAdmin()">Activa o desactiva permisos globales por rol. Estos cambios afectan el acceso del sistema.</p>
+        <p *ngIf="isTenantAdmin()">Activa o desactiva permisos por rol solo para este cliente.</p>
       </div>
+      <button type="button" class="ghost" (click)="openUsersList()">Volver a usuarios</button>
     </header>
 
     <div class="roles-grid">
       <div class="role-card" *ngFor="let roleOption of roles">
         <div class="role-summary">
           <div>
-            <h3>{{ roleOption }}</h3>
+            <h3>{{ roleLabel(roleOption) }}</h3>
             <span>{{ permissionCount(roleOption) }} de {{ permissions.length }} permisos activos</span>
+            <small>{{ roleDescription(roleOption) }}</small>
+            <em *ngIf="isLegacyRole(roleOption)">Legado: se conserva para usuarios antiguos, no para nuevas asignaciones.</em>
           </div>
           <button
             type="button"
             class="ghost"
-            *ngIf="!isEditingRole(roleOption)"
+            *ngIf="canEditRolePermissions() && !isEditingRole(roleOption)"
             (click)="startEditRolePermissions(roleOption)"
           >
             Editar permisos
@@ -449,18 +459,45 @@
             <strong>Editando permisos</strong>
             <span>Marca solo los permisos que este rol debe tener.</span>
           </div>
+          <div class="role-template-actions">
+            <button type="button" class="ghost" (click)="applyRecommendedPermissions(roleOption)">
+              Aplicar plantilla base
+            </button>
+            <button type="button" class="ghost" (click)="clearPermissionDraft()">
+              Limpiar selección
+            </button>
+          </div>
           <div class="temporary-role-note" *ngIf="roleOption !== 'superuser'">
             Importación masiva y migración de PDFs se asignan por usuario y con vencimiento automático.
           </div>
-          <div class="perm-list">
-          <label *ngFor="let permission of roleAssignablePermissions(roleOption)">
-            <input
-              type="checkbox"
-              [checked]="permissionDraft.has(permission)"
-              (change)="togglePermission(roleIds.get(roleOption) ?? 0, permission)"
-            />
-            {{ permissionLabel(permission) }}
-          </label>
+          <div class="perm-groups">
+            <section class="perm-group" *ngFor="let group of permissionGroupsForRole(roleOption)">
+              <header>
+                <div>
+                  <strong>{{ group.label }}</strong>
+                  <span>{{ group.description }}</span>
+                </div>
+                <small>{{ selectedPermissionsInGroup(group.permissions) }}/{{ group.permissions.length }}</small>
+                <div class="group-actions">
+                  <button type="button" class="ghost tiny" (click)="setPermissionGroup(group.permissions, true)">
+                    Todos
+                  </button>
+                  <button type="button" class="ghost tiny" (click)="setPermissionGroup(group.permissions, false)">
+                    Ninguno
+                  </button>
+                </div>
+              </header>
+              <div class="perm-list">
+                <label *ngFor="let permission of group.permissions">
+                  <input
+                    type="checkbox"
+                    [checked]="permissionDraft.has(permission)"
+                    (change)="togglePermission(roleIds.get(roleOption) ?? 0, permission)"
+                  />
+                  {{ permissionLabel(permission) }}
+                </label>
+              </div>
+            </section>
           </div>
           <div class="role-actions">
             <button type="button" (click)="saveRolePermissions(roleIds.get(roleOption) ?? 0)">

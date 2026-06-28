@@ -1,14 +1,21 @@
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { AdminService } from '../../admin/admin.service';
+import { AuthService } from '../../auth/auth.service';
 import { Role } from '../../auth/models';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
-import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 
 type UserDocumentType = 'cedula_ciudadania' | 'cedula_extranjeria' | 'pasaporte';
-type UserTab = 'list' | 'create' | 'roles';
+type UserTab = 'list' | 'roles';
+
+interface PermissionGroupView {
+  key: string;
+  label: string;
+  description: string;
+  permissions: string[];
+}
 
 interface TemporaryPermissionView {
   permission: string;
@@ -35,7 +42,7 @@ interface UserView {
 @Component({
   selector: 'app-users',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
+  imports: [CommonModule, FormsModule, ModuleTabsComponent],
   templateUrl: './users.component.html',
   styleUrl: './users.component.scss'
 })
@@ -53,7 +60,7 @@ export class UsersComponent implements OnInit {
   clients: { id: string; name: string }[] = [];
   searchTerm = '';
   activeUserTab: UserTab = 'list';
-  openClientId: string | null = null;
+  createUserModalOpen = false;
   editingUserId: string | null = null;
   temporaryPanelUserId: string | null = null;
   editUser = {
@@ -80,8 +87,7 @@ export class UsersComponent implements OnInit {
   username = '';
   displayName = '';
   email = '';
-  password = '';
-  role: Role = 'viewer';
+  role: Role = 'saas_admin';
   clientId = '';
   signatureFile: File | null = null;
   private readonly signatureAllowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
@@ -94,14 +100,25 @@ export class UsersComponent implements OnInit {
     { value: 'pasaporte', label: 'Pasaporte' }
   ];
   readonly permissionLabels: Record<string, string> = {
+    'clients:create': 'Crear clientes',
+    'clients:manage': 'Administrar clientes',
+    'clients:view': 'Ver clientes',
+    'reports:view': 'Ver reportes administrativos',
+    'users:manage': 'Gestionar usuarios',
+    'audit:client:view': 'Ver auditoría administrativa',
+    'platform:templates:manage': 'Gestionar plantillas globales',
+    'saas:access': 'Acceder a administración SaaS',
+    'saas:clients:view': 'Ver cartera de clientes SaaS',
+    'saas:clients:update': 'Editar datos y configuración de clientes SaaS',
+    'saas:subscriptions:manage': 'Gestionar suscripciones y pagos SaaS',
+    'saas:plans:manage': 'Gestionar planes SaaS generales',
+    'saas:client_admins:reset_password': 'Enviar acceso a administradores de cliente',
+    'saas:audit:view': 'Ver auditoría SaaS',
     'hb:create': 'Crear hojas de vida',
     'hb:import': 'Importar hojas de vida masivamente',
     'hb:view': 'Ver hojas de vida',
     'asset_history:upload': 'Migrar PDFs históricos de equipos',
     'areas:manage': 'Gestionar sedes, áreas y ubicaciones',
-    'clients:manage': 'Gestionar clientes',
-    'clients:view': 'Ver clientes',
-    'users:manage': 'Gestionar usuarios',
     'schedules:manage': 'Gestionar cronogramas de mantenimiento',
     'calibration:schedule:manage': 'Gestionar cronogramas de calibración',
     'maintenance:request:create': 'Crear solicitudes de mantenimiento',
@@ -110,7 +127,61 @@ export class UsersComponent implements OnInit {
     'calibration:report:upload': 'Subir reportes de calibración',
     'inventory:move': 'Mover equipos y generar reportes de movimiento',
     'inventory:request': 'Solicitudes de inventario',
+    'software:biomedico:access': 'Acceder a mantenimiento biomédico',
+    'software:odontologico:access': 'Acceder al software odontológico',
+    'software:laboratorio:access': 'Acceder al software de laboratorio',
+    'quick_guides:view': 'Ver guías rápidas de uso',
+    'quick_guides:create': 'Crear guías rápidas de uso',
+    'quick_guides:edit': 'Editar guías rápidas de uso',
+    'quick_guides:approve': 'Aprobar guías rápidas de uso',
+    'quick_guides:delete': 'Eliminar guías rápidas de uso',
+    'odontology:access': 'Acceder al módulo odontológico',
+    'odontology:settings:manage': 'Gestionar configuración odontológica',
+    'odontology:patients:manage': 'Gestionar pacientes odontológicos',
+    'odontology:patients:import': 'Importar pacientes odontológicos',
+    'odontology:clinical_records:manage': 'Gestionar historias odontológicas',
+    'odontology:appointments:manage': 'Gestionar agenda odontológica',
+    'odontology:odontogram:manage': 'Gestionar odontograma',
+    'odontology:periodontogram:manage': 'Gestionar periodontograma',
+    'odontology:consents:manage': 'Gestionar consentimientos odontológicos',
+    'odontology:attachments:manage': 'Gestionar adjuntos odontológicos',
+    'odontology:inventory:manage': 'Gestionar inventario odontológico',
+    'odontology:sterilization:manage': 'Gestionar esterilización odontológica',
+    'odontology:treatment_plans:manage': 'Gestionar planes de tratamiento',
+    'odontology:payments:manage': 'Gestionar pagos odontológicos',
+    'odontology:financial:view': 'Ver valores financieros odontológicos',
+    'odontology:prescriptions:manage': 'Gestionar recetas odontológicas',
+    'odontology:documents:manage': 'Gestionar certificados e incapacidades odontológicas',
+    'odontology:reports:view': 'Ver reportes odontológicos',
+    'maintenance:order:create': 'Crear órdenes de mantenimiento',
+    'maintenance:order:close': 'Cerrar órdenes de mantenimiento',
+    'service:order:create': 'Crear órdenes de servicio',
+    'spareparts:order:create': 'Crear solicitudes de repuestos',
+    'laboratory:orders:manage': 'Gestionar órdenes de laboratorio',
+    'laboratory:results:manage': 'Gestionar resultados de laboratorio',
     'read:all': 'Lectura general'
+  };
+  readonly roleLabels: Record<string, string> = {
+    superuser: 'Superadmin',
+    admin: 'Administrador plataforma',
+    saas_admin: 'Administrador SaaS',
+    saas_billing: 'Facturación SaaS',
+    saas_clients: 'Gestor de clientes SaaS',
+    saas_support: 'Soporte SaaS',
+    saas_auditor: 'Auditor SaaS',
+    client_admin: 'Administrador del cliente',
+    viewer: 'Visor plataforma (legado)',
+    almacenista: 'Almacenista',
+    ingeniero_biomedico: 'Ingeniero biomédico',
+    calibracion: 'Calibración',
+    lector: 'Lector',
+    odontologo: 'Odontólogo',
+    auxiliar_odontologia: 'Auxiliar odontología',
+    recepcion_odontologia: 'Recepción odontología',
+    admin_odontologia: 'Admin odontología',
+    auditor_odontologia: 'Auditor odontología',
+    bacteriologo: 'Bacteriólogo',
+    auxiliar_laboratorio: 'Auxiliar laboratorio'
   };
   readonly temporaryPermissionOptions = [
     {
@@ -127,22 +198,270 @@ export class UsersComponent implements OnInit {
   private readonly temporaryOnlyPermissions = new Set(
     this.temporaryPermissionOptions.map((option) => option.value)
   );
+  private readonly legacyPlatformRoles = new Set<Role>(['viewer']);
+
+  readonly permissionGroupOrder = [
+    'saas',
+    'users_audit',
+    'software',
+    'biomed',
+    'maintenance',
+    'calibration',
+    'odontology',
+    'laboratory',
+    'reading',
+    'other'
+  ];
+  readonly permissionGroupLabels: Record<string, { label: string; description: string }> = {
+    saas: {
+      label: 'Administración SaaS',
+      description: 'Clientes, planes, cartera, suscripciones y soporte de plataforma.'
+    },
+    users_audit: {
+      label: 'Usuarios, auditoría y seguridad',
+      description: 'Gestión de usuarios, auditoría y trazabilidad administrativa.'
+    },
+    software: {
+      label: 'Software principal',
+      description: 'Acceso base a los productos contratados por el cliente.'
+    },
+    biomed: {
+      label: 'Biomédico, inventario y hojas de vida',
+      description: 'Hojas de vida, inventario, guías rápidas, sedes, áreas y movimientos.'
+    },
+    maintenance: {
+      label: 'Mantenimiento y repuestos',
+      description: 'Solicitudes, reportes, firmas, órdenes, repuestos y cronogramas.'
+    },
+    calibration: {
+      label: 'Calibración',
+      description: 'Cronogramas y carga documental de certificados de calibración.'
+    },
+    odontology: {
+      label: 'Odontología',
+      description: 'Pacientes, agenda, historia clínica, tratamientos, pagos y reportes.'
+    },
+    laboratory: {
+      label: 'Laboratorio',
+      description: 'Órdenes, resultados y flujo operativo de laboratorio.'
+    },
+    reading: {
+      label: 'Lectura general',
+      description: 'Consulta amplia sin edición operativa.'
+    },
+    other: {
+      label: 'Otros permisos',
+      description: 'Permisos pendientes de categorizar o de uso especial.'
+    }
+  };
+
+  readonly recommendedRolePermissions: Partial<Record<Role, string[]>> = {
+    admin: [
+      'saas:access',
+      'saas:clients:view',
+      'saas:clients:update',
+      'saas:subscriptions:manage',
+      'saas:plans:manage',
+      'saas:client_admins:reset_password',
+      'saas:audit:view',
+      'audit:client:view',
+      'clients:view',
+      'reports:view'
+    ],
+    viewer: ['clients:view', 'reports:view'],
+    saas_admin: [
+      'saas:access',
+      'saas:clients:view',
+      'saas:clients:update',
+      'saas:subscriptions:manage',
+      'saas:plans:manage',
+      'saas:client_admins:reset_password',
+      'saas:audit:view',
+      'audit:client:view',
+      'clients:view',
+      'reports:view'
+    ],
+    saas_billing: [
+      'saas:access',
+      'saas:clients:view',
+      'saas:subscriptions:manage',
+      'clients:view'
+    ],
+    saas_clients: [
+      'saas:access',
+      'saas:clients:view',
+      'saas:clients:update',
+      'clients:view'
+    ],
+    saas_support: [
+      'saas:access',
+      'saas:clients:view',
+      'saas:client_admins:reset_password',
+      'clients:view'
+    ],
+    saas_auditor: [
+      'saas:access',
+      'saas:clients:view',
+      'saas:audit:view',
+      'audit:client:view',
+      'clients:view',
+      'reports:view'
+    ],
+    client_admin: ['users:manage', 'clients:view', 'audit:client:view', 'areas:manage'],
+    almacenista: [
+      'software:biomedico:access',
+      'hb:view',
+      'maintenance:request:create',
+      'maintenance:report:sign',
+      'inventory:move',
+      'inventory:request',
+      'quick_guides:view'
+    ],
+    ingeniero_biomedico: [
+      'software:biomedico:access',
+      'hb:create',
+      'hb:view',
+      'areas:manage',
+      'maintenance:report:create',
+      'maintenance:report:sign',
+      'schedules:manage',
+      'calibration:schedule:manage',
+      'inventory:move',
+      'quick_guides:view',
+      'quick_guides:create',
+      'quick_guides:edit',
+      'quick_guides:approve'
+    ],
+    calibracion: [
+      'software:biomedico:access',
+      'hb:view',
+      'calibration:report:upload',
+      'quick_guides:view'
+    ],
+    lector: [
+      'software:biomedico:access',
+      'hb:view',
+      'maintenance:request:create',
+      'maintenance:report:sign',
+      'quick_guides:view'
+    ],
+    admin_odontologia: [
+      'software:odontologico:access',
+      'odontology:access',
+      'odontology:settings:manage',
+      'odontology:patients:manage',
+      'odontology:patients:import',
+      'odontology:clinical_records:manage',
+      'odontology:appointments:manage',
+      'odontology:odontogram:manage',
+      'odontology:periodontogram:manage',
+      'odontology:consents:manage',
+      'odontology:attachments:manage',
+      'odontology:inventory:manage',
+      'odontology:sterilization:manage',
+      'odontology:treatment_plans:manage',
+      'odontology:payments:manage',
+      'odontology:financial:view',
+      'odontology:prescriptions:manage',
+      'odontology:documents:manage',
+      'odontology:reports:view',
+      'audit:odontology:view'
+    ],
+    odontologo: [
+      'software:odontologico:access',
+      'odontology:access',
+      'odontology:patients:manage',
+      'odontology:clinical_records:manage',
+      'odontology:appointments:manage',
+      'odontology:odontogram:manage',
+      'odontology:periodontogram:manage',
+      'odontology:consents:manage',
+      'odontology:treatment_plans:manage',
+      'odontology:prescriptions:manage',
+      'odontology:documents:manage'
+    ],
+    auxiliar_odontologia: [
+      'software:odontologico:access',
+      'odontology:access',
+      'odontology:patients:manage',
+      'odontology:appointments:manage',
+      'odontology:attachments:manage',
+      'odontology:inventory:manage',
+      'odontology:sterilization:manage'
+    ],
+    recepcion_odontologia: [
+      'software:odontologico:access',
+      'odontology:access',
+      'odontology:patients:manage',
+      'odontology:appointments:manage',
+      'odontology:payments:manage'
+    ],
+    auditor_odontologia: [
+      'software:odontologico:access',
+      'odontology:access',
+      'odontology:reports:view',
+      'audit:odontology:view'
+    ],
+    bacteriologo: [
+      'software:laboratorio:access',
+      'laboratory:orders:manage',
+      'laboratory:results:manage'
+    ],
+    auxiliar_laboratorio: [
+      'software:laboratorio:access',
+      'laboratory:orders:manage'
+    ]
+  };
 
   private readonly clientScopedRoles: Role[] = [
+    'client_admin',
     'almacenista',
     'ingeniero_biomedico',
     'calibracion',
-    'lector'
+    'lector',
+    'odontologo',
+    'auxiliar_odontologia',
+    'recepcion_odontologia',
+    'admin_odontologia',
+    'auditor_odontologia',
+    'bacteriologo',
+    'auxiliar_laboratorio'
   ];
+  private readonly platformCreatableRoles: Role[] = [
+    'saas_admin',
+    'saas_billing',
+    'saas_clients',
+    'saas_support',
+    'saas_auditor'
+  ];
+  private readonly platformAssignablePermissions = new Set<string>([
+    'clients:create',
+    'clients:manage',
+    'clients:view',
+    'reports:view',
+    'users:manage',
+    'audit:client:view',
+    'platform:templates:manage',
+    'saas:access',
+    'saas:clients:view',
+    'saas:clients:update',
+    'saas:subscriptions:manage',
+    'saas:plans:manage',
+    'saas:client_admins:reset_password',
+    'saas:audit:view'
+  ]);
   private readonly signatureRoles: Role[] = ['almacenista', 'ingeniero_biomedico', 'lector'];
 
   constructor(
     private readonly admin: AdminService,
+    public readonly auth: AuthService,
+    private readonly router: Router,
     private readonly cdr: ChangeDetectorRef
   ) {}
 
   async ngOnInit(): Promise<void> {
     await Promise.resolve();
+    this.activeUserTab = this.isRolePermissionsRoute() ? 'roles' : 'list';
     await this.load();
   }
 
@@ -153,11 +472,23 @@ export class UsersComponent implements OnInit {
       const [roles, users, permissions] = await Promise.all([
         this.admin.listRoles(),
         this.admin.listUsers(),
-        this.admin.listPermissions()
+        this.canViewRolesAndPermissions() ? this.admin.listPermissions() : Promise.resolve([])
       ]);
-      this.roles = roles.map((item) => item.name);
-      this.roleIds = new Map(roles.map((item) => [item.name, item.id]));
-      this.permissions = permissions.map((item) => item.name);
+      this.roles = this.visibleRolesForContext(roles.map((item) => item.name));
+      if (!this.creatableRoles.includes(this.role)) {
+        this.role = this.creatableRoles[0] ?? this.assignableRoles[0] ?? 'saas_admin';
+      }
+      const visibleRoleSet = new Set(this.roles);
+      this.roleIds = new Map(
+        roles
+          .filter((item) => visibleRoleSet.has(item.name))
+          .map((item) => [item.name, item.id])
+      );
+      this.permissions = permissions
+        .map((item) => item.name)
+        .filter((permission) =>
+          this.isKnownSoftwarePermission(permission) && this.isVisiblePermissionForContext(permission)
+        );
       this.users = users.map((user) => ({
         id: user.id,
         username: user.username,
@@ -177,15 +508,22 @@ export class UsersComponent implements OnInit {
           reason: permission.reason ?? null
         }))
       }));
-      await this.loadRolePermissions();
-      try {
-        const clients = await this.admin.listClients();
-        this.clients = clients.map((client) => ({ id: client.id, name: client.name }));
-        if (!this.clientId) {
-          this.clientId = this.clients[0]?.id ?? '';
+      if (this.canViewRolesAndPermissions()) {
+        await this.loadRolePermissions();
+      }
+      if (this.isPlatformAdmin()) {
+        try {
+          const clients = await this.admin.listClients();
+          this.clients = clients.map((client) => ({ id: client.id, name: client.name }));
+          if (!this.clientId) {
+            this.clientId = this.clients[0]?.id ?? '';
+          }
+        } catch {
+          this.clients = [];
         }
-      } catch {
+      } else {
         this.clients = [];
+        this.clientId = this.auth.currentUser()?.clientId ?? '';
       }
     } catch (error) {
       console.error(error);
@@ -199,7 +537,8 @@ export class UsersComponent implements OnInit {
   async loadRolePermissions(): Promise<void> {
     const entries = await Promise.all(
       Array.from(this.roleIds.entries()).map(async ([roleName, roleId]) => {
-        const permissions = await this.admin.getRolePermissions(roleId);
+        const permissions = (await this.admin.getRolePermissions(roleId))
+          .filter((permission) => this.isKnownSoftwarePermission(permission));
         return [roleId, permissions] as const;
       })
     );
@@ -208,7 +547,7 @@ export class UsersComponent implements OnInit {
   }
 
   async onCreateUser(): Promise<void> {
-    if (!this.username || !this.displayName || !this.email || !this.password) {
+    if (!this.username || !this.displayName || !this.email || !this.role) {
       this.errorMessage = 'Completa todos los campos.';
       return;
     }
@@ -231,15 +570,20 @@ export class UsersComponent implements OnInit {
 
     this.errorMessage = '';
     this.successMessage = '';
+    const securityCode = await this.requestSecurityCode(
+      'USER_CREATE',
+      `Crear usuario ${this.username.trim()} con rol ${this.roleLabel(this.role)} y enviar correo de acceso`
+    );
+    if (!securityCode) return;
     try {
       await this.admin.createUser({
         username: this.username.trim(),
         displayName: this.displayName.trim(),
         email: this.email.trim(),
-        password: this.password,
         role: this.role,
         clientId: this.isClientScopedRole(this.role) ? this.clientId : undefined,
         signatureFile: this.signatureFile,
+        securityCode,
         documentType: this.documentType,
         documentNumber: this.documentNumber.trim(),
         invimaRegistration: this.requiresBiomedicalCredentials(this.role) ? this.invimaRegistration.trim() : null
@@ -247,14 +591,14 @@ export class UsersComponent implements OnInit {
       this.username = '';
       this.displayName = '';
       this.email = '';
-      this.password = '';
-      this.role = this.roles[0] ?? 'viewer';
+      this.role = this.creatableRoles[0] ?? this.assignableRoles[0] ?? 'saas_admin';
       this.clientId = this.clients[0]?.id ?? '';
       this.signatureFile = null;
       this.documentType = 'cedula_ciudadania';
       this.documentNumber = '';
       this.invimaRegistration = '';
-      this.successMessage = 'Usuario creado.';
+      this.successMessage = 'Usuario creado. Se envió correo para definir contraseña.';
+      this.createUserModalOpen = false;
       this.activeUserTab = 'list';
       await this.load();
     } catch (error: any) {
@@ -287,8 +631,30 @@ export class UsersComponent implements OnInit {
     return this.groupedUsers.reduce((total, group) => total + group.users.length, 0);
   }
 
+  get filteredUsers(): UserView[] {
+    return this.groupedUsers.flatMap((group) => group.users);
+  }
+
+  get editingUser(): UserView | null {
+    return this.users.find((user) => user.id === this.editingUserId) ?? null;
+  }
+
   setUserTab(tab: UserTab): void {
+    if (tab === 'roles' && !this.canViewRolesAndPermissions()) {
+      tab = 'list';
+    }
     this.activeUserTab = tab;
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.createUserModalOpen = false;
+    this.cancelEditUser();
+    this.cancelTemporaryAccess();
+    this.cancelRolePermissionsEdit();
+  }
+
+  openCreateUserModal(): void {
+    this.createUserModalOpen = true;
+    this.activeUserTab = 'list';
     this.errorMessage = '';
     this.successMessage = '';
     this.cancelEditUser();
@@ -296,12 +662,21 @@ export class UsersComponent implements OnInit {
     this.cancelRolePermissionsEdit();
   }
 
-  clearSearch(): void {
-    this.searchTerm = '';
+  closeCreateUserModal(): void {
+    this.createUserModalOpen = false;
+    this.resetCreateUserForm();
   }
 
-  toggleClientOpen(clientId: string): void {
-    this.openClientId = this.openClientId === clientId ? null : clientId;
+  openUsersList(): void {
+    if (this.isRolePermissionsRoute()) {
+      void this.router.navigateByUrl('/usuarios');
+      return;
+    }
+    this.setUserTab('list');
+  }
+
+  clearSearch(): void {
+    this.searchTerm = '';
   }
 
   trackByGroup(_index: number, group: { id: string }): string {
@@ -372,6 +747,11 @@ export class UsersComponent implements OnInit {
       return;
     }
 
+    const securityCode = await this.requestSecurityCode(
+      'USER_UPDATE',
+      `Editar usuario ${user.username}`
+    );
+    if (!securityCode) return;
     await this.admin.updateUserProfile(user.id, {
       displayName: this.editUser.displayName.trim(),
       email: this.editUser.email.trim(),
@@ -380,7 +760,8 @@ export class UsersComponent implements OnInit {
       documentNumber: this.editUser.documentNumber.trim(),
       invimaRegistration: this.requiresBiomedicalCredentials(user.roles[0] || 'viewer')
         ? this.editUser.invimaRegistration.trim()
-        : null
+        : null,
+      securityCode
     });
     if (this.editSignatureFile && this.requiresSignature(user.roles[0] || 'viewer')) {
       await this.admin.updateUserSignature(user.id, this.editSignatureFile);
@@ -395,12 +776,86 @@ export class UsersComponent implements OnInit {
 
   async removeUser(user: UserView): Promise<void> {
     if (!confirm('¿Eliminar usuario?')) return;
-    await this.admin.deleteUser(user.id);
+    const securityCode = await this.requestSecurityCode('USER_DELETE', `Eliminar usuario ${user.username}`);
+    if (!securityCode) return;
+    await this.admin.deleteUser(user.id, securityCode);
     await this.load();
   }
 
   isClientScopedRole(role: Role): boolean {
     return this.clientScopedRoles.includes(role);
+  }
+
+  isPlatformAdmin(): boolean {
+    return this.auth.hasRole('superuser');
+  }
+
+  isTenantAdmin(): boolean {
+    return this.auth.hasRole('client_admin');
+  }
+
+  canViewRolesAndPermissions(): boolean {
+    return this.isPlatformAdmin() || this.isTenantAdmin();
+  }
+
+  canEditRolePermissions(): boolean {
+    return this.isPlatformAdmin() || this.isTenantAdmin();
+  }
+
+  private visibleRolesForContext(roles: Role[]): Role[] {
+    if (this.isPlatformAdmin()) {
+      return roles.filter((role) => this.platformCreatableRoles.includes(role));
+    }
+    return roles;
+  }
+
+  private isVisiblePermissionForContext(permission: string): boolean {
+    return !this.isPlatformAdmin() || this.platformAssignablePermissions.has(permission);
+  }
+
+  isRolePermissionsRoute(): boolean {
+    return this.router.url.split('?')[0] === '/roles-permisos';
+  }
+
+  get assignableRoles(): Role[] {
+    if (this.isPlatformAdmin()) {
+      return this.roles.filter((role) => this.platformCreatableRoles.includes(role));
+    }
+    return this.roles.filter((role) => !this.isLegacyRole(role));
+  }
+
+  get creatableRoles(): Role[] {
+    if (this.isPlatformAdmin()) {
+      return this.roles.filter((role) => this.platformCreatableRoles.includes(role));
+    }
+    return this.assignableRoles;
+  }
+
+  assignableRolesFor(user?: UserView): Role[] {
+    const currentRole = user?.roles?.[0];
+    if (this.isPlatformAdmin()) {
+      return this.assignableRoles;
+    }
+    if (this.isTenantAdmin() && currentRole === 'client_admin') {
+      return this.assignableRoles;
+    }
+    if (currentRole && !this.assignableRoles.includes(currentRole)) {
+      return [currentRole, ...this.assignableRoles];
+    }
+    return this.assignableRoles;
+  }
+
+  isLegacyRole(role?: Role | null): boolean {
+    return Boolean(role && this.legacyPlatformRoles.has(role));
+  }
+
+  canChangeUserRole(user: UserView): boolean {
+    const currentRole = user.roles?.[0];
+    if (!currentRole) return false;
+    if (this.isPlatformAdmin()) {
+      return this.platformCreatableRoles.includes(currentRole);
+    }
+    return this.assignableRolesFor(user).length > 0;
   }
 
   isReader(user: UserView): boolean {
@@ -417,6 +872,56 @@ export class UsersComponent implements OnInit {
 
   documentTypeLabel(value?: string | null): string {
     return this.documentTypes.find((item) => item.value === value)?.label ?? 'Sin tipo';
+  }
+
+  roleLabel(role?: string | null): string {
+    return this.roleLabels[role || ''] ?? role ?? 'Sin rol';
+  }
+
+  private async requestSecurityCode(action: string, summary: string): Promise<string | null> {
+    try {
+      const result = await this.admin.requestActionConfirmation({ action, summary });
+      const code = window.prompt(
+        `Se envió un código de confirmación a ${result.deliveryEmail}.\n\n${summary}\n\nIngresa el código para confirmar:`
+      );
+      if (!code?.trim()) {
+        this.errorMessage = 'Acción cancelada. El código de confirmación es obligatorio.';
+        return null;
+      }
+      return code.trim();
+    } catch (error: any) {
+      console.error(error);
+      this.errorMessage = error?.error?.message ?? 'No se pudo enviar el código de confirmación.';
+      return null;
+    } finally {
+      this.cdr.detectChanges();
+    }
+  }
+
+  roleDescription(role?: Role | null): string {
+    const descriptions: Partial<Record<Role, string>> = {
+      superuser: 'Dueño total de la plataforma. Úsalo solo para administración crítica.',
+      admin: 'Rol antiguo de administración de plataforma. Preferible usar roles SaaS específicos.',
+      viewer: 'Rol legado de solo lectura. No se recomienda para usuarios nuevos.',
+      saas_admin: 'Administra cartera, planes, suscripciones, soporte y auditoría SaaS.',
+      saas_billing: 'Gestiona cobros, renovaciones y estados comerciales sin crear clientes.',
+      saas_clients: 'Actualiza datos y configuración administrativa de clientes.',
+      saas_support: 'Soporte interno: consulta clientes y restablece claves de administradores.',
+      saas_auditor: 'Consulta cartera y auditoría sin modificar información.',
+      client_admin: 'Administrador del cliente. Crea y controla usuarios de su institución.',
+      almacenista: 'Solicita correctivos, firma reportes y gestiona movimientos operativos permitidos.',
+      ingeniero_biomedico: 'Crea hojas de vida, reportes, cronogramas y documentos biomédicos.',
+      calibracion: 'Carga certificados y reportes de calibración.',
+      lector: 'Consulta información autorizada por área/ubicación y firma cuando aplique.',
+      admin_odontologia: 'Administra la operación odontológica del cliente.',
+      odontologo: 'Gestiona atención clínica odontológica.',
+      auxiliar_odontologia: 'Apoya agenda, pacientes, adjuntos, inventario y esterilización.',
+      recepcion_odontologia: 'Gestiona pacientes, agenda y pagos básicos.',
+      auditor_odontologia: 'Consulta reportes y auditoría odontológica.',
+      bacteriologo: 'Gestiona órdenes y resultados de laboratorio.',
+      auxiliar_laboratorio: 'Apoya la gestión de órdenes de laboratorio.'
+    };
+    return descriptions[role || 'viewer'] ?? 'Rol configurable por permisos.';
   }
 
   temporaryPermissionLabel(permission: string): string {
@@ -486,15 +991,19 @@ export class UsersComponent implements OnInit {
     this.errorMessage = '';
     this.successMessage = '';
     try {
-      await Promise.all(
-        permissionsToGrant.map((permission) =>
-          this.admin.grantTemporaryPermission(user.id, {
-            permission,
-            expiresAt: expiresAt.toISOString(),
-            reason: this.temporaryPermissionForm.reason.trim() || null
-          })
-        )
-      );
+      for (const permission of permissionsToGrant) {
+        const securityCode = await this.requestSecurityCode(
+          'USER_TEMPORARY_PERMISSION_GRANT',
+          `Activar permiso temporal ${this.permissionLabel(permission)} para ${user.username}`
+        );
+        if (!securityCode) return;
+        await this.admin.grantTemporaryPermission(user.id, {
+          permission,
+          expiresAt: expiresAt.toISOString(),
+          reason: this.temporaryPermissionForm.reason.trim() || null,
+          securityCode
+        });
+      }
       this.successMessage = permissionsToGrant.length === 1
         ? 'Permiso temporal activado. Si el usuario está conectado, debe volver a iniciar sesión para verlo.'
         : 'Permisos temporales activados. Si el usuario está conectado, debe volver a iniciar sesión para verlos.';
@@ -513,11 +1022,16 @@ export class UsersComponent implements OnInit {
 
   async revokeTemporaryPermission(user: UserView, permission: string): Promise<void> {
     if (!confirm('¿Revocar este permiso temporal?')) return;
+    const securityCode = await this.requestSecurityCode(
+      'USER_TEMPORARY_PERMISSION_REVOKE',
+      `Revocar permiso temporal ${this.permissionLabel(permission)} para ${user.username}`
+    );
+    if (!securityCode) return;
     this.temporaryPermissionLoading = true;
     this.errorMessage = '';
     this.successMessage = '';
     try {
-      await this.admin.revokeTemporaryPermission(user.id, permission);
+      await this.admin.revokeTemporaryPermission(user.id, permission, securityCode);
       this.successMessage = 'Permiso temporal revocado. Si el usuario está conectado, debe volver a iniciar sesión para actualizar sus accesos.';
       this.selectedTemporaryPermissions.delete(permission);
       await this.load();
@@ -542,6 +1056,18 @@ export class UsersComponent implements OnInit {
       expiresAt: this.toDatetimeLocal(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
       reason: 'Periodo temporal de creación/migración inicial del cliente'
     };
+  }
+
+  private resetCreateUserForm(): void {
+    this.username = '';
+    this.displayName = '';
+    this.email = '';
+    this.role = this.creatableRoles[0] ?? this.assignableRoles[0] ?? 'saas_admin';
+    this.clientId = this.clients[0]?.id ?? this.auth.currentUser()?.clientId ?? '';
+    this.signatureFile = null;
+    this.documentType = 'cedula_ciudadania';
+    this.documentNumber = '';
+    this.invimaRegistration = '';
   }
 
   private toDatetimeLocal(date: Date): string {
@@ -648,7 +1174,13 @@ export class UsersComponent implements OnInit {
 
   async onToggleActive(user: UserView): Promise<void> {
     try {
-      await this.admin.updateUserActive(user.id, !user.isActive);
+      const nextState = !user.isActive;
+      const securityCode = await this.requestSecurityCode(
+        'USER_ACTIVE_UPDATE',
+        `${nextState ? 'Activar' : 'Bloquear'} usuario ${user.username}`
+      );
+      if (!securityCode) return;
+      await this.admin.updateUserActive(user.id, nextState, securityCode);
       user.isActive = !user.isActive;
     } catch (error) {
       console.error(error);
@@ -671,7 +1203,12 @@ export class UsersComponent implements OnInit {
     }
 
     try {
-      await this.admin.updateUserRole(user.id, role);
+      const securityCode = await this.requestSecurityCode(
+        'USER_ROLE_UPDATE',
+        `Cambiar rol de ${user.username} a ${this.roleLabel(role)}`
+      );
+      if (!securityCode) return;
+      await this.admin.updateUserRole(user.id, role, securityCode);
       user.roles = [role];
     } catch (error) {
       console.error(error);
@@ -681,20 +1218,20 @@ export class UsersComponent implements OnInit {
     }
   }
 
-  async onChangePassword(user: UserView, password: string): Promise<void> {
-    if (!password) {
-      this.errorMessage = 'Ingresa una contraseña nueva.';
-      return;
-    }
-
+  async onSendPasswordSetup(user: UserView): Promise<void> {
     this.errorMessage = '';
     this.successMessage = '';
     try {
-      await this.admin.updateUserPassword(user.id, password);
-      this.successMessage = 'Contraseña actualizada.';
+      const securityCode = await this.requestSecurityCode(
+        'USER_PASSWORD_RESET',
+        `Enviar correo para que ${user.username} defina su contraseña`
+      );
+      if (!securityCode) return;
+      await this.admin.sendUserPasswordSetup(user.id, securityCode);
+      this.successMessage = 'Correo enviado. El usuario definirá su contraseña desde Recuperar contraseña.';
     } catch (error) {
       console.error(error);
-      this.errorMessage = 'No se pudo actualizar la contraseña.';
+      this.errorMessage = 'No se pudo enviar el correo de contraseña.';
     } finally {
       this.cdr.detectChanges();
     }
@@ -709,9 +1246,105 @@ export class UsersComponent implements OnInit {
     return this.permissionLabels[permission] ?? permission;
   }
 
+  isKnownSoftwarePermission(permission: string): boolean {
+    return Object.prototype.hasOwnProperty.call(this.permissionLabels, permission);
+  }
+
   roleAssignablePermissions(role: Role): string[] {
     if (role === 'superuser') return this.permissions;
     return this.permissions.filter((permission) => !this.temporaryOnlyPermissions.has(permission));
+  }
+
+  permissionGroupsForRole(role: Role): PermissionGroupView[] {
+    const allowed = this.roleAssignablePermissions(role);
+    const grouped = new Map<string, string[]>();
+    for (const permission of allowed) {
+      const key = this.permissionGroupKey(permission);
+      grouped.set(key, [...(grouped.get(key) ?? []), permission]);
+    }
+
+    return this.permissionGroupOrder
+      .filter((key) => grouped.has(key))
+      .map((key) => ({
+        key,
+        label: this.permissionGroupLabels[key]?.label ?? key,
+        description: this.permissionGroupLabels[key]?.description ?? '',
+        permissions: (grouped.get(key) ?? []).sort((a, b) =>
+          this.permissionLabel(a).localeCompare(this.permissionLabel(b))
+        )
+      }));
+  }
+
+  applyRecommendedPermissions(role: Role): void {
+    const recommended = this.recommendedRolePermissions[role];
+    if (!recommended?.length) {
+      this.errorMessage = 'Este rol aún no tiene una plantilla recomendada.';
+      return;
+    }
+    const allowed = new Set(this.roleAssignablePermissions(role));
+    this.permissionDraft = new Set(recommended.filter((permission) => allowed.has(permission)));
+    this.errorMessage = '';
+    this.successMessage = 'Plantilla base aplicada. Revisa los permisos y guarda cuando estés de acuerdo.';
+  }
+
+  clearPermissionDraft(): void {
+    this.permissionDraft.clear();
+  }
+
+  setPermissionGroup(permissions: string[], enabled: boolean): void {
+    for (const permission of permissions) {
+      if (enabled) {
+        this.permissionDraft.add(permission);
+      } else {
+        this.permissionDraft.delete(permission);
+      }
+    }
+  }
+
+  selectedPermissionsInGroup(permissions: string[]): number {
+    return permissions.filter((permission) => this.permissionDraft.has(permission)).length;
+  }
+
+  private permissionGroupKey(permission: string): string {
+    if (permission.startsWith('saas:') || permission.startsWith('clients:') || permission === 'reports:view' || permission === 'platform:templates:manage') {
+      return 'saas';
+    }
+    if (permission === 'users:manage' || permission.startsWith('audit:')) {
+      return 'users_audit';
+    }
+    if (permission.startsWith('software:')) {
+      return 'software';
+    }
+    if (
+      permission.startsWith('hb:') ||
+      permission.startsWith('quick_guides:') ||
+      permission.startsWith('inventory:') ||
+      permission === 'areas:manage' ||
+      permission === 'asset_history:upload'
+    ) {
+      return 'biomed';
+    }
+    if (
+      permission.startsWith('maintenance:') ||
+      permission.startsWith('service:') ||
+      permission.startsWith('spareparts:') ||
+      permission === 'schedules:manage'
+    ) {
+      return 'maintenance';
+    }
+    if (permission.startsWith('calibration:')) {
+      return 'calibration';
+    }
+    if (permission.startsWith('odontology:')) {
+      return 'odontology';
+    }
+    if (permission.startsWith('laboratory:')) {
+      return 'laboratory';
+    }
+    if (permission === 'read:all') {
+      return 'reading';
+    }
+    return 'other';
   }
 
   isEditingRole(role: Role): boolean {
@@ -720,6 +1353,7 @@ export class UsersComponent implements OnInit {
   }
 
   startEditRolePermissions(role: Role): void {
+    if (!this.canEditRolePermissions()) return;
     const roleId = this.roleIds.get(role);
     if (!roleId) return;
     this.editingRoleId = roleId;
@@ -750,10 +1384,21 @@ export class UsersComponent implements OnInit {
       const permissions = Array.from(this.permissionDraft).filter((permission) =>
         role === 'superuser' || !this.temporaryOnlyPermissions.has(permission)
       );
-      await this.admin.updateRolePermissions(roleId, permissions);
+      const roleName = role ? this.roleLabel(role) : `rol ${roleId}`;
+      const action = this.isTenantAdmin() ? 'CLIENT_ROLE_PERMISSIONS_UPDATE' : 'ROLE_PERMISSIONS_UPDATE';
+      const securityCode = await this.requestSecurityCode(
+        action,
+        this.isTenantAdmin()
+          ? `Actualizar permisos de ${roleName} para este cliente`
+          : `Actualizar permisos de ${roleName}`
+      );
+      if (!securityCode) return;
+      await this.admin.updateRolePermissions(roleId, permissions, securityCode);
       this.rolePermissions[roleId] = permissions;
       this.cancelRolePermissionsEdit();
-      this.successMessage = 'Permisos guardados.';
+      this.successMessage = this.isTenantAdmin()
+        ? 'Permisos guardados para este cliente. Los usuarios verán el cambio al iniciar sesión de nuevo.'
+        : 'Permisos guardados.';
     } catch (error) {
       console.error(error);
       this.errorMessage = 'No se pudieron guardar los permisos.';

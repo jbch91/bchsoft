@@ -6,6 +6,8 @@
     </div>
     <h1>LOGIN</h1>
 
+    <div class="alert session" *ngIf="sessionMessage" aria-live="polite">{{ sessionMessage }}</div>
+
     <form (ngSubmit)="onSubmit()">
       <label>
         Usuario

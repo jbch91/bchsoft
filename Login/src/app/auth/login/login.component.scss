@@ -66,6 +66,18 @@
   font-size: 12px;
 }
 
+.alert.session {
+  background: color-mix(in srgb, var(--brand-100) 72%, #ffffff);
+  color: var(--brand-800);
+  border-color: color-mix(in srgb, var(--brand-600) 28%, #ffffff);
+  box-shadow: 0 10px 22px rgba(185, 28, 28, 0.09);
+}
+
+.alert.session::before {
+  content: 'i';
+  background: var(--brand-600);
+}
+
 @keyframes alert-in {
   from {
     opacity: 0;

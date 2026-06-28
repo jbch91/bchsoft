@@ -1,16 +1,13 @@
 import { ChangeDetectorRef, Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { BiomedService } from '../../biomed/biomed.service';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
-import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 import { InventoryPanelComponent, InventoryPanelItem } from '../../shared/inventory-panel/inventory-panel.component';
-import * as QRCode from 'qrcode';
-import jsPDF from 'jspdf';
 
 interface ClientOption {
   id: string;
@@ -27,7 +24,7 @@ type InventoryView = 'listado' | 'qr';
 @Component({
   selector: 'app-inventario',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent, InventoryPanelComponent],
+  imports: [CommonModule, FormsModule, ModuleTabsComponent, InventoryPanelComponent],
   templateUrl: './inventario.component.html',
   styleUrl: './inventario.component.scss'
 })
@@ -229,6 +226,7 @@ export class InventarioComponent {
     }
 
     await this.generateQrCodes(targets);
+    const { default: jsPDF } = await import('jspdf');
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
     const margin = 10;
@@ -308,6 +306,7 @@ export class InventarioComponent {
 
   private async ensureQrCode(item: InventoryPanelItem, force = false): Promise<string> {
     if (!force && this.qrCodes[item.id]) return this.qrCodes[item.id];
+    const QRCode = await import('qrcode');
     const dataUrl = await QRCode.toDataURL(this.qrPayload(item), {
       errorCorrectionLevel: 'M',
       margin: 1,

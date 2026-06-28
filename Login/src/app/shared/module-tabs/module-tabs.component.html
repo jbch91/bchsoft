@@ -1,10 +1,13 @@
-<nav class="module-tabs" *ngIf="visibleTabs.length > 1" aria-label="Navegación de módulos">
-  <a
-    *ngFor="let tab of visibleTabs"
-    [routerLink]="tab.route"
-    routerLinkActive="active"
-    [routerLinkActiveOptions]="{ exact: true }"
-  >
-    {{ tab.label }}
-  </a>
+<nav class="module-tabs-shell" *ngIf="visibleTabs.length" aria-label="Navegación de módulos">
+  <div class="module-tabs">
+    <a
+      *ngFor="let tab of visibleTabs"
+      [routerLink]="tab.route"
+      routerLinkActive="active"
+      [routerLinkActiveOptions]="{ exact: true }"
+    >
+      {{ tab.label }}
+    </a>
+  </div>
+  <a class="module-home" routerLink="/dashboard">Menú principal</a>
 </nav>

@@ -5,9 +5,6 @@ import { AssetHistoryItemDto, BiomedService } from '../../biomed/biomed.service'
 import { CalibrationService } from '../../calibration/calibration.service';
 import { MaintenanceService } from '../../maintenance/maintenance.service';
 import { QuickGuidesService } from '../../quick-guides/quick-guides.service';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 export interface InventoryPanelItem {
   id: string;
@@ -213,7 +210,7 @@ export class InventoryPanelComponent implements OnDestroy {
     this.filterStatus = '';
   }
 
-  exportInventory(useFiltered: boolean): void {
+  async exportInventory(useFiltered: boolean): Promise<void> {
     const items = useFiltered ? this.filteredItems : this.items;
     const filenameBase = useFiltered ? 'inventario-filtrado' : 'inventario-completo';
     const headers = ['Código', 'Equipo', 'Marca', 'Modelo', 'Serie', 'Sede', 'Área', 'Ubicación', 'Estado operativo'];
@@ -242,6 +239,7 @@ export class InventoryPanelComponent implements OnDestroy {
     }
 
     if (this.exportFormat === 'xlsx') {
+      const XLSX = await import('xlsx');
       const data = rows.map((row) => ({
         [headers[0]]: row[0],
         [headers[1]]: row[1],
@@ -260,6 +258,10 @@ export class InventoryPanelComponent implements OnDestroy {
       return;
     }
 
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable')
+    ]);
     const doc = new jsPDF({ orientation: 'landscape' });
     autoTable(doc, {
       head: [headers],

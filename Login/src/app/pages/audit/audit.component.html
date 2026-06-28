@@ -1,103 +1,107 @@
 <section class="page">
-  <app-user-menu></app-user-menu>
-  <header>
-    <div>
-      <h1>Auditoría</h1>
-      <p>Registro de cambios (solo superuser).</p>
-    </div>
-    <div class="header-actions">
-      <a class="back" routerLink="/dashboard">Menú</a>
-    </div>
-  </header>
-
   <app-module-tabs></app-module-tabs>
 
-  <div class="card filters-card audit-filters-card">
-    <div class="filters-top" *ngIf="clients.length">
-      <div class="filters">
+  <section class="audit-section module-panel">
+    <header class="list-header module-panel-header">
+      <div>
+        <h2>Registros de auditoría</h2>
+        <p>Consulta acciones por usuario, cliente, software, fecha o tipo de evento.</p>
+      </div>
+      <div class="list-tools module-panel-tools">
         <label>
-          Buscar cliente
-          <input type="text" [(ngModel)]="clientSearchTerm" placeholder="Escribe para filtrar..." />
+          Buscar
+          <input
+            type="text"
+            [(ngModel)]="searchTerm"
+            (ngModelChange)="applyFilters()"
+            placeholder="Actor, acción, objetivo o detalle..."
+          />
         </label>
-        <label>
+        <button type="button" class="ghost" (click)="clearSearch()">Limpiar</button>
+      </div>
+    </header>
+
+    <div class="audit-filters-panel module-filter-panel">
+      <div class="filters audit-filter-grid module-filter-grid">
+        <label *ngIf="clients.length">
           Cliente
           <select [(ngModel)]="selectedClientId" (change)="applyFilters()">
-            <option value="todos">Todos los clientes</option>
-            <option *ngFor="let client of filteredClients" [value]="client.id">{{ client.name }}</option>
+            <option value="todos">Todos</option>
+            <option *ngFor="let client of clients" [value]="client.id">{{ client.name }}</option>
           </select>
         </label>
+
+        <label>
+          Actor
+          <select [(ngModel)]="selectedActor" (change)="applyFilters()">
+            <option *ngFor="let actor of actors" [value]="actor">{{ actor }}</option>
+          </select>
+        </label>
+
+        <label>
+          Acción
+          <select [(ngModel)]="selectedAction" (change)="applyFilters()">
+            <option *ngFor="let action of actions" [value]="action">
+              {{ action === 'todos' ? 'Todos' : labelAction(action) }}
+            </option>
+          </select>
+        </label>
+
+        <label>
+          Software
+          <select [(ngModel)]="selectedSoftware" (change)="applyFilters()">
+            <option *ngFor="let software of softwares" [value]="software">
+              {{ software === 'todos' ? 'Todos' : software }}
+            </option>
+          </select>
+        </label>
+
+        <label>
+          Desde
+          <input type="date" [(ngModel)]="dateFrom" (change)="applyFilters()" />
+        </label>
+
+        <label>
+          Hasta
+          <input type="date" [(ngModel)]="dateTo" (change)="applyFilters()" />
+        </label>
       </div>
-      <div class="client-preview" *ngIf="selectedClientInfo; else allClientsPreview">
-        <div class="client-preview-info">
-          <div><strong>{{ selectedClientInfo.name }}</strong></div>
-          <div *ngIf="selectedClientInfo.nit">NIT: {{ selectedClientInfo.nit }}</div>
-          <div *ngIf="selectedClientInfo.city">Ciudad: {{ selectedClientInfo.city }}</div>
-          <div *ngIf="selectedClientInfo.address">Dirección: {{ selectedClientInfo.address }}</div>
-          <div *ngIf="selectedClientInfo.email">Correo: {{ selectedClientInfo.email }}</div>
-        </div>
-        <img *ngIf="clientLogoUrl(selectedClientInfo)" [src]="clientLogoUrl(selectedClientInfo)!" alt="Logo cliente" />
-      </div>
-      <ng-template #allClientsPreview>
-        <div class="client-preview">
-          <div class="client-preview-info">
-            <div><strong>Todos los clientes</strong></div>
-            <div>La auditoría mostrará eventos de todos los clientes disponibles.</div>
-          </div>
-        </div>
-      </ng-template>
     </div>
 
-    <div class="filters audit-filter-grid">
-      <label>
-        Actor
-        <select [(ngModel)]="selectedActor" (change)="applyFilters()">
-          <option *ngFor="let actor of actors" [value]="actor">{{ actor }}</option>
-        </select>
-      </label>
+    <p *ngIf="loading">Cargando...</p>
+    <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+    <p class="result-count module-result-count" *ngIf="!loading && !errorMessage">
+      {{ filteredLogs.length }} registro{{ filteredLogs.length === 1 ? '' : 's' }} encontrado{{ filteredLogs.length === 1 ? '' : 's' }}
+    </p>
+    <p class="empty module-empty" *ngIf="!loading && !errorMessage && filteredLogs.length === 0">
+      Sin registros con esos filtros.
+    </p>
 
-      <label>
-        Acción
-        <select [(ngModel)]="selectedAction" (change)="applyFilters()">
-          <option *ngFor="let action of actions" [value]="action">
-            {{ action === 'todos' ? 'Todos' : labelAction(action) }}
-          </option>
-        </select>
-      </label>
-
-      <label>
-        Desde
-        <input type="date" [(ngModel)]="dateFrom" (change)="applyFilters()" />
-      </label>
-
-      <label>
-        Hasta
-        <input type="date" [(ngModel)]="dateTo" (change)="applyFilters()" />
-      </label>
+    <div class="audit-table-wrap module-table-wrap" *ngIf="!loading && filteredLogs.length">
+      <table class="audit-excel-table module-excel-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Actor</th>
+            <th>Software</th>
+            <th>Acción</th>
+            <th>Tipo</th>
+            <th>Objetivo</th>
+            <th>Detalles</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let log of filteredLogs">
+            <td>{{ log.when }}</td>
+            <td>{{ log.actor }}</td>
+            <td><strong class="software-pill">{{ log.software }}</strong></td>
+            <td><strong class="action-pill">{{ log.action }}</strong></td>
+            <td>{{ log.category }}</td>
+            <td>{{ log.target }}</td>
+            <td class="details-text">{{ log.details }}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
-  </div>
-
-  <p *ngIf="loading">Cargando...</p>
-  <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
-  <p class="empty" *ngIf="!loading && !errorMessage && filteredLogs.length === 0">
-    Sin registros por ahora.
-  </p>
-
-  <div class="table" *ngIf="!loading && filteredLogs.length">
-    <div class="row header">
-      <span>Fecha</span>
-      <span>Actor</span>
-      <span>Acción</span>
-      <span>Tipo</span>
-      <span>Objetivo</span>
-      <span>Detalles</span>
-    </div>
-    <div class="row" *ngFor="let log of filteredLogs">
-      <span data-label="Fecha">{{ log.when }}</span>
-      <span data-label="Actor">{{ log.actor }}</span>
-      <span data-label="Acción"><strong class="action-pill">{{ log.action }}</strong></span>
-      <span data-label="Tipo">{{ log.category }}</span>
-      <span data-label="Objetivo">{{ log.target }}</span>
-      <span data-label="Detalles" class="details-text">{{ log.details }}</span>
-    </div>
-  </div>
+  </section>
 </section>

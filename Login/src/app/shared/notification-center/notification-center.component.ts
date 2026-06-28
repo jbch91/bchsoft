@@ -118,6 +118,7 @@ export class NotificationCenterComponent implements OnInit, OnDestroy {
       maintenance_report_correction_requested: 'Corrección solicitada',
       maintenance_report_signed: 'Reporte firmado',
       maintenance_spare_part_requested: 'Solicitud de repuesto',
+      odontology_inventory_low_stock: 'Stock bajo odontología',
       maintenance_preventive_generated: 'Preventivo',
       preventive_maintenance_start: 'Inicio preventivo',
       preventive_maintenance_reminder: 'Recordatorio preventivo',

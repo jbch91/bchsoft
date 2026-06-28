@@ -1,7 +1,7 @@
 import { ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, ParamMap, RouterLink } from '@angular/router';
+import { ActivatedRoute, ParamMap } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
@@ -9,7 +9,6 @@ import { BiomedService } from '../../biomed/biomed.service';
 import { MaintenanceService, MaintenanceReportDto, MaintenanceRequestDto } from '../../maintenance/maintenance.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
-import { UserMenuComponent } from '../../shared/user-menu/user-menu.component';
 
 interface ClientLite {
   id: string;
@@ -52,7 +51,7 @@ type MaintenanceViewMode =
 @Component({
   selector: 'app-maintenance',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, ModuleTabsComponent, UserMenuComponent],
+  imports: [CommonModule, FormsModule, ModuleTabsComponent],
   templateUrl: './maintenance.component.html',
   styleUrl: './maintenance.component.scss'
 })

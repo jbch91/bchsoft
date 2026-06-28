@@ -2,12 +2,32 @@ import path from 'path';
 import fs from 'fs/promises';
 import { query } from './db.js';
 import { createSchemaTables, slugify } from './tenants.js';
+import { ensureClientSubscription } from './subscriptions.js';
 
 export async function listClients() {
   const { rows } = await query(
-    `SELECT id, name, nit, city, address, habilitation_code, email, logo_path, schema_name, created_at
+    `SELECT c.id,
+            c.name,
+            c.nit,
+            c.city,
+            c.address,
+            c.habilitation_code,
+            c.email,
+            c.logo_path,
+            c.schema_name,
+            c.created_at,
+            COALESCE((
+              SELECT COUNT(*)::int
+              FROM users u
+              JOIN user_roles ur ON ur.user_id = u.id
+              JOIN roles r ON r.id = ur.role_id
+              WHERE u.client_id = c.id
+                AND u.is_active = TRUE
+                AND r.name = 'client_admin'
+            ), 0) AS client_admin_count
      FROM clients
-     ORDER BY created_at DESC`
+     c
+     ORDER BY c.created_at DESC`
   );
   return rows;
 }
@@ -48,6 +68,8 @@ export async function createClient({ name, nit, city, address, habilitationCode,
      RETURNING id, schema_name`,
     [name, nit, city, address, habilitationCode, email, schemaName]
   );
+
+  await ensureClientSubscription(rows[0].id);
 
   return rows[0];
 }

@@ -45,7 +45,7 @@
   position: absolute;
   top: calc(100% + 10px);
   left: 0;
-  z-index: 35;
+  z-index: 90;
   width: min(390px, calc(100vw - 32px));
   max-height: min(620px, calc(100vh - 120px));
   overflow: auto;
@@ -54,6 +54,22 @@
   background: #ffffff;
   box-shadow: 0 24px 45px rgba(80, 25, 30, 0.18);
   padding: 14px;
+}
+
+:host-context(.app-shell-header) .notification-trigger {
+  min-height: 36px;
+  padding: 6px 10px;
+  box-shadow: none;
+}
+
+:host-context(.app-shell-header) .bell {
+  width: 24px;
+  height: 24px;
+}
+
+:host-context(.app-shell-header) .notification-panel {
+  left: auto;
+  right: 0;
 }
 
 .notification-header {
@@ -160,5 +176,11 @@
   .notification-panel {
     left: 0;
     width: calc(100vw - 28px);
+  }
+
+  :host-context(.app-shell-header) .notification-panel {
+    left: 0;
+    right: auto;
+    width: min(320px, calc(100vw - 48px));
   }
 }

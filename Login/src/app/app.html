@@ -1,1 +1,77 @@
-<router-outlet></router-outlet>
+<ng-container *ngIf="shellVisible(); else publicPage">
+  <section class="app-shell">
+    <header class="app-shell-header">
+      <div class="shell-current">
+        <div>
+          <span>{{ routeEyebrow() }}</span>
+          <strong>{{ routeTitle() }}</strong>
+          <small>{{ routeSubtitle() }}</small>
+        </div>
+      </div>
+
+      <div class="shell-tools">
+        <div class="shell-client" *ngIf="clientInfo; else shellSession">
+          <div class="shell-client-logo" *ngIf="clientLogoUrl()">
+            <img [src]="clientLogoUrl()!" alt="Logo cliente" />
+          </div>
+          <div class="shell-client-copy">
+            <strong>{{ clientInfo.name }}</strong>
+            <span>{{ clientInfo.nit }} · {{ clientInfo.city }}</span>
+          </div>
+        </div>
+
+        <ng-template #shellSession>
+          <div class="shell-client shell-session">
+            <span>Sesión activa</span>
+          </div>
+        </ng-template>
+
+        <details class="shell-info" *ngIf="clientInfo">
+          <summary>Información</summary>
+          <div class="shell-info-panel">
+            <strong>{{ clientInfo.name }}</strong>
+            <span>NIT: {{ clientInfo.nit }}</span>
+            <span>Ciudad: {{ clientInfo.city }}</span>
+            <span *ngIf="clientInfo.address">Dirección: {{ clientInfo.address }}</span>
+            <span>Correo: {{ clientInfo.email }}</span>
+          </div>
+        </details>
+
+        <app-user-menu></app-user-menu>
+      </div>
+    </header>
+
+    <main class="app-shell-main">
+      <router-outlet></router-outlet>
+    </main>
+
+    <footer class="app-shell-footer">
+      <div class="shell-brand">
+        <img src="/assets/inbi-logo.png" alt="INBIHOSPITALARIO" />
+        <div>
+          <strong>INBIHOSPITALARIO</strong>
+          <span>Plataforma SaaS hospitalaria por módulos.</span>
+        </div>
+      </div>
+
+      <div class="shell-footer-meta">
+        <div>
+          <span>Entorno</span>
+          <strong>{{ footerEnvironmentLabel() }}</strong>
+        </div>
+        <div>
+          <span>Estado</span>
+          <strong>{{ footerStatusLabel() }}</strong>
+        </div>
+        <div>
+          <span>Acceso</span>
+          <strong>{{ footerModulesLabel() }}</strong>
+        </div>
+      </div>
+    </footer>
+  </section>
+</ng-container>
+
+<ng-template #publicPage>
+  <router-outlet></router-outlet>
+</ng-template>

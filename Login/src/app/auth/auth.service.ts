@@ -11,6 +11,7 @@ interface LoginResponse {
     username: string;
     displayName: string;
     clientId?: string | null;
+    subscription?: User['subscription'];
     roles: Role[];
     permissions: Permission[];
   };
@@ -23,6 +24,7 @@ export class AuthService {
   private readonly storageKey = 'auth_user_v1';
   private readonly tokenKey = 'auth_tokens_v1';
   private readonly lastActivityKey = 'auth_last_activity_v1';
+  private readonly logoutReasonKey = 'auth_logout_reason_v1';
   private readonly apiBase = getApiBase();
   private readonly idleTimeoutMs = 15 * 60 * 1000;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -60,7 +62,9 @@ export class AuthService {
         username: response.user.username,
         displayName: response.user.displayName,
         clientId: response.user.clientId ?? null,
+        subscription: response.user.subscription ?? null,
         role,
+        roles: response.user.roles ?? [role],
         permissions: response.user.permissions
       };
 
@@ -88,7 +92,7 @@ export class AuthService {
     }
   }
 
-  logout(redirectToLogin = false): void {
+  logout(redirectToLogin = false, reason: 'manual' | 'idle' | 'expired' = 'manual'): void {
     const refreshToken = this.tokens()?.refreshToken;
     if (refreshToken) {
       void firstValueFrom(
@@ -104,7 +108,12 @@ export class AuthService {
     localStorage.removeItem(this.lastActivityKey);
 
     if (redirectToLogin) {
-      void this.router.navigateByUrl('/login');
+      if (reason !== 'manual') {
+        sessionStorage.setItem(this.logoutReasonKey, reason);
+      }
+      void this.router.navigate(['/login'], {
+        queryParams: reason !== 'manual' ? { reason } : undefined
+      });
     }
   }
 
@@ -125,7 +134,9 @@ export class AuthService {
         username: response.user.username,
         displayName: response.user.displayName,
         clientId: response.user.clientId ?? null,
+        subscription: response.user.subscription ?? null,
         role,
+        roles: response.user.roles ?? [role],
         permissions: response.user.permissions
       };
 
@@ -146,7 +157,7 @@ export class AuthService {
       return true;
     } catch (error) {
       console.error(error);
-      this.logout(true);
+      this.logout(true, 'expired');
       return false;
     }
   }
@@ -158,7 +169,8 @@ export class AuthService {
     }
 
     const roleList = Array.isArray(roles) ? roles : [roles];
-    return roleList.includes(user.role);
+    const userRoles = user.roles?.length ? user.roles : [user.role];
+    return userRoles.some((role) => roleList.includes(role));
   }
 
   hasPermission(permissions: Permission[] | Permission): boolean {
@@ -202,7 +214,7 @@ export class AuthService {
     if (!this.currentUser()) return;
 
     if (this.isIdleExpired()) {
-      this.logout(true);
+      this.logout(true, 'idle');
       return;
     }
 
@@ -224,7 +236,7 @@ export class AuthService {
   private readonly handleActivity = (): void => {
     if (!this.currentUser()) return;
     if (this.isIdleExpired()) {
-      this.logout(true);
+      this.logout(true, 'idle');
       return;
     }
     this.markActivity();
@@ -234,7 +246,7 @@ export class AuthService {
   private readonly handleVisibilityChange = (): void => {
     if (document.visibilityState !== 'visible' || !this.currentUser()) return;
     if (this.isIdleExpired()) {
-      this.logout(true);
+      this.logout(true, 'idle');
       return;
     }
     this.markActivity();
@@ -263,8 +275,14 @@ export class AuthService {
     const remaining = Math.max(0, this.idleTimeoutMs - elapsed);
 
     this.idleTimer = setTimeout(() => {
-      this.logout(true);
+      this.logout(true, 'idle');
     }, remaining);
+  }
+
+  consumeLogoutReason(): 'idle' | 'expired' | null {
+    const reason = sessionStorage.getItem(this.logoutReasonKey);
+    sessionStorage.removeItem(this.logoutReasonKey);
+    return reason === 'idle' || reason === 'expired' ? reason : null;
   }
 
   private stopIdleTimer(): void {
