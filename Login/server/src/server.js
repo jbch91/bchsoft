@@ -9060,59 +9060,75 @@ app.patch('/admin/users/:id/role', requireAuth, requirePermission('users:manage'
 });
 
 app.patch('/admin/users/:id', requireAuth, requirePermission('users:manage'), async (req, res) => {
-  const target = await ensureCanManageTargetUser(req, res, req.params.id);
-  if (!target) return;
-  const { displayName, email, clientId, documentType, documentNumber, invimaRegistration } = req.body || {};
-  if (!displayName || !email) {
-    return res.status(400).json({ message: 'Datos incompletos.' });
-  }
-  const cleanDocumentType = documentType?.trim?.() || null;
-  const cleanDocumentNumber = documentNumber?.trim?.() || null;
-  const cleanInvimaRegistration = invimaRegistration?.trim?.() || null;
-  if (cleanDocumentType && !BIOMED_DOCUMENT_TYPES.includes(cleanDocumentType)) {
-    return res.status(400).json({ message: 'Tipo de documento inválido.' });
-  }
-  if (!cleanDocumentType || !cleanDocumentNumber) {
-    return res.status(400).json({ message: 'Tipo de documento y número de documento son obligatorios.' });
-  }
-  const { rows: roleRows } = await query(
-    `SELECT r.name
-     FROM roles r
-     JOIN user_roles ur ON ur.role_id = r.id
-     WHERE ur.user_id = $1`,
-    [req.params.id]
-  );
-  const isBiomedicalEngineer = roleRows.some((row) => row.name === 'ingeniero_biomedico');
-  if (isBiomedicalEngineer && !cleanInvimaRegistration) {
-    return res.status(400).json({ message: 'Registro INVIMA obligatorio para el ingeniero biomédico.' });
-  }
-  if (!(await requireActionConfirmation(req, res, 'USER_UPDATE'))) return;
-  await updateUserProfile(req.params.id, {
-    displayName,
-    email,
-    clientId: isSuperuser(req.user)
+  try {
+    const target = await ensureCanManageTargetUser(req, res, req.params.id);
+    if (!target) return;
+    const { displayName, email, clientId, documentType, documentNumber, invimaRegistration } = req.body || {};
+    if (!displayName || !email) {
+      return res.status(400).json({ message: 'Datos incompletos.' });
+    }
+    const cleanDocumentType = documentType?.trim?.() || null;
+    const cleanDocumentNumber = documentNumber?.trim?.() || null;
+    const cleanInvimaRegistration = invimaRegistration?.trim?.() || null;
+    if (cleanDocumentType && !BIOMED_DOCUMENT_TYPES.includes(cleanDocumentType)) {
+      return res.status(400).json({ message: 'Tipo de documento inválido.' });
+    }
+    if (!cleanDocumentType || !cleanDocumentNumber) {
+      return res.status(400).json({ message: 'Tipo de documento y número de documento son obligatorios.' });
+    }
+    const { rows: duplicateEmailRows } = await query(
+      'SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id <> $2 LIMIT 1',
+      [email, req.params.id]
+    );
+    if (duplicateEmailRows.length) {
+      return res.status(400).json({ message: 'Ese correo ya está usado por otro usuario.' });
+    }
+    const { rows: roleRows } = await query(
+      `SELECT r.name
+       FROM roles r
+       JOIN user_roles ur ON ur.role_id = r.id
+       WHERE ur.user_id = $1`,
+      [req.params.id]
+    );
+    const isBiomedicalEngineer = roleRows.some((row) => row.name === 'ingeniero_biomedico');
+    if (isBiomedicalEngineer && !cleanInvimaRegistration) {
+      return res.status(400).json({ message: 'Registro INVIMA obligatorio para el ingeniero biomédico.' });
+    }
+    if (!(await requireActionConfirmation(req, res, 'USER_UPDATE'))) return;
+    const resolvedClientId = isSuperuser(req.user)
       ? (target.roles?.includes(CLIENT_ADMIN_ROLE) ? target.client_id : null)
-      : req.user.clientId,
-    documentType: cleanDocumentType,
-    documentNumber: cleanDocumentNumber,
-    invimaRegistration: isBiomedicalEngineer ? cleanInvimaRegistration : null
-  });
-  await logAudit({
-    actorUserId: req.user.sub,
-    actorUsername: req.user.username,
-    action: 'USER_UPDATE',
-    targetUserId: req.params.id,
-    details: {
+      : req.user.clientId;
+    await updateUserProfile(req.params.id, {
       displayName,
       email,
-      clientId: (isSuperuser(req.user)
-        ? (target.roles?.includes(CLIENT_ADMIN_ROLE) ? target.client_id : null)
-        : req.user.clientId) ?? null,
-      documentType: documentType ?? null,
-      hasInvimaRegistration: Boolean(invimaRegistration)
-    }
-  });
-  return res.json({ ok: true });
+      clientId: resolvedClientId,
+      documentType: cleanDocumentType,
+      documentNumber: cleanDocumentNumber,
+      invimaRegistration: isBiomedicalEngineer ? cleanInvimaRegistration : null
+    });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'USER_UPDATE',
+      targetUserId: req.params.id,
+      details: {
+        displayName,
+        email,
+        clientId: resolvedClientId ?? null,
+        documentType: documentType ?? null,
+        hasInvimaRegistration: Boolean(invimaRegistration)
+      }
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    const duplicateEmail = error?.code === '23505' && error?.constraint === 'users_email_key';
+    return res.status(duplicateEmail ? 400 : 500).json({
+      message: duplicateEmail
+        ? 'Ese correo ya está usado por otro usuario.'
+        : 'No se pudo actualizar el usuario.'
+    });
+  }
 });
 
 app.get('/admin/users/:id/reader-access', requireAuth, requirePermission('users:manage'), async (req, res) => {
