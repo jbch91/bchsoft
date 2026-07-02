@@ -11,7 +11,14 @@ import { promisify } from 'util';
 import multer from 'multer';
 import sharp from 'sharp';
 import { query } from './db.js';
-import { authenticateUser, refreshSession, revokeRefreshToken } from './auth.js';
+import {
+  authenticateUser,
+  refreshSession,
+  revokeClientActiveSessions,
+  revokeRefreshToken,
+  revokeRoleActiveSessions,
+  revokeUserActiveSessions
+} from './auth.js';
 import { requireAnyPermission, requireAuth, requirePermission } from './middleware.js';
 import {
   createUser,
@@ -1054,6 +1061,11 @@ app.post('/auth/reset-password', async (req, res) => {
     await resetPasswordWithCode({ email, code, newPassword });
     return res.json({ ok: true });
   } catch (error) {
+    if (error?.code === 'PASSWORD_WEAK') {
+      return res.status(400).json({
+        message: 'La contraseña debe tener mínimo 10 caracteres, una mayúscula, una minúscula y un número.'
+      });
+    }
     return res.status(400).json({ message: 'Código inválido o expirado.' });
   }
 });
@@ -1160,6 +1172,7 @@ app.put(
         permissions: requested,
         actorUserId: req.user.sub
       });
+      await revokeRoleActiveSessions(req.params.id, req.user.clientId);
       await logAudit({
         actorUserId: req.user.sub,
         actorUsername: req.user.username,
@@ -1191,6 +1204,7 @@ app.put(
     if (!(await requireActionConfirmation(req, res, 'ROLE_PERMISSIONS_UPDATE'))) return;
 
     await updateRolePermissions(req.params.id, requested);
+    await revokeRoleActiveSessions(req.params.id);
     return res.json({ ok: true });
   }
 );
@@ -1256,6 +1270,7 @@ app.post(
     if (result?.error === 'PERMISSION_NOT_FOUND') {
       return res.status(404).json({ message: 'Permiso no encontrado.' });
     }
+    await revokeUserActiveSessions(req.params.id);
 
     await logAudit({
       actorUserId: req.user.sub,
@@ -1299,6 +1314,7 @@ app.delete(
     if (!result) {
       return res.status(404).json({ message: 'Permiso temporal no encontrado.' });
     }
+    await revokeUserActiveSessions(req.params.id);
 
     await logAudit({
       actorUserId: req.user.sub,
@@ -1397,6 +1413,7 @@ app.put('/admin/clients/:id/software-suites', requireAuth, requireAnyPermission(
   }
   if (!(await requireActionConfirmation(req, res, 'CLIENT_SOFTWARE_ACCESS_UPDATE'))) return;
   await updateClientSoftwareAccess(req.params.id, suites);
+  await revokeClientActiveSessions(req.params.id);
   await logAudit({
     actorUserId: req.user.sub,
     actorUsername: req.user.username,
@@ -1418,6 +1435,7 @@ app.put('/admin/clients/:id/modules', requireAuth, requireAnyPermission(SAAS_CLI
   }
   if (!(await requireActionConfirmation(req, res, 'CLIENT_MODULES_UPDATE'))) return;
   await updateClientModules(req.params.id, modules);
+  await revokeClientActiveSessions(req.params.id);
   await logAudit({
     actorUserId: req.user.sub,
     actorUsername: req.user.username,
@@ -9062,6 +9080,7 @@ app.patch('/admin/users/:id/role', requireAuth, requirePermission('users:manage'
     }
     if (!(await requireActionConfirmation(req, res, 'USER_ROLE_UPDATE'))) return;
     const { before } = await updateUserRole(req.params.id, role);
+    await revokeUserActiveSessions(req.params.id);
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,
@@ -9124,6 +9143,7 @@ app.patch('/admin/users/:id', requireAuth, requirePermission('users:manage'), as
       documentNumber: cleanDocumentNumber,
       invimaRegistration: isBiomedicalEngineer ? cleanInvimaRegistration : null
     });
+    await revokeUserActiveSessions(req.params.id);
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,
@@ -9253,6 +9273,7 @@ app.patch(
     if (!(await requireActionConfirmation(req, res, 'USER_ACTIVE_UPDATE'))) return;
 
     const { before } = await updateUserActive(req.params.id, isActive);
+    await revokeUserActiveSessions(req.params.id);
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,

@@ -125,13 +125,39 @@ async function storeRefreshToken(userId, refreshToken, sessionId, db = { query }
   );
 }
 
-async function revokeUserActiveSessions(userId, db = { query }) {
+export async function revokeUserActiveSessions(userId, db = { query }) {
   await db.query(
     `UPDATE refresh_tokens
      SET revoked_at = NOW()
      WHERE user_id = $1
        AND revoked_at IS NULL`,
     [userId]
+  );
+}
+
+export async function revokeRoleActiveSessions(roleId, clientId = null, db = { query }) {
+  await db.query(
+    `UPDATE refresh_tokens rt
+     SET revoked_at = NOW()
+     FROM users u
+     JOIN user_roles ur ON ur.user_id = u.id
+     WHERE rt.user_id = u.id
+       AND ur.role_id = $1
+       AND ($2::uuid IS NULL OR u.client_id = $2::uuid)
+       AND rt.revoked_at IS NULL`,
+    [roleId, clientId || null]
+  );
+}
+
+export async function revokeClientActiveSessions(clientId, db = { query }) {
+  await db.query(
+    `UPDATE refresh_tokens rt
+     SET revoked_at = NOW()
+     FROM users u
+     WHERE rt.user_id = u.id
+       AND u.client_id = $1
+       AND rt.revoked_at IS NULL`,
+    [clientId]
   );
 }
 

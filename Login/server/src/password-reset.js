@@ -1,11 +1,14 @@
 import bcrypt from 'bcrypt';
-import { query } from './db.js';
+import { randomInt } from 'crypto';
+import { pool, query } from './db.js';
+import { revokeUserActiveSessions } from './auth.js';
 import { sendPasswordSetupCode, sendResetCode } from './mailer.js';
 
 const CODE_TTL_MINUTES = 30;
+const PASSWORD_MIN_LENGTH = 10;
 
 function generateCode() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(randomInt(100000, 1000000));
 }
 
 function expiryDate() {
@@ -32,9 +35,10 @@ export async function requestPasswordSetup(email, { clientName } = {}) {
 }
 
 async function createPasswordResetCode(email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
   const { rows } = await query(
-    'SELECT id, username FROM users WHERE email = $1 AND is_active = TRUE',
-    [email]
+    'SELECT id, username FROM users WHERE LOWER(email) = $1 AND is_active = TRUE',
+    [normalizedEmail]
   );
 
   const user = rows[0];
@@ -59,9 +63,12 @@ async function createPasswordResetCode(email) {
 }
 
 export async function resetPasswordWithCode({ email, code, newPassword }) {
+  assertPasswordPolicy(newPassword);
+
+  const normalizedEmail = String(email || '').trim().toLowerCase();
   const { rows } = await query(
-    'SELECT id FROM users WHERE email = $1 AND is_active = TRUE',
-    [email]
+    'SELECT id FROM users WHERE LOWER(email) = $1 AND is_active = TRUE',
+    [normalizedEmail]
   );
 
   const user = rows[0];
@@ -95,6 +102,37 @@ export async function resetPasswordWithCode({ email, code, newPassword }) {
   }
 
   const passwordHash = await bcrypt.hash(newPassword, 12);
-  await query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, user.id]);
-  await query('UPDATE password_reset_codes SET used_at = NOW() WHERE id = $1', [matchedId]);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [
+      passwordHash,
+      user.id
+    ]);
+    await client.query(
+      'UPDATE password_reset_codes SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL',
+      [user.id]
+    );
+    await revokeUserActiveSessions(user.id, client);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function assertPasswordPolicy(password) {
+  const value = String(password || '');
+  const hasMinimumLength = value.length >= PASSWORD_MIN_LENGTH;
+  const hasUppercase = /[A-Z]/.test(value);
+  const hasLowercase = /[a-z]/.test(value);
+  const hasNumber = /\d/.test(value);
+
+  if (!hasMinimumLength || !hasUppercase || !hasLowercase || !hasNumber) {
+    const error = new Error('PASSWORD_WEAK');
+    error.code = 'PASSWORD_WEAK';
+    throw error;
+  }
 }

@@ -83,7 +83,10 @@ export class AuthService {
     }
   }
 
-  logout(redirectToLogin = false, reason: 'manual' | 'expired' | 'replaced' = 'manual'): void {
+  logout(
+    redirectToLogin = false,
+    reason: 'manual' | 'expired' | 'inactive' | 'replaced' = 'manual'
+  ): void {
     const refreshToken = this.tokens()?.refreshToken;
     if (refreshToken) {
       void firstValueFrom(
@@ -197,10 +200,10 @@ export class AuthService {
     }
   }
 
-  consumeLogoutReason(): 'expired' | 'replaced' | null {
+  consumeLogoutReason(): 'expired' | 'inactive' | 'replaced' | null {
     const reason = sessionStorage.getItem(this.logoutReasonKey);
     sessionStorage.removeItem(this.logoutReasonKey);
-    return reason === 'expired' || reason === 'replaced' ? reason : null;
+    return reason === 'expired' || reason === 'inactive' || reason === 'replaced' ? reason : null;
   }
 
   async requestPasswordReset(email: string): Promise<boolean> {

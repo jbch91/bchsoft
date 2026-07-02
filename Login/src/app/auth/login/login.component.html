@@ -11,12 +11,12 @@
     <form (ngSubmit)="onSubmit()">
       <label>
         Usuario
-        <input type="text" name="username" [(ngModel)]="username" required />
+        <input type="text" name="username" [(ngModel)]="username" autocomplete="username" required />
       </label>
 
       <label>
         Contraseña
-        <input type="password" name="password" [(ngModel)]="password" required />
+        <input type="password" name="password" [(ngModel)]="password" autocomplete="current-password" required />
       </label>
 
       <button type="submit" [disabled]="isSubmitting">
@@ -26,51 +26,110 @@
 
     <div class="alert" *ngIf="errorMessage" aria-live="polite">{{ errorMessage }}</div>
 
-    <button type="button" class="link" (click)="toggleRecovery()">
+    <button type="button" class="link" (click)="openRecovery()">
       ¿Olvidaste tu contraseña?
     </button>
   </div>
 
-  <div class="recovery" *ngIf="showRecovery">
-    <h2>Recuperar contraseña</h2>
-    <p>Ingresa tu correo para recibir un código de 6 dígitos.</p>
+  <div class="modal-backdrop" *ngIf="showRecovery" (click)="closeRecovery()">
+    <section
+      class="recovery-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="recovery-title"
+      (click)="$event.stopPropagation()"
+      (keydown.escape)="closeRecovery()"
+      tabindex="-1"
+    >
+      <header class="modal-header">
+        <div>
+          <span>Acceso seguro</span>
+          <h2 id="recovery-title">Recuperar contraseña</h2>
+        </div>
+        <button type="button" class="icon-button" aria-label="Cerrar recuperación" (click)="closeRecovery()">
+          ×
+        </button>
+      </header>
 
-    <label>
-      Correo
-      <input
-        type="email"
-        name="recoveryEmail"
-        [(ngModel)]="recoveryEmail"
-        [ngModelOptions]="{ standalone: true }"
-      />
-    </label>
+      <p class="modal-copy">
+        Ingresa tu correo, solicita el código y define una nueva contraseña para recuperar el acceso.
+      </p>
 
-    <button type="button" (click)="onRequestCode()">Enviar código</button>
+      <div
+        class="modal-alert"
+        *ngIf="recoveryMessage"
+        [class.success]="recoveryMessageType === 'success'"
+        [class.error]="recoveryMessageType === 'error'"
+        aria-live="polite"
+      >
+        {{ recoveryMessage }}
+      </div>
 
-    <div class="divider"></div>
+      <div class="recovery-grid">
+        <label>
+          Correo
+          <input
+            type="email"
+            name="recoveryEmail"
+            [(ngModel)]="recoveryEmail"
+            autocomplete="email"
+            [ngModelOptions]="{ standalone: true }"
+          />
+        </label>
 
-    <label>
-      Código
-      <input
-        type="text"
-        name="recoveryCode"
-        [(ngModel)]="recoveryCode"
-        [ngModelOptions]="{ standalone: true }"
-      />
-    </label>
+        <button
+          type="button"
+          class="secondary-action"
+          (click)="onRequestCode()"
+          [disabled]="isSendingRecoveryCode || isResettingPassword"
+        >
+          {{ isSendingRecoveryCode ? 'Enviando...' : 'Enviar código' }}
+        </button>
+      </div>
 
-    <label>
-      Nueva contraseña
-      <input
-        type="password"
-        name="recoveryPassword"
-        [(ngModel)]="recoveryPassword"
-        [ngModelOptions]="{ standalone: true }"
-      />
-    </label>
+      <div class="divider"></div>
 
-    <button type="button" (click)="onResetPassword()">Cambiar contraseña</button>
+      <div class="recovery-grid">
+        <label>
+          Código
+          <input
+            type="text"
+            name="recoveryCode"
+            [(ngModel)]="recoveryCode"
+            inputmode="numeric"
+            maxlength="6"
+            autocomplete="one-time-code"
+            [ngModelOptions]="{ standalone: true }"
+          />
+        </label>
 
-    <p class="message" *ngIf="recoveryMessage">{{ recoveryMessage }}</p>
+        <label>
+          Nueva contraseña
+          <input
+            type="password"
+            name="recoveryPassword"
+            [(ngModel)]="recoveryPassword"
+            minlength="10"
+            autocomplete="new-password"
+            [ngModelOptions]="{ standalone: true }"
+          />
+        </label>
+      </div>
+
+      <div class="password-hint">
+        Mínimo 10 caracteres, una mayúscula, una minúscula y un número.
+      </div>
+
+      <footer class="modal-actions">
+        <button type="button" class="ghost-action" (click)="closeRecovery()">Cancelar</button>
+        <button
+          type="button"
+          (click)="onResetPassword()"
+          [disabled]="isSendingRecoveryCode || isResettingPassword"
+        >
+          {{ isResettingPassword ? 'Cambiando...' : 'Cambiar contraseña' }}
+        </button>
+      </footer>
+    </section>
   </div>
 </section>

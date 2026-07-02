@@ -4,6 +4,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter, firstValueFrom } from 'rxjs';
 import { AuthService } from './auth/auth.service';
+import { SessionTimeoutService } from './auth/session-timeout.service';
 import { getApiBase, getPublicBase, joinBase } from './core/api-base';
 import { UserMenuComponent } from './shared/user-menu/user-menu.component';
 
@@ -136,7 +137,8 @@ export class App {
   constructor(
     public readonly auth: AuthService,
     private readonly http: HttpClient,
-    private readonly router: Router
+    private readonly router: Router,
+    private readonly sessionTimeout: SessionTimeoutService
   ) {
     this.currentPath = this.router.url.split('?')[0];
     this.router.events
@@ -149,11 +151,13 @@ export class App {
     effect(() => {
       const user = this.auth.currentUser();
       if (!user) {
+        this.sessionTimeout.stop();
         this.clientInfo = null;
         this.softwareSuites = [];
         this.subscription = null;
         return;
       }
+      this.sessionTimeout.start();
       void this.loadShellData();
     });
   }

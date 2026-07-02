@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../auth.service';
@@ -11,7 +11,7 @@ import { AuthService } from '../auth.service';
   templateUrl: './login.component.html',
   styleUrl: './login.component.scss'
 })
-export class LoginComponent implements OnInit {
+export class LoginComponent implements OnInit, OnDestroy {
   username = '';
   password = '';
   errorMessage = '';
@@ -21,7 +21,11 @@ export class LoginComponent implements OnInit {
   recoveryCode = '';
   recoveryPassword = '';
   recoveryMessage = '';
+  recoveryMessageType: 'info' | 'success' | 'error' = 'info';
+  isSendingRecoveryCode = false;
+  isResettingPassword = false;
   sessionMessage = '';
+  private closeRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly auth: AuthService,
@@ -35,9 +39,16 @@ export class LoginComponent implements OnInit {
     if (reason === 'expired') {
       this.sessionMessage = 'Tu sesión expiró. Inicia sesión nuevamente para continuar.';
     }
+    if (reason === 'inactive') {
+      this.sessionMessage = 'Tu sesión se cerró por inactividad. Inicia sesión nuevamente para continuar.';
+    }
     if (reason === 'replaced') {
       this.sessionMessage = 'Tu sesión se cerró porque iniciaste sesión en otro dispositivo.';
     }
+  }
+
+  ngOnDestroy(): void {
+    this.clearCloseRecoveryTimer();
   }
 
   async onSubmit(): Promise<void> {
@@ -60,46 +71,98 @@ export class LoginComponent implements OnInit {
     }
   }
 
-  toggleRecovery(): void {
-    this.showRecovery = !this.showRecovery;
+  openRecovery(): void {
+    this.showRecovery = true;
     this.recoveryMessage = '';
+    this.recoveryMessageType = 'info';
     this.errorMessage = '';
+  }
+
+  closeRecovery(): void {
+    this.showRecovery = false;
+    this.recoveryMessage = '';
+    this.recoveryMessageType = 'info';
+    this.recoveryCode = '';
+    this.recoveryPassword = '';
+    this.clearCloseRecoveryTimer();
   }
 
   async onRequestCode(): Promise<void> {
     this.recoveryMessage = '';
     if (!this.recoveryEmail) {
       this.recoveryMessage = 'Ingresa tu correo.';
+      this.recoveryMessageType = 'error';
       return;
     }
 
-    const ok = await this.auth.requestPasswordReset(this.recoveryEmail.trim());
-    this.recoveryMessage = ok
-      ? 'Código enviado. Revisa tu correo.'
-      : 'No se pudo enviar el código.';
+    this.isSendingRecoveryCode = true;
+    try {
+      const ok = await this.auth.requestPasswordReset(this.recoveryEmail.trim());
+      this.recoveryMessage = ok
+        ? 'Código enviado. Revisa tu correo.'
+        : 'No se pudo enviar el código.';
+      this.recoveryMessageType = ok ? 'success' : 'error';
+    } finally {
+      this.isSendingRecoveryCode = false;
+      this.cdr.detectChanges();
+    }
   }
 
   async onResetPassword(): Promise<void> {
     this.recoveryMessage = '';
     if (!this.recoveryEmail || !this.recoveryCode || !this.recoveryPassword) {
       this.recoveryMessage = 'Completa todos los campos.';
+      this.recoveryMessageType = 'error';
+      return;
+    }
+    if (!this.isStrongPassword(this.recoveryPassword)) {
+      this.recoveryMessage = 'La contraseña debe tener mínimo 10 caracteres, una mayúscula, una minúscula y un número.';
+      this.recoveryMessageType = 'error';
       return;
     }
 
-    const ok = await this.auth.resetPassword(
-      this.recoveryEmail.trim(),
-      this.recoveryCode.trim(),
-      this.recoveryPassword
-    );
+    this.isResettingPassword = true;
+    try {
+      const ok = await this.auth.resetPassword(
+        this.recoveryEmail.trim(),
+        this.recoveryCode.trim(),
+        this.recoveryPassword
+      );
 
-    if (ok) {
-      this.recoveryMessage = 'Contraseña actualizada. Ya puedes iniciar sesión.';
-      this.recoveryCode = '';
-      this.recoveryPassword = '';
-      return;
+      if (ok) {
+        this.recoveryMessage = 'Contraseña actualizada. Ya puedes iniciar sesión.';
+        this.recoveryMessageType = 'success';
+        this.recoveryCode = '';
+        this.recoveryPassword = '';
+        this.clearCloseRecoveryTimer();
+        this.closeRecoveryTimer = setTimeout(() => {
+          this.closeRecovery();
+          this.sessionMessage = 'Contraseña actualizada correctamente. Inicia sesión con tu nueva contraseña.';
+          this.cdr.detectChanges();
+        }, 1400);
+        return;
+      }
+
+      this.recoveryMessage = 'Código inválido o expirado.';
+      this.recoveryMessageType = 'error';
+    } finally {
+      this.isResettingPassword = false;
+      this.cdr.detectChanges();
     }
+  }
 
-    this.recoveryMessage = 'Código inválido o expirado.';
+  private isStrongPassword(password: string): boolean {
+    return password.length >= 10
+      && /[A-Z]/.test(password)
+      && /[a-z]/.test(password)
+      && /\d/.test(password);
+  }
+
+  private clearCloseRecoveryTimer(): void {
+    if (this.closeRecoveryTimer) {
+      clearTimeout(this.closeRecoveryTimer);
+      this.closeRecoveryTimer = null;
+    }
   }
 
   private postLoginRoute(): string {
