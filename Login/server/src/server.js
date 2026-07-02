@@ -445,6 +445,7 @@ const ODONTOLOGY_CLIENT_ROLES = [
   'auditor_odontologia'
 ];
 const LABORATORY_CLIENT_ROLES = ['bacteriologo', 'auxiliar_laboratorio'];
+const TEMPORARY_BIOMEDICAL_PERMISSIONS = ['hb:import', 'asset_history:upload'];
 const BIOMEDICAL_MODULE_KEYS = [
   'hojas_de_vida',
   'inventario',
@@ -751,6 +752,10 @@ function canManageTargetUser(actor, target) {
       && !targetRoles.includes(CLIENT_ADMIN_ROLE);
   }
   return false;
+}
+
+function canReceiveTemporaryBiomedicalPermissions(target) {
+  return Boolean(target?.client_id) && Boolean(target?.roles?.includes('ingeniero_biomedico'));
 }
 
 async function ensureCanManageTargetUser(req, res, userId) {
@@ -1214,9 +1219,13 @@ app.post(
     if (!target) return;
 
     const { permission, expiresAt, reason } = req.body || {};
-    const allowedTemporaryPermissions = ['hb:import', 'asset_history:upload'];
-    if (!allowedTemporaryPermissions.includes(permission)) {
+    if (!TEMPORARY_BIOMEDICAL_PERMISSIONS.includes(permission)) {
       return res.status(400).json({ message: 'Permiso temporal inválido.' });
+    }
+    if (!canReceiveTemporaryBiomedicalPermissions(target)) {
+      return res.status(400).json({
+        message: 'Los permisos temporales solo aplican a ingenieros biomédicos de un cliente.'
+      });
     }
 
     const parsedExpiresAt = new Date(expiresAt);
@@ -1271,6 +1280,9 @@ app.delete(
     const permission = req.query.permission || req.body?.permission;
     if (!permission) {
       return res.status(400).json({ message: 'Permiso requerido.' });
+    }
+    if (!TEMPORARY_BIOMEDICAL_PERMISSIONS.includes(String(permission))) {
+      return res.status(400).json({ message: 'Permiso temporal inválido.' });
     }
     if (!(await requireActionConfirmation(req, res, 'USER_TEMPORARY_PERMISSION_REVOKE'))) return;
 

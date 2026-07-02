@@ -640,6 +640,11 @@ export class UsersComponent implements OnInit {
     return this.users.find((user) => user.id === this.editingUserId) ?? null;
   }
 
+  get temporaryUser(): UserView | null {
+    const user = this.users.find((item) => item.id === this.temporaryPanelUserId) ?? null;
+    return user && this.canManageTemporaryAccess(user) ? user : null;
+  }
+
   setUserTab(tab: UserTab): void {
     if (tab === 'roles' && !this.canViewRolesAndPermissions()) {
       tab = 'list';
@@ -724,6 +729,11 @@ export class UsersComponent implements OnInit {
   }
 
   toggleTemporaryAccess(user: UserView): void {
+    if (!this.canManageTemporaryAccess(user)) {
+      this.errorMessage = 'Los permisos temporales solo aplican a ingenieros biomédicos de un cliente.';
+      this.successMessage = '';
+      return;
+    }
     if (this.temporaryPanelUserId === user.id) {
       this.cancelTemporaryAccess();
       return;
@@ -888,6 +898,10 @@ export class UsersComponent implements OnInit {
     return role === 'ingeniero_biomedico';
   }
 
+  canManageTemporaryAccess(user: UserView): boolean {
+    return Boolean(user.clientId) && user.roles.includes('ingeniero_biomedico');
+  }
+
   documentTypeLabel(value?: string | null): string {
     return this.documentTypes.find((item) => item.value === value)?.label ?? 'Sin tipo';
   }
@@ -990,6 +1004,12 @@ export class UsersComponent implements OnInit {
   }
 
   async grantTemporaryPermission(user: UserView): Promise<void> {
+    if (!this.canManageTemporaryAccess(user)) {
+      this.errorMessage = 'Los permisos temporales solo se pueden activar a ingenieros biomédicos de un cliente.';
+      this.successMessage = '';
+      return;
+    }
+
     const permissionsToGrant = Array.from(this.selectedTemporaryPermissions).filter(
       (permission) => !this.hasActiveTemporaryPermission(user, permission)
     );

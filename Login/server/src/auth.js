@@ -172,8 +172,13 @@ async function loadUserPermissions(userId, clientId, roles = []) {
        SELECT p.name
        FROM permissions p
        JOIN user_temporary_permissions utp ON utp.permission_id = p.id
+       JOIN users tu ON tu.id = utp.user_id
+       JOIN user_roles tur ON tur.user_id = tu.id
+       JOIN roles tr ON tr.id = tur.role_id
        WHERE utp.user_id = $1
          AND utp.expires_at > NOW()
+         AND tu.client_id IS NOT NULL
+         AND tr.name = 'ingeniero_biomedico'
      ) active_permissions
      ORDER BY name`,
     [userId, clientId || null, CLIENT_CONFIGURABLE_ROLES]

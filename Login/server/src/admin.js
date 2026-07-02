@@ -522,6 +522,16 @@ export async function updateUserRole(userId, roleName) {
     userId,
     roleRows[0].id
   ]);
+  if (roleName !== 'ingeniero_biomedico') {
+    await query(
+      `DELETE FROM user_temporary_permissions utp
+       USING permissions p
+       WHERE utp.permission_id = p.id
+         AND utp.user_id = $1
+         AND p.name = ANY($2)`,
+      [userId, TEMPORARY_ONLY_PERMISSIONS]
+    );
+  }
 
   return { before };
 }
