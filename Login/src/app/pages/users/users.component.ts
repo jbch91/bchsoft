@@ -93,6 +93,8 @@ export class UsersComponent implements OnInit {
   clientId = '';
   signatureFile: File | null = null;
   private readonly signatureAllowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
+  readonly signatureMaxSizeMb = 8;
+  private readonly signatureMaxSizeBytes = this.signatureMaxSizeMb * 1024 * 1024;
   documentType: UserDocumentType = 'cedula_ciudadania';
   documentNumber = '';
   invimaRegistration = '';
@@ -916,11 +918,15 @@ export class UsersComponent implements OnInit {
   }
 
   private readApiError(error: any, fallback: string): string {
+    const rawError = typeof error?.error === 'string' ? error.error : '';
+    if (error?.status === 413 || rawError.includes('413 Request Entity Too Large')) {
+      return this.signatureSizeErrorMessage();
+    }
     if (error?.status === 0) {
       return 'No fue posible conectar con el servidor. Revisa que la API esté activa e intenta nuevamente.';
     }
-    if (typeof error?.error === 'string' && error.error.trim()) {
-      return error.error.trim();
+    if (rawError.trim()) {
+      return rawError.trim();
     }
     if (error?.error?.message) {
       return error.error.message;
@@ -1152,6 +1158,14 @@ export class UsersComponent implements OnInit {
     return this.signatureAllowedTypes.includes(file.type) || ['png', 'jpg', 'jpeg', 'webp', 'pdf'].includes(extension || '');
   }
 
+  private isValidSignatureSize(file: File): boolean {
+    return file.size <= this.signatureMaxSizeBytes;
+  }
+
+  private signatureSizeErrorMessage(): string {
+    return `La firma no puede superar ${this.signatureMaxSizeMb} MB. Usa una imagen o PDF más liviano.`;
+  }
+
   onSignatureSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0] ?? null;
@@ -1159,6 +1173,12 @@ export class UsersComponent implements OnInit {
       this.signatureFile = null;
       input.value = '';
       this.errorMessage = 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.';
+      return;
+    }
+    if (file && !this.isValidSignatureSize(file)) {
+      this.signatureFile = null;
+      input.value = '';
+      this.errorMessage = this.signatureSizeErrorMessage();
       return;
     }
     this.errorMessage = '';
@@ -1172,6 +1192,12 @@ export class UsersComponent implements OnInit {
       this.editSignatureFile = null;
       input.value = '';
       this.errorMessage = 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.';
+      return;
+    }
+    if (file && !this.isValidSignatureSize(file)) {
+      this.editSignatureFile = null;
+      input.value = '';
+      this.errorMessage = this.signatureSizeErrorMessage();
       return;
     }
     this.errorMessage = '';

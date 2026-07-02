@@ -196,7 +196,7 @@
           <div class="create-upload-block">
             <div class="create-section-head">
               <strong>Firma del administrador</strong>
-              <span>Opcional para flujos documentales del cliente.</span>
+              <span>Opcional para flujos documentales del cliente. Máximo {{ signatureMaxSizeMb }} MB.</span>
             </div>
             <div class="create-logo-control">
               <label class="file-button">
@@ -217,6 +217,7 @@
                 Quitar firma
               </button>
               <span *ngIf="adminSignatureFileName">{{ adminSignatureFileName }}</span>
+              <small class="upload-hint">Imagen PNG/JPG/WEBP o PDF de hasta {{ signatureMaxSizeMb }} MB.</small>
             </div>
           </div>
         </section>
@@ -790,6 +791,7 @@
                 Quitar firma
               </button>
               <span *ngIf="repairAdminSignatureFileName">{{ repairAdminSignatureFileName }}</span>
+              <small class="upload-hint">Imagen PNG/JPG/WEBP o PDF de hasta {{ signatureMaxSizeMb }} MB.</small>
             </div>
             <div class="module-actions">
               <button type="button" class="primary" (click)="createMissingAdmin(client)">Guardar administrador</button>

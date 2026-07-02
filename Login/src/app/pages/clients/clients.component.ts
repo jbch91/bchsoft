@@ -242,6 +242,9 @@ export class ClientsComponent implements OnInit {
   adminDocumentNumber = '';
   adminSignatureFile: File | null = null;
   adminSignatureFileName = '';
+  readonly signatureMaxSizeMb = 8;
+  private readonly signatureMaxSizeBytes = this.signatureMaxSizeMb * 1024 * 1024;
+  private readonly signatureAllowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
   clientAdminDraft: ClientAdminEditDraft = {
     displayName: '',
     email: '',
@@ -1600,6 +1603,17 @@ export class ClientsComponent implements OnInit {
   onSelectAdminSignature(event: Event): void {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0] ?? null;
+    if (file && !this.isValidSignatureFile(file)) {
+      this.clearAdminSignature(input);
+      this.errorMessage = 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.';
+      return;
+    }
+    if (file && !this.isValidSignatureSize(file)) {
+      this.clearAdminSignature(input);
+      this.errorMessage = this.signatureSizeErrorMessage('La firma del administrador');
+      return;
+    }
+    this.errorMessage = '';
     this.adminSignatureFile = file;
     this.adminSignatureFileName = file?.name ?? '';
   }
@@ -1615,6 +1629,17 @@ export class ClientsComponent implements OnInit {
   onSelectRepairAdminSignature(event: Event): void {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0] ?? null;
+    if (file && !this.isValidSignatureFile(file)) {
+      this.clearRepairAdminSignature(input);
+      this.errorMessage = 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.';
+      return;
+    }
+    if (file && !this.isValidSignatureSize(file)) {
+      this.clearRepairAdminSignature(input);
+      this.errorMessage = this.signatureSizeErrorMessage('La firma del administrador');
+      return;
+    }
+    this.errorMessage = '';
     this.repairAdminSignatureFile = file;
     this.repairAdminSignatureFileName = file?.name ?? '';
   }
@@ -1625,6 +1650,19 @@ export class ClientsComponent implements OnInit {
     if (input) {
       input.value = '';
     }
+  }
+
+  private isValidSignatureFile(file: File): boolean {
+    const extension = file.name.toLowerCase().split('.').pop();
+    return this.signatureAllowedTypes.includes(file.type) || ['png', 'jpg', 'jpeg', 'webp', 'pdf'].includes(extension || '');
+  }
+
+  private isValidSignatureSize(file: File): boolean {
+    return file.size <= this.signatureMaxSizeBytes;
+  }
+
+  private signatureSizeErrorMessage(label = 'La firma'): string {
+    return `${label} no puede superar ${this.signatureMaxSizeMb} MB. Usa una imagen o PDF más liviano.`;
   }
 
   openClientInfo(clientId: string): void {

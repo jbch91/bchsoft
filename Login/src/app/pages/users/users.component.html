@@ -202,7 +202,8 @@
           Firma digital (imagen o PDF)
           <input type="file" accept="image/*,.pdf,application/pdf" (change)="onSignatureSelected($event)" />
           <small class="signature-hint">
-            Sube una foto con fondo blanco o un PDF. El sistema eliminará el fondo y guardará solo la firma.
+            Sube una foto con fondo blanco o un PDF de hasta {{ signatureMaxSizeMb }} MB.
+            El sistema eliminará el fondo y guardará solo la firma.
           </small>
         </label>
 
@@ -288,7 +289,7 @@
           Firma digital (imagen o PDF)
           <input type="file" accept="image/*,.pdf,application/pdf" (change)="onEditSignatureSelected($event)" />
           <small class="signature-hint">
-            Se procesará como PNG transparente para usarla en documentos.
+            Se procesará como PNG transparente para usarla en documentos. Máximo {{ signatureMaxSizeMb }} MB.
           </small>
         </label>
 

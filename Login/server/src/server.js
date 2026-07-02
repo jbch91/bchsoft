@@ -407,6 +407,8 @@ const SIGNATURE_ALLOWED_MIME_TYPES = [
   'image/webp',
   'application/pdf'
 ];
+const SIGNATURE_MAX_FILE_SIZE_MB = 8;
+const SIGNATURE_MAX_FILE_SIZE_BYTES = SIGNATURE_MAX_FILE_SIZE_MB * 1024 * 1024;
 const CLIENT_ADMIN_ROLE = 'client_admin';
 const SAAS_ADMIN_ROLES = ['saas_admin', 'saas_billing', 'saas_clients', 'saas_support', 'saas_auditor'];
 const PLATFORM_LEGACY_ROLES = ['viewer'];
@@ -6613,6 +6615,9 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       message: 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.'
     });
   }
+  if (req.file && !isAllowedSignatureSize(req.file)) {
+    return res.status(413).json({ message: signatureSizeMessage() });
+  }
   if (!(await requireActionConfirmation(req, res, 'USER_CREATE'))) return;
 
   try {
@@ -6719,6 +6724,14 @@ function isAllowedSignatureFile(file) {
   const mimetype = String(file?.mimetype || '').toLowerCase();
   const extension = path.extname(String(file?.originalname || '')).toLowerCase();
   return SIGNATURE_ALLOWED_MIME_TYPES.includes(mimetype) || SIGNATURE_ALLOWED_EXTENSIONS.includes(extension);
+}
+
+function isAllowedSignatureSize(file) {
+  return Number(file?.size || 0) <= SIGNATURE_MAX_FILE_SIZE_BYTES;
+}
+
+function signatureSizeMessage(label = 'La firma') {
+  return `${label} no puede superar ${SIGNATURE_MAX_FILE_SIZE_MB} MB. Usa una imagen o PDF más liviano.`;
 }
 
 function isPdfSignatureFile(file) {
@@ -7351,6 +7364,9 @@ app.post(
         message: 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.'
       });
     }
+    if (req.file && !isAllowedSignatureSize(req.file)) {
+      return res.status(413).json({ message: signatureSizeMessage() });
+    }
     if (!(await requireActionConfirmation(req, res, 'CLIENT_ADMIN_CREATE'))) return;
 
     try {
@@ -7517,6 +7533,9 @@ app.post('/admin/clients', requireAuth, requirePermission('clients:manage'), upl
     return res.status(400).json({
       message: 'La firma del administrador debe ser una imagen PNG/JPG/WEBP o un PDF.'
     });
+  }
+  if (adminSignatureFile && !isAllowedSignatureSize(adminSignatureFile)) {
+    return res.status(413).json({ message: signatureSizeMessage('La firma del administrador') });
   }
 
   const { rows: duplicateAdminRows } = await query(
@@ -9310,6 +9329,9 @@ app.post(
       return res.status(400).json({
         message: 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.'
       });
+    }
+    if (!isAllowedSignatureSize(req.file)) {
+      return res.status(413).json({ message: signatureSizeMessage() });
     }
     try {
       const signaturePath = await saveUserSignature(req.params.id, req.file);
