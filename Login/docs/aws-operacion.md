@@ -106,6 +106,8 @@ git status --short
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+El servicio `web` construye el frontend Angular desde el `Dockerfile`. No depende de `dist/browser` del servidor, porque esa carpeta puede quedar vieja y seguir entregando chunks anteriores.
+
 Las migraciones se ejecutan automaticamente al iniciar el contenedor `api`, porque el `CMD` del backend corre:
 
 ```bash
@@ -142,6 +144,12 @@ Ver logs del web/nginx:
 
 ```bash
 docker compose -f docker-compose.prod.yml logs --tail=80 web
+```
+
+Validar que el frontend ya no este apuntando a un chunk viejo:
+
+```bash
+docker compose -f docker-compose.prod.yml exec web sh -lc 'grep -R "QV77OJQK" -n /usr/share/nginx/html || true'
 ```
 
 ## Reinicio rapido
