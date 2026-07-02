@@ -475,46 +475,69 @@ export async function createUser({
   documentNumber,
   invimaRegistration
 }) {
+  const cleanUsername = String(username || '').trim();
+  const cleanDisplayName = String(displayName || '').trim();
+  const cleanEmail = String(email || '').trim();
+
   const { rows: existing } = await query(
     'SELECT username, email FROM users WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)',
-    [username, email]
+    [cleanUsername, cleanEmail]
   );
   if (existing.length) {
-    const cleanUsername = String(username).trim().toLowerCase();
-    const cleanEmail = String(email).trim().toLowerCase();
+    const normalizedUsername = cleanUsername.toLowerCase();
+    const normalizedEmail = cleanEmail.toLowerCase();
     const fields = new Set();
     for (const row of existing) {
-      if (String(row.username || '').trim().toLowerCase() === cleanUsername) fields.add('username');
-      if (String(row.email || '').trim().toLowerCase() === cleanEmail) fields.add('email');
+      if (String(row.username || '').trim().toLowerCase() === normalizedUsername) fields.add('username');
+      if (String(row.email || '').trim().toLowerCase() === normalizedEmail) fields.add('email');
     }
     return { error: 'DUPLICATE', fields: Array.from(fields) };
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
-  const { rows } = await query(
-    `INSERT INTO users (
-       username, display_name, email, password_hash, client_id,
-       document_type, document_number, invima_registration
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-    [
-      username,
-      displayName,
-      email,
-      passwordHash,
-      clientId ?? null,
-      documentType ?? null,
-      documentNumber ?? null,
-      invimaRegistration ?? null
-    ]
-  );
-
-  const userId = rows[0].id;
   const { rows: roleRows } = await query('SELECT id FROM roles WHERE name = $1', [role]);
-  if (roleRows.length) {
-    await query('INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)', [userId, roleRows[0].id]);
+  if (!roleRows.length) {
+    return { error: 'ROLE_NOT_FOUND' };
   }
 
-  return { id: userId };
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  const dbClient = await pool.connect();
+  try {
+    await dbClient.query('BEGIN');
+    const { rows } = await dbClient.query(
+      `INSERT INTO users (
+         username, display_name, email, password_hash, client_id,
+         document_type, document_number, invima_registration
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [
+        cleanUsername,
+        cleanDisplayName,
+        cleanEmail,
+        passwordHash,
+        clientId ?? null,
+        documentType ?? null,
+        documentNumber ?? null,
+        invimaRegistration ?? null
+      ]
+    );
+
+    const userId = rows[0].id;
+    await dbClient.query('INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)', [
+      userId,
+      roleRows[0].id
+    ]);
+    await dbClient.query('COMMIT');
+    return { id: userId };
+  } catch (error) {
+    try {
+      await dbClient.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('No se pudo revertir la creación de usuario', rollbackError);
+    }
+    throw error;
+  } finally {
+    dbClient.release();
+  }
 }
 
 export async function updateUserRole(userId, roleName) {

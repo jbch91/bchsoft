@@ -6628,22 +6628,30 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       invimaRegistration: cleanInvimaRegistration
     });
     if (result?.error === 'DUPLICATE') {
-      const fields = result.fields || [];
-      if (fields.includes('username') && fields.includes('email')) {
-        return res.status(409).json({ message: 'El usuario y el correo ya están registrados.' });
-      }
-      if (fields.includes('username')) {
-        return res.status(409).json({ message: 'Ese usuario ya está registrado.' });
-      }
-      if (fields.includes('email')) {
-        return res.status(409).json({ message: 'Ese correo ya está registrado.' });
-      }
-      return res.status(409).json({ message: 'Usuario o correo ya existe.' });
+      return res.status(409).json({ message: createUserDuplicateMessage(result.fields) });
+    }
+    if (result?.error === 'ROLE_NOT_FOUND') {
+      return res.status(400).json({
+        message: 'El rol seleccionado no existe o no está disponible para crear usuarios.'
+      });
+    }
+    if (!result?.id) {
+      return res.status(500).json({
+        message: 'No se pudo crear el usuario porque la base de datos no devolvió el identificador.'
+      });
     }
 
-    if (req.file && result?.id) {
-      const signaturePath = await saveUserSignature(result.id, req.file);
-      await updateUserSignature(result.id, signaturePath);
+    if (req.file) {
+      try {
+        const signaturePath = await saveUserSignature(result.id, req.file);
+        await updateUserSignature(result.id, signaturePath);
+      } catch (signatureError) {
+        console.error('No se pudo procesar la firma del usuario', signatureError);
+        await cleanupPartiallyCreatedUser(result.id, 'firma del usuario');
+        return res.status(400).json({
+          message: 'No se pudo procesar la firma digital. Usa una imagen PNG/JPG/WEBP válida o un PDF legible.'
+        });
+      }
     }
 
     let invitationSent = false;
@@ -6656,24 +6664,30 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       }
     }
 
-    await logAudit({
-      actorUserId: req.user.sub,
-      actorUsername: req.user.username,
-      action: 'USER_CREATE',
-      targetUsername: username,
-      details: {
-        role,
-        email,
-        clientId: resolvedScope.clientId ?? null,
-        documentType: documentType ?? null,
-        hasInvimaRegistration: Boolean(invimaRegistration),
-        invitationSent
-      }
-    });
+    try {
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'USER_CREATE',
+        targetUserId: result.id,
+        targetUsername: username,
+        details: {
+          role,
+          email,
+          clientId: resolvedScope.clientId ?? null,
+          documentType: documentType ?? null,
+          hasInvimaRegistration: Boolean(invimaRegistration),
+          invitationSent
+        }
+      });
+    } catch (auditError) {
+      console.error('No se pudo registrar auditoría de creación de usuario', auditError);
+    }
     return res.status(201).json({ ...result, invitation_sent: invitationSent });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: 'No se pudo crear el usuario.' });
+    console.error('No se pudo crear el usuario', error);
+    const failure = createUserFailureResponse(error);
+    return res.status(failure.status).json({ message: failure.message });
   }
 });
 
@@ -6753,6 +6767,71 @@ async function saveUserSignature(userId, file) {
   await processSignatureImage(imageBuffer, filename);
   const publicPath = `/${path.join('uploads', 'users', userId, 'signature.png')}`;
   return publicPath.replace(/\\/g, '/');
+}
+
+function createUserDuplicateMessage(fields = []) {
+  if (fields.includes('username') && fields.includes('email')) {
+    return 'El usuario y el correo ya están registrados.';
+  }
+  if (fields.includes('username')) {
+    return 'Ese usuario ya está registrado.';
+  }
+  if (fields.includes('email')) {
+    return 'Ese correo ya está registrado.';
+  }
+  return 'Usuario o correo ya existe.';
+}
+
+function createUserFailureResponse(error) {
+  const code = String(error?.code || '');
+  const constraint = String(error?.constraint || '').toLowerCase();
+
+  if (code === '23505') {
+    if (constraint.includes('username') && constraint.includes('email')) {
+      return { status: 409, message: 'El usuario y el correo ya están registrados.' };
+    }
+    if (constraint.includes('username')) {
+      return { status: 409, message: 'Ese usuario ya está registrado.' };
+    }
+    if (constraint.includes('email')) {
+      return { status: 409, message: 'Ese correo ya está registrado.' };
+    }
+    return { status: 409, message: 'Usuario o correo ya existe.' };
+  }
+
+  if (code === '23503') {
+    return {
+      status: 400,
+      message: 'No se pudo asociar el usuario al cliente o rol seleccionado. Revisa que el cliente y el rol existan.'
+    };
+  }
+
+  if (code === '23502') {
+    return {
+      status: 400,
+      message: 'Falta un dato obligatorio para crear el usuario. Revisa los campos marcados en el formulario.'
+    };
+  }
+
+  if (code === '22P02') {
+    return {
+      status: 400,
+      message: 'Uno de los datos enviados no tiene el formato esperado. Revisa cliente, rol y datos de identificación.'
+    };
+  }
+
+  return {
+    status: 500,
+    message: 'No se pudo crear el usuario por un error interno. Intenta nuevamente o revisa los logs del servidor.'
+  };
+}
+
+async function cleanupPartiallyCreatedUser(userId, context) {
+  try {
+    await deleteUser(userId);
+  } catch (cleanupError) {
+    console.error(`No se pudo revertir usuario creado parcialmente (${context})`, cleanupError);
+  }
 }
 
 async function saveOdontologyConsentSignerSignature(clientId, consentId, dataUrl) {

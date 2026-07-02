@@ -607,8 +607,7 @@ export class UsersComponent implements OnInit {
       await this.load();
     } catch (error: any) {
       console.error(error);
-      this.errorMessage =
-        error?.error?.message ?? 'No se pudo crear el usuario.';
+      this.errorMessage = this.readApiError(error, 'No se pudo crear el usuario.');
     } finally {
       this.creatingUser = false;
       this.cdr.detectChanges();
@@ -914,6 +913,25 @@ export class UsersComponent implements OnInit {
 
   roleLabel(role?: string | null): string {
     return this.roleLabels[role || ''] ?? role ?? 'Sin rol';
+  }
+
+  private readApiError(error: any, fallback: string): string {
+    if (error?.status === 0) {
+      return 'No fue posible conectar con el servidor. Revisa que la API esté activa e intenta nuevamente.';
+    }
+    if (typeof error?.error === 'string' && error.error.trim()) {
+      return error.error.trim();
+    }
+    if (error?.error?.message) {
+      return error.error.message;
+    }
+    if (typeof error?.message === 'string' && !error.message.includes('Http failure response')) {
+      return error.message;
+    }
+    if (error?.statusText) {
+      return `${fallback} Detalle: ${error.statusText}.`;
+    }
+    return fallback;
   }
 
   private async requestSecurityCode(action: string, summary: string): Promise<string | null> {
