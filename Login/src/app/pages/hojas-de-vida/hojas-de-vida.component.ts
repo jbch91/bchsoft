@@ -8,6 +8,7 @@ import { AuthService } from '../../auth/auth.service';
 import { getApiBase, getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 import { InventoryPanelComponent, InventoryPanelItem } from '../../shared/inventory-panel/inventory-panel.component';
+import { Workbook as ExcelWorkbookConstructor } from 'exceljs';
 import * as XLSX from 'xlsx';
 
 interface ClientOption {
@@ -99,6 +100,45 @@ interface AssetView extends InventoryPanelItem {
   siteId?: string | null;
   areaId?: string | null;
   locationId?: string | null;
+}
+
+interface ExcelCell {
+  font?: unknown;
+  fill?: unknown;
+  alignment?: unknown;
+  border?: unknown;
+  dataValidation?: unknown;
+}
+
+interface ExcelRow {
+  height?: number;
+  font?: unknown;
+  fill?: unknown;
+  eachCell: (callback: (cell: ExcelCell, colNumber: number) => void) => void;
+}
+
+interface ExcelColumn {
+  numFmt?: string;
+}
+
+interface ExcelWorksheet {
+  columns: unknown[];
+  autoFilter?: unknown;
+  addRow: (row: unknown) => ExcelRow;
+  addRows: (rows: unknown[]) => void;
+  getCell: (rowNumber: number, columnNumber: number) => ExcelCell;
+  getColumn: (columnNumber: number) => ExcelColumn;
+  getRow: (rowNumber: number) => ExcelRow;
+  eachRow: (callback: (row: ExcelRow, rowNumber: number) => void) => void;
+}
+
+interface ExcelWorkbook {
+  creator: string;
+  created: Date;
+  addWorksheet: (name: string, options?: unknown) => ExcelWorksheet;
+  xlsx: {
+    writeBuffer: () => Promise<BlobPart>;
+  };
 }
 
 @Component({
@@ -224,6 +264,7 @@ export class HojasDeVidaComponent {
   importMessageType: 'info' | 'success' | 'error' = 'info';
   importReading = false;
   importLoading = false;
+  importTemplateLoading = false;
 
   newAreaName = '';
   newSiteName = '';
@@ -305,6 +346,8 @@ export class HojasDeVidaComponent {
   }
 
   async init(): Promise<void> {
+    await this.auth.refreshSession().catch(() => false);
+
     const userClient = this.auth.currentUser()?.clientId ?? '';
     if (userClient) {
       this.selectedClientId = userClient;
@@ -392,131 +435,79 @@ export class HojasDeVidaComponent {
       return;
     }
 
-    await this.loadSites();
-    await this.loadAreas();
-    await this.loadLocationsAll();
+    if (this.importTemplateLoading) return;
+    this.importTemplateLoading = true;
+    this.setImportMessage('Generando plantilla de importación...', 'info');
+    this.cdr.detectChanges();
 
-    const ExcelJS = await import('exceljs');
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'INBIHOSPITALARIO';
-    workbook.created = new Date();
+    try {
+      await this.loadSites();
+      await this.loadAreas();
+      await this.loadLocationsAll();
 
-    const worksheet = workbook.addWorksheet('Hojas de vida', {
-      views: [{ state: 'frozen', ySplit: 1 }]
-    });
-    const catalogSheet = workbook.addWorksheet('Catalogos');
-    const guideSheet = workbook.addWorksheet('Instrucciones');
+      const workbook = this.createExcelWorkbook();
+      workbook.creator = 'INBIHOSPITALARIO';
+      workbook.created = new Date();
 
-    const unique = (values: string[]): string[] => Array.from(new Set(values.filter(Boolean))).sort();
-    const siteNames = unique(this.sites.map((site) => site.name));
-    const areaNames = unique(this.areas.map((area) => area.name));
-    const locationNames = unique(this.locationsAll.map((location) => location.name));
-    const warrantyOptions = ['1', '2', '3'];
-    const yesNoOptions = ['Sí', 'No'];
-    const equipmentTypeOptions = ['Fijo', 'Móvil'];
+      const worksheet = workbook.addWorksheet('Hojas de vida', {
+        views: [{ state: 'frozen', ySplit: 1 }]
+      });
+      const catalogSheet = workbook.addWorksheet('Catalogos');
+      const guideSheet = workbook.addWorksheet('Instrucciones');
 
-    const headers = this.importHeaders;
-    worksheet.columns = headers.map((header) => ({
-      header,
-      key: header,
-      width: Math.min(Math.max(header.length + 4, 15), 28)
-    }));
-    worksheet.getRow(1).height = 28;
-    worksheet.getRow(1).eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFA64045' } };
-      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-      cell.border = {
-        top: { style: 'thin', color: { argb: 'FF8F343A' } },
-        left: { style: 'thin', color: { argb: 'FF8F343A' } },
-        bottom: { style: 'thin', color: { argb: 'FF8F343A' } },
-        right: { style: 'thin', color: { argb: 'FF8F343A' } }
-      };
-    });
+      const unique = (values: string[]): string[] => Array.from(new Set(values.filter(Boolean))).sort();
+      const siteNames = unique(this.sites.map((site) => site.name));
+      const areaNames = unique(this.areas.map((area) => area.name));
+      const locationNames = unique(this.locationsAll.map((location) => location.name));
+      const warrantyOptions = ['1', '2', '3'];
+      const yesNoOptions = ['Sí', 'No'];
+      const equipmentTypeOptions = ['Fijo', 'Móvil'];
 
-    worksheet.addRow({
-      'Código*': 'EQ-001',
-      'Nombre*': 'Monitor de signos vitales',
-      'Marca*': 'Marca ejemplo',
-      'Modelo*': 'Modelo ejemplo',
-      'Serie*': 'SER-001',
-      'Sede*': siteNames[0] ?? 'Sede principal',
-      'Área*': areaNames[0] ?? 'Urgencias',
-      'Ubicación*': locationNames[0] ?? 'Consultorio 1',
-      'Registro Invima*': 'INVIMA-000',
-      'Riesgo*': 'Clase IIA',
-      Fabricante: 'Fabricante ejemplo',
-      'Tipo equipo': 'Fijo',
-      'Forma adquisición': 'COMPRA DIRECTA',
-      'Fecha adquisición': '2026-01-15',
-      'Vida útil años': 10,
-      'Garantía años': 1,
-      Proveedor: 'Proveedor ejemplo',
-      'Teléfono proveedor': '3000000000',
-      'Correo proveedor': 'proveedor@correo.com',
-      'Frecuencia mantenimiento': 'trimestral',
-      'Requiere calibración': 'No',
-      'Frecuencia calibración': 'anual'
-    });
-    worksheet.getRow(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF1F2' } };
-    worksheet.getRow(2).eachCell((cell) => {
-      cell.border = {
-        top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-        left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-        bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-        right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
-      };
-    });
-    worksheet.autoFilter = { from: 'A1', to: 'V1' };
-    worksheet.getColumn(14).numFmt = 'yyyy-mm-dd';
-    worksheet.getColumn(15).numFmt = '0';
-    worksheet.getColumn(16).numFmt = '0';
+      const headers = this.importHeaders;
+      worksheet.columns = headers.map((header) => ({
+        header,
+        key: header,
+        width: Math.min(Math.max(header.length + 4, 15), 28)
+      }));
+      worksheet.getRow(1).height = 28;
+      worksheet.getRow(1).eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFA64045' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF8F343A' } },
+          left: { style: 'thin', color: { argb: 'FF8F343A' } },
+          bottom: { style: 'thin', color: { argb: 'FF8F343A' } },
+          right: { style: 'thin', color: { argb: 'FF8F343A' } }
+        };
+      });
 
-    catalogSheet.columns = [
-      { header: 'Sedes', key: 'sites', width: 28 },
-      { header: 'Áreas', key: 'areas', width: 28 },
-      { header: 'Ubicaciones', key: 'locations', width: 28 },
-      { header: 'Riesgos', key: 'risks', width: 18 },
-      { header: 'Frecuencias', key: 'frequencies', width: 20 },
-      { header: 'Adquisición', key: 'acquisition', width: 22 },
-      { header: 'Tipo equipo', key: 'equipmentType', width: 16 },
-      { header: 'Garantía', key: 'warranty', width: 14 },
-      { header: 'Sí/No', key: 'yesNo', width: 12 }
-    ];
-    const catalogColumns = [
-      siteNames,
-      areaNames,
-      locationNames,
-      this.riskClasses,
-      this.frequencyOptions,
-      this.acquisitionTypes,
-      equipmentTypeOptions,
-      warrantyOptions,
-      yesNoOptions
-    ];
-    const maxCatalogRows = Math.max(...catalogColumns.map((items) => items.length), 1);
-    for (let rowIndex = 0; rowIndex < maxCatalogRows; rowIndex += 1) {
-      catalogSheet.addRow(catalogColumns.map((items) => items[rowIndex] ?? ''));
-    }
-    catalogSheet.getRow(1).eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5F1F25' } };
-      cell.alignment = { vertical: 'middle', horizontal: 'center' };
-    });
-
-    guideSheet.columns = [{ width: 36 }, { width: 90 }];
-    guideSheet.addRows([
-      ['Cómo usar la plantilla', 'Selecciona valores desde las listas desplegables cuando el campo lo permita.'],
-      ['Orden correcto', 'Primero crea sedes, áreas y ubicaciones en el sistema; luego descarga esta plantilla.'],
-      ['Campos obligatorios', 'Todos los encabezados con * son obligatorios.'],
-      ['Sede, Área y Ubicación', 'Deben existir previamente en el cliente seleccionado. El sistema validará la relación antes de importar.'],
-      ['Fechas', 'Usa formato yyyy-mm-dd o selecciona la fecha desde Excel.'],
-      ['Validación final', 'Aunque Excel permita escribir manualmente, el software vuelve a validar todo antes de guardar.']
-    ]);
-    guideSheet.getRow(1).font = { bold: true, color: { argb: 'FFA64045' } };
-    guideSheet.eachRow((row) => {
-      row.eachCell((cell) => {
-        cell.alignment = { vertical: 'middle', wrapText: true };
+      worksheet.addRow({
+        'Código*': 'EQ-001',
+        'Nombre*': 'Monitor de signos vitales',
+        'Marca*': 'Marca ejemplo',
+        'Modelo*': 'Modelo ejemplo',
+        'Serie*': 'SER-001',
+        'Sede*': siteNames[0] ?? 'Sede principal',
+        'Área*': areaNames[0] ?? 'Urgencias',
+        'Ubicación*': locationNames[0] ?? 'Consultorio 1',
+        'Registro Invima*': 'INVIMA-000',
+        'Riesgo*': 'Clase IIA',
+        Fabricante: 'Fabricante ejemplo',
+        'Tipo equipo': 'Fijo',
+        'Forma adquisición': 'COMPRA DIRECTA',
+        'Fecha adquisición': '2026-01-15',
+        'Vida útil años': 10,
+        'Garantía años': 1,
+        Proveedor: 'Proveedor ejemplo',
+        'Teléfono proveedor': '3000000000',
+        'Correo proveedor': 'proveedor@correo.com',
+        'Frecuencia mantenimiento': 'trimestral',
+        'Requiere calibración': 'No',
+        'Frecuencia calibración': 'anual'
+      });
+      worksheet.getRow(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF1F2' } };
+      worksheet.getRow(2).eachCell((cell) => {
         cell.border = {
           top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
           left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
@@ -524,62 +515,122 @@ export class HojasDeVidaComponent {
           right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
         };
       });
-    });
+      worksheet.autoFilter = { from: 'A1', to: 'V1' };
+      worksheet.getColumn(14).numFmt = 'yyyy-mm-dd';
+      worksheet.getColumn(15).numFmt = '0';
+      worksheet.getColumn(16).numFmt = '0';
 
-    const listFormula = (columnLetter: string, values: string[]): string => {
-      const endRow = Math.max(values.length + 1, 2);
-      return `Catalogos!$${columnLetter}$2:$${columnLetter}$${endRow}`;
-    };
-    const addListValidation = (columnNumber: number, formula: string, prompt: string): void => {
+      catalogSheet.columns = [
+        { header: 'Sedes', key: 'sites', width: 28 },
+        { header: 'Áreas', key: 'areas', width: 28 },
+        { header: 'Ubicaciones', key: 'locations', width: 28 },
+        { header: 'Riesgos', key: 'risks', width: 18 },
+        { header: 'Frecuencias', key: 'frequencies', width: 20 },
+        { header: 'Adquisición', key: 'acquisition', width: 22 },
+        { header: 'Tipo equipo', key: 'equipmentType', width: 16 },
+        { header: 'Garantía', key: 'warranty', width: 14 },
+        { header: 'Sí/No', key: 'yesNo', width: 12 }
+      ];
+      const catalogColumns = [
+        siteNames,
+        areaNames,
+        locationNames,
+        this.riskClasses,
+        this.frequencyOptions,
+        this.acquisitionTypes,
+        equipmentTypeOptions,
+        warrantyOptions,
+        yesNoOptions
+      ];
+      const maxCatalogRows = Math.max(...catalogColumns.map((items) => items.length), 1);
+      for (let rowIndex = 0; rowIndex < maxCatalogRows; rowIndex += 1) {
+        catalogSheet.addRow(catalogColumns.map((items) => items[rowIndex] ?? ''));
+      }
+      catalogSheet.getRow(1).eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5F1F25' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      });
+
+      guideSheet.columns = [{ width: 36 }, { width: 90 }];
+      guideSheet.addRows([
+        ['Cómo usar la plantilla', 'Selecciona valores desde las listas desplegables cuando el campo lo permita.'],
+        ['Orden correcto', 'Primero crea sedes, áreas y ubicaciones en el sistema; luego descarga esta plantilla.'],
+        ['Campos obligatorios', 'Todos los encabezados con * son obligatorios.'],
+        ['Sede, Área y Ubicación', 'Deben existir previamente en el cliente seleccionado. El sistema validará la relación antes de importar.'],
+        ['Fechas', 'Usa formato yyyy-mm-dd o selecciona la fecha desde Excel.'],
+        ['Validación final', 'Aunque Excel permita escribir manualmente, el software vuelve a validar todo antes de guardar.']
+      ]);
+      guideSheet.getRow(1).font = { bold: true, color: { argb: 'FFA64045' } };
+      guideSheet.eachRow((row) => {
+        row.eachCell((cell) => {
+          cell.alignment = { vertical: 'middle', wrapText: true };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+          };
+        });
+      });
+
+      const listFormula = (columnLetter: string, values: string[]): string => {
+        const endRow = Math.max(values.length + 1, 2);
+        return `Catalogos!$${columnLetter}$2:$${columnLetter}$${endRow}`;
+      };
+      const addListValidation = (columnNumber: number, formula: string, prompt: string): void => {
+        for (let rowNumber = 2; rowNumber <= 501; rowNumber += 1) {
+          worksheet.getCell(rowNumber, columnNumber).dataValidation = {
+            type: 'list',
+            allowBlank: true,
+            formulae: [formula],
+            showErrorMessage: true,
+            errorStyle: 'error',
+            errorTitle: 'Valor no permitido',
+            error: 'Selecciona un valor de la lista desplegable.',
+            showInputMessage: true,
+            promptTitle: 'Selecciona de la lista',
+            prompt
+          };
+        }
+      };
+
+      addListValidation(6, listFormula('A', siteNames), 'Selecciona la sede creada para este cliente.');
+      addListValidation(7, listFormula('B', areaNames), 'Selecciona el área creada para este cliente.');
+      addListValidation(8, listFormula('C', locationNames), 'Selecciona la ubicación creada para este cliente.');
+      addListValidation(10, listFormula('D', this.riskClasses), 'Selecciona la clase de riesgo del equipo.');
+      addListValidation(12, listFormula('G', equipmentTypeOptions), 'Selecciona si el equipo es fijo o móvil.');
+      addListValidation(13, listFormula('F', this.acquisitionTypes), 'Selecciona la forma de adquisición.');
+      addListValidation(16, listFormula('H', warrantyOptions), 'Selecciona los años de garantía si aplica.');
+      addListValidation(20, listFormula('E', this.frequencyOptions), 'Selecciona la frecuencia de mantenimiento.');
+      addListValidation(21, listFormula('I', yesNoOptions), 'Indica si el equipo requiere calibración.');
+      addListValidation(22, listFormula('E', this.frequencyOptions), 'Selecciona la frecuencia de calibración si aplica.');
+
       for (let rowNumber = 2; rowNumber <= 501; rowNumber += 1) {
-        worksheet.getCell(rowNumber, columnNumber).dataValidation = {
-          type: 'list',
+        worksheet.getCell(rowNumber, 15).dataValidation = {
+          type: 'whole',
+          operator: 'between',
           allowBlank: true,
-          formulae: [formula],
+          formulae: [0, 50],
           showErrorMessage: true,
-          errorStyle: 'error',
-          errorTitle: 'Valor no permitido',
-          error: 'Selecciona un valor de la lista desplegable.',
-          showInputMessage: true,
-          promptTitle: 'Selecciona de la lista',
-          prompt
+          errorTitle: 'Vida útil no válida',
+          error: 'Ingresa un número entre 0 y 50.'
         };
       }
-    };
 
-    addListValidation(6, listFormula('A', siteNames), 'Selecciona la sede creada para este cliente.');
-    addListValidation(7, listFormula('B', areaNames), 'Selecciona el área creada para este cliente.');
-    addListValidation(8, listFormula('C', locationNames), 'Selecciona la ubicación creada para este cliente.');
-    addListValidation(10, listFormula('D', this.riskClasses), 'Selecciona la clase de riesgo del equipo.');
-    addListValidation(12, listFormula('G', equipmentTypeOptions), 'Selecciona si el equipo es fijo o móvil.');
-    addListValidation(13, listFormula('F', this.acquisitionTypes), 'Selecciona la forma de adquisición.');
-    addListValidation(16, listFormula('H', warrantyOptions), 'Selecciona los años de garantía si aplica.');
-    addListValidation(20, listFormula('E', this.frequencyOptions), 'Selecciona la frecuencia de mantenimiento.');
-    addListValidation(21, listFormula('I', yesNoOptions), 'Indica si el equipo requiere calibración.');
-    addListValidation(22, listFormula('E', this.frequencyOptions), 'Selecciona la frecuencia de calibración si aplica.');
-
-    for (let rowNumber = 2; rowNumber <= 501; rowNumber += 1) {
-      worksheet.getCell(rowNumber, 15).dataValidation = {
-        type: 'whole',
-        operator: 'between',
-        allowBlank: true,
-        formulae: [0, 50],
-        showErrorMessage: true,
-        errorTitle: 'Vida útil no válida',
-        error: 'Ingresa un número entre 0 y 50.'
-      };
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer as BlobPart], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      this.downloadBlob(blob, 'plantilla-hojas-de-vida.xlsx');
+      this.setImportMessage('Plantilla generada. Revisa la carpeta de descargas del navegador.', 'success');
+    } catch (error) {
+      console.error(error);
+      this.setImportMessage('No se pudo generar la plantilla. Verifica la sesión y vuelve a intentar.', 'error');
+    } finally {
+      this.importTemplateLoading = false;
+      this.cdr.detectChanges();
     }
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer as BlobPart], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'plantilla-hojas-de-vida.xlsx';
-    link.click();
-    URL.revokeObjectURL(url);
   }
 
   async onHvImportFileSelected(event: Event): Promise<void> {
@@ -699,14 +750,22 @@ export class HojasDeVidaComponent {
     this.importMessageType = type;
   }
 
+  private createExcelWorkbook(): ExcelWorkbook {
+    try {
+      return new ExcelWorkbookConstructor() as ExcelWorkbook;
+    } catch (error) {
+      console.error(error);
+      throw new Error('No se pudo inicializar el generador de Excel.');
+    }
+  }
+
   async downloadHvImportErrors(): Promise<void> {
     const errorRows = this.importPreviewRows.filter((row) => row.errors.length > 0);
     if (!errorRows.length) {
       return;
     }
 
-    const ExcelJS = await import('exceljs');
-    const workbook = new ExcelJS.Workbook();
+    const workbook = this.createExcelWorkbook();
     workbook.creator = 'INBIHOSPITALARIO';
     workbook.created = new Date();
     const worksheet = workbook.addWorksheet('Corregir hojas de vida', {
@@ -789,12 +848,22 @@ export class HojasDeVidaComponent {
     const blob = new Blob([buffer as BlobPart], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
+    this.downloadBlob(blob, `corregir-importacion-${baseName || 'hojas-de-vida'}.xlsx`);
+  }
+
+  private downloadBlob(blob: Blob, filename: string): void {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `corregir-importacion-${baseName || 'hojas-de-vida'}.xlsx`;
+    link.download = filename;
+    link.rel = 'noopener';
+    link.style.display = 'none';
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => {
+      link.remove();
+      URL.revokeObjectURL(url);
+    }, 1000);
   }
 
   private buildImportPreview(rows: Record<string, unknown>[]): ImportPreviewRow[] {

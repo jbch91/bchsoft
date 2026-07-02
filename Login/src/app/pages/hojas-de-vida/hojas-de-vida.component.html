@@ -253,7 +253,9 @@
         <span class="import-badge">Excel validado antes de guardar</span>
       </div>
       <div class="import-actions">
-        <button type="button" class="ghost" (click)="downloadHvImportTemplate()">Descargar plantilla</button>
+        <button type="button" class="ghost" [disabled]="importTemplateLoading" (click)="downloadHvImportTemplate()">
+          {{ importTemplateLoading ? 'Generando plantilla...' : 'Descargar plantilla' }}
+        </button>
         <label class="file-import-button">
           Seleccionar Excel
           <input type="file" accept=".xlsx,.xls,.csv" (change)="onHvImportFileSelected($event)" />
