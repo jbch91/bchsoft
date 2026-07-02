@@ -32,11 +32,11 @@ export class LoginComponent implements OnInit {
 
   ngOnInit(): void {
     const reason = this.route.snapshot.queryParamMap.get('reason') || this.auth.consumeLogoutReason();
-    if (reason === 'idle') {
-      this.sessionMessage = 'Tu sesión se cerró automáticamente por 15 minutos de inactividad.';
-    }
     if (reason === 'expired') {
       this.sessionMessage = 'Tu sesión expiró. Inicia sesión nuevamente para continuar.';
+    }
+    if (reason === 'replaced') {
+      this.sessionMessage = 'Tu sesión se cerró porque iniciaste sesión en otro dispositivo.';
     }
   }
 

@@ -1009,6 +1009,12 @@ app.post('/auth/refresh', async (req, res) => {
     const result = await refreshSession(refreshToken);
     return res.json(result);
   } catch (error) {
+    if (error?.message === 'SESSION_REPLACED') {
+      return res.status(401).json({
+        code: 'SESSION_REPLACED',
+        message: 'Tu sesión se cerró porque iniciaste sesión en otro dispositivo.'
+      });
+    }
     return res.status(401).json({ message: 'Refresh inválido.' });
   }
 });

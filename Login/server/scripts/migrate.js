@@ -10,6 +10,7 @@ const MIGRATIONS = [
   'schema.sql',
   'add_email.sql',
   'refresh_tokens.sql',
+  'single_active_sessions.sql',
   'password_reset.sql',
   'admin_action_confirmations.sql',
   'clients.sql',

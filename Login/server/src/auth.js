@@ -1,7 +1,8 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
-import { query } from './db.js';
+import { randomUUID } from 'crypto';
+import { pool, query } from './db.js';
 import { listClientModules } from './admin.js';
 import { getClientSubscriptionAccess } from './subscriptions.js';
 
@@ -114,12 +115,23 @@ function calculateExpiry(ttl) {
   return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 }
 
-async function storeRefreshToken(userId, refreshToken) {
+async function storeRefreshToken(userId, refreshToken, sessionId, db = { query }) {
   const tokenHash = await bcrypt.hash(refreshToken, 10);
   const expiresAt = calculateExpiry(refreshTtl);
-  await query(
-    'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
-    [userId, tokenHash, expiresAt]
+  await db.query(
+    `INSERT INTO refresh_tokens (user_id, session_id, token_hash, expires_at)
+     VALUES ($1, $2, $3, $4)`,
+    [userId, sessionId, tokenHash, expiresAt]
+  );
+}
+
+async function revokeUserActiveSessions(userId, db = { query }) {
+  await db.query(
+    `UPDATE refresh_tokens
+     SET revoked_at = NOW()
+     WHERE user_id = $1
+       AND revoked_at IS NULL`,
+    [userId]
   );
 }
 
@@ -231,23 +243,36 @@ export async function authenticateUser(username, password) {
   const roles = await loadUserRoles(user.id);
   const permissions = await loadUserPermissions(user.id, user.client_id, roles);
   const subscription = await loadClientSubscription(user.client_id);
+  const sessionId = randomUUID();
 
   const payload = {
     sub: user.id,
     username: user.username,
     displayName: user.display_name,
     clientId: user.client_id,
+    sessionId,
     subscription,
     roles,
     permissions
   };
 
   const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: tokenTtl });
-  const refreshToken = jwt.sign({ sub: user.id }, process.env.JWT_REFRESH_SECRET, {
+  const refreshToken = jwt.sign({ sub: user.id, sessionId }, process.env.JWT_REFRESH_SECRET, {
     expiresIn: refreshTtl
   });
 
-  await storeRefreshToken(user.id, refreshToken);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await revokeUserActiveSessions(user.id, client);
+    await storeRefreshToken(user.id, refreshToken, sessionId, client);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 
   return {
     user: payload,
@@ -258,16 +283,22 @@ export async function authenticateUser(username, password) {
 
 export async function refreshSession(refreshToken) {
   const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+  const decodedSessionId = decoded.sessionId || null;
   const { rows } = await query(
-    'SELECT id, user_id, token_hash, expires_at, revoked_at FROM refresh_tokens WHERE user_id = $1 AND revoked_at IS NULL',
-    [decoded.sub]
+    `SELECT id, user_id, session_id, token_hash, expires_at, revoked_at, replaced_at
+     FROM refresh_tokens
+     WHERE user_id = $1
+       AND revoked_at IS NULL
+       AND replaced_at IS NULL
+       AND ($2::uuid IS NULL OR session_id = $2::uuid)`,
+    [decoded.sub, decodedSessionId]
   );
 
-  let valid = false;
+  let matchedRow = null;
   for (const row of rows) {
     const match = await bcrypt.compare(refreshToken, row.token_hash);
     if (match) {
-      valid = true;
+      matchedRow = row;
       if (new Date(row.expires_at).getTime() < Date.now()) {
         throw new Error('Refresh expired');
       }
@@ -275,7 +306,21 @@ export async function refreshSession(refreshToken) {
     }
   }
 
-  if (!valid) {
+  if (!matchedRow) {
+    if (decodedSessionId) {
+      const replacement = await query(
+        `SELECT 1
+         FROM refresh_tokens
+         WHERE user_id = $1
+           AND session_id = $2
+           AND revoked_at IS NOT NULL
+         LIMIT 1`,
+        [decoded.sub, decodedSessionId]
+      );
+      if (replacement.rows.length) {
+        throw new Error('SESSION_REPLACED');
+      }
+    }
     throw new Error('Invalid refresh token');
   }
 
@@ -294,23 +339,42 @@ export async function refreshSession(refreshToken) {
   const roles = await loadUserRoles(user.id);
   const permissions = await loadUserPermissions(user.id, user.client_id, roles);
   const subscription = await loadClientSubscription(user.client_id);
+  const sessionId = matchedRow.session_id || decodedSessionId || randomUUID();
 
   const payload = {
     sub: user.id,
     username: user.username,
     displayName: user.display_name,
     clientId: user.client_id,
+    sessionId,
     subscription,
     roles,
     permissions
   };
 
   const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: tokenTtl });
-  const newRefreshToken = jwt.sign({ sub: user.id }, process.env.JWT_REFRESH_SECRET, {
+  const newRefreshToken = jwt.sign({ sub: user.id, sessionId }, process.env.JWT_REFRESH_SECRET, {
     expiresIn: refreshTtl
   });
 
-  await storeRefreshToken(user.id, newRefreshToken);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await storeRefreshToken(user.id, newRefreshToken, sessionId, client);
+    await client.query(
+      `UPDATE refresh_tokens
+       SET revoked_at = NOW(),
+           replaced_at = NOW()
+       WHERE id = $1`,
+      [matchedRow.id]
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 
   return {
     user: payload,
@@ -320,11 +384,20 @@ export async function refreshSession(refreshToken) {
 }
 
 export async function revokeRefreshToken(refreshToken) {
-  const { rows } = await query('SELECT id, token_hash FROM refresh_tokens WHERE revoked_at IS NULL');
+  const { rows } = await query(
+    'SELECT id, user_id, session_id, token_hash FROM refresh_tokens WHERE revoked_at IS NULL'
+  );
   for (const row of rows) {
     const match = await bcrypt.compare(refreshToken, row.token_hash);
     if (match) {
-      await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1', [row.id]);
+      await query(
+        `UPDATE refresh_tokens
+         SET revoked_at = NOW()
+         WHERE user_id = $1
+           AND session_id = $2
+           AND revoked_at IS NULL`,
+        [row.user_id, row.session_id]
+      );
       return true;
     }
   }
