@@ -135,6 +135,11 @@
       </div>
 
       <form class="edit-form create-user-form" (ngSubmit)="onCreateUser()">
+        <div class="modal-notices" *ngIf="errorMessage || successMessage">
+          <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+          <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+        </div>
+
         <div class="edit-section">
           <h4>Datos principales</h4>
           <div class="edit-grid">
@@ -213,8 +218,10 @@
         </div>
 
         <div class="edit-actions">
-          <button type="submit" class="save-edit">Crear usuario</button>
-          <button type="button" class="cancel-edit" (click)="closeCreateUserModal()">Cancelar</button>
+          <button type="submit" class="save-edit" [disabled]="creatingUser">
+            {{ creatingUser ? 'Creando...' : 'Crear usuario' }}
+          </button>
+          <button type="button" class="cancel-edit" [disabled]="creatingUser" (click)="closeCreateUserModal()">Cancelar</button>
         </div>
       </form>
     </article>

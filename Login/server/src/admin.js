@@ -480,7 +480,14 @@ export async function createUser({
     [username, email]
   );
   if (existing.length) {
-    return { error: 'DUPLICATE' };
+    const cleanUsername = String(username).trim().toLowerCase();
+    const cleanEmail = String(email).trim().toLowerCase();
+    const fields = new Set();
+    for (const row of existing) {
+      if (String(row.username || '').trim().toLowerCase() === cleanUsername) fields.add('username');
+      if (String(row.email || '').trim().toLowerCase() === cleanEmail) fields.add('email');
+    }
+    return { error: 'DUPLICATE', fields: Array.from(fields) };
   }
 
   const passwordHash = await bcrypt.hash(password, 12);

@@ -61,6 +61,7 @@ export class UsersComponent implements OnInit {
   searchTerm = '';
   activeUserTab: UserTab = 'list';
   createUserModalOpen = false;
+  creatingUser = false;
   editingUserId: string | null = null;
   savingUser = false;
   temporaryPanelUserId: string | null = null;
@@ -548,6 +549,7 @@ export class UsersComponent implements OnInit {
   }
 
   async onCreateUser(): Promise<void> {
+    if (this.creatingUser) return;
     if (!this.username || !this.displayName || !this.email || !this.role) {
       this.errorMessage = 'Completa todos los campos.';
       return;
@@ -569,14 +571,15 @@ export class UsersComponent implements OnInit {
       return;
     }
 
+    this.creatingUser = true;
     this.errorMessage = '';
     this.successMessage = '';
-    const securityCode = await this.requestSecurityCode(
-      'USER_CREATE',
-      `Crear usuario ${this.username.trim()} con rol ${this.roleLabel(this.role)} y enviar correo de acceso`
-    );
-    if (!securityCode) return;
     try {
+      const securityCode = await this.requestSecurityCode(
+        'USER_CREATE',
+        `Crear usuario ${this.username.trim()} con rol ${this.roleLabel(this.role)} y enviar correo de acceso`
+      );
+      if (!securityCode) return;
       await this.admin.createUser({
         username: this.username.trim(),
         displayName: this.displayName.trim(),
@@ -607,6 +610,7 @@ export class UsersComponent implements OnInit {
       this.errorMessage =
         error?.error?.message ?? 'No se pudo crear el usuario.';
     } finally {
+      this.creatingUser = false;
       this.cdr.detectChanges();
     }
   }
@@ -660,6 +664,7 @@ export class UsersComponent implements OnInit {
 
   openCreateUserModal(): void {
     this.createUserModalOpen = true;
+    this.creatingUser = false;
     this.activeUserTab = 'list';
     this.errorMessage = '';
     this.successMessage = '';
@@ -670,6 +675,7 @@ export class UsersComponent implements OnInit {
 
   closeCreateUserModal(): void {
     this.createUserModalOpen = false;
+    this.creatingUser = false;
     this.resetCreateUserForm();
   }
 

@@ -6628,6 +6628,16 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       invimaRegistration: cleanInvimaRegistration
     });
     if (result?.error === 'DUPLICATE') {
+      const fields = result.fields || [];
+      if (fields.includes('username') && fields.includes('email')) {
+        return res.status(409).json({ message: 'El usuario y el correo ya están registrados.' });
+      }
+      if (fields.includes('username')) {
+        return res.status(409).json({ message: 'Ese usuario ya está registrado.' });
+      }
+      if (fields.includes('email')) {
+        return res.status(409).json({ message: 'Ese correo ya está registrado.' });
+      }
       return res.status(409).json({ message: 'Usuario o correo ya existe.' });
     }
 
