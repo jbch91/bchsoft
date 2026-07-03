@@ -1,7 +1,7 @@
 <section class="page">
   <app-module-tabs></app-module-tabs>
 
-  <div class="card filters-card">
+  <div class="card filters-card" *ngIf="clients.length">
     <div class="filters-top" *ngIf="clients.length">
       <div class="filters">
         <label>

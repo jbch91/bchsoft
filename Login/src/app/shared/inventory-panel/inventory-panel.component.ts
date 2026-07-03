@@ -54,10 +54,12 @@ export class InventoryPanelComponent implements OnDestroy {
   @Input() canEdit = false;
   @Input() canMove = false;
   @Input() canUploadHistory = false;
+  @Input() viewInModal = false;
   @Input() showRetired = false;
   @Input() title = 'Inventario';
   @Input() emptyMessage = 'Sin equipos registrados.';
 
+  @Output() viewItem = new EventEmitter<InventoryPanelItem>();
   @Output() editItem = new EventEmitter<InventoryPanelItem>();
   @Output() deleteItem = new EventEmitter<InventoryPanelItem>();
   @Output() movedItem = new EventEmitter<void>();

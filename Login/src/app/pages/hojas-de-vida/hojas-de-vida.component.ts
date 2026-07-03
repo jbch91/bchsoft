@@ -2,12 +2,15 @@ import { ChangeDetectorRef, Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { BiomedService } from '../../biomed/biomed.service';
+import { AssetHistoryItemDto, BiomedService } from '../../biomed/biomed.service';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
 import { getApiBase, getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 import { InventoryPanelComponent, InventoryPanelItem } from '../../shared/inventory-panel/inventory-panel.component';
+import { MaintenanceService } from '../../maintenance/maintenance.service';
+import { CalibrationService } from '../../calibration/calibration.service';
+import { QuickGuidesService } from '../../quick-guides/quick-guides.service';
 import { Workbook as ExcelWorkbookConstructor } from 'exceljs';
 import * as XLSX from 'xlsx';
 
@@ -155,6 +158,7 @@ export class HojasDeVidaComponent {
   private readonly maxPdfSizeMb = 10;
   private readonly maxImportRows = 500;
   private readonly maxImportFileSizeMb = 10;
+  private pendingRouteAssetId: string | null = null;
   clients: ClientOption[] = [];
   clientSearchTerm = '';
   selectedClientId = '';
@@ -174,6 +178,21 @@ export class HojasDeVidaComponent {
   errorMessage = '';
   successMessage = '';
   viewMode: 'inventory' | 'form' | 'areas' = 'inventory';
+  importPanelOpen = false;
+  assetModalMode: 'create' | 'edit' | 'view' | null = null;
+  selectedAssetForModal: AssetView | null = null;
+  assetDetailsLoading = false;
+  detailModalTab: 'summary' | 'history' | 'documents' = 'summary';
+  assetHistoryItems: AssetHistoryItemDto[] = [];
+  assetHistoryLoading = false;
+  assetHistoryError = '';
+  assetHistoryFrom = '';
+  assetHistoryTo = '';
+  assetHistoryOrder: 'asc' | 'desc' = 'desc';
+  assetHistoryLimit = 8;
+  assetHistoryOffset = 0;
+  assetHistoryHasMore = false;
+  private assetHistoryLoadToken = 0;
   formMode: 'full' | 'wizard' = 'wizard';
   wizardStep = 0;
   readonly wizardSteps = [
@@ -274,15 +293,19 @@ export class HojasDeVidaComponent {
   constructor(
     private readonly biomed: BiomedService,
     private readonly admin: AdminService,
+    private readonly maintenance: MaintenanceService,
+    private readonly calibration: CalibrationService,
+    private readonly quickGuides: QuickGuidesService,
     public readonly auth: AuthService,
     private readonly cdr: ChangeDetectorRef,
     private readonly route: ActivatedRoute
   ) {
     void this.init();
     this.route.queryParams.subscribe((params) => {
-      const assetId = params['assetId'];
+      const assetId = typeof params['assetId'] === 'string' ? params['assetId'] : '';
       if (assetId) {
-        void this.loadAssetDetails(assetId);
+        this.pendingRouteAssetId = assetId;
+        void this.openPendingRouteAsset();
       }
     });
   }
@@ -389,6 +412,16 @@ export class HojasDeVidaComponent {
     await this.loadSites();
     await this.loadAreas();
     await this.loadAssets();
+    await this.openPendingRouteAsset();
+  }
+
+  private async openPendingRouteAsset(): Promise<void> {
+    if (!this.pendingRouteAssetId || !this.selectedClientId) {
+      return;
+    }
+    const assetId = this.pendingRouteAssetId;
+    this.pendingRouteAssetId = null;
+    await this.openViewModal({ id: assetId } as InventoryPanelItem);
   }
 
   getSelectedSiteName(): string {
@@ -427,6 +460,209 @@ export class HojasDeVidaComponent {
 
   get canOpenFormTab(): boolean {
     return this.auth.hasPermission('hb:create') || this.auth.hasPermission('hb:import');
+  }
+
+  get canImportAssets(): boolean {
+    return this.auth.hasPermission('hb:import');
+  }
+
+  get canCreateAssets(): boolean {
+    return this.auth.hasPermission('hb:create');
+  }
+
+  get assetFormModalOpen(): boolean {
+    return this.assetModalMode === 'create' || this.assetModalMode === 'edit';
+  }
+
+  toggleImportPanel(): void {
+    if (!this.canImportAssets) return;
+    this.importPanelOpen = !this.importPanelOpen;
+  }
+
+  async openCreateModal(): Promise<void> {
+    if (!this.canCreateAssets) return;
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.selectedAssetForModal = null;
+    this.resetForm();
+    await this.loadLocationsForForm();
+    this.assetModalMode = 'create';
+    this.formMode = 'wizard';
+    this.wizardStep = 0;
+    this.cdr.detectChanges();
+  }
+
+  async openViewModal(asset: InventoryPanelItem): Promise<void> {
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.selectedAssetForModal = this.assets.find((item) => item.id === asset.id) ?? (asset as AssetView);
+    this.assetModalMode = 'view';
+    this.detailModalTab = 'summary';
+    this.resetAssetHistory();
+    this.assetDetailsLoading = true;
+    try {
+      await this.loadAssetDetails(asset.id);
+      void this.loadAssetHistory(true);
+    } catch (error) {
+      console.error(error);
+      this.errorMessage = 'No se pudo cargar la hoja de vida.';
+    } finally {
+      this.assetDetailsLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  async openEditModal(asset: InventoryPanelItem): Promise<void> {
+    if (!this.canCreateAssets) return;
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.selectedAssetForModal = this.assets.find((item) => item.id === asset.id) ?? (asset as AssetView);
+    this.assetModalMode = 'edit';
+    this.assetDetailsLoading = true;
+    this.formMode = 'wizard';
+    this.wizardStep = 0;
+    try {
+      await this.loadAssetDetails(asset.id);
+    } catch (error) {
+      console.error(error);
+      this.errorMessage = 'No se pudo cargar la hoja de vida para edición.';
+    } finally {
+      this.assetDetailsLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  editFromViewModal(): void {
+    if (!this.canCreateAssets || !this.selectedAssetForModal) return;
+    this.assetModalMode = 'edit';
+    this.formMode = 'wizard';
+    this.wizardStep = 0;
+  }
+
+  closeAssetModal(): void {
+    this.assetModalMode = null;
+    this.selectedAssetForModal = null;
+    this.assetDetailsLoading = false;
+    this.detailModalTab = 'summary';
+    this.resetAssetHistory();
+    this.resetForm();
+    this.cdr.detectChanges();
+  }
+
+  setDetailModalTab(tab: 'summary' | 'history' | 'documents'): void {
+    this.detailModalTab = tab;
+    if (tab === 'history' && !this.assetHistoryItems.length && !this.assetHistoryLoading) {
+      void this.loadAssetHistory(true);
+    }
+  }
+
+  resetAssetHistory(): void {
+    this.assetHistoryItems = [];
+    this.assetHistoryLoading = false;
+    this.assetHistoryError = '';
+    this.assetHistoryFrom = '';
+    this.assetHistoryTo = '';
+    this.assetHistoryOrder = 'desc';
+    this.assetHistoryOffset = 0;
+    this.assetHistoryHasMore = false;
+    this.assetHistoryLoadToken += 1;
+  }
+
+  async loadAssetHistory(reset = true): Promise<void> {
+    if (!this.selectedClientId || !this.selectedAssetForModal?.id) {
+      this.assetHistoryItems = [];
+      return;
+    }
+    if (reset) {
+      this.assetHistoryOffset = 0;
+      this.assetHistoryHasMore = false;
+      this.assetHistoryItems = [];
+    }
+    const token = ++this.assetHistoryLoadToken;
+    this.assetHistoryLoading = true;
+    this.assetHistoryError = '';
+    try {
+      const rows = await this.biomed.listAssetHistory(this.selectedClientId, this.selectedAssetForModal.id, {
+        from: this.assetHistoryFrom || undefined,
+        to: this.assetHistoryTo || undefined,
+        order: this.assetHistoryOrder,
+        limit: this.assetHistoryLimit,
+        offset: this.assetHistoryOffset
+      });
+      if (token !== this.assetHistoryLoadToken) return;
+      this.assetHistoryItems = rows;
+      this.assetHistoryHasMore = rows.length === this.assetHistoryLimit;
+    } catch (error) {
+      console.error(error);
+      if (token !== this.assetHistoryLoadToken) return;
+      this.assetHistoryItems = [];
+      this.assetHistoryHasMore = false;
+      this.assetHistoryError = 'No se pudo cargar el historial del equipo.';
+    } finally {
+      if (token === this.assetHistoryLoadToken) {
+        this.assetHistoryLoading = false;
+        this.cdr.detectChanges();
+      }
+    }
+  }
+
+  async nextAssetHistoryPage(): Promise<void> {
+    if (this.assetHistoryLoading || !this.assetHistoryHasMore) return;
+    this.assetHistoryOffset += this.assetHistoryLimit;
+    await this.loadAssetHistory(false);
+  }
+
+  async previousAssetHistoryPage(): Promise<void> {
+    if (this.assetHistoryLoading || this.assetHistoryOffset === 0) return;
+    this.assetHistoryOffset = Math.max(0, this.assetHistoryOffset - this.assetHistoryLimit);
+    await this.loadAssetHistory(false);
+  }
+
+  assetHistoryTypeLabel(item: AssetHistoryItemDto): string {
+    if (item.item_type === 'maintenance_report') {
+      return item.subtype === 'preventivo' ? 'Mantenimiento preventivo' : 'Mantenimiento correctivo';
+    }
+    if (item.item_type === 'calibration_report') return 'Calibración';
+    if (item.item_type === 'movement_report') return 'Movimiento';
+    return 'PDF histórico';
+  }
+
+  async openSelectedAssetPdf(): Promise<void> {
+    if (!this.selectedAssetForModal) return;
+    await this.downloadPdf(this.selectedAssetForModal);
+  }
+
+  async openSelectedAssetQuickGuide(): Promise<void> {
+    if (!this.selectedClientId || !this.selectedAssetForModal?.id) return;
+    try {
+      const blob = await this.quickGuides.downloadAssetGuidePdf(this.selectedClientId, this.selectedAssetForModal.id);
+      this.openBlob(blob);
+    } catch (error: any) {
+      if (error?.status === 404) {
+        window.alert('Este equipo aún no tiene una guía rápida aprobada para su marca y modelo.');
+        return;
+      }
+      window.alert('No se pudo abrir la guía rápida de uso.');
+    }
+  }
+
+  async openAssetHistoryItem(item: AssetHistoryItemDto): Promise<void> {
+    if (!item.pdf_path) return;
+    if (item.item_type === 'maintenance_report') {
+      this.openBlob(await this.maintenance.downloadReportPdf(item.id));
+      return;
+    }
+    if (item.item_type === 'calibration_report') {
+      this.openBlob(await this.calibration.downloadPdf(item.id));
+      return;
+    }
+    if (item.item_type === 'movement_report') {
+      if (!this.selectedClientId) return;
+      this.openBlob(await this.biomed.downloadAssetMovementPdf(this.selectedClientId, item.id));
+      return;
+    }
+    if (!this.selectedClientId) return;
+    this.openBlob(await this.biomed.downloadAssetHistoryFilePdf(this.selectedClientId, item.id));
   }
 
   async downloadHvImportTemplate(): Promise<void> {
@@ -724,7 +960,7 @@ export class HojasDeVidaComponent {
       this.importFileName = '';
       await this.loadAssets();
       this.resetForm();
-      this.viewMode = 'inventory';
+      this.importPanelOpen = false;
     } catch (error) {
       console.error(error);
       this.setImportMessage(
@@ -1575,6 +1811,8 @@ export class HojasDeVidaComponent {
       }
 
       this.resetForm();
+      this.assetModalMode = null;
+      this.selectedAssetForModal = null;
       await this.loadAssets();
     } catch (error) {
       console.error(error);
@@ -1583,12 +1821,11 @@ export class HojasDeVidaComponent {
   }
 
   startEdit(asset: InventoryPanelItem): void {
-    void this.loadAssetDetails(asset.id);
-    this.viewMode = 'form';
+    void this.openEditModal(asset);
   }
 
   cancelEdit(): void {
-    this.resetForm();
+    this.closeAssetModal();
   }
 
   resetForm(): void {
@@ -1741,7 +1978,11 @@ export class HojasDeVidaComponent {
 
   async downloadPdf(asset: AssetView): Promise<void> {
     if (!this.selectedClientId) return;
-    const blob = await this.biomed.downloadAssetPdf(this.selectedClientId, asset.id);
+    const blob = await this.biomed.downloadAssetFullPdf(this.selectedClientId, asset.id);
+    this.openBlob(blob);
+  }
+
+  private openBlob(blob: Blob): void {
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
     setTimeout(() => URL.revokeObjectURL(url), 5000);

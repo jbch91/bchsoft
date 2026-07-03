@@ -120,7 +120,9 @@ export class CronogramasComponent implements OnInit {
       await this.loadSchedules();
       await this.loadAreas();
       await this.loadTrainingSchedules();
-      await this.loadCalibrationSchedules();
+      if (this.canAccessCalibrationModule()) {
+        await this.loadCalibrationSchedules();
+      }
       return;
     }
     const rows = await this.admin.listClients();
@@ -137,7 +139,9 @@ export class CronogramasComponent implements OnInit {
     await this.loadSchedules();
     await this.loadAreas();
     await this.loadTrainingSchedules();
-    await this.loadCalibrationSchedules();
+    if (this.canAccessCalibrationModule()) {
+      await this.loadCalibrationSchedules();
+    }
   }
 
   async loadSchedules(): Promise<void> {
@@ -165,7 +169,16 @@ export class CronogramasComponent implements OnInit {
     await this.loadSchedules();
     await this.loadAreas();
     await this.loadTrainingSchedules();
-    await this.loadCalibrationSchedules();
+    if (this.canAccessCalibrationModule()) {
+      await this.loadCalibrationSchedules();
+    } else {
+      this.calibrationSchedules = [];
+      this.selectedCalibrationScheduleId = '';
+      this.calibrationItems = [];
+      if (this.viewMode === 'calibration') {
+        this.viewMode = 'maintenance';
+      }
+    }
   }
 
   async loadCalibrationSchedules(): Promise<void> {
@@ -339,6 +352,10 @@ export class CronogramasComponent implements OnInit {
 
   canUploadCalibration(item: CalibrationItemDto): boolean {
     return this.auth.hasPermission('calibration:report:upload') && this.calibrationItemStatus(item) === 'Activo';
+  }
+
+  canAccessCalibrationModule(): boolean {
+    return this.auth.hasPermission('calibration:schedule:manage') || this.auth.hasPermission('calibration:report:upload');
   }
 
   get selectedClient(): ClientOption | null {

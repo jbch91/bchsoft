@@ -182,7 +182,7 @@ export class ModuleTabsComponent implements OnInit {
       return true;
     }
     if (!this.enabledModules) {
-      return true;
+      return false;
     }
     return this.enabledModules.has(moduleKey);
   }

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, effect, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, effect, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter, firstValueFrom } from 'rxjs';
@@ -138,14 +138,15 @@ export class App {
     public readonly auth: AuthService,
     private readonly http: HttpClient,
     private readonly router: Router,
-    private readonly sessionTimeout: SessionTimeoutService
+    private readonly sessionTimeout: SessionTimeoutService,
+    private readonly cdr: ChangeDetectorRef
   ) {
     this.currentPath = this.router.url.split('?')[0];
     this.router.events
       .pipe(filter((event): event is NavigationEnd => event instanceof NavigationEnd))
       .subscribe((event) => {
         this.currentPath = event.urlAfterRedirects.split('?')[0];
-        void this.loadShellData();
+        this.scheduleShellDataLoad();
       });
 
     effect(() => {
@@ -158,12 +159,12 @@ export class App {
         return;
       }
       this.sessionTimeout.start();
-      void this.loadShellData();
+      this.scheduleShellDataLoad();
     });
   }
 
   shellVisible(): boolean {
-    return Boolean(this.auth.currentUser() && !this.currentPath.startsWith('/login'));
+    return Boolean(this.auth.isAuthenticated() && !this.currentPath.startsWith('/login'));
   }
 
   routeEyebrow(): string {
@@ -223,6 +224,12 @@ export class App {
     };
   }
 
+  private scheduleShellDataLoad(): void {
+    setTimeout(() => {
+      void this.loadShellData();
+    }, 0);
+  }
+
   private async loadShellData(): Promise<void> {
     if (this.loadingShellData || !this.shellVisible()) return;
     const token = this.auth.tokens()?.accessToken;
@@ -236,45 +243,31 @@ export class App {
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache'
       });
-      const tasks: Promise<unknown>[] = [
-        firstValueFrom(
-          this.http.get<ShellSoftwareSuite[]>(`${this.apiBase}/software-suites/me?t=${Date.now()}`, { headers })
-        )
-          .then((suites) => {
-            this.softwareSuites = suites;
-          })
-          .catch(() => {
-            this.softwareSuites = [];
-          })
-      ];
+      const nextSoftwareSuites = await firstValueFrom(
+        this.http.get<ShellSoftwareSuite[]>(`${this.apiBase}/software-suites/me?t=${Date.now()}`, { headers })
+      ).catch(() => []);
+
+      let nextClientInfo: ShellClientInfo | null = null;
+      let nextSubscription: ShellSubscription | null = null;
 
       if (user.clientId) {
-        tasks.push(
+        [nextClientInfo, nextSubscription] = await Promise.all([
           firstValueFrom(
             this.http.get<ShellClientInfo>(`${this.apiBase}/clients/me?t=${Date.now()}`, { headers })
-          )
-            .then((client) => {
-              this.clientInfo = client;
-            })
-            .catch(() => {})
-        );
-        tasks.push(
+          ).catch(() => this.clientInfo),
           firstValueFrom(
             this.http.get<ShellSubscription | null>(`${this.apiBase}/subscription/me?t=${Date.now()}`, { headers })
-          )
-            .then((subscription) => {
-              this.subscription = subscription;
-            })
-            .catch(() => {
-              this.subscription = null;
-            })
-        );
-      } else {
-        this.clientInfo = null;
-        this.subscription = null;
+          ).catch(() => null)
+        ]);
       }
 
-      await Promise.all(tasks);
+      setTimeout(() => {
+        if (this.auth.currentUser()?.id !== user.id || !this.shellVisible()) return;
+        this.softwareSuites = nextSoftwareSuites;
+        this.clientInfo = user.clientId ? nextClientInfo : null;
+        this.subscription = user.clientId ? nextSubscription : null;
+        this.cdr.detectChanges();
+      }, 0);
     } finally {
       this.loadingShellData = false;
     }

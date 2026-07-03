@@ -10,6 +10,7 @@ import { finished } from 'stream/promises';
 import { promisify } from 'util';
 import multer from 'multer';
 import sharp from 'sharp';
+import { PDFDocument as PdfMergerDocument } from 'pdf-lib';
 import { query } from './db.js';
 import {
   authenticateUser,
@@ -670,9 +671,9 @@ function isSuperuserVisibleRolePermission(permission) {
 }
 
 function denyPlatformOperationalAccess(req, res, next) {
-  if (isSuperuser(req.user)) {
+  if (isSuperuser(req.user) || isPlatformUser(req.user) || !req.user?.clientId) {
     return res.status(403).json({
-      message: 'El superadmin administra la plataforma. Para ver datos operativos usa un administrador del cliente.'
+      message: 'La operación de clientes requiere una cuenta asignada al cliente. Usa un usuario interno del cliente para acceder a datos operativos.'
     });
   }
   return next();
@@ -2772,6 +2773,61 @@ function resolveStoredFilePath(filePath) {
   if (!clean) return null;
   const fullPath = path.join(process.cwd(), clean);
   return fs.existsSync(fullPath) ? fullPath : null;
+}
+
+function buildPdfKitBuffer(builder) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const chunks = [];
+    doc.on('data', (chunk) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    builder(doc);
+    doc.end();
+  });
+}
+
+async function resolveAssetHistoryPdfFile(item) {
+  let filePath = resolveStoredFilePath(item.pdf_path);
+  if (!filePath && item.item_type === 'maintenance_report') {
+    const publicPath = await writeMaintenanceReportPdfFile(item.id);
+    filePath = resolveStoredFilePath(publicPath);
+  }
+  return filePath;
+}
+
+async function appendPdfFile(mergedPdf, filePath) {
+  const sourceBytes = await fs.promises.readFile(filePath);
+  const sourcePdf = await PdfMergerDocument.load(sourceBytes, {
+    ignoreEncryption: true,
+    updateMetadata: false
+  });
+  const pages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+  for (const page of pages) {
+    mergedPdf.addPage(page);
+  }
+}
+
+async function buildAssetFullHistoryPdfBuffer({ client, asset, historyItems }) {
+  const mergedPdf = await PdfMergerDocument.create({ updateMetadata: false });
+  const basePdfBuffer = await buildPdfKitBuffer((doc) => buildAssetPdf(doc, { client, asset }));
+  const basePdf = await PdfMergerDocument.load(basePdfBuffer, { updateMetadata: false });
+  const basePages = await mergedPdf.copyPages(basePdf, basePdf.getPageIndices());
+  for (const page of basePages) {
+    mergedPdf.addPage(page);
+  }
+
+  for (const item of historyItems) {
+    const filePath = await resolveAssetHistoryPdfFile(item);
+    if (!filePath) continue;
+    try {
+      await appendPdfFile(mergedPdf, filePath);
+    } catch (error) {
+      console.warn(`No se pudo anexar PDF histórico ${item.id}`, error.message);
+    }
+  }
+
+  return Buffer.from(await mergedPdf.save());
 }
 
 function drawClientLogoOrBadge(doc, client, { x, y, fit = [84, 42] }) {
@@ -8827,6 +8883,59 @@ app.get(
     doc.pipe(res);
     buildAssetPdf(doc, { client, asset });
     doc.end();
+  }
+);
+
+app.get(
+  '/biomed/:clientId/assets/:assetId/full-pdf',
+  requireAuth,
+  requireAnyPermission(['hb:create', 'hb:view', 'read:all']),
+  async (req, res) => {
+    const { clientId, assetId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (req.user.roles?.includes('lector')) {
+      const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
+      if (!allowed) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+    }
+
+    try {
+      const client = await getClientById(clientId);
+      let asset = await getAssetById(clientId, assetId);
+      if (!client || !asset) {
+        return res.status(404).json({ message: 'No encontrado.' });
+      }
+      asset = await backfillHvEngineerFromAudit(clientId, asset);
+      const historyItems = [];
+      const pageSize = 100;
+      for (let offset = 0; ; offset += pageSize) {
+        const rows = await listAssetHistory(clientId, assetId, {
+          order: 'desc',
+          limit: pageSize,
+          offset
+        });
+        historyItems.push(...rows);
+        if (rows.length < pageSize) break;
+      }
+      const pdfBuffer = await buildAssetFullHistoryPdfBuffer({
+        client,
+        asset,
+        historyItems
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${pdfFilename(`hv-completa-${asset.code || asset.id}`)}.pdf"`
+      );
+      return res.send(pdfBuffer);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo generar la hoja de vida completa.' });
+    }
   }
 );
 

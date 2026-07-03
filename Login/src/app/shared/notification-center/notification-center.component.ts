@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { AppNotificationDto, NotificationsService } from '../../notifications/notifications.service';
 
@@ -18,11 +18,14 @@ export class NotificationCenterComponent implements OnInit, OnDestroy {
 
   constructor(
     private readonly notificationsService: NotificationsService,
-    private readonly router: Router
+    private readonly router: Router,
+    private readonly cdr: ChangeDetectorRef
   ) {}
 
-  async ngOnInit(): Promise<void> {
-    await this.load();
+  ngOnInit(): void {
+    setTimeout(() => {
+      void this.load();
+    }, 0);
     this.timer = setInterval(() => void this.load(false), 60000);
   }
 
@@ -51,6 +54,7 @@ export class NotificationCenterComponent implements OnInit, OnDestroy {
       console.error(error);
     } finally {
       this.loading = false;
+      this.cdr.detectChanges();
     }
   }
 
@@ -103,6 +107,7 @@ export class NotificationCenterComponent implements OnInit, OnDestroy {
       ...notification,
       read_at: notification.read_at || new Date().toISOString()
     }));
+    this.cdr.detectChanges();
   }
 
   priorityLabel(priority?: string | null): string {

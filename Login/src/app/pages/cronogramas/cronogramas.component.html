@@ -52,6 +52,7 @@
     <button
       type="button"
       class="tab"
+      *ngIf="canAccessCalibrationModule()"
       [class.active]="viewMode === 'calibration'"
       (click)="viewMode = 'calibration'"
     >
@@ -382,7 +383,7 @@
   </div>
   </ng-container>
 
-  <ng-container *ngIf="viewMode === 'calibration'">
+  <ng-container *ngIf="viewMode === 'calibration' && canAccessCalibrationModule()">
     <div class="card header-card">
       <div class="form-grid">
         <label>

@@ -26,7 +26,7 @@ export const accessGuard: CanActivateFn = async (route) => {
 
   const data = route.data as AccessData | undefined;
 
-  if (auth.hasRole('superuser') && data?.suiteKey) {
+  if (data?.suiteKey && !auth.currentUser()?.clientId) {
     return router.createUrlTree(['/no-autorizado']);
   }
 

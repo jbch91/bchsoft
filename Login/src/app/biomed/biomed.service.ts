@@ -115,6 +115,14 @@ export class BiomedService {
     );
   }
 
+  async downloadAssetFullPdf(clientId: string, assetId: string): Promise<Blob> {
+    return firstValueFrom(
+      this.http.get(`${this.apiBase}/biomed/${clientId}/assets/${assetId}/full-pdf`, {
+        responseType: 'blob'
+      })
+    );
+  }
+
   async listAreas(clientId: string): Promise<AreaDto[]> {
     return firstValueFrom(this.http.get<AreaDto[]>(`${this.apiBase}/biomed/${clientId}/areas`));
   }

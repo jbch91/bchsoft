@@ -28,205 +28,28 @@
     </div>
   </div>
 
-  <div class="tab-bar">
-    <button
-      type="button"
-      class="tab"
-      [class.active]="viewMode === 'inventory'"
-      (click)="viewMode = 'inventory'"
-    >
-      Inventario
-    </button>
-    <button
-      type="button"
-      class="tab"
-      *ngIf="canOpenFormTab"
-      [class.active]="viewMode === 'form'"
-      (click)="viewMode = 'form'"
-    >
-      Crear/Importar hoja de vida
-    </button>
-    <button
-      type="button"
-      class="tab"
-      *ngIf="auth.hasPermission('areas:manage')"
-      [class.active]="viewMode === 'areas'"
-      (click)="viewMode = 'areas'"
-    >
-      Áreas y ubicaciones
-    </button>
-  </div>
-
-  <div class="admin-tools" *ngIf="auth.hasPermission('areas:manage') && viewMode === 'areas'">
-    <div class="sub-tabs">
-      <button
-        type="button"
-        class="sub-tab"
-        [class.active]="areasView === 'list'"
-        (click)="areasView = 'list'"
-      >
-        Listado
+  <div class="list-actions">
+    <div>
+      <h2>Hojas de vida</h2>
+    </div>
+    <div class="list-action-buttons">
+      <button type="button" class="primary" *ngIf="canCreateAssets" (click)="openCreateModal()">
+        Crear hoja de vida
       </button>
       <button
         type="button"
-        class="sub-tab"
-        [class.active]="areasView === 'create-site'"
-        (click)="areasView = 'create-site'"
+        class="ghost"
+        *ngIf="canImportAssets"
+        [class.active-action]="importPanelOpen"
+        (click)="toggleImportPanel()"
       >
-        Crear sede
+        Importar hojas de vida
       </button>
-      <button
-        type="button"
-        class="sub-tab"
-        [class.active]="areasView === 'create-area'"
-        (click)="areasView = 'create-area'"
-      >
-        Crear área
-      </button>
-      <button
-        type="button"
-        class="sub-tab"
-        [class.active]="areasView === 'create-location'"
-        (click)="areasView = 'create-location'"
-      >
-        Crear ubicación
-      </button>
-    </div>
-    <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
-
-    <div class="tool-card" *ngIf="areasView === 'list'">
-      <h3>Sedes, áreas y ubicaciones</h3>
-      <p class="muted" *ngIf="!sites.length">Aún no hay sedes creadas para este cliente.</p>
-      <div class="tree">
-        <div class="tree-item site-item" *ngFor="let site of sites; trackBy: trackBySiteId">
-          <div class="tree-row site-row">
-            <div>
-              <strong>{{ site.name }}</strong>
-              <small *ngIf="site.address">{{ site.address }}</small>
-            </div>
-            <div class="tree-actions">
-              <button type="button" class="tiny" (click)="startEditSite(site.id)">Editar</button>
-              <button type="button" class="tiny danger" (click)="onDeleteSite(site.id)">Eliminar</button>
-            </div>
-          </div>
-          <div class="tree-edit" *ngIf="editingSiteId === site.id">
-            <input type="text" [(ngModel)]="siteEdits[site.id]" placeholder="Nombre de la sede" />
-            <input type="text" [(ngModel)]="siteAddressEdits[site.id]" placeholder="Dirección o referencia" />
-            <button type="button" class="tiny" (click)="onUpdateSite(site.id)">Guardar</button>
-            <button type="button" class="tiny ghost" (click)="cancelEditSite()">Cancelar</button>
-          </div>
-
-          <div class="tree-children">
-            <div class="tree-item" *ngFor="let area of areasBySite(site.id); trackBy: trackByAreaId">
-              <div class="tree-row">
-                <strong>{{ area.name }}</strong>
-                <div class="tree-actions">
-                  <button type="button" class="tiny" (click)="startEditArea(area.id)">Editar</button>
-                  <button type="button" class="tiny danger" (click)="onDeleteArea(area.id)">Eliminar</button>
-                </div>
-              </div>
-              <div class="tree-edit" *ngIf="editingAreaId === area.id">
-                <input type="text" [(ngModel)]="areaEdits[area.id]" />
-                <button type="button" class="tiny" (click)="onUpdateArea(area.id)">Guardar</button>
-                <button type="button" class="tiny ghost" (click)="cancelEditArea()">Cancelar</button>
-              </div>
-
-              <div class="tree-children">
-                <div class="tree-row child" *ngFor="let location of locationsByArea(area.id); trackBy: trackByLocationId">
-                  <span>{{ location.name }}</span>
-                  <div class="tree-actions">
-                    <button type="button" class="tiny" (click)="startEditLocation(location.id)">Editar</button>
-                    <button type="button" class="tiny danger" (click)="onDeleteLocation(location.id)">Eliminar</button>
-                  </div>
-                </div>
-                <div class="tree-edit child" *ngIf="isEditingLocationInArea(area.id)">
-                  <input type="text" [(ngModel)]="locationEdits[editingLocationId!]" />
-                  <button type="button" class="tiny" (click)="onUpdateLocation(editingLocationId!)">Guardar</button>
-                  <button type="button" class="tiny ghost" (click)="cancelEditLocation()">Cancelar</button>
-                </div>
-              </div>
-            </div>
-            <p class="muted" *ngIf="!areasBySite(site.id).length">Sin áreas registradas en esta sede.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="tool-card" *ngIf="areasView === 'create-site'">
-      <h3>Crear sede</h3>
-      <div class="row compact">
-        <input type="text" [(ngModel)]="newSiteName" placeholder="Nombre de la sede" />
-        <input type="text" [(ngModel)]="newSiteAddress" placeholder="Dirección o referencia" />
-        <button type="button" (click)="onCreateSite()">Agregar</button>
-      </div>
-      <div class="tree compact-list">
-        <div class="tree-item" *ngFor="let site of sites; trackBy: trackBySiteId">
-          <div class="tree-row">
-            <strong>{{ site.name }}</strong>
-            <span>{{ site.address || 'Sin dirección' }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="tool-card" *ngIf="areasView === 'create-area'">
-      <h3>Crear área</h3>
-      <div class="row compact">
-        <select [(ngModel)]="siteId" (change)="onSiteForFormChange()">
-          <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
-        </select>
-        <input type="text" [(ngModel)]="newAreaName" placeholder="Nombre del área" />
-        <button type="button" (click)="onCreateArea()">Agregar</button>
-      </div>
-      <div class="tree compact-list">
-        <div class="tree-item" *ngFor="let site of sites; trackBy: trackBySiteId">
-          <div class="tree-row">
-            <strong>{{ site.name }}</strong>
-          </div>
-          <div class="tree-children two-column-list">
-            <div class="tree-row child text-only" *ngFor="let area of areasBySite(site.id); trackBy: trackByAreaId">
-              <span>{{ area.name }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="tool-card" *ngIf="areasView === 'create-location'">
-      <h3>Crear ubicación</h3>
-      <div class="row compact">
-        <select [(ngModel)]="siteId" (change)="onSiteForFormChange()">
-          <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
-        </select>
-        <select [(ngModel)]="areaId" (change)="loadLocationsForForm()">
-          <option *ngFor="let area of areasForSelectedSite()" [value]="area.id">{{ area.name }}</option>
-        </select>
-        <input type="text" [(ngModel)]="newLocationName" placeholder="Nombre de la ubicación" />
-        <button type="button" (click)="onCreateLocation()">Agregar</button>
-      </div>
-      <div class="tree compact-list">
-        <div class="tree-item" *ngFor="let site of sites; trackBy: trackBySiteId">
-          <div class="tree-row">
-            <strong>{{ site.name }}</strong>
-          </div>
-          <div class="tree-children">
-            <div class="tree-item" *ngFor="let area of areasBySite(site.id); trackBy: trackByAreaId">
-              <div class="tree-row child">
-                <strong>{{ area.name }}</strong>
-              </div>
-              <div class="tree-children two-column-list">
-                <div class="tree-row child text-only" *ngFor="let location of locationsByArea(area.id); trackBy: trackByLocationId">
-                  <span>{{ location.name }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
+  <p class="success page-feedback" *ngIf="successMessage && !assetFormModalOpen">{{ successMessage }}</p>
 
   <app-inventory-panel
-    *ngIf="viewMode === 'inventory'"
     [items]="assets"
     [selectedClientId]="selectedClientId"
     [loading]="loading"
@@ -234,13 +57,15 @@
     [canEdit]="auth.hasPermission('hb:create')"
     [canMove]="auth.hasPermission('inventory:move')"
     [canUploadHistory]="auth.hasPermission('asset_history:upload')"
+    [viewInModal]="true"
     title="Inventario de hojas de vida"
+    (viewItem)="openViewModal($event)"
     (editItem)="startEdit($event)"
     (deleteItem)="deleteAsset($event)"
     (movedItem)="loadAssets()"
   ></app-inventory-panel>
 
-  <div class="grid" *ngIf="viewMode === 'form'">
+  <div class="grid import-grid" *ngIf="importPanelOpen && canImportAssets">
     <div class="card full import-card" *ngIf="auth.hasPermission('hb:import')">
       <div class="import-header">
         <div>
@@ -313,9 +138,22 @@
       </div>
     </div>
 
-    <div class="card full" *ngIf="auth.hasPermission('hb:create')">
-      <h2>{{ editingAssetId ? 'Editar hoja de vida' : 'Crear hoja de vida' }}</h2>
-      <form (ngSubmit)="onCreateAsset()">
+  </div>
+
+  <div class="modal-backdrop" *ngIf="assetFormModalOpen">
+    <div class="modal-shell form-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div>
+          <span>{{ assetModalMode === 'edit' ? 'Editar' : 'Crear' }}</span>
+          <h2>{{ assetModalMode === 'edit' ? 'Editar hoja de vida' : 'Crear hoja de vida' }}</h2>
+        </div>
+        <button type="button" class="modal-close" (click)="closeAssetModal()">Cerrar</button>
+      </div>
+
+      <div class="modal-loading" *ngIf="assetDetailsLoading">Cargando hoja de vida...</div>
+
+      <div class="card full modal-card" *ngIf="canCreateAssets && !assetDetailsLoading">
+        <form (ngSubmit)="onCreateAsset()">
         <div class="form-section" *ngIf="showSection(0)">
           <h3>DATOS DEL EQUIPO</h3>
           <div class="section-grid">
@@ -422,8 +260,8 @@
                 Humedad máx de operación
                 <input type="number" name="humidityMax" [(ngModel)]="humidityMax" />
               </label>
-    </div>
-  </div>
+            </div>
+          </div>
         </div>
 
         <div class="form-section" *ngIf="showSection(1)">
@@ -629,16 +467,177 @@
         <button type="submit" *ngIf="formMode === 'full' || isLastStep()">
           {{ editingAssetId ? 'Guardar cambios' : 'Crear' }}
         </button>
-        <button type="button" class="ghost" *ngIf="editingAssetId" (click)="cancelEdit()">Cancelar</button>
-      </form>
-      <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
-      <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+        <button type="button" class="ghost" (click)="cancelEdit()">Cancelar</button>
+        </form>
+        <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+        <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+      </div>
     </div>
-
   </div>
 
-  <div class="card full" *ngIf="viewMode === 'form' && !canOpenFormTab">
-    <h2>Solo lectura</h2>
-    <p>Tu rol no tiene permisos para crear, editar o importar hojas de vida.</p>
+  <div class="modal-backdrop" *ngIf="assetModalMode === 'view'">
+    <div class="modal-shell detail-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div>
+          <span>Hoja de vida</span>
+          <h2>{{ name || selectedAssetForModal?.name || 'Detalle del equipo' }}</h2>
+        </div>
+        <button type="button" class="modal-close" (click)="closeAssetModal()">Cerrar</button>
+      </div>
+
+      <div class="modal-loading" *ngIf="assetDetailsLoading">Cargando hoja de vida...</div>
+
+      <div class="detail-content" *ngIf="!assetDetailsLoading">
+        <div class="detail-summary">
+          <div>
+            <span>Código</span>
+            <strong>{{ code || selectedAssetForModal?.code || '-' }}</strong>
+          </div>
+          <div>
+            <span>Equipo</span>
+            <strong>{{ name || selectedAssetForModal?.name || '-' }}</strong>
+          </div>
+          <div>
+            <span>Marca / Modelo</span>
+            <strong>{{ brand || '-' }} / {{ model || '-' }}</strong>
+          </div>
+          <div>
+            <span>Serie</span>
+            <strong>{{ serial || '-' }}</strong>
+          </div>
+        </div>
+
+        <div class="detail-tabs" role="tablist" aria-label="Secciones de hoja de vida">
+          <button
+            type="button"
+            [class.active]="detailModalTab === 'summary'"
+            (click)="setDetailModalTab('summary')"
+          >
+            Resumen
+          </button>
+          <button
+            type="button"
+            [class.active]="detailModalTab === 'history'"
+            (click)="setDetailModalTab('history')"
+          >
+            Historial
+          </button>
+          <button
+            type="button"
+            [class.active]="detailModalTab === 'documents'"
+            (click)="setDetailModalTab('documents')"
+          >
+            Documentos
+          </button>
+        </div>
+
+        <div class="summary-grid" *ngIf="detailModalTab === 'summary'">
+          <div>
+            <h4>Ubicación</h4>
+            <p><strong>Sede:</strong> {{ getSelectedSiteName() }}</p>
+            <p><strong>Área:</strong> {{ getSelectedAreaName() }}</p>
+            <p><strong>Ubicación:</strong> {{ getSelectedLocationName() }}</p>
+            <p><strong>Estado:</strong> {{ selectedAssetForModal?.status || '-' }}</p>
+          </div>
+          <div>
+            <h4>Datos técnicos</h4>
+            <p><strong>Registro Invima:</strong> {{ invimaReg || '-' }}</p>
+            <p><strong>Riesgo:</strong> {{ riskClass || '-' }}</p>
+            <p><strong>Fabricante:</strong> {{ manufacturer || '-' }}</p>
+            <p><strong>Tipo:</strong> {{ isMobile ? 'Móvil' : 'Fijo' }}</p>
+          </div>
+          <div>
+            <h4>Mantenimiento</h4>
+            <p><strong>Frecuencia:</strong> {{ maintenanceFrequency || '-' }}</p>
+            <p><strong>Requiere calibración:</strong> {{ requiresCalibration ? 'Sí' : 'No' }}</p>
+            <p *ngIf="requiresCalibration"><strong>Frecuencia calibración:</strong> {{ calibrationFrequency || '-' }}</p>
+          </div>
+        </div>
+
+        <div class="history-panel" *ngIf="detailModalTab === 'history'">
+          <div class="history-filters">
+            <label>
+              Desde
+              <input type="date" [(ngModel)]="assetHistoryFrom" />
+            </label>
+            <label>
+              Hasta
+              <input type="date" [(ngModel)]="assetHistoryTo" />
+            </label>
+            <label>
+              Orden
+              <select [(ngModel)]="assetHistoryOrder">
+                <option value="desc">Más reciente primero</option>
+                <option value="asc">Más antiguo primero</option>
+              </select>
+            </label>
+            <button type="button" class="ghost" [disabled]="assetHistoryLoading" (click)="loadAssetHistory(true)">
+              Buscar
+            </button>
+          </div>
+
+          <p class="modal-loading" *ngIf="assetHistoryLoading">Cargando historial del equipo...</p>
+          <p class="error" *ngIf="assetHistoryError">{{ assetHistoryError }}</p>
+
+          <div class="table history-list" *ngIf="!assetHistoryLoading">
+            <div class="row history-row header" *ngIf="assetHistoryItems.length">
+              <span>Tipo</span>
+              <span>Fecha</span>
+              <span>Documento</span>
+              <span>Acciones</span>
+            </div>
+
+            <div class="row history-row" *ngFor="let event of assetHistoryItems">
+              <span class="history-badge" data-label="Tipo">{{ assetHistoryTypeLabel(event) }}</span>
+              <span data-label="Fecha">{{ event.event_date | date: 'dd/MM/yyyy' }}</span>
+              <span data-label="Documento">
+                <strong [title]="event.title || 'Evento del equipo'">{{ event.title || 'Evento del equipo' }}</strong>
+                <small *ngIf="event.description" [title]="event.description">{{ event.description }}</small>
+              </span>
+              <span class="history-actions" data-label="Acciones">
+                <button type="button" class="primary" [disabled]="!event.pdf_path" (click)="openAssetHistoryItem(event)">
+                  VER
+                </button>
+              </span>
+            </div>
+
+            <p class="muted" *ngIf="!assetHistoryItems.length">
+              Sin mantenimientos, calibraciones, movimientos o PDFs históricos para el rango seleccionado.
+            </p>
+
+            <div class="history-more" *ngIf="assetHistoryItems.length || assetHistoryOffset > 0">
+              <button type="button" class="ghost" [disabled]="assetHistoryLoading || assetHistoryOffset === 0" (click)="previousAssetHistoryPage()">
+                Anterior
+              </button>
+              <button type="button" class="ghost" [disabled]="assetHistoryLoading || !assetHistoryHasMore" (click)="nextAssetHistoryPage()">
+                Siguiente
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="documents-panel" *ngIf="detailModalTab === 'documents'">
+          <div class="document-action">
+            <div>
+              <strong>PDF principal de hoja de vida</strong>
+              <span>Documento maestro del equipo con los datos técnicos y ubicación actual.</span>
+            </div>
+            <button type="button" class="primary" (click)="openSelectedAssetPdf()">Abrir PDF</button>
+          </div>
+          <div class="document-action">
+            <div>
+              <strong>Guía rápida de uso</strong>
+              <span>Guía aprobada por marca y modelo para operación segura del equipo.</span>
+            </div>
+            <button type="button" class="ghost" (click)="openSelectedAssetQuickGuide()">Abrir guía</button>
+          </div>
+        </div>
+
+        <div class="modal-actions" *ngIf="detailModalTab === 'summary'">
+          <button type="button" class="primary" (click)="openSelectedAssetPdf()">Abrir PDF</button>
+          <button type="button" class="ghost" *ngIf="canCreateAssets" (click)="editFromViewModal()">Editar</button>
+        </div>
+      </div>
+    </div>
   </div>
 </section>

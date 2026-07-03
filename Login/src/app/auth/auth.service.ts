@@ -34,10 +34,15 @@ export class AuthService {
   constructor(
     private readonly http: HttpClient,
     private readonly router: Router
-  ) {}
+  ) {
+    if (this.currentUser() && !this.tokens()) {
+      this.currentUser.set(null);
+      localStorage.removeItem(this.storageKey);
+    }
+  }
 
   isAuthenticated(): boolean {
-    return this.currentUser() !== null;
+    return this.currentUser() !== null && this.tokens() !== null;
   }
 
   async login(username: string, password: string): Promise<LoginResult> {
