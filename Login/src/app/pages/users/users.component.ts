@@ -1073,8 +1073,8 @@ export class UsersComponent implements OnInit {
         });
       }
       this.successMessage = permissionsToGrant.length === 1
-        ? 'Permiso temporal activado. Si el usuario está conectado, debe volver a iniciar sesión para verlo.'
-        : 'Permisos temporales activados. Si el usuario está conectado, debe volver a iniciar sesión para verlos.';
+        ? 'Permiso temporal activado. Si el usuario está conectado, puede volver a Hojas de vida o usar Actualizar permisos para verlo.'
+        : 'Permisos temporales activados. Si el usuario está conectado, puede volver a Hojas de vida o usar Actualizar permisos para verlos.';
       await this.load();
       this.temporaryPanelUserId = user.id;
       this.selectedTemporaryPermissions.clear();

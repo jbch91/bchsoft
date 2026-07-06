@@ -45,6 +45,15 @@
       >
         Importar hojas de vida
       </button>
+      <button
+        type="button"
+        class="ghost"
+        *ngIf="canRefreshTemporaryPermissions"
+        [disabled]="permissionsRefreshLoading"
+        (click)="refreshCurrentPermissions()"
+      >
+        {{ permissionsRefreshLoading ? 'Actualizando...' : 'Actualizar permisos' }}
+      </button>
     </div>
   </div>
   <p class="success page-feedback" *ngIf="successMessage && !assetFormModalOpen">{{ successMessage }}</p>

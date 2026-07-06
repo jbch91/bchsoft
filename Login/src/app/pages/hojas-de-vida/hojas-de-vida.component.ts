@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -151,7 +151,7 @@ interface ExcelWorkbook {
   templateUrl: './hojas-de-vida.component.html',
   styleUrl: './hojas-de-vida.component.scss'
 })
-export class HojasDeVidaComponent {
+export class HojasDeVidaComponent implements OnDestroy {
   private readonly apiBase = getApiBase();
   private readonly publicBase = getPublicBase();
   private readonly maxImageSizeMb = 5;
@@ -179,6 +179,7 @@ export class HojasDeVidaComponent {
   successMessage = '';
   viewMode: 'inventory' | 'form' | 'areas' = 'inventory';
   importPanelOpen = false;
+  permissionsRefreshLoading = false;
   assetModalMode: 'create' | 'edit' | 'view' | null = null;
   selectedAssetForModal: AssetView | null = null;
   assetDetailsLoading = false;
@@ -193,6 +194,16 @@ export class HojasDeVidaComponent {
   assetHistoryOffset = 0;
   assetHistoryHasMore = false;
   private assetHistoryLoadToken = 0;
+  private lastPermissionRefreshAt = 0;
+  private readonly permissionRefreshCooldownMs = 15_000;
+  private readonly handleWindowFocus = () => {
+    void this.refreshCurrentPermissions(false);
+  };
+  private readonly handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      void this.refreshCurrentPermissions(false);
+    }
+  };
   formMode: 'full' | 'wizard' = 'wizard';
   wizardStep = 0;
   readonly wizardSteps = [
@@ -301,6 +312,8 @@ export class HojasDeVidaComponent {
     private readonly route: ActivatedRoute
   ) {
     void this.init();
+    window.addEventListener('focus', this.handleWindowFocus);
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
     this.route.queryParams.subscribe((params) => {
       const assetId = typeof params['assetId'] === 'string' ? params['assetId'] : '';
       if (assetId) {
@@ -308,6 +321,11 @@ export class HojasDeVidaComponent {
         void this.openPendingRouteAsset();
       }
     });
+  }
+
+  ngOnDestroy(): void {
+    window.removeEventListener('focus', this.handleWindowFocus);
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
   }
 
   trackByAreaId(_index: number, area: { id: string }): string {
@@ -369,7 +387,7 @@ export class HojasDeVidaComponent {
   }
 
   async init(): Promise<void> {
-    await this.auth.refreshSession().catch(() => false);
+    await this.refreshCurrentPermissions(false);
 
     const userClient = this.auth.currentUser()?.clientId ?? '';
     if (userClient) {
@@ -466,6 +484,10 @@ export class HojasDeVidaComponent {
     return this.auth.hasPermission('hb:import');
   }
 
+  get canRefreshTemporaryPermissions(): boolean {
+    return !this.canImportAssets && this.auth.hasRole('ingeniero_biomedico') && Boolean(this.auth.currentUser()?.clientId);
+  }
+
   get canCreateAssets(): boolean {
     return this.auth.hasPermission('hb:create');
   }
@@ -477,6 +499,31 @@ export class HojasDeVidaComponent {
   toggleImportPanel(): void {
     if (!this.canImportAssets) return;
     this.importPanelOpen = !this.importPanelOpen;
+  }
+
+  async refreshCurrentPermissions(force = true): Promise<void> {
+    if (this.permissionsRefreshLoading || !this.auth.tokens()?.refreshToken) return;
+    const now = Date.now();
+    if (!force && now - this.lastPermissionRefreshAt < this.permissionRefreshCooldownMs) return;
+    this.lastPermissionRefreshAt = now;
+    const hadImportPermission = this.canImportAssets;
+    this.permissionsRefreshLoading = true;
+    try {
+      const refreshed = await this.auth.refreshSession();
+      if (!refreshed) return;
+      const gainedImportPermission = !hadImportPermission && this.canImportAssets;
+      if (gainedImportPermission) {
+        this.importPanelOpen = true;
+        this.errorMessage = '';
+        this.successMessage = 'Permisos actualizados. Ya puedes importar hojas de vida.';
+      } else if (force && !this.canImportAssets) {
+        this.successMessage = '';
+        this.errorMessage = 'Aún no aparece el permiso temporal de importación. Verifica que esté activo y con fecha vigente.';
+      }
+    } finally {
+      this.permissionsRefreshLoading = false;
+      this.cdr.detectChanges();
+    }
   }
 
   async openCreateModal(): Promise<void> {
