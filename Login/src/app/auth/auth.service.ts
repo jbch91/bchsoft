@@ -19,6 +19,10 @@ interface LoginResponse {
   refreshToken: string;
 }
 
+interface CurrentUserResponse {
+  user: LoginResponse['user'];
+}
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly storageKey = 'auth_user_v1';
@@ -54,17 +58,7 @@ export class AuthService {
         })
       );
 
-      const role = (response.user.roles[0] ?? 'viewer') as Role;
-      const user: User = {
-        id: response.user.sub,
-        username: response.user.username,
-        displayName: response.user.displayName,
-        clientId: response.user.clientId ?? null,
-        subscription: response.user.subscription ?? null,
-        role,
-        roles: response.user.roles ?? [role],
-        permissions: response.user.permissions
-      };
+      const user = this.userFromResponse(response.user);
 
       this.currentUser.set(user);
       this.tokens.set({
@@ -125,17 +119,7 @@ export class AuthService {
         this.http.post<LoginResponse>(`${this.apiBase}/auth/refresh`, { refreshToken })
       );
 
-      const role = (response.user.roles[0] ?? 'viewer') as Role;
-      const user: User = {
-        id: response.user.sub,
-        username: response.user.username,
-        displayName: response.user.displayName,
-        clientId: response.user.clientId ?? null,
-        subscription: response.user.subscription ?? null,
-        role,
-        roles: response.user.roles ?? [role],
-        permissions: response.user.permissions
-      };
+      const user = this.userFromResponse(response.user);
 
       this.currentUser.set(user);
       this.tokens.set({
@@ -156,6 +140,39 @@ export class AuthService {
       this.logout(true, reason);
       return false;
     }
+  }
+
+  async reloadCurrentUser(): Promise<boolean> {
+    if (!this.tokens()?.accessToken) {
+      return false;
+    }
+
+    try {
+      const response = await firstValueFrom(
+        this.http.get<CurrentUserResponse>(`${this.apiBase}/auth/me?t=${Date.now()}`)
+      );
+      const user = this.userFromResponse(response.user);
+      this.currentUser.set(user);
+      localStorage.setItem(this.storageKey, JSON.stringify(user));
+      return true;
+    } catch (error) {
+      console.error(error);
+      return false;
+    }
+  }
+
+  private userFromResponse(responseUser: LoginResponse['user']): User {
+    const role = (responseUser.roles[0] ?? 'viewer') as Role;
+    return {
+      id: responseUser.sub,
+      username: responseUser.username,
+      displayName: responseUser.displayName,
+      clientId: responseUser.clientId ?? null,
+      subscription: responseUser.subscription ?? null,
+      role,
+      roles: responseUser.roles ?? [role],
+      permissions: responseUser.permissions
+    };
   }
 
   hasRole(roles: Role[] | Role): boolean {

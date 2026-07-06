@@ -14,6 +14,7 @@ import { PDFDocument as PdfMergerDocument } from 'pdf-lib';
 import { query } from './db.js';
 import {
   authenticateUser,
+  getCurrentSessionUser,
   refreshSession,
   revokeClientActiveSessions,
   revokeRefreshToken,
@@ -1026,6 +1027,16 @@ app.post('/auth/refresh', async (req, res) => {
       });
     }
     return res.status(401).json({ message: 'Refresh inválido.' });
+  }
+});
+
+app.get('/auth/me', requireAuth, async (req, res) => {
+  try {
+    const user = await getCurrentSessionUser(req.user.sub);
+    return res.json({ user });
+  } catch (error) {
+    console.error(error);
+    return res.status(401).json({ message: 'Sesión inválida.' });
   }
 });
 

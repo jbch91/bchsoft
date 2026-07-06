@@ -485,7 +485,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   get canRefreshTemporaryPermissions(): boolean {
-    return !this.canImportAssets && this.auth.hasRole('ingeniero_biomedico') && Boolean(this.auth.currentUser()?.clientId);
+    return !this.canImportAssets && Boolean(this.auth.currentUser()?.clientId);
   }
 
   get canCreateAssets(): boolean {
@@ -509,7 +509,10 @@ export class HojasDeVidaComponent implements OnDestroy {
     const hadImportPermission = this.canImportAssets;
     this.permissionsRefreshLoading = true;
     try {
-      const refreshed = await this.auth.refreshSession();
+      let refreshed = await this.auth.reloadCurrentUser();
+      if (!refreshed) {
+        refreshed = await this.auth.refreshSession();
+      }
       if (!refreshed) return;
       const gainedImportPermission = !hadImportPermission && this.canImportAssets;
       if (gainedImportPermission) {

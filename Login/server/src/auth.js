@@ -229,6 +229,34 @@ async function loadUserPermissions(userId, clientId, roles = []) {
   return permissions.filter((permission) => allowed.has(permission));
 }
 
+export async function getCurrentSessionUser(userId) {
+  const { rows: userRows } = await query(
+    `SELECT id, username, display_name, is_active, client_id
+     FROM users
+     WHERE id = $1`,
+    [userId]
+  );
+
+  const user = userRows[0];
+  if (!user || !user.is_active) {
+    throw new Error('User inactive');
+  }
+
+  const roles = await loadUserRoles(user.id);
+  const permissions = await loadUserPermissions(user.id, user.client_id, roles);
+  const subscription = await loadClientSubscription(user.client_id);
+
+  return {
+    sub: user.id,
+    username: user.username,
+    displayName: user.display_name,
+    clientId: user.client_id,
+    subscription,
+    roles,
+    permissions
+  };
+}
+
 async function loadClientSubscription(clientId) {
   if (!clientId) return null;
   try {
