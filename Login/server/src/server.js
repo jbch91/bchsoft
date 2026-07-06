@@ -1284,8 +1284,7 @@ app.post(
     if (result?.error === 'PERMISSION_NOT_FOUND') {
       return res.status(404).json({ message: 'Permiso no encontrado.' });
     }
-    await revokeUserActiveSessions(req.params.id);
-
+    // Existing access tokens do not gain this permission until the user refreshes the session.
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,
