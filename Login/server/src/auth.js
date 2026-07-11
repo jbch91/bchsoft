@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { pool, query } from './db.js';
 import { listClientModules } from './admin.js';
 import { getClientSubscriptionAccess } from './subscriptions.js';
+import { allowedClientPermissionsForModules } from './permission-policy.js';
 
 dotenv.config();
 
@@ -23,80 +24,6 @@ const CLIENT_CONFIGURABLE_ROLES = [
   'bacteriologo',
   'auxiliar_laboratorio'
 ];
-
-async function listAllowedClientPermissions(clientId) {
-  const modules = await listClientModules(clientId);
-  const enabledModules = new Set(
-    modules.filter((module) => module.enabled).map((module) => module.key)
-  );
-  const enabledSuites = new Set(
-    modules
-      .filter((module) => module.enabled)
-      .map((module) => module.suite_key || 'biomedico')
-  );
-  const allowed = new Set();
-  const add = (values) => values.forEach((value) => allowed.add(value));
-
-  if (enabledSuites.has('biomedico')) {
-    add(['software:biomedico:access', 'areas:manage', 'read:all']);
-  }
-  if (enabledModules.has('hojas_de_vida')) {
-    add(['hb:create', 'hb:view', 'hb:import', 'asset_history:upload']);
-  }
-  if (enabledModules.has('inventario')) {
-    add(['hb:view', 'inventory:move', 'inventory:request']);
-  }
-  if (enabledModules.has('guias_rapidas')) {
-    add(['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete']);
-  }
-  if (enabledModules.has('reportes_mantenimiento')) {
-    add([
-      'hb:view',
-      'maintenance:request:create',
-      'maintenance:report:create',
-      'maintenance:report:sign',
-      'maintenance:order:create',
-      'maintenance:order:close',
-      'service:order:create',
-      'spareparts:order:create'
-    ]);
-  }
-  if (enabledModules.has('cronogramas')) {
-    allowed.add('schedules:manage');
-  }
-  if (enabledModules.has('calibraciones')) {
-    add(['calibration:schedule:manage', 'calibration:report:upload']);
-  }
-  if (enabledSuites.has('odontologico') || enabledModules.has('odontologia')) {
-    add([
-      'software:odontologico:access',
-      'odontology:access',
-      'odontology:settings:manage',
-      'odontology:patients:manage',
-      'odontology:patients:import',
-      'odontology:clinical_records:manage',
-      'odontology:appointments:manage',
-      'odontology:odontogram:manage',
-      'odontology:periodontogram:manage',
-      'odontology:consents:manage',
-      'odontology:attachments:manage',
-      'odontology:inventory:manage',
-      'odontology:sterilization:manage',
-      'odontology:treatment_plans:manage',
-      'odontology:payments:manage',
-      'odontology:financial:view',
-      'odontology:prescriptions:manage',
-      'odontology:documents:manage',
-      'odontology:reports:view',
-      'audit:odontology:view'
-    ]);
-  }
-  if (enabledSuites.has('laboratorio') || enabledModules.has('laboratorio')) {
-    add(['software:laboratorio:access', 'laboratory:orders:manage', 'laboratory:results:manage']);
-  }
-
-  return allowed;
-}
 
 function calculateExpiry(ttl) {
   const value = ttl.trim().toLowerCase();
@@ -225,7 +152,8 @@ async function loadUserPermissions(userId, clientId, roles = []) {
   if (!clientId || roles.includes('client_admin')) {
     return permissions;
   }
-  const allowed = await listAllowedClientPermissions(clientId);
+  const modules = await listClientModules(clientId);
+  const allowed = allowedClientPermissionsForModules(modules);
   return permissions.filter((permission) => allowed.has(permission));
 }
 

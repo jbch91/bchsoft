@@ -1,5 +1,19 @@
 import { Routes } from '@angular/router';
 import { accessGuard } from './auth/auth.guard';
+import {
+  BIOMEDICAL_FEATURE_POLICIES,
+  BiomedicalFeatureKey
+} from './core/biomedical-access-policy';
+
+function biomedicalRouteData(featureKey: BiomedicalFeatureKey) {
+  const policy = BIOMEDICAL_FEATURE_POLICIES[featureKey];
+  return {
+    suiteKey: 'biomedico',
+    moduleKey: 'moduleKey' in policy ? policy.moduleKey : undefined,
+    permissionsAny: [...policy.permissionsAny],
+    excludedRoles: 'excludedRoles' in policy ? [...policy.excludedRoles] : undefined
+  };
+}
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'login' },
@@ -74,37 +88,43 @@ export const routes: Routes = [
     path: 'hojas-de-vida',
     loadComponent: () => import('./pages/hojas-de-vida/hojas-de-vida.component').then((m) => m.HojasDeVidaComponent),
     canActivate: [accessGuard],
-    data: { suiteKey: 'biomedico', moduleKey: 'hojas_de_vida', permissionsAny: ['hb:create', 'hb:view', 'read:all'] }
+    data: biomedicalRouteData('hojas_de_vida')
   },
   {
     path: 'inventario',
     loadComponent: () => import('./pages/inventario/inventario.component').then((m) => m.InventarioComponent),
     canActivate: [accessGuard],
-    data: { suiteKey: 'biomedico', moduleKey: 'inventario', permissionsAny: ['hb:create', 'hb:view', 'read:all'] }
+    data: biomedicalRouteData('inventario')
+  },
+  {
+    path: 'sedes-areas-ubicaciones',
+    loadComponent: () => import('./pages/locations-management/locations-management.component').then((m) => m.LocationsManagementComponent),
+    canActivate: [accessGuard],
+    data: biomedicalRouteData('sedes_areas_ubicaciones')
   },
   {
     path: 'guias-rapidas',
     loadComponent: () => import('./pages/quick-guides/quick-guides.component').then((m) => m.QuickGuidesComponent),
     canActivate: [accessGuard],
-    data: { suiteKey: 'biomedico', moduleKey: 'guias_rapidas', permissionsAny: ['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete', 'hb:view', 'read:all'] }
+    data: biomedicalRouteData('guias_rapidas')
   },
   {
     path: 'mantenimiento',
     loadComponent: () => import('./pages/maintenance/maintenance.component').then((m) => m.MaintenanceComponent),
     canActivate: [accessGuard],
-    data: { suiteKey: 'biomedico', moduleKey: 'reportes_mantenimiento', permissionsAny: ['maintenance:request:create', 'maintenance:report:create', 'maintenance:report:sign', 'read:all'] }
+    data: biomedicalRouteData('reportes_mantenimiento')
   },
   {
     path: 'cronogramas',
     loadComponent: () => import('./pages/cronogramas/cronogramas.component').then((m) => m.CronogramasComponent),
     canActivate: [accessGuard],
-    data: { suiteKey: 'biomedico', moduleKey: 'cronogramas', permissionsAny: ['schedules:manage'] }
+    data: biomedicalRouteData('cronogramas')
   },
   {
     path: 'calibraciones',
     loadComponent: () => import('./pages/calibraciones/calibraciones.component').then((m) => m.CalibracionesComponent),
     canActivate: [accessGuard],
-    data: { suiteKey: 'biomedico', moduleKey: 'calibraciones', permissionsAny: ['calibration:schedule:manage', 'calibration:report:upload', 'read:all'] }
+    data: biomedicalRouteData('calibraciones')
   },
   {
     path: 'odontologia',

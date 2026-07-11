@@ -320,9 +320,29 @@
 }
 
 @media (max-width: 560px) {
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .app-shell-header,
+  .app-shell-footer {
+    position: static;
+    width: auto;
+  }
+
+  .app-shell-header {
+    margin: 12px 12px 0;
+  }
+
+  .app-shell-footer {
+    margin: auto 12px 12px;
+  }
+
   .app-shell-main {
-    padding-top: 124px;
-    padding-bottom: 116px;
+    flex: 1 0 auto;
+    min-height: 0;
+    padding: 0;
   }
 
   .shell-current {

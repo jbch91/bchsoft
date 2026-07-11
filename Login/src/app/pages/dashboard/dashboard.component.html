@@ -84,7 +84,7 @@
     <a
       routerLink="/hojas-de-vida"
       class="ui-card module-card"
-      *ngIf="!auth.hasRole('lector') && (auth.hasPermission('hb:create') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('hojas_de_vida')"
+      *ngIf="canOpenBiomedFeature('hojas_de_vida')"
     >
       <h2>Hojas de vida</h2>
       <p>Registro técnico, historial y documentación de equipos biomédicos.</p>
@@ -93,16 +93,25 @@
     <a
       routerLink="/inventario"
       class="ui-card module-card"
-      *ngIf="(auth.hasPermission('hb:create') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('inventario')"
+      *ngIf="canOpenBiomedFeature('inventario')"
     >
       <h2>Inventario</h2>
       <p>Listado, ubicación, QR e historial de equipos.</p>
     </a>
 
     <a
+      routerLink="/sedes-areas-ubicaciones"
+      class="ui-card module-card"
+      *ngIf="canOpenBiomedFeature('sedes_areas_ubicaciones')"
+    >
+      <h2>Sedes, áreas y ubicaciones</h2>
+      <p>Estructura física utilizada para localizar los equipos del cliente.</p>
+    </a>
+
+    <a
       routerLink="/guias-rapidas"
       class="ui-card module-card"
-      *ngIf="(auth.hasPermission('quick_guides:view') || auth.hasPermission('quick_guides:create') || auth.hasPermission('quick_guides:edit') || auth.hasPermission('quick_guides:approve') || auth.hasPermission('quick_guides:delete') || auth.hasPermission('hb:view') || auth.hasPermission('read:all')) && canShow('guias_rapidas')"
+      *ngIf="canOpenBiomedFeature('guias_rapidas')"
     >
       <h2>Guías rápidas de uso</h2>
       <p>Guías por marca y modelo para operación segura.</p>
@@ -111,7 +120,7 @@
     <a
       routerLink="/mantenimiento"
       class="ui-card module-card"
-      *ngIf="(auth.hasPermission('maintenance:request:create') || auth.hasPermission('maintenance:report:create') || auth.hasPermission('maintenance:report:sign') || auth.hasPermission('read:all')) && canShow('reportes_mantenimiento')"
+      *ngIf="canOpenBiomedFeature('reportes_mantenimiento')"
     >
       <h2>Reportes de mantenimiento</h2>
       <p>Solicitudes, preventivos, correctivos, repuestos y firmas.</p>
@@ -120,7 +129,7 @@
     <a
       routerLink="/cronogramas"
       class="ui-card module-card"
-      *ngIf="auth.hasPermission('schedules:manage') && canShow('cronogramas')"
+      *ngIf="canOpenBiomedFeature('cronogramas')"
     >
       <h2>Cronogramas y Capacitaciones</h2>
       <p>Plan anual de preventivos, capacitaciones y control documental.</p>
@@ -129,7 +138,7 @@
     <a
       routerLink="/calibraciones"
       class="ui-card module-card"
-      *ngIf="(auth.hasPermission('calibration:schedule:manage') || auth.hasPermission('calibration:report:upload') || auth.hasPermission('read:all')) && canShow('calibraciones')"
+      *ngIf="canOpenBiomedFeature('calibraciones')"
     >
       <h2>Calibraciones</h2>
       <p>Cronograma y certificados de calibración.</p>

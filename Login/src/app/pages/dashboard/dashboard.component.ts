@@ -6,6 +6,10 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { getApiBase, getPublicBase, joinBase } from '../../core/api-base';
 import { Permission } from '../../auth/models';
+import {
+  BiomedicalFeatureKey,
+  canOpenBiomedicalFeature
+} from '../../core/biomedical-access-policy';
 
 interface SoftwareSuite {
   key: 'biomedico' | 'odontologico' | 'laboratorio' | string;
@@ -330,6 +334,16 @@ export class DashboardComponent {
       'odontology:documents:manage',
       'odontology:reports:view'
     ].some((permission) => this.auth.hasPermission(permission as Permission));
+  }
+
+  canOpenBiomedFeature(featureKey: BiomedicalFeatureKey): boolean {
+    const user = this.auth.currentUser();
+    const roles = user?.roles?.length ? user.roles : user ? [user.role] : [];
+    return canOpenBiomedicalFeature(featureKey, {
+      permissions: user?.permissions ?? [],
+      roles,
+      enabledModules: this.enabledModules
+    });
   }
 
   canOpenSaasAdministration(): boolean {

@@ -1,0 +1,41 @@
+import {
+  BIOMEDICAL_FEATURE_POLICIES,
+  canOpenBiomedicalFeature
+} from './biomedical-access-policy';
+
+describe('biomedical access policy', () => {
+  it('muestra sedes solo cuando areas:manage está presente', () => {
+    expect(canOpenBiomedicalFeature('sedes_areas_ubicaciones', {
+      permissions: ['areas:manage'],
+      roles: ['ingeniero_biomedico'],
+      enabledModules: new Set()
+    })).toBe(true);
+
+    expect(canOpenBiomedicalFeature('sedes_areas_ubicaciones', {
+      permissions: ['hb:view'],
+      roles: ['ingeniero_biomedico'],
+      enabledModules: new Set(['hojas_de_vida'])
+    })).toBe(false);
+  });
+
+  it('exige permiso y módulo contratado para las hojas de vida', () => {
+    expect(canOpenBiomedicalFeature('hojas_de_vida', {
+      permissions: ['hb:view'],
+      roles: ['ingeniero_biomedico'],
+      enabledModules: new Set(['hojas_de_vida'])
+    })).toBe(true);
+
+    expect(canOpenBiomedicalFeature('hojas_de_vida', {
+      permissions: ['hb:view'],
+      roles: ['ingeniero_biomedico'],
+      enabledModules: new Set()
+    })).toBe(false);
+  });
+
+  it('mantiene la misma política para navegación y rutas', () => {
+    expect(BIOMEDICAL_FEATURE_POLICIES.sedes_areas_ubicaciones.permissionsAny)
+      .toEqual(['areas:manage']);
+    expect(BIOMEDICAL_FEATURE_POLICIES.sedes_areas_ubicaciones.route)
+      .toBe('/sedes-areas-ubicaciones');
+  });
+});

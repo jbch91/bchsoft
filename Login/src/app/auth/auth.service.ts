@@ -175,7 +175,7 @@ export class AuthService {
     };
   }
 
-  hasRole(roles: Role[] | Role): boolean {
+  hasRole(roles: readonly Role[] | Role): boolean {
     const user = this.currentUser();
     if (!user) {
       return false;
@@ -186,7 +186,7 @@ export class AuthService {
     return userRoles.some((role) => roleList.includes(role));
   }
 
-  hasPermission(permissions: Permission[] | Permission): boolean {
+  hasPermission(permissions: readonly Permission[] | Permission): boolean {
     const user = this.currentUser();
     if (!user) {
       return false;

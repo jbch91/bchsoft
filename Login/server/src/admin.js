@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt';
 import { pool, query } from './db.js';
+import { TEMPORARY_ONLY_PERMISSIONS } from './permission-policy.js';
 
-const TEMPORARY_ONLY_PERMISSIONS = ['hb:import', 'asset_history:upload'];
 const PLATFORM_ONLY_MODULES = ['clientes', 'auditoria'];
 
 export async function listRoles() {

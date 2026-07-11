@@ -7,9 +7,10 @@ import { Permission, Role } from './models';
 import { getApiBase } from '../core/api-base';
 
 interface AccessData {
-  roles?: Role[];
-  permissions?: Permission[];
-  permissionsAny?: Permission[];
+  roles?: readonly Role[];
+  excludedRoles?: readonly Role[];
+  permissions?: readonly Permission[];
+  permissionsAny?: readonly Permission[];
   platformOnly?: boolean;
   suiteKey?: string;
   moduleKey?: string;
@@ -35,6 +36,10 @@ export const accessGuard: CanActivateFn = async (route) => {
   }
 
   if (data?.roles && !auth.hasRole(data.roles)) {
+    return router.createUrlTree(['/no-autorizado']);
+  }
+
+  if (data?.excludedRoles?.some((role) => auth.hasRole(role))) {
     return router.createUrlTree(['/no-autorizado']);
   }
 

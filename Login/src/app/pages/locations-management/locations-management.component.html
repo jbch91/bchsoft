@@ -1,0 +1,149 @@
+<section class="page locations-page">
+  <app-module-tabs></app-module-tabs>
+
+  <header class="management-toolbar">
+    <div class="management-title">
+      <h2>Sedes, áreas y ubicaciones</h2>
+      <div class="catalog-counts" aria-label="Totales del catálogo">
+        <span><strong>{{ sites.length }}</strong> sedes</span>
+        <span><strong>{{ areas.length }}</strong> áreas</span>
+        <span><strong>{{ locations.length }}</strong> ubicaciones</span>
+      </div>
+    </div>
+    <div class="management-actions">
+      <button type="button" class="primary" (click)="openCreate('site')">Crear sede</button>
+      <button type="button" (click)="openCreate('area')" [disabled]="!sites.length">Crear área</button>
+      <button type="button" (click)="openCreate('location')" [disabled]="!areas.length">Crear ubicación</button>
+    </div>
+  </header>
+
+  <div class="feedback error" role="alert" *ngIf="errorMessage">{{ errorMessage }}</div>
+  <div class="feedback success" role="status" *ngIf="successMessage">{{ successMessage }}</div>
+
+  <div class="catalog-toolbar">
+    <label>
+      Buscar
+      <input
+        type="search"
+        [(ngModel)]="searchTerm"
+        placeholder="Sede, área o ubicación"
+        autocomplete="off"
+      />
+    </label>
+    <button type="button" class="quiet" (click)="searchTerm = ''" [disabled]="!searchTerm">Limpiar</button>
+  </div>
+
+  <div class="loading-state" *ngIf="loading">Cargando estructura del cliente...</div>
+
+  <div class="empty-state" *ngIf="!loading && !sites.length">
+    <strong>No hay sedes registradas</strong>
+    <button type="button" class="primary" (click)="openCreate('site')">Crear primera sede</button>
+  </div>
+
+  <div class="empty-state" *ngIf="!loading && sites.length && !visibleSites.length">
+    <strong>Sin resultados para la búsqueda</strong>
+  </div>
+
+  <section class="site-list" *ngIf="!loading && visibleSites.length">
+    <article class="site-panel" *ngFor="let site of visibleSites; trackBy: trackById">
+      <header class="site-header">
+        <div>
+          <strong>{{ site.name }}</strong>
+          <span>{{ site.address || 'Sin dirección registrada' }}</span>
+        </div>
+        <div class="row-actions">
+          <button type="button" (click)="openEditSite(site)" [disabled]="deletingId === site.id">Editar sede</button>
+          <button type="button" class="danger" (click)="deleteSite(site)" [disabled]="deletingId === site.id">
+            {{ deletingId === site.id ? 'Eliminando...' : 'Eliminar sede' }}
+          </button>
+        </div>
+      </header>
+
+      <div class="area-list">
+        <div class="area-row" *ngFor="let area of visibleAreasForSite(site); trackBy: trackById">
+          <div class="area-column">
+            <div>
+              <strong>{{ area.name }}</strong>
+              <span>{{ locationsForArea(area.id).length }} ubicaciones</span>
+            </div>
+            <div class="row-actions compact-actions">
+              <button type="button" (click)="openEditArea(area)" [disabled]="deletingId === area.id">Editar</button>
+              <button type="button" class="danger" (click)="deleteArea(area)" [disabled]="deletingId === area.id">Eliminar</button>
+            </div>
+          </div>
+
+          <div class="location-column">
+            <div class="location-row" *ngFor="let location of locationsForArea(area.id); trackBy: trackById">
+              <span>{{ location.name }}</span>
+              <div class="row-actions compact-actions">
+                <button type="button" (click)="openEditLocation(location)" [disabled]="deletingId === location.id">Editar</button>
+                <button type="button" class="danger" (click)="deleteLocation(location)" [disabled]="deletingId === location.id">Eliminar</button>
+              </div>
+            </div>
+            <span class="inline-empty" *ngIf="!locationsForArea(area.id).length">Sin ubicaciones</span>
+          </div>
+        </div>
+
+        <div class="area-empty" *ngIf="!visibleAreasForSite(site).length">
+          Sin áreas registradas en esta sede
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="unassigned-panel" *ngIf="!loading && (areasWithoutSite.length || locationsWithoutArea.length)">
+    <h3>Registros pendientes de asignación</h3>
+    <div class="unassigned-row" *ngFor="let area of areasWithoutSite; trackBy: trackById">
+      <span>Área: {{ area.name }}</span>
+      <button type="button" (click)="openEditArea(area)">Asignar sede</button>
+    </div>
+    <div class="unassigned-row" *ngFor="let location of locationsWithoutArea; trackBy: trackById">
+      <span>Ubicación: {{ location.name }}</span>
+      <button type="button" (click)="openEditLocation(location)">Asignar área</button>
+    </div>
+  </section>
+
+  <div class="modal-backdrop" *ngIf="editor" (click)="closeEditor()">
+    <section class="editor-modal" role="dialog" aria-modal="true" [attr.aria-label]="editorTitle()" (click)="$event.stopPropagation()">
+      <header class="modal-header">
+        <h2>{{ editorTitle() }}</h2>
+        <button type="button" class="quiet" (click)="closeEditor()" [disabled]="saving">Cerrar</button>
+      </header>
+
+      <form (ngSubmit)="saveEditor()">
+        <label>
+          Nombre
+          <input type="text" name="catalogName" [(ngModel)]="editor.name" required autocomplete="off" />
+        </label>
+
+        <label *ngIf="editor.kind === 'site'">
+          Dirección o referencia
+          <input type="text" name="siteAddress" [(ngModel)]="editor.address" autocomplete="off" />
+        </label>
+
+        <label *ngIf="editor.kind === 'area' || editor.kind === 'location'">
+          Sede
+          <select name="editorSite" [(ngModel)]="editor.siteId" (change)="onEditorSiteChange()" required>
+            <option *ngFor="let site of sites; trackBy: trackById" [value]="site.id">{{ site.name }}</option>
+          </select>
+        </label>
+
+        <label *ngIf="editor.kind === 'location'">
+          Área
+          <select name="editorArea" [(ngModel)]="editor.areaId" required>
+            <option *ngFor="let area of areasForEditorSite(); trackBy: trackById" [value]="area.id">{{ area.name }}</option>
+          </select>
+        </label>
+
+        <div class="modal-feedback error" role="alert" *ngIf="errorMessage">{{ errorMessage }}</div>
+
+        <footer class="modal-actions">
+          <button type="button" class="quiet" (click)="closeEditor()" [disabled]="saving">Cancelar</button>
+          <button type="submit" class="primary" [disabled]="saving">
+            {{ saving ? 'Guardando...' : 'Guardar' }}
+          </button>
+        </footer>
+      </form>
+    </section>
+  </div>
+</section>

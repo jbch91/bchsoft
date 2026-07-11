@@ -23,6 +23,11 @@ import {
 } from './auth.js';
 import { requireAnyPermission, requireAuth, requirePermission } from './middleware.js';
 import {
+  SUITE_ACCESS_PERMISSIONS,
+  TEMPORARY_ONLY_PERMISSIONS,
+  allowedClientPermissionsForModules
+} from './permission-policy.js';
+import {
   createUser,
   getClientRolePermissions,
   grantTemporaryPermission,
@@ -456,7 +461,7 @@ const ODONTOLOGY_CLIENT_ROLES = [
   'auditor_odontologia'
 ];
 const LABORATORY_CLIENT_ROLES = ['bacteriologo', 'auxiliar_laboratorio'];
-const TEMPORARY_BIOMEDICAL_PERMISSIONS = ['hb:import', 'asset_history:upload'];
+const TEMPORARY_BIOMEDICAL_PERMISSIONS = TEMPORARY_ONLY_PERMISSIONS;
 const BIOMEDICAL_MODULE_KEYS = [
   'hojas_de_vida',
   'inventario',
@@ -569,81 +574,7 @@ function isClientVisiblePermission(permission) {
 
 async function listAllowedClientRolePermissions(clientId) {
   const modules = await listClientModules(clientId);
-  const { enabledModules, enabledSuites } = clientModuleAccessContext(modules);
-  const allowed = new Set();
-  const add = (values) => values.forEach((value) => allowed.add(value));
-
-  if (enabledSuites.has('biomedico')) {
-    allowed.add('software:biomedico:access');
-    allowed.add('areas:manage');
-    allowed.add('read:all');
-  }
-  if (enabledModules.has('hojas_de_vida')) {
-    add(['hb:create', 'hb:view']);
-  }
-  if (enabledModules.has('inventario')) {
-    add(['hb:view', 'inventory:move', 'inventory:request']);
-  }
-  if (enabledModules.has('guias_rapidas')) {
-    add([
-      'quick_guides:view',
-      'quick_guides:create',
-      'quick_guides:edit',
-      'quick_guides:approve',
-      'quick_guides:delete'
-    ]);
-  }
-  if (enabledModules.has('reportes_mantenimiento')) {
-    add([
-      'hb:view',
-      'maintenance:request:create',
-      'maintenance:report:create',
-      'maintenance:report:sign',
-      'maintenance:order:create',
-      'maintenance:order:close',
-      'service:order:create',
-      'spareparts:order:create'
-    ]);
-  }
-  if (enabledModules.has('cronogramas')) {
-    allowed.add('schedules:manage');
-  }
-  if (enabledModules.has('calibraciones')) {
-    add(['calibration:schedule:manage', 'calibration:report:upload']);
-  }
-  if (enabledSuites.has('odontologico') || enabledModules.has('odontologia')) {
-    add([
-      'software:odontologico:access',
-      'odontology:access',
-      'odontology:settings:manage',
-      'odontology:patients:manage',
-      'odontology:patients:import',
-      'odontology:clinical_records:manage',
-      'odontology:appointments:manage',
-      'odontology:odontogram:manage',
-      'odontology:periodontogram:manage',
-      'odontology:consents:manage',
-      'odontology:attachments:manage',
-      'odontology:inventory:manage',
-      'odontology:sterilization:manage',
-      'odontology:treatment_plans:manage',
-      'odontology:payments:manage',
-      'odontology:financial:view',
-      'odontology:prescriptions:manage',
-      'odontology:documents:manage',
-      'odontology:reports:view',
-      'audit:odontology:view'
-    ]);
-  }
-  if (enabledSuites.has('laboratorio') || enabledModules.has('laboratorio')) {
-    add([
-      'software:laboratorio:access',
-      'laboratory:orders:manage',
-      'laboratory:results:manage'
-    ]);
-  }
-
-  return allowed;
+  return allowedClientPermissionsForModules(modules, { includeTemporary: false });
 }
 
 async function getRoleNameById(roleId) {
@@ -1480,45 +1411,8 @@ function canAccessSuite(req, suiteKey) {
   if (isSuperuser(req.user)) return false;
   if (isClientAdmin(req.user)) return true;
   const permissions = new Set(req.user.permissions || []);
-  const suitePermissions = {
-    biomedico: [
-      'software:biomedico:access',
-      'hb:create',
-      'hb:view',
-      'read:all',
-      'maintenance:request:create',
-      'maintenance:report:create',
-      'maintenance:report:sign',
-      'schedules:manage',
-      'calibration:schedule:manage',
-      'calibration:report:upload'
-    ],
-    odontologico: [
-      'software:odontologico:access',
-      'odontology:access',
-      'odontology:patients:manage',
-      'odontology:clinical_records:manage',
-      'odontology:appointments:manage',
-      'odontology:settings:manage',
-      'odontology:odontogram:manage',
-      'odontology:periodontogram:manage',
-      'odontology:consents:manage',
-      'odontology:treatment_plans:manage',
-      'odontology:attachments:manage',
-      'odontology:inventory:manage',
-      'odontology:sterilization:manage',
-      'odontology:payments:manage',
-      'odontology:prescriptions:manage',
-      'odontology:documents:manage',
-      'odontology:reports:view'
-    ],
-    laboratorio: [
-      'software:laboratorio:access',
-      'laboratory:orders:manage',
-      'laboratory:results:manage'
-    ]
-  };
-  return (suitePermissions[suiteKey] || []).some((permission) => permissions.has(permission));
+  return (SUITE_ACCESS_PERMISSIONS[suiteKey] || [])
+    .some((permission) => permissions.has(permission));
 }
 
 app.get('/software-suites/me', requireAuth, async (req, res) => {
@@ -8975,7 +8869,7 @@ app.get(
 app.get(
   '/biomed/:clientId/sites',
   requireAuth,
-  requireAnyPermission(['hb:create', 'hb:view', 'read:all']),
+  requireAnyPermission(['areas:manage', 'hb:create', 'hb:view', 'read:all']),
   async (req, res) => {
     const { clientId } = req.params;
     if (req.user.clientId && req.user.clientId !== clientId) {
@@ -9078,7 +8972,7 @@ app.delete(
 app.get(
   '/biomed/:clientId/areas',
   requireAuth,
-  requireAnyPermission(['hb:create', 'hb:view', 'read:all']),
+  requireAnyPermission(['areas:manage', 'hb:create', 'hb:view', 'read:all']),
   async (req, res) => {
     const { clientId } = req.params;
     if (req.user.clientId && req.user.clientId !== clientId) {
@@ -9173,7 +9067,7 @@ app.delete(
 app.get(
   '/biomed/:clientId/locations',
   requireAuth,
-  requireAnyPermission(['hb:create', 'hb:view', 'read:all']),
+  requireAnyPermission(['areas:manage', 'hb:create', 'hb:view', 'read:all']),
   async (req, res) => {
     const { clientId } = req.params;
     const { areaId } = req.query;

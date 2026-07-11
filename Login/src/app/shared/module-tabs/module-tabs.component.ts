@@ -6,14 +6,20 @@ import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../../auth/auth.service';
 import { Permission, Role } from '../../auth/models';
 import { getApiBase } from '../../core/api-base';
+import {
+  BIOMEDICAL_FEATURE_POLICIES,
+  BiomedicalFeatureKey,
+  canOpenBiomedicalFeature
+} from '../../core/biomedical-access-policy';
 
 interface ModuleTab {
   label: string;
   route: string;
   moduleKey?: string;
-  roles?: Role[];
-  permissionsAny?: Permission[];
-  hiddenForRoles?: Role[];
+  roles?: readonly Role[];
+  permissionsAny?: readonly Permission[];
+  hiddenForRoles?: readonly Role[];
+  biomedicalFeature?: BiomedicalFeatureKey;
   platform?: boolean;
   platformOnly?: boolean;
 }
@@ -64,43 +70,11 @@ export class ModuleTabsComponent implements OnInit {
       permissionsAny: ['users:manage', 'audit:client:view', 'saas:audit:view'],
       platform: true
     },
-    {
-      label: 'Hojas de vida',
-      route: '/hojas-de-vida',
-      moduleKey: 'hojas_de_vida',
-      permissionsAny: ['hb:create', 'hb:view', 'read:all'],
-      hiddenForRoles: ['lector']
-    },
-    {
-      label: 'Inventario',
-      route: '/inventario',
-      moduleKey: 'inventario',
-      permissionsAny: ['hb:create', 'hb:view', 'read:all']
-    },
-    {
-      label: 'Guías rápidas',
-      route: '/guias-rapidas',
-      moduleKey: 'guias_rapidas',
-      permissionsAny: ['quick_guides:view', 'quick_guides:create', 'quick_guides:edit', 'quick_guides:approve', 'quick_guides:delete', 'hb:view', 'read:all']
-    },
-    {
-      label: 'Mantenimiento',
-      route: '/mantenimiento',
-      moduleKey: 'reportes_mantenimiento',
-      permissionsAny: ['maintenance:request:create', 'maintenance:report:create', 'maintenance:report:sign', 'read:all']
-    },
-    {
-      label: 'Cronogramas',
-      route: '/cronogramas',
-      moduleKey: 'cronogramas',
-      permissionsAny: ['schedules:manage']
-    },
-    {
-      label: 'Calibraciones',
-      route: '/calibraciones',
-      moduleKey: 'calibraciones',
-      permissionsAny: ['calibration:schedule:manage', 'calibration:report:upload', 'read:all']
-    },
+    ...Object.entries(BIOMEDICAL_FEATURE_POLICIES).map(([key, policy]) => ({
+      label: policy.label,
+      route: policy.route,
+      biomedicalFeature: key as BiomedicalFeatureKey
+    })),
     {
       label: 'Odontología',
       route: '/odontologia',
@@ -160,6 +134,14 @@ export class ModuleTabsComponent implements OnInit {
     }
     if (tab.platformOnly && user?.clientId) {
       return false;
+    }
+    if (tab.biomedicalFeature) {
+      const roles = user?.roles?.length ? user.roles : user ? [user.role] : [];
+      return canOpenBiomedicalFeature(tab.biomedicalFeature, {
+        permissions: user?.permissions ?? [],
+        roles,
+        enabledModules: this.enabledModules
+      });
     }
     if (tab.roles && !this.auth.hasRole(tab.roles)) {
       return false;

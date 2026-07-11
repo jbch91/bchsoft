@@ -167,17 +167,9 @@ export class HojasDeVidaComponent implements OnDestroy {
   areas: AreaOption[] = [];
   locations: LocationOption[] = [];
   locationsAll: LocationOption[] = [];
-  siteEdits: Record<string, string> = {};
-  siteAddressEdits: Record<string, string> = {};
-  areaEdits: Record<string, string> = {};
-  locationEdits: Record<string, string> = {};
-  areasOpen = true;
-  areasFormOpen = false;
-  areasView: 'list' | 'create-site' | 'create-area' | 'create-location' = 'list';
   loading = false;
   errorMessage = '';
   successMessage = '';
-  viewMode: 'inventory' | 'form' | 'areas' = 'inventory';
   importPanelOpen = false;
   permissionsRefreshLoading = false;
   assetModalMode: 'create' | 'edit' | 'view' | null = null;
@@ -246,9 +238,6 @@ export class HojasDeVidaComponent implements OnDestroy {
   readonly equipmentTypeOptions = ['Fijo', 'Móvil'];
   readonly warrantyYearOptions = [1, 2, 3];
 
-  editingAreaId: string | null = null;
-  editingSiteId: string | null = null;
-  editingLocationId: string | null = null;
   editingAssetId: string | null = null;
   code = '';
   name = '';
@@ -296,11 +285,6 @@ export class HojasDeVidaComponent implements OnDestroy {
   importLoading = false;
   importTemplateLoading = false;
 
-  newAreaName = '';
-  newSiteName = '';
-  newSiteAddress = '';
-  newLocationName = '';
-
   constructor(
     private readonly biomed: BiomedService,
     private readonly admin: AdminService,
@@ -326,18 +310,6 @@ export class HojasDeVidaComponent implements OnDestroy {
   ngOnDestroy(): void {
     window.removeEventListener('focus', this.handleWindowFocus);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
-  }
-
-  trackByAreaId(_index: number, area: { id: string }): string {
-    return area.id;
-  }
-
-  trackBySiteId(_index: number, site: { id: string }): string {
-    return site.id;
-  }
-
-  trackByLocationId(_index: number, location: { id: string }): string {
-    return location.id;
   }
 
   setFormMode(mode: 'full' | 'wizard'): void {
@@ -1533,8 +1505,6 @@ export class HojasDeVidaComponent implements OnDestroy {
         name: row.name,
         address: row.address ?? null
       }));
-      this.siteEdits = Object.fromEntries(this.sites.map((site) => [site.id, site.name]));
-      this.siteAddressEdits = Object.fromEntries(this.sites.map((site) => [site.id, site.address ?? '']));
       if (!this.sites.find((site) => site.id === this.siteId)) {
         this.siteId = this.sites[0]?.id ?? '';
       }
@@ -1556,7 +1526,6 @@ export class HojasDeVidaComponent implements OnDestroy {
         siteId: row.site_id ?? null,
         siteName: row.site_name ?? null
       }));
-      this.areaEdits = Object.fromEntries(this.areas.map((area) => [area.id, area.name]));
       const visibleAreas = this.areasForSelectedSite();
       if (!visibleAreas.find((area) => area.id === this.areaId)) {
         this.areaId = visibleAreas[0]?.id ?? this.areas[0]?.id ?? '';
@@ -1580,7 +1549,6 @@ export class HojasDeVidaComponent implements OnDestroy {
       siteId: row.site_id ?? null,
       siteName: row.site_name ?? null
     }));
-    this.locationEdits = Object.fromEntries(this.locationsAll.map((loc) => [loc.id, loc.name]));
   }
 
   async loadLocationsForForm(): Promise<void> {
@@ -1609,168 +1577,11 @@ export class HojasDeVidaComponent implements OnDestroy {
     return this.siteId ? this.areas.filter((area) => area.siteId === this.siteId) : this.areas;
   }
 
-  areasBySite(siteId: string): AreaOption[] {
-    return this.areas.filter((area) => area.siteId === siteId);
-  }
-
-  locationsByArea(areaId: string): LocationOption[] {
-    return this.locationsAll.filter((loc) => loc.areaId === areaId);
-  }
-
   async onSiteForFormChange(): Promise<void> {
     const siteAreas = this.areasForSelectedSite();
     this.areaId = siteAreas[0]?.id ?? '';
     this.locationId = '';
     await this.loadLocationsForForm();
-  }
-
-  async onCreateSite(): Promise<void> {
-    if (!this.newSiteName || !this.selectedClientId) {
-      return;
-    }
-    const name = this.newSiteName.trim();
-    if (this.sites.some((site) => site.name.toLowerCase() === name.toLowerCase())) {
-      this.errorMessage = 'Esta sede ya existe para este cliente.';
-      this.newSiteName = '';
-      alert('Esta sede ya existe para este cliente.');
-      return;
-    }
-    await this.biomed.createSite(this.selectedClientId, name, this.newSiteAddress.trim() || undefined);
-    this.newSiteName = '';
-    this.newSiteAddress = '';
-    await this.loadSites();
-    this.cdr.detectChanges();
-  }
-
-  async onUpdateSite(siteId: string): Promise<void> {
-    const name = this.siteEdits[siteId]?.trim();
-    if (!name || !this.selectedClientId) {
-      return;
-    }
-    await this.biomed.updateSite(this.selectedClientId, siteId, {
-      name,
-      address: this.siteAddressEdits[siteId]?.trim() || null
-    });
-    this.editingSiteId = null;
-    await this.loadSites();
-    await this.loadAreas();
-    this.cdr.detectChanges();
-  }
-
-  async onDeleteSite(siteId: string): Promise<void> {
-    if (!this.selectedClientId) return;
-    try {
-      await this.biomed.deleteSite(this.selectedClientId, siteId);
-      if (this.siteId === siteId) {
-        this.siteId = '';
-      }
-      await this.loadSites();
-      await this.loadAreas();
-      await this.loadAssets();
-    } catch (error) {
-      console.error(error);
-      this.errorMessage = 'No se puede eliminar una sede con áreas o equipos asociados.';
-    }
-    this.cdr.detectChanges();
-  }
-
-  async onCreateArea(): Promise<void> {
-    if (!this.newAreaName || !this.selectedClientId || !this.siteId) {
-      return;
-    }
-    const name = this.newAreaName.trim();
-    if (this.areas.some((area) => area.siteId === this.siteId && area.name.toLowerCase() === name.toLowerCase())) {
-      this.errorMessage = 'Esta área ya existe para esta sede.';
-      this.newAreaName = '';
-      alert('Esta área ya existe para esta sede.');
-      return;
-    }
-    await this.biomed.createArea(this.selectedClientId, name, this.siteId);
-    this.newAreaName = '';
-    await this.loadAreas();
-    this.cdr.detectChanges();
-  }
-
-  async onCreateLocation(): Promise<void> {
-    if (!this.newLocationName || !this.selectedClientId || !this.areaId) {
-      return;
-    }
-    await this.biomed.createLocation(this.selectedClientId, this.areaId, this.newLocationName.trim());
-    this.newLocationName = '';
-    await this.loadLocationsAll();
-    await this.loadLocationsForForm();
-    this.cdr.detectChanges();
-  }
-
-  async onUpdateArea(areaId: string): Promise<void> {
-    const name = this.areaEdits[areaId]?.trim();
-    if (!name || !this.selectedClientId) {
-      return;
-    }
-    const area = this.areas.find((item) => item.id === areaId);
-    await this.biomed.updateArea(this.selectedClientId, areaId, name, area?.siteId ?? this.siteId ?? null);
-    this.editingAreaId = null;
-    await this.loadAreas();
-    this.cdr.detectChanges();
-  }
-
-  async onDeleteArea(areaId: string): Promise<void> {
-    if (!this.selectedClientId) return;
-    await this.biomed.deleteArea(this.selectedClientId, areaId);
-    await this.loadAreas();
-    this.cdr.detectChanges();
-  }
-
-  async onUpdateLocation(locationId: string): Promise<void> {
-    const name = this.locationEdits[locationId]?.trim();
-    if (!name || !this.selectedClientId) {
-      return;
-    }
-    const location = this.locationsAll.find((item) => item.id === locationId);
-    await this.biomed.updateLocation(this.selectedClientId, locationId, { name, areaId: location?.areaId ?? this.areaId ?? null });
-    this.editingLocationId = null;
-    await this.loadLocationsAll();
-    await this.loadLocationsForForm();
-    this.cdr.detectChanges();
-  }
-
-  async onDeleteLocation(locationId: string): Promise<void> {
-    if (!this.selectedClientId) return;
-    await this.biomed.deleteLocation(this.selectedClientId, locationId);
-    await this.loadLocationsAll();
-    await this.loadLocationsForForm();
-    this.cdr.detectChanges();
-  }
-
-  startEditArea(areaId: string): void {
-    this.editingAreaId = areaId;
-  }
-
-  startEditSite(siteId: string): void {
-    this.editingSiteId = siteId;
-  }
-
-  cancelEditSite(): void {
-    this.editingSiteId = null;
-  }
-
-  cancelEditArea(): void {
-    this.editingAreaId = null;
-  }
-
-  startEditLocation(locationId: string): void {
-    this.editingLocationId = locationId;
-  }
-
-  cancelEditLocation(): void {
-    this.editingLocationId = null;
-  }
-
-  isEditingLocationInArea(areaId: string): boolean {
-    if (!this.editingLocationId) {
-      return false;
-    }
-    return this.locationsByArea(areaId).some((loc) => loc.id === this.editingLocationId);
   }
 
   async onCreateAsset(): Promise<void> {

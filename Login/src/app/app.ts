@@ -97,6 +97,11 @@ export class App {
       title: 'Inventario',
       subtitle: 'Equipos, ubicación y control de activos.'
     },
+    '/sedes-areas-ubicaciones': {
+      eyebrow: 'Biomédico',
+      title: 'Sedes, áreas y ubicaciones',
+      subtitle: 'Estructura física del cliente para la ubicación de equipos.'
+    },
     '/guias-rapidas': {
       eyebrow: 'Biomédico',
       title: 'Guías rápidas',
@@ -188,7 +193,7 @@ export class App {
   footerEnvironmentLabel(): string {
     const path = this.currentPath;
     if (path === '/odontologia') return 'Software odontológico';
-    if (['/hojas-de-vida', '/inventario', '/guias-rapidas', '/mantenimiento', '/cronogramas', '/calibraciones'].includes(path)) {
+    if (['/hojas-de-vida', '/inventario', '/sedes-areas-ubicaciones', '/guias-rapidas', '/mantenimiento', '/cronogramas', '/calibraciones'].includes(path)) {
       return 'Software biomédico';
     }
     if (path.startsWith('/administracion-saas') || path.startsWith('/clientes')) return 'Administración SaaS';
