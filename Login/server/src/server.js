@@ -27,6 +27,7 @@ import {
   TEMPORARY_ONLY_PERMISSIONS,
   allowedClientPermissionsForModules
 } from './permission-policy.js';
+import { validateAndNormalizeHvImportAsset } from './hv-import-validation.js';
 import {
   createUser,
   getClientRolePermissions,
@@ -8127,7 +8128,7 @@ app.post(
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
 
-    const assets = Array.isArray(req.body?.assets) ? req.body.assets : [];
+    let assets = Array.isArray(req.body?.assets) ? req.body.assets : [];
     if (!assets.length) {
       return res.status(400).json({ message: 'No hay equipos para importar.' });
     }
@@ -8150,6 +8151,17 @@ app.post(
     if (missing) {
       return res.status(400).json({ message: 'Hay equipos con campos obligatorios incompletos.' });
     }
+
+    const validationResults = assets.map((asset) => validateAndNormalizeHvImportAsset(asset));
+    const invalidDataIndex = validationResults.findIndex((result) => result.errors.length > 0);
+    if (invalidDataIndex >= 0) {
+      const invalidAsset = assets[invalidDataIndex];
+      const assetName = invalidAsset?.code || invalidAsset?.name || `fila ${invalidDataIndex + 2}`;
+      return res.status(400).json({
+        message: `Equipo ${assetName}: ${validationResults[invalidDataIndex].errors.join('. ')}.`
+      });
+    }
+    assets = validationResults.map((result) => result.asset);
 
     try {
       const normalizedCodes = assets.map((asset) => String(asset.code || '').trim().toLowerCase());
@@ -8226,7 +8238,7 @@ app.post(
           humidityMax: asset.humidityMax ? Number(asset.humidityMax) : null,
           maintenanceFrequency: asset.maintenanceFrequency || 'mensual',
           requiresCalibration: Boolean(asset.requiresCalibration),
-          calibrationFrequency: asset.requiresCalibration ? asset.calibrationFrequency || 'anual' : null,
+          calibrationFrequency: asset.calibrationFrequency,
           hvEngineerUserId
         });
         const createdAsset = await getAssetById(clientId, result.id);
