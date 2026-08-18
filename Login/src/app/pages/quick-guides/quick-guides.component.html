@@ -35,7 +35,7 @@
       <div class="client-preview empty" *ngIf="clientsLoading || !selectedClientInfo">
         <div class="client-preview-info">
           <strong>{{ clientsLoading ? 'Cargando clientes' : 'Selecciona un cliente' }}</strong>
-          <div>{{ clientsLoading ? 'Preparando el selector del módulo.' : 'Las guías rápidas se crean por cliente, marca y modelo.' }}</div>
+          <div>{{ clientsLoading ? 'Preparando el selector del módulo.' : 'Las guías rápidas se crean por cliente y por equipo del catálogo.' }}</div>
         </div>
       </div>
     </div>
@@ -57,8 +57,8 @@
   <div class="card guide-list-card" *ngIf="viewMode === 'list'">
     <div class="list-head">
       <div>
-        <h2>Guías por marca y modelo</h2>
-        <p class="muted">Una guía aprobada queda disponible para todos los equipos con la misma marca y modelo.</p>
+        <h2>Guías por equipo, marca y modelo</h2>
+        <p class="muted">Cada guía aprobada queda disponible para los equipos del cliente vinculados al mismo nodo del catálogo.</p>
       </div>
       <button type="button" class="primary" *ngIf="canCreate" (click)="startCreate()">Nueva guía</button>
     </div>
@@ -114,13 +114,6 @@
     </div>
 
     <div class="form-grid">
-      <label>
-        Usar marca/modelo del inventario
-        <select [(ngModel)]="selectedBrandModelKey" name="brandModel" (change)="onBrandModelChange()">
-          <option value="">Seleccionar manualmente</option>
-          <option *ngFor="let option of brandModelOptions" [value]="option.key">{{ option.label }}</option>
-        </select>
-      </label>
       <label class="meta-field">
         <span class="label-row">
           Código documental
@@ -144,7 +137,19 @@
       </label>
       <label>
         Equipo *
-        <input type="text" [(ngModel)]="form.equipmentName" name="equipmentName" required />
+        <input
+          type="text"
+          [(ngModel)]="form.equipmentName"
+          name="equipmentName"
+          list="guide-equipment-catalog"
+          placeholder="Seleccionar o escribir"
+          (change)="onEquipmentCatalogChange()"
+          autocomplete="off"
+          required
+        />
+        <datalist id="guide-equipment-catalog">
+          <option *ngFor="let equipmentName of equipmentCatalogNames" [value]="equipmentName"></option>
+        </datalist>
       </label>
       <label>
         Tipo de equipo
@@ -154,11 +159,35 @@
       </label>
       <label>
         Marca *
-        <input type="text" [(ngModel)]="form.brand" name="brand" (input)="onBrandModelManualChange()" required />
+        <input
+          type="text"
+          [(ngModel)]="form.brand"
+          name="brand"
+          list="guide-brand-catalog"
+          placeholder="Seleccionar o escribir"
+          (change)="onBrandCatalogChange()"
+          autocomplete="off"
+          required
+        />
+        <datalist id="guide-brand-catalog">
+          <option *ngFor="let brandName of equipmentCatalogBrands" [value]="brandName"></option>
+        </datalist>
       </label>
       <label>
         Modelo *
-        <input type="text" [(ngModel)]="form.model" name="model" (input)="onBrandModelManualChange()" required />
+        <input
+          type="text"
+          [(ngModel)]="form.model"
+          name="model"
+          list="guide-model-catalog"
+          placeholder="Seleccionar o escribir"
+          (input)="onModelCatalogChange()"
+          autocomplete="off"
+          required
+        />
+        <datalist id="guide-model-catalog">
+          <option *ngFor="let modelName of equipmentCatalogModels" [value]="modelName"></option>
+        </datalist>
       </label>
       <label>
         Responsable del uso

@@ -1,3 +1,6 @@
+import { canonicalizeCatalogValue } from './equipment-catalog-text.js';
+import { normalizeBiomedicalRiskClassifications } from './biomedical-risk.js';
+
 export const HV_CALIBRATION_FREQUENCIES = Object.freeze([
   'mensual',
   'bimensual',
@@ -57,6 +60,7 @@ export function validateAndNormalizeHvImportAsset(asset = {}) {
   const requiresCalibration = parseBoolean(asset.requiresCalibration);
   const calibrationFrequencyRaw = String(asset.calibrationFrequency ?? '').trim();
   const calibrationFrequency = normalizedText(calibrationFrequencyRaw) || null;
+  const risk = normalizeBiomedicalRiskClassifications(asset);
 
   if (acquisitionDate && !isValidIsoDate(acquisitionDate)) {
     errors.push('Fecha adquisición debe usar yyyy-mm-dd, quedar vacía o ser NR');
@@ -73,12 +77,17 @@ export function validateAndNormalizeHvImportAsset(asset = {}) {
   } else if (calibrationFrequency && !HV_CALIBRATION_FREQUENCIES.includes(calibrationFrequency)) {
     errors.push(`Frecuencia de calibración no permitida. Usa: ${HV_CALIBRATION_FREQUENCIES.join(', ')}`);
   }
+  errors.push(...risk.errors);
 
   return {
     asset: {
       ...asset,
+      name: canonicalizeCatalogValue(asset.name) || asset.name,
+      brand: canonicalizeCatalogValue(asset.brand) || asset.brand,
+      model: canonicalizeCatalogValue(asset.model) || asset.model,
       acquisitionDate,
       supplierEmail,
+      ...risk.values,
       requiresCalibration: requiresCalibration ?? false,
       calibrationFrequency: requiresCalibration ? calibrationFrequency : null
     },

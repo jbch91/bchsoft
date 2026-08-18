@@ -12,6 +12,7 @@ export interface QuickGuideDto {
   equipment_type: string | null;
   brand: string;
   model: string;
+  equipment_catalog_model_id?: string | null;
   status: 'borrador' | 'aprobada' | 'obsoleta';
   intended_use: string | null;
   responsible_use: string | null;

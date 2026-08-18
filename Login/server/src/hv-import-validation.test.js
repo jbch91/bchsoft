@@ -57,3 +57,42 @@ test('rechaza fechas inexistentes y correos inválidos', () => {
   assert.equal(result.errors.some((error) => error.startsWith('Fecha adquisición')), true);
   assert.equal(result.errors.some((error) => error.startsWith('Correo proveedor')), true);
 });
+
+test('convierte equipo, marca y modelo importados a mayúsculas', () => {
+  const result = validateAndNormalizeHvImportAsset({
+    name: '  monitor de signos vitales ',
+    brand: 'Mindray',
+    model: 'uMEC 12',
+    requiresCalibration: false
+  });
+
+  assert.equal(result.asset.name, 'MONITOR DE SIGNOS VITALES');
+  assert.equal(result.asset.brand, 'MINDRAY');
+  assert.equal(result.asset.model, 'UMEC 12');
+});
+
+test('valida y normaliza los riesgos condicionales de la importación', () => {
+  const valid = validateAndNormalizeHvImportAsset({
+    requiresSanitaryClassification: 'Sí',
+    riskClass: 'clase iib',
+    requiresElectricalClassification: 'Sí',
+    electricalProtectionClass: 'Clase II',
+    appliedPartType: 'CF',
+    requiresCalibration: false
+  });
+  const invalid = validateAndNormalizeHvImportAsset({
+    requiresSanitaryClassification: 'No',
+    riskClass: 'Clase I',
+    requiresElectricalClassification: 'Sí',
+    electricalProtectionClass: '',
+    appliedPartType: '',
+    requiresCalibration: false
+  });
+
+  assert.deepEqual(valid.errors, []);
+  assert.equal(valid.asset.riskClass, 'Clase IIB');
+  assert.equal(valid.asset.electricalProtectionClass, 'Clase II');
+  assert.equal(valid.asset.appliedPartType, 'Tipo CF');
+  assert.equal(invalid.errors.some((error) => error.includes('riesgo sanitario debe estar vacía')), true);
+  assert.equal(invalid.errors.some((error) => error.includes('protección eléctrica es obligatoria')), true);
+});

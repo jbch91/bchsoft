@@ -1,21 +1,24 @@
 import { query } from './db.js';
-
-function normalizeKey(value) {
-  return String(value || '').trim().toLowerCase();
-}
+import {
+  canonicalizeCatalogValue,
+  ensureEquipmentCatalogPath,
+  normalizeCatalogText
+} from './equipment-catalog.js';
 
 function normalizePayload(payload = {}) {
-  const brand = String(payload.brand || '').trim();
-  const model = String(payload.model || '').trim();
+  const equipmentName = canonicalizeCatalogValue(payload.equipmentName);
+  const brand = canonicalizeCatalogValue(payload.brand);
+  const model = canonicalizeCatalogValue(payload.model);
   return {
     documentCode: String(payload.documentCode || '').trim() || null,
     version: String(payload.version || '1.0').trim() || '1.0',
-    equipmentName: String(payload.equipmentName || '').trim(),
+    equipmentName,
     equipmentType: String(payload.equipmentType || '').trim() || null,
     brand,
     model,
-    brandNormalized: normalizeKey(brand),
-    modelNormalized: normalizeKey(model),
+    equipmentNameNormalized: normalizeCatalogText(equipmentName),
+    brandNormalized: normalizeCatalogText(brand),
+    modelNormalized: normalizeCatalogText(model),
     status: 'aprobada',
     intendedUse: null,
     responsibleUse: String(payload.responsibleUse || '').trim() || null,
@@ -37,15 +40,24 @@ async function getClientSchema(clientId) {
   return rows[0]?.schema_name ?? null;
 }
 
-async function countAssetsForGuide(clientId, brand, model) {
+async function countAssetsForGuide(clientId, equipmentName, brand, model, catalogModelId) {
   const schema = await getClientSchema(clientId);
-  if (!schema || !brand || !model) return 0;
+  if (!schema || !equipmentName || !brand || !model) return 0;
   const { rows } = await query(
     `SELECT COUNT(*)::int AS total
      FROM "${schema}".assets
-     WHERE LOWER(TRIM(COALESCE(brand, ''))) = $1
-       AND LOWER(TRIM(COALESCE(model, ''))) = $2`,
-    [normalizeKey(brand), normalizeKey(model)]
+     WHERE ($1::uuid IS NOT NULL AND equipment_catalog_model_id = $1)
+        OR (
+          public.normalize_biomedical_catalog_text(name) = $2
+          AND public.normalize_biomedical_catalog_text(brand) = $3
+          AND public.normalize_biomedical_catalog_text(model) = $4
+        )`,
+    [
+      catalogModelId || null,
+      normalizeCatalogText(equipmentName),
+      normalizeCatalogText(brand),
+      normalizeCatalogText(model)
+    ]
   );
   return rows[0]?.total ?? 0;
 }
@@ -54,7 +66,13 @@ async function attachAssetCounts(clientId, guides) {
   return Promise.all(
     guides.map(async (guide) => ({
       ...guide,
-      asset_count: await countAssetsForGuide(clientId, guide.brand, guide.model)
+      asset_count: await countAssetsForGuide(
+        clientId,
+        guide.equipment_name,
+        guide.brand,
+        guide.model,
+        guide.equipment_catalog_model_id
+      )
     }))
   );
 }
@@ -114,20 +132,38 @@ export async function findQuickGuideForAsset(clientId, assetId, { includeDrafts 
   const schema = await getClientSchema(clientId);
   if (!schema) return null;
   const { rows: assetRows } = await query(
-    `SELECT id, brand, model FROM "${schema}".assets WHERE id = $1 LIMIT 1`,
+    `SELECT id, name, brand, model, equipment_catalog_model_id
+     FROM "${schema}".assets
+     WHERE id = $1
+     LIMIT 1`,
     [assetId]
   );
   const asset = assetRows[0];
   if (!asset?.brand || !asset?.model) return null;
 
-  const params = [clientId, normalizeKey(asset.brand), normalizeKey(asset.model)];
+  const params = [
+    clientId,
+    asset.equipment_catalog_model_id || null,
+    normalizeCatalogText(asset.name),
+    normalizeCatalogText(asset.brand),
+    normalizeCatalogText(asset.model)
+  ];
   const statusWhere = includeDrafts ? '' : "AND g.status = 'aprobada'";
   const { rows } = await query(
     `${GUIDE_SELECT}
      WHERE g.client_id = $1
-       AND g.brand_normalized = $2
-       AND g.model_normalized = $3
+       AND (
+         ($2::uuid IS NOT NULL AND g.equipment_catalog_model_id = $2)
+         OR (
+           g.equipment_name_normalized = $3
+           AND g.brand_normalized = $4
+           AND g.model_normalized = $5
+         )
+       )
        ${statusWhere}
+     ORDER BY
+       CASE WHEN $2::uuid IS NOT NULL AND g.equipment_catalog_model_id = $2 THEN 0 ELSE 1 END,
+       g.updated_at DESC
      LIMIT 1`,
     params
   );
@@ -136,10 +172,17 @@ export async function findQuickGuideForAsset(clientId, assetId, { includeDrafts 
 
 export async function createQuickGuide(clientId, payload, userId) {
   const data = normalizePayload(payload);
+  const catalogPath = await ensureEquipmentCatalogPath({
+    equipmentName: data.equipmentName,
+    brand: data.brand,
+    model: data.model,
+    createdBy: userId
+  });
   const { rows } = await query(
     `INSERT INTO quick_use_guides (
        client_id, document_code, version, equipment_name, equipment_type,
-       brand, model, brand_normalized, model_normalized, status,
+       brand, model, equipment_name_normalized, brand_normalized, model_normalized,
+       equipment_catalog_model_id, status,
        intended_use, responsible_use, placement_notes, prerequisites,
        startup_steps, shutdown_steps, basic_operation, alarms,
        cleaning_disinfection, emergency_actions, support_contact, visual_notes,
@@ -148,10 +191,10 @@ export async function createQuickGuide(clientId, payload, userId) {
      VALUES (
        $1,$2,$3,$4,$5,
        $6,$7,$8,$9,$10,
-       $11,$12,$13,$14,
-       $15,$16,$17,$18,
-       $19,$20,$21,$22,
-       $23,$23,$23,NOW()
+       $11,$12,$13,$14,$15,
+       $16,$17,$18,$19,
+       $20,$21,$22,$23,
+       $24,$25,$25,$25,NOW()
      )
      RETURNING id`,
     [
@@ -162,8 +205,10 @@ export async function createQuickGuide(clientId, payload, userId) {
       data.equipmentType,
       data.brand,
       data.model,
+      data.equipmentNameNormalized,
       data.brandNormalized,
       data.modelNormalized,
+      catalogPath.modelId,
       data.status,
       data.intendedUse,
       data.responsibleUse,
@@ -185,6 +230,12 @@ export async function createQuickGuide(clientId, payload, userId) {
 
 export async function updateQuickGuide(clientId, guideId, payload, userId) {
   const data = normalizePayload(payload);
+  const catalogPath = await ensureEquipmentCatalogPath({
+    equipmentName: data.equipmentName,
+    brand: data.brand,
+    model: data.model,
+    createdBy: userId
+  });
   const { rows } = await query(
     `UPDATE quick_use_guides
      SET document_code = $3,
@@ -193,23 +244,25 @@ export async function updateQuickGuide(clientId, guideId, payload, userId) {
          equipment_type = $6,
          brand = $7,
          model = $8,
-         brand_normalized = $9,
-         model_normalized = $10,
-         status = $11,
-         intended_use = $12,
-         responsible_use = $13,
-         placement_notes = $14,
-         prerequisites = $15,
-         startup_steps = $16,
-         shutdown_steps = $17,
-         basic_operation = $18,
-         alarms = $19,
-         cleaning_disinfection = $20,
-         emergency_actions = $21,
-         support_contact = $22,
-         visual_notes = $23,
-         updated_by = $24,
-         approved_by = $24,
+         equipment_name_normalized = $9,
+         brand_normalized = $10,
+         model_normalized = $11,
+         equipment_catalog_model_id = $12,
+         status = $13,
+         intended_use = $14,
+         responsible_use = $15,
+         placement_notes = $16,
+         prerequisites = $17,
+         startup_steps = $18,
+         shutdown_steps = $19,
+         basic_operation = $20,
+         alarms = $21,
+         cleaning_disinfection = $22,
+         emergency_actions = $23,
+         support_contact = $24,
+         visual_notes = $25,
+         updated_by = $26,
+         approved_by = $26,
          approved_at = NOW()
      WHERE client_id = $1 AND id = $2
      RETURNING id`,
@@ -222,8 +275,10 @@ export async function updateQuickGuide(clientId, guideId, payload, userId) {
       data.equipmentType,
       data.brand,
       data.model,
+      data.equipmentNameNormalized,
       data.brandNormalized,
       data.modelNormalized,
+      catalogPath.modelId,
       data.status,
       data.intendedUse,
       data.responsibleUse,

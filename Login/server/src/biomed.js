@@ -1,4 +1,6 @@
 import { query } from './db.js';
+import { canonicalizeCatalogValue, ensureEquipmentCatalogPath } from './equipment-catalog.js';
+import { assertBiomedicalRiskClassifications } from './biomedical-risk.js';
 
 async function getSchemaByClientId(clientId) {
   const { rows } = await query('SELECT schema_name FROM clients WHERE id = $1', [clientId]);
@@ -183,11 +185,14 @@ export async function listAssets(clientId) {
   }
   const { rows } = await query(
     `SELECT a.id, a.code, a.name, a.brand, a.model, a.serial, a.location, a.status, a.created_at,
-            a.photo_path, a.invima_reg, a.risk_class, a.is_mobile, a.manufacturer,
+            a.photo_path, a.invima_reg, a.risk_class, a.requires_sanitary_classification,
+            a.requires_electrical_classification, a.electrical_protection_class, a.applied_part_type,
+            a.is_mobile, a.manufacturer,
             a.acquisition_type, a.contract_text, a.acquisition_date, a.useful_life_years, a.warranty_years,
             a.supplier_name, a.supplier_phone, a.supplier_email, a.power_type, a.voltage,
             a.temp_min, a.temp_max, a.humidity_min, a.humidity_max,
             a.maintenance_frequency, a.requires_calibration, a.calibration_frequency,
+            a.equipment_catalog_model_id,
             a.hv_engineer_user_id, a.hv_engineer_signed_at,
             hu.display_name AS hv_engineer_name, hu.signature_path AS hv_engineer_signature_path,
             hu.invima_registration AS hv_engineer_invima_registration,
@@ -232,11 +237,14 @@ export async function listAssetsForReader(clientId, userId) {
 
   const { rows } = await query(
     `SELECT a.id, a.code, a.name, a.brand, a.model, a.serial, a.location, a.status, a.created_at,
-            a.photo_path, a.invima_reg, a.risk_class, a.is_mobile, a.manufacturer,
+            a.photo_path, a.invima_reg, a.risk_class, a.requires_sanitary_classification,
+            a.requires_electrical_classification, a.electrical_protection_class, a.applied_part_type,
+            a.is_mobile, a.manufacturer,
             a.acquisition_type, a.contract_text, a.acquisition_date, a.useful_life_years, a.warranty_years,
             a.supplier_name, a.supplier_phone, a.supplier_email, a.power_type, a.voltage,
             a.temp_min, a.temp_max, a.humidity_min, a.humidity_max,
             a.maintenance_frequency, a.requires_calibration, a.calibration_frequency,
+            a.equipment_catalog_model_id,
             a.hv_engineer_user_id, a.hv_engineer_signed_at,
             hu.display_name AS hv_engineer_name, hu.signature_path AS hv_engineer_signature_path,
             hu.invima_registration AS hv_engineer_invima_registration,
@@ -359,6 +367,10 @@ export async function createAsset(clientId, payload) {
     areaId,
     locationId,
     riskClass,
+    requiresSanitaryClassification,
+    requiresElectricalClassification,
+    electricalProtectionClass,
+    appliedPartType,
     isMobile,
     manufacturer,
     acquisitionType,
@@ -378,30 +390,53 @@ export async function createAsset(clientId, payload) {
     maintenanceFrequency,
     requiresCalibration,
     calibrationFrequency,
-    hvEngineerUserId
+    hvEngineerUserId,
+    catalogCreatedBy
   } = payload;
+  const equipmentName = canonicalizeCatalogValue(name);
+  const equipmentBrand = canonicalizeCatalogValue(brand);
+  const equipmentModel = canonicalizeCatalogValue(model);
+  const risk = assertBiomedicalRiskClassifications({
+    riskClass,
+    requiresSanitaryClassification,
+    requiresElectricalClassification,
+    electricalProtectionClass,
+    appliedPartType
+  });
+  const catalogPath = await ensureEquipmentCatalogPath({
+    equipmentName,
+    brand: equipmentBrand,
+    model: equipmentModel,
+    createdBy: catalogCreatedBy
+  });
   const { rows } = await query(
     `INSERT INTO "${schema}".assets
-     (code, name, brand, model, serial, invima_reg, site_id, area_id, location_id, risk_class, is_mobile, manufacturer,
+     (code, name, brand, model, serial, invima_reg, site_id, area_id, location_id, risk_class,
+      requires_sanitary_classification, requires_electrical_classification, electrical_protection_class, applied_part_type,
+      is_mobile, manufacturer,
       acquisition_type, contract_text, acquisition_date, useful_life_years, warranty_years,
       supplier_name, supplier_phone, supplier_email, power_type, voltage, temp_min, temp_max,
       humidity_min, humidity_max, maintenance_frequency, requires_calibration, calibration_frequency,
-      hv_engineer_user_id, hv_engineer_signed_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-             $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
-             $30, CASE WHEN $30::uuid IS NULL THEN NULL ELSE NOW() END)
+      hv_engineer_user_id, hv_engineer_signed_at, equipment_catalog_model_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+             $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
+             $34, CASE WHEN $34::uuid IS NULL THEN NULL ELSE NOW() END, $35)
      RETURNING id`,
     [
       code,
-      name,
-      brand,
-      model,
+      equipmentName,
+      equipmentBrand || null,
+      equipmentModel || null,
       serial,
       invimaReg,
       siteId,
       areaId,
       locationId,
-      riskClass,
+      risk.riskClass,
+      risk.requiresSanitaryClassification,
+      risk.requiresElectricalClassification,
+      risk.electricalProtectionClass,
+      risk.appliedPartType,
       isMobile,
       manufacturer,
       acquisitionType,
@@ -421,7 +456,8 @@ export async function createAsset(clientId, payload) {
       maintenanceFrequency,
       requiresCalibration,
       calibrationFrequency,
-      hvEngineerUserId || null
+      hvEngineerUserId || null,
+      catalogPath.modelId
     ]
   );
   return rows[0];
@@ -454,6 +490,10 @@ export async function updateAsset(clientId, assetId, payload) {
     areaId,
     locationId,
     riskClass,
+    requiresSanitaryClassification,
+    requiresElectricalClassification,
+    electricalProtectionClass,
+    appliedPartType,
     isMobile,
     manufacturer,
     acquisitionType,
@@ -473,32 +513,56 @@ export async function updateAsset(clientId, assetId, payload) {
     maintenanceFrequency,
     requiresCalibration,
     calibrationFrequency,
-    hvEngineerUserId
+    hvEngineerUserId,
+    catalogCreatedBy
   } = payload;
+  const equipmentName = canonicalizeCatalogValue(name);
+  const equipmentBrand = canonicalizeCatalogValue(brand);
+  const equipmentModel = canonicalizeCatalogValue(model);
+  const risk = assertBiomedicalRiskClassifications({
+    riskClass,
+    requiresSanitaryClassification,
+    requiresElectricalClassification,
+    electricalProtectionClass,
+    appliedPartType
+  });
+  const catalogPath = await ensureEquipmentCatalogPath({
+    equipmentName,
+    brand: equipmentBrand,
+    model: equipmentModel,
+    createdBy: catalogCreatedBy
+  });
   await query(
     `UPDATE "${schema}".assets
      SET code = $1, name = $2, brand = $3, model = $4, serial = $5,
          invima_reg = $6, site_id = $7, area_id = $8, location_id = $9, risk_class = $10,
-         is_mobile = $11, manufacturer = $12,
-         acquisition_type = $13, contract_text = $14, acquisition_date = $15,
-         useful_life_years = $16, warranty_years = $17, supplier_name = $18,
-         supplier_phone = $19, supplier_email = $20, power_type = $21, voltage = $22,
-         temp_min = $23, temp_max = $24, humidity_min = $25, humidity_max = $26,
-         maintenance_frequency = $27, requires_calibration = $28, calibration_frequency = $29,
-         hv_engineer_user_id = COALESCE($30::uuid, hv_engineer_user_id),
-         hv_engineer_signed_at = CASE WHEN $30::uuid IS NULL THEN hv_engineer_signed_at ELSE NOW() END
-     WHERE id = $31`,
+         requires_sanitary_classification = $11, requires_electrical_classification = $12,
+         electrical_protection_class = $13, applied_part_type = $14,
+         is_mobile = $15, manufacturer = $16,
+         acquisition_type = $17, contract_text = $18, acquisition_date = $19,
+         useful_life_years = $20, warranty_years = $21, supplier_name = $22,
+         supplier_phone = $23, supplier_email = $24, power_type = $25, voltage = $26,
+         temp_min = $27, temp_max = $28, humidity_min = $29, humidity_max = $30,
+         maintenance_frequency = $31, requires_calibration = $32, calibration_frequency = $33,
+         hv_engineer_user_id = COALESCE($34::uuid, hv_engineer_user_id),
+         hv_engineer_signed_at = CASE WHEN $34::uuid IS NULL THEN hv_engineer_signed_at ELSE NOW() END,
+         equipment_catalog_model_id = $35
+     WHERE id = $36`,
     [
       code,
-      name,
-      brand,
-      model,
+      equipmentName,
+      equipmentBrand || null,
+      equipmentModel || null,
       serial,
       invimaReg,
       siteId || null,
       areaId || null,
       locationId || null,
-      riskClass,
+      risk.riskClass,
+      risk.requiresSanitaryClassification,
+      risk.requiresElectricalClassification,
+      risk.electricalProtectionClass,
+      risk.appliedPartType,
       isMobile,
       manufacturer,
       acquisitionType,
@@ -519,6 +583,7 @@ export async function updateAsset(clientId, assetId, payload) {
       requiresCalibration,
       calibrationFrequency,
       hvEngineerUserId || null,
+      catalogPath.modelId,
       assetId
     ]
   );

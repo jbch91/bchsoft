@@ -178,15 +178,50 @@
             </label>
             <label class="required">
               <span class="label-line"><span class="label-text">Nombre</span><span class="required-star">*</span></span>
-              <input type="text" name="name" [(ngModel)]="name" required />
+              <input
+                type="text"
+                name="name"
+                [(ngModel)]="name"
+                list="hv-equipment-catalog"
+                placeholder="Seleccionar o escribir"
+                (change)="onEquipmentCatalogChange()"
+                autocomplete="off"
+                required
+              />
+              <datalist id="hv-equipment-catalog">
+                <option *ngFor="let equipmentName of equipmentCatalogNames" [value]="equipmentName"></option>
+              </datalist>
             </label>
             <label class="required">
               <span class="label-line"><span class="label-text">Marca</span><span class="required-star">*</span></span>
-              <input type="text" name="brand" [(ngModel)]="brand" required />
+              <input
+                type="text"
+                name="brand"
+                [(ngModel)]="brand"
+                list="hv-brand-catalog"
+                placeholder="Seleccionar o escribir"
+                (change)="onBrandCatalogChange()"
+                autocomplete="off"
+                required
+              />
+              <datalist id="hv-brand-catalog">
+                <option *ngFor="let brandName of equipmentCatalogBrands" [value]="brandName"></option>
+              </datalist>
             </label>
             <label class="required">
               <span class="label-line"><span class="label-text">Modelo</span><span class="required-star">*</span></span>
-              <input type="text" name="model" [(ngModel)]="model" required />
+              <input
+                type="text"
+                name="model"
+                [(ngModel)]="model"
+                list="hv-model-catalog"
+                placeholder="Seleccionar o escribir"
+                autocomplete="off"
+                required
+              />
+              <datalist id="hv-model-catalog">
+                <option *ngFor="let modelName of equipmentCatalogModels" [value]="modelName"></option>
+              </datalist>
             </label>
             <label class="required">
               <span class="label-line"><span class="label-text">Serie</span><span class="required-star">*</span></span>
@@ -218,15 +253,68 @@
               <span class="label-line"><span class="label-text">Registro Invima</span><span class="required-star">*</span></span>
               <input type="text" name="invimaReg" [(ngModel)]="invimaReg" required />
             </label>
-            <label class="required">
-              <span class="label-line"><span class="label-text">Riesgo</span><span class="required-star">*</span></span>
-              <select [(ngModel)]="riskClass" name="riskClass" required>
-                <option>Clase I</option>
-                <option>Clase IIA</option>
-                <option>Clase IIB</option>
-                <option>Clase III</option>
-              </select>
-            </label>
+            <div class="risk-classification-grid">
+              <label class="requirement-toggle">
+                <span>Riesgo sanitario</span>
+                <span class="toggle-control">
+                  <input
+                    type="checkbox"
+                    name="requiresSanitaryClassification"
+                    [(ngModel)]="requiresSanitaryClassification"
+                    (change)="onSanitaryRequirementChange()"
+                  />
+                  <span>{{ requiresSanitaryClassification ? 'Sí requiere' : 'No requiere' }}</span>
+                </span>
+              </label>
+              <label class="required" *ngIf="requiresSanitaryClassification">
+                <span class="label-line">
+                  <span class="label-text">Clasificación de riesgo sanitario</span>
+                  <span class="required-star">*</span>
+                </span>
+                <select [(ngModel)]="riskClass" name="riskClass" required>
+                  <option value="" disabled>Seleccionar</option>
+                  <option *ngFor="let risk of riskClasses" [value]="risk">{{ risk }}</option>
+                </select>
+              </label>
+              <label class="requirement-toggle">
+                <span>Riesgo eléctrico</span>
+                <span class="toggle-control">
+                  <input
+                    type="checkbox"
+                    name="requiresElectricalClassification"
+                    [(ngModel)]="requiresElectricalClassification"
+                    (change)="onElectricalRequirementChange()"
+                  />
+                  <span>{{ requiresElectricalClassification ? 'Sí requiere' : 'No requiere' }}</span>
+                </span>
+              </label>
+              <label class="required" *ngIf="requiresElectricalClassification">
+                <span class="label-line">
+                  <span class="label-text">Clase de protección eléctrica</span>
+                  <span class="required-star">*</span>
+                </span>
+                <select
+                  [(ngModel)]="electricalProtectionClass"
+                  name="electricalProtectionClass"
+                  required
+                >
+                  <option value="" disabled>Seleccionar</option>
+                  <option *ngFor="let electricalClass of electricalProtectionClasses" [value]="electricalClass">
+                    {{ electricalClass }}
+                  </option>
+                </select>
+              </label>
+              <label class="required" *ngIf="requiresElectricalClassification">
+                <span class="label-line">
+                  <span class="label-text">Tipo de parte aplicada</span>
+                  <span class="required-star">*</span>
+                </span>
+                <select [(ngModel)]="appliedPartType" name="appliedPartType" required>
+                  <option value="" disabled>Seleccionar</option>
+                  <option *ngFor="let partType of appliedPartTypes" [value]="partType">{{ partType }}</option>
+                </select>
+              </label>
+            </div>
             <label>
               Tipo de equipo
               <select [(ngModel)]="isMobile" name="isMobile">
@@ -430,7 +518,11 @@
               <p><strong>Serie:</strong> {{ serial || '-' }}</p>
               <p><strong>Código:</strong> {{ code || '-' }}</p>
               <p><strong>Registro Invima:</strong> {{ invimaReg || '-' }}</p>
-              <p><strong>Riesgo:</strong> {{ riskClass || '-' }}</p>
+              <p><strong>Requiere riesgo sanitario:</strong> {{ requiresSanitaryClassification ? 'Sí' : 'No' }}</p>
+              <p *ngIf="requiresSanitaryClassification"><strong>Riesgo sanitario:</strong> {{ riskClass || '-' }}</p>
+              <p><strong>Requiere riesgo eléctrico:</strong> {{ requiresElectricalClassification ? 'Sí' : 'No' }}</p>
+              <p *ngIf="requiresElectricalClassification"><strong>Clase eléctrica:</strong> {{ electricalProtectionClass || '-' }}</p>
+              <p *ngIf="requiresElectricalClassification"><strong>Parte aplicada:</strong> {{ appliedPartType || '-' }}</p>
               <p><strong>Sede:</strong> {{ getSelectedSiteName() }}</p>
               <p><strong>Área:</strong> {{ getSelectedAreaName() }}</p>
               <p><strong>Ubicación:</strong> {{ getSelectedLocationName() }}</p>
@@ -460,7 +552,7 @@
           <div class="wizard-steps">
             Paso {{ wizardStep + 1 }} de {{ wizardSteps.length }} · {{ wizardSteps[wizardStep] }}
             <span class="wizard-hint" *ngIf="!canProceedStep()">
-              Completa Nombre, Código, Sede, Área y Ubicación para continuar.
+              Completa los datos obligatorios y las clasificaciones activas para continuar.
             </span>
           </div>
           <div class="wizard-actions">
@@ -551,7 +643,11 @@
           <div>
             <h4>Datos técnicos</h4>
             <p><strong>Registro Invima:</strong> {{ invimaReg || '-' }}</p>
-            <p><strong>Riesgo:</strong> {{ riskClass || '-' }}</p>
+            <p><strong>Requiere riesgo sanitario:</strong> {{ requiresSanitaryClassification ? 'Sí' : 'No' }}</p>
+            <p *ngIf="requiresSanitaryClassification"><strong>Riesgo sanitario:</strong> {{ riskClass || '-' }}</p>
+            <p><strong>Requiere riesgo eléctrico:</strong> {{ requiresElectricalClassification ? 'Sí' : 'No' }}</p>
+            <p *ngIf="requiresElectricalClassification"><strong>Clase eléctrica:</strong> {{ electricalProtectionClass || '-' }}</p>
+            <p *ngIf="requiresElectricalClassification"><strong>Parte aplicada:</strong> {{ appliedPartType || '-' }}</p>
             <p><strong>Fabricante:</strong> {{ manufacturer || '-' }}</p>
             <p><strong>Tipo:</strong> {{ isMobile ? 'Móvil' : 'Fijo' }}</p>
           </div>
@@ -636,7 +732,7 @@
           <div class="document-action">
             <div>
               <strong>Guía rápida de uso</strong>
-              <span>Guía aprobada por marca y modelo para operación segura del equipo.</span>
+              <span>Guía aprobada para esta combinación de equipo, marca y modelo.</span>
             </div>
             <button type="button" class="ghost" (click)="openSelectedAssetQuickGuide()">Abrir guía</button>
           </div>

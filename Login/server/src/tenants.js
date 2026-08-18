@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS "${schema}".assets (
   name TEXT NOT NULL,
   brand TEXT,
   model TEXT,
+  equipment_catalog_model_id UUID REFERENCES public.biomedical_equipment_models(id) ON DELETE SET NULL,
   serial TEXT,
   location TEXT,
   photo_path TEXT,
@@ -38,6 +39,10 @@ CREATE TABLE IF NOT EXISTS "${schema}".assets (
   area_id UUID REFERENCES "${schema}".areas(id) ON DELETE SET NULL,
   location_id UUID REFERENCES "${schema}".locations(id) ON DELETE SET NULL,
   risk_class TEXT,
+  requires_sanitary_classification BOOLEAN NOT NULL DEFAULT FALSE,
+  requires_electrical_classification BOOLEAN NOT NULL DEFAULT FALSE,
+  electrical_protection_class TEXT,
+  applied_part_type TEXT,
   is_mobile BOOLEAN NOT NULL DEFAULT FALSE,
   manufacturer TEXT,
   acquisition_type TEXT,
@@ -62,6 +67,11 @@ CREATE TABLE IF NOT EXISTS "${schema}".assets (
   status TEXT DEFAULT 'activo',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+DROP TRIGGER IF EXISTS trg_assets_catalog_uppercase ON "${schema}".assets;
+CREATE TRIGGER trg_assets_catalog_uppercase
+BEFORE INSERT OR UPDATE OF name, brand, model ON "${schema}".assets
+FOR EACH ROW EXECUTE FUNCTION public.enforce_biomedical_asset_catalog_uppercase();
 
 CREATE TABLE IF NOT EXISTS "${schema}".asset_movements (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

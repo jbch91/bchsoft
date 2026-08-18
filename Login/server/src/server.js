@@ -327,6 +327,7 @@ import {
   setQuickGuideVisual,
   updateQuickGuide
 } from './quick-guides.js';
+import { listEquipmentCatalog } from './equipment-catalog.js';
 import { sendNotificationEmail } from './mailer.js';
 import { listReaderAccess, replaceReaderAccess } from './reader-access.js';
 import { sendPreventiveRemindersForClient } from './preventive-reminders.js';
@@ -7027,6 +7028,10 @@ function assetSnapshot(asset) {
     location: asset.location_name ?? asset.location ?? null,
     status: asset.status ?? null,
     riskClass: asset.risk_class ?? null,
+    requiresSanitaryClassification: asset.requires_sanitary_classification ?? null,
+    requiresElectricalClassification: asset.requires_electrical_classification ?? null,
+    electricalProtectionClass: asset.electrical_protection_class ?? null,
+    appliedPartType: asset.applied_part_type ?? null,
     maintenanceFrequency: asset.maintenance_frequency ?? null,
     requiresCalibration: asset.requires_calibration ?? null,
     calibrationFrequency: asset.calibration_frequency ?? null
@@ -7043,7 +7048,11 @@ function changedAssetFields(before, after) {
     ['serial', 'Serie'],
     ['area_id', 'Área'],
     ['location_id', 'Ubicación'],
-    ['risk_class', 'Riesgo'],
+    ['requires_sanitary_classification', 'Requiere riesgo sanitario'],
+    ['risk_class', 'Clasificación de riesgo sanitario'],
+    ['requires_electrical_classification', 'Requiere riesgo eléctrico'],
+    ['electrical_protection_class', 'Clase de protección eléctrica'],
+    ['applied_part_type', 'Tipo de parte aplicada'],
     ['status', 'Estado'],
     ['maintenance_frequency', 'Frecuencia mantenimiento'],
     ['requires_calibration', 'Requiere calibración'],
@@ -7713,7 +7722,7 @@ app.get(
     const includeDrafts = hasAnyPermission(req.user, ['quick_guides:create', 'quick_guides:edit', 'quick_guides:approve']);
     const guide = await findQuickGuideForAsset(clientId, assetId, { includeDrafts });
     if (!guide) {
-      return res.status(404).json({ message: 'No hay guía rápida aprobada para la marca y modelo de este equipo.' });
+      return res.status(404).json({ message: 'No hay guía rápida aprobada para este equipo, marca y modelo.' });
     }
     return res.json(guide);
   }
@@ -7738,7 +7747,7 @@ app.get(
     const includeDrafts = hasAnyPermission(req.user, ['quick_guides:create', 'quick_guides:edit', 'quick_guides:approve']);
     const guide = await findQuickGuideForAsset(clientId, assetId, { includeDrafts });
     if (!client || !guide) {
-      return res.status(404).json({ message: 'No hay guía rápida aprobada para la marca y modelo de este equipo.' });
+      return res.status(404).json({ message: 'No hay guía rápida aprobada para este equipo, marca y modelo.' });
     }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=\"guia-rapida-${guide.brand}-${guide.model}.pdf\"`);
@@ -7805,7 +7814,10 @@ app.post(
       return res.status(201).json({ ...result, visual_path: visualPath });
     } catch (error) {
       if (error?.code === '23505') {
-        return res.status(409).json({ message: 'Ya existe una guía rápida para esta marca y modelo en este cliente.' });
+        return res.status(409).json({ message: 'Ya existe una guía rápida para este equipo, marca y modelo en el cliente.' });
+      }
+      if (error?.code === 'CATALOG_VALUE_TOO_LONG') {
+        return res.status(400).json({ message: error.message });
       }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo crear la guía rápida.' });
@@ -7854,7 +7866,10 @@ app.put(
       return res.json({ ok: true });
     } catch (error) {
       if (error?.code === '23505') {
-        return res.status(409).json({ message: 'Ya existe una guía rápida para esta marca y modelo en este cliente.' });
+        return res.status(409).json({ message: 'Ya existe una guía rápida para este equipo, marca y modelo en el cliente.' });
+      }
+      if (error?.code === 'CATALOG_VALUE_TOO_LONG') {
+        return res.status(400).json({ message: error.message });
       }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo actualizar la guía rápida.' });
@@ -7942,6 +7957,32 @@ app.delete(
 );
 
 app.get(
+  '/biomed/:clientId/equipment-catalog',
+  requireAuth,
+  requireAnyPermission([
+    'hb:create',
+    'hb:view',
+    'hb:import',
+    'read:all',
+    'quick_guides:view',
+    'quick_guides:create',
+    'quick_guides:edit'
+  ]),
+  async (req, res) => {
+    const { clientId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    try {
+      return res.json(await listEquipmentCatalog());
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo cargar el catálogo de equipos.' });
+    }
+  }
+);
+
+app.get(
   '/biomed/:clientId/assets',
   requireAuth,
   requireAnyPermission(['hb:create', 'hb:view', 'read:all']),
@@ -7987,6 +8028,10 @@ app.post(
       areaId,
       locationId,
       riskClass,
+      requiresSanitaryClassification,
+      requiresElectricalClassification,
+      electricalProtectionClass,
+      appliedPartType,
       isMobile,
       manufacturer,
       acquisitionType,
@@ -8028,6 +8073,10 @@ app.post(
         areaId: areaId || null,
         locationId: locationId || null,
         riskClass,
+        requiresSanitaryClassification,
+        requiresElectricalClassification,
+        electricalProtectionClass,
+        appliedPartType,
         isMobile: String(isMobile) === 'true',
         manufacturer,
         acquisitionType,
@@ -8047,7 +8096,8 @@ app.post(
         maintenanceFrequency,
         requiresCalibration: String(requiresCalibration) === 'true',
         calibrationFrequency,
-        hvEngineerUserId
+        hvEngineerUserId,
+        catalogCreatedBy: req.user.sub
       });
 
       if (req.files?.photo?.[0]) {
@@ -8112,6 +8162,9 @@ app.post(
       });
       return res.status(201).json(result);
     } catch (error) {
+      if (['CATALOG_VALUE_TOO_LONG', 'INVALID_RISK_CLASSIFICATION'].includes(error?.code)) {
+        return res.status(400).json({ message: error.message });
+      }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo crear la hoja de vida.' });
     }
@@ -8145,8 +8198,7 @@ app.post(
       !asset?.siteId ||
       !asset?.areaId ||
       !asset?.locationId ||
-      !asset?.invimaReg ||
-      !asset?.riskClass
+      !asset?.invimaReg
     );
     if (missing) {
       return res.status(400).json({ message: 'Hay equipos con campos obligatorios incompletos.' });
@@ -8220,6 +8272,10 @@ app.post(
           areaId: asset.areaId || null,
           locationId: asset.locationId || null,
           riskClass: asset.riskClass || null,
+          requiresSanitaryClassification: asset.requiresSanitaryClassification,
+          requiresElectricalClassification: asset.requiresElectricalClassification,
+          electricalProtectionClass: asset.electricalProtectionClass || null,
+          appliedPartType: asset.appliedPartType || null,
           isMobile: Boolean(asset.isMobile),
           manufacturer: asset.manufacturer || null,
           acquisitionType: asset.acquisitionType || null,
@@ -8239,7 +8295,8 @@ app.post(
           maintenanceFrequency: asset.maintenanceFrequency || 'mensual',
           requiresCalibration: Boolean(asset.requiresCalibration),
           calibrationFrequency: asset.calibrationFrequency,
-          hvEngineerUserId
+          hvEngineerUserId,
+          catalogCreatedBy: req.user.sub
         });
         const createdAsset = await getAssetById(clientId, result.id);
         imported.push(result.id);
@@ -8258,6 +8315,9 @@ app.post(
 
       return res.status(201).json({ imported: imported.length, ids: imported });
     } catch (error) {
+      if (['CATALOG_VALUE_TOO_LONG', 'INVALID_RISK_CLASSIFICATION'].includes(error?.code)) {
+        return res.status(400).json({ message: error.message });
+      }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo completar la importación masiva.' });
     }
@@ -8286,6 +8346,10 @@ app.put(
       areaId,
       locationId,
       riskClass,
+      requiresSanitaryClassification,
+      requiresElectricalClassification,
+      electricalProtectionClass,
+      appliedPartType,
       isMobile,
       manufacturer,
       acquisitionType,
@@ -8326,6 +8390,10 @@ app.put(
         areaId,
         locationId,
         riskClass,
+        requiresSanitaryClassification,
+        requiresElectricalClassification,
+        electricalProtectionClass,
+        appliedPartType,
         isMobile: String(isMobile) === 'true',
         manufacturer,
         acquisitionType,
@@ -8345,7 +8413,8 @@ app.put(
         maintenanceFrequency,
         requiresCalibration: String(requiresCalibration) === 'true',
         calibrationFrequency,
-        hvEngineerUserId
+        hvEngineerUserId,
+        catalogCreatedBy: req.user.sub
       });
 
       if (req.files?.photo?.[0]) {
@@ -8410,6 +8479,9 @@ app.put(
       });
       return res.json({ ok: true });
     } catch (error) {
+      if (['CATALOG_VALUE_TOO_LONG', 'INVALID_RISK_CLASSIFICATION'].includes(error?.code)) {
+        return res.status(400).json({ message: error.message });
+      }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo actualizar la hoja de vida.' });
     }

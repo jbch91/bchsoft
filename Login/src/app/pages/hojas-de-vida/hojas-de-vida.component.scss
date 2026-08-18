@@ -769,8 +769,70 @@ form {
 }
 
 .section-grid .range,
-.section-grid .list-section {
+.section-grid .list-section,
+.section-grid .risk-classification-grid {
   grid-column: span 2;
+}
+
+.risk-classification-grid {
+  border-block: 1px solid color-mix(in srgb, var(--border) 82%, var(--brand-600));
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-block: 12px;
+}
+
+.requirement-toggle {
+  align-content: start;
+}
+
+.toggle-control {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 9px;
+  min-height: 40px;
+}
+
+.toggle-control input[type='checkbox'] {
+  appearance: none;
+  background: #cbd5e1;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  flex: 0 0 40px;
+  height: 22px;
+  min-height: 22px;
+  padding: 2px;
+  position: relative;
+  transition: background-color 140ms ease;
+  width: 40px;
+}
+
+.toggle-control input[type='checkbox']::before {
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.28);
+  content: '';
+  display: block;
+  height: 18px;
+  transition: transform 140ms ease;
+  width: 18px;
+}
+
+.toggle-control input[type='checkbox']:checked {
+  background: var(--brand-600);
+}
+
+.toggle-control input[type='checkbox']:checked::before {
+  transform: translateX(18px);
+}
+
+.toggle-control input[type='checkbox']:focus-visible {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-100) 72%, transparent);
+  outline: 1px solid var(--brand-600);
 }
 
 .range {
@@ -1001,8 +1063,13 @@ li span {
   }
 
   .section-grid .range,
-  .section-grid .list-section {
+  .section-grid .list-section,
+  .section-grid .risk-classification-grid {
     grid-column: auto;
+  }
+
+  .risk-classification-grid {
+    grid-template-columns: 1fr;
   }
 
   .actions,

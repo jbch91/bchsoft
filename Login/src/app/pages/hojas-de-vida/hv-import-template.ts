@@ -17,12 +17,32 @@ export interface HvTemplateLocation {
   areaId: string | null;
 }
 
+export interface HvTemplateEquipmentCatalogModel {
+  id: string;
+  name: string;
+}
+
+export interface HvTemplateEquipmentCatalogBrand {
+  id: string;
+  name: string;
+  models: readonly HvTemplateEquipmentCatalogModel[];
+}
+
+export interface HvTemplateEquipmentCatalogItem {
+  id: string;
+  name: string;
+  brands: readonly HvTemplateEquipmentCatalogBrand[];
+}
+
 interface HvImportTemplateOptions {
   headers: readonly string[];
   sites: readonly HvTemplateSite[];
   areas: readonly HvTemplateArea[];
   locations: readonly HvTemplateLocation[];
-  riskClasses: readonly string[];
+  equipmentCatalog: readonly HvTemplateEquipmentCatalogItem[];
+  sanitaryRiskClasses: readonly string[];
+  electricalProtectionClasses: readonly string[];
+  appliedPartTypes: readonly string[];
   frequencies: readonly string[];
   acquisitionTypes: readonly string[];
   equipmentTypes: readonly string[];
@@ -31,13 +51,20 @@ interface HvImportTemplateOptions {
 }
 
 const CATALOG_SHEET_NAME = 'Catalogos';
+const EQUIPMENT_CATALOG_SHEET_NAME = 'CatalogoEquipos';
 const EMPTY_LIST_NAME = 'HV_LISTA_VACIA';
 const LOCATION_MAP_NAME = 'HV_MAPA_UBICACIONES';
-const LOCATION_COLUMNS_START = 13;
+const EQUIPMENT_BRAND_MAP_NAME = 'HV_MAPA_MARCAS';
+const EQUIPMENT_MODEL_MAP_NAME = 'HV_MAPA_MODELOS';
+const LOCATION_COLUMNS_START = 15;
 
 function uniqueSorted(values: readonly string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
     .sort((left, right) => left.localeCompare(right, 'es', { sensitivity: 'base' }));
+}
+
+function catalogStorageValue(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLocaleUpperCase('es-CO');
 }
 
 function excelColumnLetter(columnNumber: number): string {
@@ -85,6 +112,9 @@ export function buildHvImportTemplate(
   const catalogSheet = workbook.addWorksheet(CATALOG_SHEET_NAME, {
     views: [{ state: 'frozen', ySplit: 1 }]
   });
+  const equipmentCatalogSheet = workbook.addWorksheet(EQUIPMENT_CATALOG_SHEET_NAME, {
+    views: [{ state: 'frozen', ySplit: 1 }]
+  });
   const guideSheet = workbook.addWorksheet('Instrucciones', {
     views: [{ state: 'frozen', ySplit: 1 }]
   });
@@ -94,6 +124,21 @@ export function buildHvImportTemplate(
   const locationNames = uniqueSorted(options.locations.map((location) => location.name));
   const warrantyOptions = options.warrantyOptions.map(String);
   const yesNoOptions = ['Sí', 'No'];
+  const equipmentCatalog = options.equipmentCatalog
+    .map((item) => ({
+      ...item,
+      name: catalogStorageValue(item.name),
+      brands: item.brands.map((brand) => ({
+        ...brand,
+        name: catalogStorageValue(brand.name),
+        models: brand.models.map((model) => ({
+          ...model,
+          name: catalogStorageValue(model.name)
+        }))
+      }))
+    }))
+    .filter((item) => item.name)
+    .sort((left, right) => left.name.localeCompare(right.name, 'es', { sensitivity: 'base' }));
 
   worksheet.columns = options.headers.map((header) => ({
     header,
@@ -107,18 +152,28 @@ export function buildHvImportTemplate(
   ) ?? options.areas.find((area) => Boolean(area.siteId));
   const exampleSite = options.sites.find((site) => site.id === exampleArea?.siteId) ?? options.sites[0];
   const exampleLocation = options.locations.find((location) => location.areaId === exampleArea?.id);
+  const exampleEquipment = equipmentCatalog.find((item) =>
+    item.brands.some((brand) => brand.models.length > 0)
+  ) ?? equipmentCatalog[0];
+  const exampleBrand = exampleEquipment?.brands.find((brand) => brand.models.length > 0)
+    ?? exampleEquipment?.brands[0];
+  const exampleModel = exampleBrand?.models[0];
 
   worksheet.addRow({
     'Código*': 'EQ-001',
-    'Nombre*': 'Monitor de signos vitales',
-    'Marca*': 'Marca ejemplo',
-    'Modelo*': 'Modelo ejemplo',
+    'Nombre*': exampleEquipment?.name ?? 'MONITOR DE SIGNOS VITALES',
+    'Marca*': exampleBrand?.name ?? 'MARCA EJEMPLO',
+    'Modelo*': exampleModel?.name ?? 'MODELO EJEMPLO',
     'Serie*': 'SER-001',
     'Sede*': exampleSite?.name ?? 'Sede principal',
     'Área*': exampleArea?.name ?? 'Urgencias',
     'Ubicación*': exampleLocation?.name ?? 'Consultorio 1',
     'Registro Invima*': 'INVIMA-000',
-    'Riesgo*': 'Clase IIA',
+    'Requiere riesgo sanitario*': 'Sí',
+    'Clasificación riesgo sanitario': 'Clase IIA',
+    'Requiere riesgo eléctrico*': 'Sí',
+    'Clase protección eléctrica': 'Clase I',
+    'Tipo parte aplicada': 'Tipo BF',
     Fabricante: 'Fabricante ejemplo',
     'Tipo equipo': 'Fijo',
     'Forma adquisición': 'COMPRA DIRECTA',
@@ -142,16 +197,18 @@ export function buildHvImportTemplate(
       right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
     };
   });
-  worksheet.autoFilter = { from: 'A1', to: 'V1' };
-  worksheet.getColumn(14).numFmt = 'yyyy-mm-dd';
-  worksheet.getColumn(15).numFmt = '0';
-  worksheet.getColumn(16).numFmt = '0';
+  worksheet.autoFilter = { from: 'A1', to: 'Z1' };
+  worksheet.getColumn(18).numFmt = 'yyyy-mm-dd';
+  worksheet.getColumn(19).numFmt = '0';
+  worksheet.getColumn(20).numFmt = '0';
 
   catalogSheet.columns = [
     { header: 'Sedes', key: 'sites', width: 28 },
     { header: 'Áreas', key: 'areas', width: 28 },
     { header: 'Ubicaciones', key: 'locations', width: 28 },
-    { header: 'Riesgos', key: 'risks', width: 18 },
+    { header: 'Riesgo sanitario', key: 'sanitaryRisk', width: 22 },
+    { header: 'Clase eléctrica', key: 'electricalClass', width: 26 },
+    { header: 'Parte aplicada', key: 'appliedPart', width: 20 },
     { header: 'Frecuencias', key: 'frequencies', width: 20 },
     { header: 'Adquisición', key: 'acquisition', width: 22 },
     { header: 'Tipo equipo', key: 'equipmentType', width: 16 },
@@ -166,7 +223,9 @@ export function buildHvImportTemplate(
     siteNames,
     areaNames,
     locationNames,
-    [...options.riskClasses],
+    [...options.sanitaryRiskClasses],
+    [...options.electricalProtectionClasses],
+    [...options.appliedPartTypes],
     [...options.frequencies],
     [...options.acquisitionTypes],
     [...options.equipmentTypes],
@@ -178,21 +237,110 @@ export function buildHvImportTemplate(
     catalogSheet.addRow(catalogColumns.map((items) => items[rowIndex] ?? ''));
   }
 
-  workbook.definedNames.add(`${CATALOG_SHEET_NAME}!$L$2:$L$2`, EMPTY_LIST_NAME);
+  workbook.definedNames.add(`${CATALOG_SHEET_NAME}!$N$2:$N$2`, EMPTY_LIST_NAME);
   const addNamedCatalogList = (name: string, columnNumber: number, values: readonly string[]): void => {
     workbook.definedNames.add(
-      values.length ? catalogRange(columnNumber, values.length) : `${CATALOG_SHEET_NAME}!$L$2:$L$2`,
+      values.length ? catalogRange(columnNumber, values.length) : `${CATALOG_SHEET_NAME}!$N$2:$N$2`,
       name
     );
   };
   addNamedCatalogList('HV_SEDES', 1, siteNames);
   addNamedCatalogList('HV_AREAS', 2, areaNames);
-  addNamedCatalogList('HV_RIESGOS', 4, options.riskClasses);
-  addNamedCatalogList('HV_FRECUENCIAS', 5, options.frequencies);
-  addNamedCatalogList('HV_ADQUISICION', 6, options.acquisitionTypes);
-  addNamedCatalogList('HV_TIPO_EQUIPO', 7, options.equipmentTypes);
-  addNamedCatalogList('HV_GARANTIA', 8, warrantyOptions);
-  addNamedCatalogList('HV_SI_NO', 9, yesNoOptions);
+  addNamedCatalogList('HV_RIESGOS_SANITARIOS', 4, options.sanitaryRiskClasses);
+  addNamedCatalogList('HV_CLASES_ELECTRICAS', 5, options.electricalProtectionClasses);
+  addNamedCatalogList('HV_TIPOS_PARTE_APLICADA', 6, options.appliedPartTypes);
+  addNamedCatalogList('HV_FRECUENCIAS', 7, options.frequencies);
+  addNamedCatalogList('HV_ADQUISICION', 8, options.acquisitionTypes);
+  addNamedCatalogList('HV_TIPO_EQUIPO', 9, options.equipmentTypes);
+  addNamedCatalogList('HV_GARANTIA', 10, warrantyOptions);
+  addNamedCatalogList('HV_SI_NO', 11, yesNoOptions);
+
+  equipmentCatalogSheet.columns = [
+    { header: 'Equipos', key: 'equipment', width: 34 },
+    { header: 'Clave equipo', key: 'equipmentKey', width: 34 },
+    { header: 'Lista de marcas', key: 'brandList', width: 24 },
+    { header: 'Clave equipo-marca', key: 'equipmentBrandKey', width: 56 },
+    { header: 'Lista de modelos', key: 'modelList', width: 24 },
+    { header: 'Lista vacía', key: 'emptyList', width: 14 }
+  ];
+
+  const equipmentNames = equipmentCatalog.map((item) => item.name);
+  equipmentNames.forEach((equipmentName, index) => {
+    equipmentCatalogSheet.getCell(index + 2, 1).value = equipmentName;
+  });
+  workbook.definedNames.add(
+    equipmentNames.length
+      ? `${EQUIPMENT_CATALOG_SHEET_NAME}!$A$2:$A$${equipmentNames.length + 1}`
+      : `${CATALOG_SHEET_NAME}!$N$2:$N$2`,
+    'HV_EQUIPOS'
+  );
+
+  let equipmentMappingRow = 2;
+  let modelMappingRow = 2;
+  let dynamicCatalogColumn = 7;
+  equipmentCatalog.forEach((equipment, equipmentIndex) => {
+    const brands = [...equipment.brands]
+      .filter((brand) => brand.name.trim())
+      .sort((left, right) => left.name.localeCompare(right.name, 'es', { sensitivity: 'base' }));
+    const brandNames = uniqueSorted(brands.map((brand) => brand.name));
+    const brandListName = brandNames.length ? `HV_MARCAS_${equipmentIndex + 1}` : EMPTY_LIST_NAME;
+
+    if (brandNames.length) {
+      const columnNumber = dynamicCatalogColumn;
+      const columnLetter = excelColumnLetter(columnNumber);
+      dynamicCatalogColumn += 1;
+      equipmentCatalogSheet.getColumn(columnNumber).width = 28;
+      equipmentCatalogSheet.getCell(1, columnNumber).value = brandListName;
+      brandNames.forEach((brandName, brandIndex) => {
+        equipmentCatalogSheet.getCell(brandIndex + 2, columnNumber).value = brandName;
+      });
+      workbook.definedNames.add(
+        `${EQUIPMENT_CATALOG_SHEET_NAME}!$${columnLetter}$2:$${columnLetter}$${brandNames.length + 1}`,
+        brandListName
+      );
+    }
+
+    equipmentCatalogSheet.getCell(equipmentMappingRow, 2).value = equipment.name;
+    equipmentCatalogSheet.getCell(equipmentMappingRow, 3).value = brandListName;
+    equipmentMappingRow += 1;
+
+    brands.forEach((brand, brandIndex) => {
+      const modelNames = uniqueSorted(brand.models.map((model) => model.name));
+      const modelListName = modelNames.length
+        ? `HV_MODELOS_${equipmentIndex + 1}_${brandIndex + 1}`
+        : EMPTY_LIST_NAME;
+
+      if (modelNames.length) {
+        const columnNumber = dynamicCatalogColumn;
+        const columnLetter = excelColumnLetter(columnNumber);
+        dynamicCatalogColumn += 1;
+        equipmentCatalogSheet.getColumn(columnNumber).width = 28;
+        equipmentCatalogSheet.getCell(1, columnNumber).value = modelListName;
+        modelNames.forEach((modelName, modelIndex) => {
+          equipmentCatalogSheet.getCell(modelIndex + 2, columnNumber).value = modelName;
+        });
+        workbook.definedNames.add(
+          `${EQUIPMENT_CATALOG_SHEET_NAME}!$${columnLetter}$2:$${columnLetter}$${modelNames.length + 1}`,
+          modelListName
+        );
+      }
+
+      equipmentCatalogSheet.getCell(modelMappingRow, 4).value = `${equipment.name}|${brand.name}`;
+      equipmentCatalogSheet.getCell(modelMappingRow, 5).value = modelListName;
+      modelMappingRow += 1;
+    });
+  });
+
+  workbook.definedNames.add(
+    `${EQUIPMENT_CATALOG_SHEET_NAME}!$B$2:$C$${Math.max(equipmentMappingRow - 1, 2)}`,
+    EQUIPMENT_BRAND_MAP_NAME
+  );
+  workbook.definedNames.add(
+    `${EQUIPMENT_CATALOG_SHEET_NAME}!$D$2:$E$${Math.max(modelMappingRow - 1, 2)}`,
+    EQUIPMENT_MODEL_MAP_NAME
+  );
+  styleHeaderRow(equipmentCatalogSheet.getRow(1), 'FF5F1F25');
+  equipmentCatalogSheet.state = 'hidden';
 
   const sitesById = new Map(options.sites.map((site) => [site.id, site]));
   const usedSiteAreaKeys = new Set<string>();
@@ -232,8 +380,8 @@ export function buildHvImportTemplate(
       );
     }
 
-    catalogSheet.getCell(mappingRow, 10).value = siteAreaKey;
-    catalogSheet.getCell(mappingRow, 11).value = listName;
+    catalogSheet.getCell(mappingRow, 12).value = siteAreaKey;
+    catalogSheet.getCell(mappingRow, 13).value = listName;
     mappingRow += 1;
   });
   styleHeaderRow(catalogSheet.getRow(1), 'FF5F1F25');
@@ -244,9 +392,12 @@ export function buildHvImportTemplate(
     ['Cómo usar la plantilla', 'Selecciona valores desde las listas desplegables cuando el campo lo permita.'],
     ['Orden correcto', 'Primero crea las sedes, áreas y ubicaciones en el sistema; después descarga una plantilla nueva.'],
     ['Campos obligatorios', 'Todos los encabezados con * son obligatorios.'],
+    ['Equipo, marca y modelo', 'Selecciona en ese orden para ver únicamente las marcas y modelos relacionados. Si falta un valor, puedes escribirlo; al importar se guardará en MAYÚSCULAS y quedará disponible en el catálogo compartido.'],
     ['Sede, área y ubicación', 'Selecciona primero la sede y el área. La ubicación mostrará únicamente los registros asociados a esa combinación.'],
     ['Fecha de adquisición', 'Usa yyyy-mm-dd. Si el dato no existe, deja la celda vacía o escribe NR (No registra).'],
     ['Correo del proveedor', 'Ingresa un correo válido. Si el dato no existe, deja la celda vacía o escribe NR; se guardará como sin dato.'],
+    ['Riesgo sanitario', 'Selecciona Sí cuando aplique y elige Clase I, Clase IIA, Clase IIB o Clase III. Si seleccionas No, deja la clasificación vacía.'],
+    ['Riesgo eléctrico', 'Selecciona Sí cuando aplique y completa tanto la clase de protección como el tipo de parte aplicada. Usa No aplica cuando el equipo no tenga parte aplicada.'],
     ['Calibración', 'Si seleccionas No, Frecuencia calibración debe quedar vacía. Si seleccionas Sí, debes elegir una frecuencia.'],
     ['Validación final', 'El software vuelve a validar relaciones y formatos antes de guardar la importación.']
   ]);
@@ -264,13 +415,18 @@ export function buildHvImportTemplate(
     });
   });
 
-  const addListValidation = (columnNumber: number, formula: string, prompt: string): void => {
+  const addListValidation = (
+    columnNumber: number,
+    formula: string,
+    prompt: string,
+    allowCustomValue = false
+  ): void => {
     for (let rowNumber = 2; rowNumber <= options.maxRows + 1; rowNumber += 1) {
       worksheet.getCell(rowNumber, columnNumber).dataValidation = {
         type: 'list',
         allowBlank: true,
         formulae: [formula],
-        showErrorMessage: true,
+        showErrorMessage: !allowCustomValue,
         errorStyle: 'error',
         errorTitle: 'Valor no permitido',
         error: 'Selecciona un valor de la lista desplegable.',
@@ -281,21 +437,47 @@ export function buildHvImportTemplate(
     }
   };
 
+  addListValidation(2, 'HV_EQUIPOS', 'Selecciona un equipo o escribe uno nuevo.', true);
   addListValidation(6, 'HV_SEDES', 'Selecciona la sede creada para este cliente.');
   addListValidation(7, 'HV_AREAS', 'Selecciona el área que pertenece a la sede elegida.');
-  addListValidation(10, 'HV_RIESGOS', 'Selecciona la clase de riesgo del equipo.');
-  addListValidation(12, 'HV_TIPO_EQUIPO', 'Selecciona si el equipo es fijo o móvil.');
-  addListValidation(13, 'HV_ADQUISICION', 'Selecciona la forma de adquisición.');
-  addListValidation(16, 'HV_GARANTIA', 'Selecciona los años de garantía si aplica.');
-  addListValidation(20, 'HV_FRECUENCIAS', 'Selecciona la frecuencia de mantenimiento.');
-  addListValidation(21, 'HV_SI_NO', 'Indica si el equipo requiere calibración.');
+  addListValidation(10, 'HV_SI_NO', 'Indica si el equipo requiere clasificación de riesgo sanitario.');
+  addListValidation(12, 'HV_SI_NO', 'Indica si el equipo requiere clasificación de riesgo eléctrico.');
+  addListValidation(16, 'HV_TIPO_EQUIPO', 'Selecciona si el equipo es fijo o móvil.');
+  addListValidation(17, 'HV_ADQUISICION', 'Selecciona la forma de adquisición.');
+  addListValidation(20, 'HV_GARANTIA', 'Selecciona los años de garantía si aplica.');
+  addListValidation(24, 'HV_FRECUENCIAS', 'Selecciona la frecuencia de mantenimiento.');
+  addListValidation(25, 'HV_SI_NO', 'Indica si el equipo requiere calibración.');
 
   const mappingEndRow = Math.max(mappingRow - 1, 2);
   workbook.definedNames.add(
-    `${CATALOG_SHEET_NAME}!$J$2:$K$${mappingEndRow}`,
+    `${CATALOG_SHEET_NAME}!$L$2:$M$${mappingEndRow}`,
     LOCATION_MAP_NAME
   );
   for (let rowNumber = 2; rowNumber <= options.maxRows + 1; rowNumber += 1) {
+    worksheet.getCell(rowNumber, 3).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: [
+        `INDIRECT(IFERROR(VLOOKUP($B${rowNumber},${EQUIPMENT_BRAND_MAP_NAME},2,FALSE),"${EMPTY_LIST_NAME}"))`
+      ],
+      showErrorMessage: false,
+      showInputMessage: true,
+      promptTitle: 'Marcas del equipo',
+      prompt: 'Selecciona una marca relacionada o escribe una nueva.'
+    };
+
+    worksheet.getCell(rowNumber, 4).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: [
+        `INDIRECT(IFERROR(VLOOKUP($B${rowNumber}&"|"&$C${rowNumber},${EQUIPMENT_MODEL_MAP_NAME},2,FALSE),"${EMPTY_LIST_NAME}"))`
+      ],
+      showErrorMessage: false,
+      showInputMessage: true,
+      promptTitle: 'Modelos de la marca',
+      prompt: 'Selecciona un modelo relacionado o escribe uno nuevo.'
+    };
+
     worksheet.getCell(rowNumber, 8).dataValidation = {
       type: 'list',
       allowBlank: true,
@@ -311,7 +493,52 @@ export function buildHvImportTemplate(
       prompt: 'La lista depende de la sede y del área seleccionadas.'
     };
 
-    worksheet.getCell(rowNumber, 15).dataValidation = {
+    worksheet.getCell(rowNumber, 11).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: [
+        `INDIRECT(IF($J${rowNumber}="Sí","HV_RIESGOS_SANITARIOS","${EMPTY_LIST_NAME}"))`
+      ],
+      showErrorMessage: true,
+      errorStyle: 'error',
+      errorTitle: 'Riesgo sanitario no aplicable',
+      error: 'Solo puedes elegir una clasificación cuando Requiere riesgo sanitario sea Sí.',
+      showInputMessage: true,
+      promptTitle: 'Riesgo sanitario',
+      prompt: 'Selecciona una clase únicamente si el equipo requiere clasificación sanitaria.'
+    };
+
+    worksheet.getCell(rowNumber, 13).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: [
+        `INDIRECT(IF($L${rowNumber}="Sí","HV_CLASES_ELECTRICAS","${EMPTY_LIST_NAME}"))`
+      ],
+      showErrorMessage: true,
+      errorStyle: 'error',
+      errorTitle: 'Clase eléctrica no aplicable',
+      error: 'Solo puedes elegir una clase cuando Requiere riesgo eléctrico sea Sí.',
+      showInputMessage: true,
+      promptTitle: 'Clase de protección eléctrica',
+      prompt: 'Selecciona la clase de protección indicada por el fabricante.'
+    };
+
+    worksheet.getCell(rowNumber, 14).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: [
+        `INDIRECT(IF($L${rowNumber}="Sí","HV_TIPOS_PARTE_APLICADA","${EMPTY_LIST_NAME}"))`
+      ],
+      showErrorMessage: true,
+      errorStyle: 'error',
+      errorTitle: 'Parte aplicada no aplicable',
+      error: 'Solo puedes elegir un tipo cuando Requiere riesgo eléctrico sea Sí.',
+      showInputMessage: true,
+      promptTitle: 'Tipo de parte aplicada',
+      prompt: 'Selecciona B, BF, CF o No aplica según la documentación del equipo.'
+    };
+
+    worksheet.getCell(rowNumber, 19).dataValidation = {
       type: 'whole',
       operator: 'between',
       allowBlank: true,
@@ -321,11 +548,11 @@ export function buildHvImportTemplate(
       error: 'Ingresa un número entre 0 y 50.'
     };
 
-    worksheet.getCell(rowNumber, 22).dataValidation = {
+    worksheet.getCell(rowNumber, 26).dataValidation = {
       type: 'list',
       allowBlank: true,
       formulae: [
-        `INDIRECT(IF($U${rowNumber}="Sí","HV_FRECUENCIAS","${EMPTY_LIST_NAME}"))`
+        `INDIRECT(IF($Y${rowNumber}="Sí","HV_FRECUENCIAS","${EMPTY_LIST_NAME}"))`
       ],
       showErrorMessage: true,
       errorStyle: 'error',
@@ -338,11 +565,37 @@ export function buildHvImportTemplate(
   }
 
   worksheet.addConditionalFormatting({
-    ref: `V2:V${options.maxRows + 1}`,
+    ref: `K2:K${options.maxRows + 1}`,
     rules: [{
       type: 'expression',
       priority: 1,
-      formulae: ['$U2<>"Sí"'],
+      formulae: ['$J2<>"Sí"'],
+      style: {
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } },
+        font: { color: { argb: 'FF6B7280' } }
+      }
+    }]
+  });
+
+  worksheet.addConditionalFormatting({
+    ref: `M2:N${options.maxRows + 1}`,
+    rules: [{
+      type: 'expression',
+      priority: 1,
+      formulae: ['$L2<>"Sí"'],
+      style: {
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } },
+        font: { color: { argb: 'FF6B7280' } }
+      }
+    }]
+  });
+
+  worksheet.addConditionalFormatting({
+    ref: `Z2:Z${options.maxRows + 1}`,
+    rules: [{
+      type: 'expression',
+      priority: 1,
+      formulae: ['$Y2<>"Sí"'],
       style: {
         fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } },
         font: { color: { argb: 'FF6B7280' } }

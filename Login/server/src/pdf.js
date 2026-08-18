@@ -407,6 +407,10 @@ export function buildAssetPdf(doc, { client, asset }) {
     }
   }
 
+  const requiresSanitaryClassification = asset.requires_sanitary_classification == null
+    ? Boolean(asset.risk_class)
+    : Boolean(asset.requires_sanitary_classification);
+  const requiresElectricalClassification = Boolean(asset.requires_electrical_classification);
   const equipoRows = [
     ['Nombre', safeText(asset.name)],
     ['Marca', safeText(asset.brand)],
@@ -417,7 +421,13 @@ export function buildAssetPdf(doc, { client, asset }) {
     ['Ubicación', safeText(asset.location_name)],
     ['Código', safeText(asset.code)],
     ['Registro Invima', safeText(asset.invima_reg)],
-    ['Riesgo', safeText(asset.risk_class)],
+    ['Requiere riesgo sanitario', requiresSanitaryClassification ? 'Sí' : 'No'],
+    ['Riesgo sanitario', requiresSanitaryClassification ? safeText(asset.risk_class) : 'No aplica'],
+    ['Requiere riesgo eléctrico', requiresElectricalClassification ? 'Sí' : 'No'],
+    ['Clase protección eléctrica', requiresElectricalClassification
+      ? safeText(asset.electrical_protection_class)
+      : 'No aplica'],
+    ['Tipo parte aplicada', requiresElectricalClassification ? safeText(asset.applied_part_type) : 'No aplica'],
     ['Tipo', asset.is_mobile ? 'Móvil' : 'Fijo'],
     ['Fabricante', safeText(asset.manufacturer)],
     ['Tipo de alimentación', safeText(asset.power_type)],

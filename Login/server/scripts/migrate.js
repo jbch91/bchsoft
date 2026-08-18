@@ -89,9 +89,9 @@ const MIGRATIONS = [
   'admin_clients_permission.sql',
   'superuser_all_permissions.sql',
   'saas_platform_admin_roles.sql',
+  'user_temporary_permissions.sql',
   'remove_legacy_unrelated_permissions.sql',
   'hv_import_permission.sql',
-  'user_temporary_permissions.sql',
   'high_impact_permissions_role_cleanup.sql',
   'tenant_hv_migration.sql',
   'tenant_hv_part2.sql',
@@ -99,7 +99,9 @@ const MIGRATIONS = [
   'asset_hv_signatures_and_movements.sql',
   'asset_history_files.sql',
   'asset_hv_engineer_backfill.sql',
-  'history_indexes.sql'
+  'history_indexes.sql',
+  'biomedical_equipment_catalog.sql',
+  'asset_risk_classifications.sql'
 ];
 
 async function ensureMigrationsTable() {

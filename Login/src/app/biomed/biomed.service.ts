@@ -9,12 +9,17 @@ interface AssetDto {
   name: string;
   brand: string | null;
   model: string | null;
+  equipment_catalog_model_id?: string | null;
   serial: string | null;
   location: string | null;
   status: string;
   photo_path?: string | null;
   invima_reg?: string | null;
   risk_class?: string | null;
+  requires_sanitary_classification?: boolean | null;
+  requires_electrical_classification?: boolean | null;
+  electrical_protection_class?: string | null;
+  applied_part_type?: string | null;
   is_mobile?: boolean;
   manufacturer?: string | null;
   area_name?: string | null;
@@ -41,6 +46,23 @@ interface AssetDto {
   requires_calibration?: boolean | null;
   calibration_frequency?: string | null;
   created_at: string;
+}
+
+export interface EquipmentCatalogModelDto {
+  id: string;
+  name: string;
+}
+
+export interface EquipmentCatalogBrandDto {
+  id: string;
+  name: string;
+  models: EquipmentCatalogModelDto[];
+}
+
+export interface EquipmentCatalogItemDto {
+  id: string;
+  name: string;
+  brands: EquipmentCatalogBrandDto[];
 }
 
 interface AreaDto {
@@ -101,6 +123,12 @@ export class BiomedService {
 
   async listAssets(clientId: string): Promise<AssetDto[]> {
     return firstValueFrom(this.http.get<AssetDto[]>(`${this.apiBase}/biomed/${clientId}/assets`));
+  }
+
+  async listEquipmentCatalog(clientId: string): Promise<EquipmentCatalogItemDto[]> {
+    return firstValueFrom(
+      this.http.get<EquipmentCatalogItemDto[]>(`${this.apiBase}/biomed/${clientId}/equipment-catalog`)
+    );
   }
 
   async getAssetDetails(clientId: string, assetId: string): Promise<any> {
@@ -187,6 +215,10 @@ export class BiomedService {
     areaId?: string;
     locationId?: string;
     riskClass?: string;
+    requiresSanitaryClassification?: boolean;
+    requiresElectricalClassification?: boolean;
+    electricalProtectionClass?: string;
+    appliedPartType?: string;
     isMobile?: boolean;
     manufacturer?: string;
     photo?: File | null;
@@ -224,6 +256,16 @@ export class BiomedService {
     if (payload.areaId) form.append('areaId', payload.areaId);
     if (payload.locationId) form.append('locationId', payload.locationId);
     if (payload.riskClass) form.append('riskClass', payload.riskClass);
+    if (payload.requiresSanitaryClassification !== undefined) {
+      form.append('requiresSanitaryClassification', String(payload.requiresSanitaryClassification));
+    }
+    if (payload.requiresElectricalClassification !== undefined) {
+      form.append('requiresElectricalClassification', String(payload.requiresElectricalClassification));
+    }
+    if (payload.electricalProtectionClass) {
+      form.append('electricalProtectionClass', payload.electricalProtectionClass);
+    }
+    if (payload.appliedPartType) form.append('appliedPartType', payload.appliedPartType);
     if (payload.isMobile !== undefined) form.append('isMobile', String(payload.isMobile));
     if (payload.manufacturer) form.append('manufacturer', payload.manufacturer);
     if (payload.photo) form.append('photo', payload.photo);
@@ -346,6 +388,10 @@ export class BiomedService {
     areaId?: string;
     locationId?: string;
     riskClass?: string;
+    requiresSanitaryClassification?: boolean;
+    requiresElectricalClassification?: boolean;
+    electricalProtectionClass?: string;
+    appliedPartType?: string;
     isMobile?: boolean;
     manufacturer?: string;
     photo?: File | null;
@@ -383,6 +429,16 @@ export class BiomedService {
     if (payload.areaId) form.append('areaId', payload.areaId);
     if (payload.locationId) form.append('locationId', payload.locationId);
     if (payload.riskClass) form.append('riskClass', payload.riskClass);
+    if (payload.requiresSanitaryClassification !== undefined) {
+      form.append('requiresSanitaryClassification', String(payload.requiresSanitaryClassification));
+    }
+    if (payload.requiresElectricalClassification !== undefined) {
+      form.append('requiresElectricalClassification', String(payload.requiresElectricalClassification));
+    }
+    if (payload.electricalProtectionClass) {
+      form.append('electricalProtectionClass', payload.electricalProtectionClass);
+    }
+    if (payload.appliedPartType) form.append('appliedPartType', payload.appliedPartType);
     if (payload.isMobile !== undefined) form.append('isMobile', String(payload.isMobile));
     if (payload.manufacturer) form.append('manufacturer', payload.manufacturer);
     if (payload.photo) form.append('photo', payload.photo);
