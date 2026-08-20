@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { getApiBase } from '../core/api-base';
+import type { CatalogReviewDto } from '../biomed/biomed.service';
 
 export interface QuickGuideDto {
   id: string;
@@ -58,6 +59,12 @@ export interface QuickGuidePayload {
   visual?: File | null;
 }
 
+export interface QuickGuideMutationResult {
+  id?: string;
+  ok?: boolean;
+  catalogReview: CatalogReviewDto;
+}
+
 @Injectable({ providedIn: 'root' })
 export class QuickGuidesService {
   private readonly apiBase = getApiBase();
@@ -72,14 +79,25 @@ export class QuickGuidesService {
     return firstValueFrom(this.http.get<QuickGuideDto[]>(`${this.apiBase}/quick-guides/${clientId}${suffix}`));
   }
 
-  async create(clientId: string, payload: QuickGuidePayload): Promise<void> {
+  async create(clientId: string, payload: QuickGuidePayload): Promise<QuickGuideMutationResult> {
     const form = this.toFormData(payload);
-    await firstValueFrom(this.http.post(`${this.apiBase}/quick-guides/${clientId}`, form));
+    return firstValueFrom(
+      this.http.post<QuickGuideMutationResult>(`${this.apiBase}/quick-guides/${clientId}`, form)
+    );
   }
 
-  async update(clientId: string, guideId: string, payload: QuickGuidePayload): Promise<void> {
+  async update(
+    clientId: string,
+    guideId: string,
+    payload: QuickGuidePayload
+  ): Promise<QuickGuideMutationResult> {
     const form = this.toFormData(payload);
-    await firstValueFrom(this.http.put(`${this.apiBase}/quick-guides/${clientId}/${guideId}`, form));
+    return firstValueFrom(
+      this.http.put<QuickGuideMutationResult>(
+        `${this.apiBase}/quick-guides/${clientId}/${guideId}`,
+        form
+      )
+    );
   }
 
   async approve(clientId: string, guideId: string): Promise<void> {

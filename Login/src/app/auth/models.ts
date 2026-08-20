@@ -35,6 +35,7 @@ export type Permission =
   | 'saas:client_admins:reset_password'
   | 'saas:audit:view'
   | 'platform:templates:manage'
+  | 'platform:biomedical_catalog:manage'
   | 'audit:odontology:view'
   | 'hb:create'
   | 'hb:import'

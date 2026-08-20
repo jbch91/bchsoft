@@ -65,6 +65,24 @@ export interface EquipmentCatalogItemDto {
   brands: EquipmentCatalogBrandDto[];
 }
 
+export interface CatalogReviewNodeDto {
+  id: string;
+  type: 'equipment' | 'brand' | 'model';
+  label: string;
+  value: string;
+}
+
+export interface CatalogReviewDto {
+  status: 'approved' | 'pending';
+  pendingNodes: CatalogReviewNodeDto[];
+}
+
+export interface CatalogMutationResultDto {
+  id?: string;
+  ok?: boolean;
+  catalogReview: CatalogReviewDto;
+}
+
 interface AreaDto {
   id: string;
   name: string;
@@ -244,7 +262,7 @@ export class BiomedService {
     recommendations?: any[];
     manualOperacion?: File | null;
     manualServicio?: File | null;
-  }): Promise<void> {
+  }): Promise<CatalogMutationResultDto> {
     const form = new FormData();
     form.append('code', payload.code);
     form.append('name', payload.name);
@@ -292,12 +310,20 @@ export class BiomedService {
     if (payload.manualOperacion) form.append('manualOperacion', payload.manualOperacion);
     if (payload.manualServicio) form.append('manualServicio', payload.manualServicio);
 
-    await firstValueFrom(this.http.post(`${this.apiBase}/biomed/${clientId}/assets`, form));
+    return firstValueFrom(
+      this.http.post<CatalogMutationResultDto>(`${this.apiBase}/biomed/${clientId}/assets`, form)
+    );
   }
 
-  async importAssets(clientId: string, assets: any[]): Promise<{ imported: number }> {
+  async importAssets(
+    clientId: string,
+    assets: any[]
+  ): Promise<{ imported: number; ids: string[]; catalogReview: CatalogReviewDto }> {
     return firstValueFrom(
-      this.http.post<{ imported: number }>(`${this.apiBase}/biomed/${clientId}/assets/import`, { assets })
+      this.http.post<{ imported: number; ids: string[]; catalogReview: CatalogReviewDto }>(
+        `${this.apiBase}/biomed/${clientId}/assets/import`,
+        { assets }
+      )
     );
   }
 
@@ -417,7 +443,7 @@ export class BiomedService {
     recommendations?: any[];
     manualOperacion?: File | null;
     manualServicio?: File | null;
-  }): Promise<void> {
+  }): Promise<CatalogMutationResultDto> {
     const form = new FormData();
     form.append('code', payload.code);
     form.append('name', payload.name);
@@ -465,7 +491,12 @@ export class BiomedService {
     if (payload.manualOperacion) form.append('manualOperacion', payload.manualOperacion);
     if (payload.manualServicio) form.append('manualServicio', payload.manualServicio);
 
-    await firstValueFrom(this.http.put(`${this.apiBase}/biomed/${clientId}/assets/${assetId}`, form));
+    return firstValueFrom(
+      this.http.put<CatalogMutationResultDto>(
+        `${this.apiBase}/biomed/${clientId}/assets/${assetId}`,
+        form
+      )
+    );
   }
 
   async deleteAsset(clientId: string, assetId: string): Promise<void> {

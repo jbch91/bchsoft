@@ -43,6 +43,19 @@ export const routes: Routes = [
     }
   },
   {
+    path: 'catalogo-biomedico',
+    loadComponent: () =>
+      import('./pages/biomedical-catalog-admin/biomedical-catalog-admin.component').then(
+        (m) => m.BiomedicalCatalogAdminComponent
+      ),
+    canActivate: [accessGuard],
+    data: {
+      platformOnly: true,
+      roles: ['superuser', 'admin', 'saas_admin'],
+      permissions: ['platform:biomedical_catalog:manage']
+    }
+  },
+  {
     path: 'clientes',
     loadComponent: () => import('./pages/clients/clients.component').then((m) => m.ClientsComponent),
     canActivate: [accessGuard],

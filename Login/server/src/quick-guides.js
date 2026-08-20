@@ -176,7 +176,8 @@ export async function createQuickGuide(clientId, payload, userId) {
     equipmentName: data.equipmentName,
     brand: data.brand,
     model: data.model,
-    createdBy: userId
+    submittedBy: userId,
+    submittedClientId: clientId
   });
   const { rows } = await query(
     `INSERT INTO quick_use_guides (
@@ -225,7 +226,13 @@ export async function createQuickGuide(clientId, payload, userId) {
       userId ?? null
     ]
   );
-  return rows[0];
+  return {
+    ...rows[0],
+    catalogReview: {
+      status: catalogPath.reviewStatus,
+      pendingNodes: catalogPath.pendingNodes
+    }
+  };
 }
 
 export async function updateQuickGuide(clientId, guideId, payload, userId) {
@@ -234,7 +241,8 @@ export async function updateQuickGuide(clientId, guideId, payload, userId) {
     equipmentName: data.equipmentName,
     brand: data.brand,
     model: data.model,
-    createdBy: userId
+    submittedBy: userId,
+    submittedClientId: clientId
   });
   const { rows } = await query(
     `UPDATE quick_use_guides
@@ -295,7 +303,14 @@ export async function updateQuickGuide(clientId, guideId, payload, userId) {
       userId ?? null
     ]
   );
-  return rows[0] ?? null;
+  if (!rows[0]) return null;
+  return {
+    ...rows[0],
+    catalogReview: {
+      status: catalogPath.reviewStatus,
+      pendingNodes: catalogPath.pendingNodes
+    }
+  };
 }
 
 export async function setQuickGuideVisual(clientId, guideId, visualPath) {

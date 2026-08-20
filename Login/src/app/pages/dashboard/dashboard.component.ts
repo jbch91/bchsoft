@@ -350,6 +350,12 @@ export class DashboardComponent {
     return this.saasShortcutPermissions.some((permission) => this.auth.hasPermission(permission));
   }
 
+  canManageBiomedicalCatalog(): boolean {
+    return !this.auth.currentUser()?.clientId
+      && this.auth.hasRole(['superuser', 'admin', 'saas_admin'])
+      && this.auth.hasPermission('platform:biomedical_catalog:manage');
+  }
+
   canOpenAuditAdministration(): boolean {
     const user = this.auth.currentUser();
     if (user?.clientId) {

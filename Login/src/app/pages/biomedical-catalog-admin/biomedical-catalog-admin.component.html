@@ -1,0 +1,312 @@
+<section class="catalog-page">
+  <app-module-tabs></app-module-tabs>
+
+  <header class="catalog-toolbar">
+    <div>
+      <span class="eyebrow">Gobierno de datos</span>
+      <h2>Árbol global de equipos</h2>
+    </div>
+    <button type="button" class="primary-action" (click)="openCreate('equipment')">
+      <span aria-hidden="true">+</span>
+      Nuevo equipo
+    </button>
+  </header>
+
+  <section class="catalog-summary" aria-label="Resumen del catálogo">
+    <div><strong>{{ totalEquipment }}</strong><span>Equipos</span></div>
+    <div><strong>{{ totalBrands }}</strong><span>Marcas</span></div>
+    <div><strong>{{ totalModels }}</strong><span>Modelos</span></div>
+    <div class="pending-summary"><strong>{{ pendingCount }}</strong><span>Pendientes</span></div>
+  </section>
+
+  <section class="catalog-filters" aria-label="Filtros del catálogo">
+    <label class="search-field">
+      <span>Buscar</span>
+      <input
+        type="search"
+        [(ngModel)]="search"
+        placeholder="Equipo, marca o modelo"
+        autocomplete="off"
+      />
+    </label>
+    <div class="status-filter" role="group" aria-label="Estado de revisión">
+      <button type="button" [class.active]="statusFilter === 'all'" (click)="setStatusFilter('all')">Todos</button>
+      <button type="button" [class.active]="statusFilter === 'pending'" (click)="setStatusFilter('pending')">Pendientes</button>
+      <button type="button" [class.active]="statusFilter === 'approved'" (click)="setStatusFilter('approved')">Aprobados</button>
+      <button type="button" [class.active]="statusFilter === 'rejected'" (click)="setStatusFilter('rejected')">Rechazados</button>
+    </div>
+    <button type="button" class="clear-filter" (click)="clearFilters()">Limpiar</button>
+  </section>
+
+  <div class="catalog-notices" *ngIf="errorMessage || successMessage" aria-live="polite">
+    <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+    <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+  </div>
+
+  <div class="loading-state" *ngIf="loading">Cargando catálogo...</div>
+
+  <section class="catalog-tree" *ngIf="!loading" aria-label="Catálogo biomédico global">
+    <div class="tree-columns" aria-hidden="true">
+      <span>Nombre</span>
+      <span>Estado</span>
+      <span>Origen</span>
+      <span>Envíos</span>
+      <span>Acciones</span>
+    </div>
+
+    <ng-container *ngFor="let equipment of filteredCatalog; trackBy: trackById">
+      <div class="tree-row equipment-row" [class.inactive]="!equipment.isActive">
+        <div class="node-name">
+          <button
+            type="button"
+            class="expand-button"
+            [attr.aria-label]="isEquipmentExpanded(equipment.id) ? 'Contraer equipo' : 'Expandir equipo'"
+            [attr.aria-expanded]="isEquipmentExpanded(equipment.id)"
+            (click)="toggleEquipment(equipment.id)"
+          >
+            {{ isEquipmentExpanded(equipment.id) ? '−' : '+' }}
+          </button>
+          <div>
+            <span class="node-kind">Equipo</span>
+            <strong>{{ equipment.name }}</strong>
+          </div>
+        </div>
+        <div class="node-status">
+          <span class="status-badge" [attr.data-status]="equipment.reviewStatus">
+            {{ statusLabel(equipment.reviewStatus) }}
+          </span>
+          <span class="inactive-badge" *ngIf="!equipment.isActive">Inactivo</span>
+        </div>
+        <div class="node-origin" [title]="formatDate(equipment.lastSubmittedAt || equipment.submittedAt)">
+          {{ originLabel(equipment) }}
+        </div>
+        <div class="node-count">{{ equipment.submissionCount || 0 }}</div>
+        <div class="node-actions">
+          <button
+            *ngIf="equipment.reviewStatus === 'approved' && equipment.isActive"
+            type="button"
+            class="action-button add"
+            (click)="openCreate('brand', equipment)"
+          >Marca +</button>
+          <button
+            *ngIf="equipment.reviewStatus !== 'approved'"
+            type="button"
+            class="action-button approve"
+            (click)="openReview(equipment, 'approve')"
+          >Aprobar</button>
+          <button
+            *ngIf="equipment.reviewStatus === 'pending'"
+            type="button"
+            class="action-button reject"
+            (click)="openReview(equipment, 'reject')"
+          >Rechazar</button>
+          <button type="button" class="action-button" (click)="openEdit(equipment)">Editar</button>
+          <button type="button" class="action-button" (click)="openMerge(equipment)">Fusionar</button>
+          <button
+            *ngIf="equipment.reviewStatus === 'approved'"
+            type="button"
+            class="action-button"
+            (click)="toggleActive(equipment)"
+          >{{ equipment.isActive ? 'Desactivar' : 'Activar' }}</button>
+        </div>
+      </div>
+
+      <div class="branch-list" *ngIf="isEquipmentExpanded(equipment.id)">
+        <ng-container *ngFor="let brand of equipment.brands; trackBy: trackById">
+          <div class="tree-row brand-row" [class.inactive]="!brand.isActive">
+            <div class="node-name">
+              <span class="branch-line" aria-hidden="true"></span>
+              <button
+                type="button"
+                class="expand-button"
+                [attr.aria-label]="isBrandExpanded(brand.id) ? 'Contraer marca' : 'Expandir marca'"
+                [attr.aria-expanded]="isBrandExpanded(brand.id)"
+                (click)="toggleBrand(brand.id)"
+              >
+                {{ isBrandExpanded(brand.id) ? '−' : '+' }}
+              </button>
+              <div>
+                <span class="node-kind">Marca</span>
+                <strong>{{ brand.name }}</strong>
+              </div>
+            </div>
+            <div class="node-status">
+              <span class="status-badge" [attr.data-status]="brand.reviewStatus">
+                {{ statusLabel(brand.reviewStatus) }}
+              </span>
+              <span class="inactive-badge" *ngIf="!brand.isActive">Inactivo</span>
+            </div>
+            <div class="node-origin" [title]="formatDate(brand.lastSubmittedAt || brand.submittedAt)">
+              {{ originLabel(brand) }}
+            </div>
+            <div class="node-count">{{ brand.submissionCount || 0 }}</div>
+            <div class="node-actions">
+              <button
+                *ngIf="brand.reviewStatus === 'approved' && brand.isActive"
+                type="button"
+                class="action-button add"
+                (click)="openCreate('model', brand)"
+              >Modelo +</button>
+              <button
+                *ngIf="brand.reviewStatus !== 'approved'"
+                type="button"
+                class="action-button approve"
+                (click)="openReview(brand, 'approve')"
+              >Aprobar</button>
+              <button
+                *ngIf="brand.reviewStatus === 'pending'"
+                type="button"
+                class="action-button reject"
+                (click)="openReview(brand, 'reject')"
+              >Rechazar</button>
+              <button type="button" class="action-button" (click)="openEdit(brand)">Editar</button>
+              <button type="button" class="action-button" (click)="openMerge(brand)">Fusionar</button>
+              <button
+                *ngIf="brand.reviewStatus === 'approved'"
+                type="button"
+                class="action-button"
+                (click)="toggleActive(brand)"
+              >{{ brand.isActive ? 'Desactivar' : 'Activar' }}</button>
+            </div>
+          </div>
+
+          <div class="model-list" *ngIf="isBrandExpanded(brand.id)">
+            <div
+              class="tree-row model-row"
+              *ngFor="let model of brand.models; trackBy: trackById"
+              [class.inactive]="!model.isActive"
+            >
+              <div class="node-name">
+                <span class="model-branch" aria-hidden="true"></span>
+                <div>
+                  <span class="node-kind">Modelo</span>
+                  <strong>{{ model.name }}</strong>
+                </div>
+              </div>
+              <div class="node-status">
+                <span class="status-badge" [attr.data-status]="model.reviewStatus">
+                  {{ statusLabel(model.reviewStatus) }}
+                </span>
+                <span class="inactive-badge" *ngIf="!model.isActive">Inactivo</span>
+              </div>
+              <div class="node-origin" [title]="formatDate(model.lastSubmittedAt || model.submittedAt)">
+                {{ originLabel(model) }}
+              </div>
+              <div class="node-count">{{ model.submissionCount || 0 }}</div>
+              <div class="node-actions">
+                <button
+                  *ngIf="model.reviewStatus !== 'approved'"
+                  type="button"
+                  class="action-button approve"
+                  (click)="openReview(model, 'approve')"
+                >Aprobar</button>
+                <button
+                  *ngIf="model.reviewStatus === 'pending'"
+                  type="button"
+                  class="action-button reject"
+                  (click)="openReview(model, 'reject')"
+                >Rechazar</button>
+                <button type="button" class="action-button" (click)="openEdit(model)">Editar</button>
+                <button type="button" class="action-button" (click)="openMerge(model)">Fusionar</button>
+                <button
+                  *ngIf="model.reviewStatus === 'approved'"
+                  type="button"
+                  class="action-button"
+                  (click)="toggleActive(model)"
+                >{{ model.isActive ? 'Desactivar' : 'Activar' }}</button>
+              </div>
+            </div>
+          </div>
+        </ng-container>
+      </div>
+    </ng-container>
+
+    <div class="empty-state" *ngIf="!filteredCatalog.length">
+      No hay elementos que coincidan con los filtros.
+    </div>
+  </section>
+
+  <div
+    class="catalog-modal-backdrop"
+    *ngIf="modalMode"
+    role="presentation"
+    (click)="closeModal()"
+  >
+    <section
+      class="catalog-modal"
+      role="dialog"
+      aria-modal="true"
+      [attr.aria-labelledby]="'catalog-modal-title'"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="modal-header">
+        <div>
+          <span class="eyebrow">{{ nodeTypeLabel(modalType) }}</span>
+          <h3 id="catalog-modal-title">{{ modalTitle }}</h3>
+        </div>
+        <button type="button" class="modal-close" aria-label="Cerrar" (click)="closeModal()">×</button>
+      </header>
+
+      <form class="catalog-form" (ngSubmit)="saveModal()">
+        <ng-container *ngIf="modalMode === 'create' || modalMode === 'edit'">
+          <label>
+            Nombre
+            <input type="text" name="catalogName" [(ngModel)]="modalName" maxlength="160" required />
+          </label>
+          <label *ngIf="modalType !== 'equipment'">
+            {{ modalType === 'brand' ? 'Equipo' : 'Equipo / marca' }}
+            <select name="catalogParent" [(ngModel)]="modalParentId" required>
+              <option value="">Seleccionar</option>
+              <option *ngFor="let option of parentOptions" [value]="option.id">{{ option.label }}</option>
+            </select>
+          </label>
+        </ng-container>
+
+        <ng-container *ngIf="modalMode === 'review' && modalNode">
+          <div class="review-subject">
+            <span>{{ nodeTypeLabel(modalNode.type) }}</span>
+            <strong>{{ modalNode.name }}</strong>
+            <small>{{ originLabel(modalNode) }} · {{ formatDate(modalNode.lastSubmittedAt || modalNode.submittedAt) }}</small>
+          </div>
+          <label>
+            Observación
+            <textarea name="reviewNotes" [(ngModel)]="modalNotes" maxlength="500" rows="4"></textarea>
+          </label>
+          <label
+            class="check-field"
+            *ngIf="reviewDecision === 'approve' && modalType !== 'model'"
+          >
+            <input type="checkbox" name="reviewCascade" [(ngModel)]="reviewCascade" />
+            <span>Aprobar también las propuestas pendientes de esta rama</span>
+          </label>
+        </ng-container>
+
+        <ng-container *ngIf="modalMode === 'merge' && modalNode">
+          <div class="merge-warning">
+            <span>Origen</span>
+            <strong>{{ modalNode.name }}</strong>
+          </div>
+          <label>
+            Destino que se conservará
+            <select name="mergeTarget" [(ngModel)]="modalTargetId" required>
+              <option value="">Seleccionar</option>
+              <option *ngFor="let option of mergeTargets" [value]="option.id">{{ option.label }}</option>
+            </select>
+          </label>
+        </ng-container>
+
+        <div class="modal-actions">
+          <button type="button" class="secondary-action" [disabled]="saving" (click)="closeModal()">Cancelar</button>
+          <button
+            type="submit"
+            class="primary-action"
+            [class.danger]="modalMode === 'review' && reviewDecision === 'reject'"
+            [disabled]="saving"
+          >
+            {{ saving ? 'Guardando...' : modalMode === 'merge' ? 'Fusionar' : modalMode === 'review' ? (reviewDecision === 'approve' ? 'Aprobar' : 'Rechazar') : 'Guardar' }}
+          </button>
+        </div>
+      </form>
+    </section>
+  </div>
+</section>

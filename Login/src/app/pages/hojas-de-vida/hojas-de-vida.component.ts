@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import {
   AssetHistoryItemDto,
   BiomedService,
+  CatalogReviewDto,
   EquipmentCatalogItemDto
 } from '../../biomed/biomed.service';
 import { AdminService } from '../../admin/admin.service';
@@ -852,7 +853,9 @@ export class HojasDeVidaComponent implements OnDestroy {
     try {
       const validRows = this.importPreviewRows.filter((row) => row.payload && !row.errors.length);
       const result = await this.biomed.importAssets(this.selectedClientId, validRows.map((row) => row.payload!));
-      this.setImportMessage(`Importación completada: ${result.imported} hoja(s) de vida creadas.`, 'success');
+      const importSuccess = `Importación completada: ${result.imported} hoja(s) de vida creadas.${this.catalogReviewNotice(result.catalogReview)}`;
+      this.setImportMessage(importSuccess, 'success');
+      this.successMessage = importSuccess;
       this.importPreviewRows = [];
       this.importFileName = '';
       await Promise.all([this.loadAssets(), this.loadEquipmentCatalog()]);
@@ -1333,6 +1336,13 @@ export class HojasDeVidaComponent implements OnDestroy {
       .toLocaleUpperCase('es-CO');
   }
 
+  private catalogReviewNotice(review?: CatalogReviewDto | null): string {
+    const pending = review?.pendingNodes ?? [];
+    if (!pending.length) return '';
+    const labels = pending.map((node) => `${node.label.toLowerCase()} ${node.value}`);
+    return ` Quedó pendiente de aprobación en el catálogo: ${labels.join(', ')}.`;
+  }
+
   private findCatalogEquipment(name: string): EquipmentCatalogItemDto | undefined {
     const key = this.normalizeCatalogSelection(name);
     return this.equipmentCatalog.find(
@@ -1584,7 +1594,7 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.successMessage = '';
     try {
       if (this.editingAssetId) {
-        await this.biomed.updateAsset(this.selectedClientId, this.editingAssetId, {
+        const result = await this.biomed.updateAsset(this.selectedClientId, this.editingAssetId, {
           code: this.code.trim(),
           name: this.catalogStorageValue(this.name),
           brand: this.catalogStorageValue(this.brand) || undefined,
@@ -1627,9 +1637,9 @@ export class HojasDeVidaComponent implements OnDestroy {
           manualOperacion: this.manualOperacion,
           manualServicio: this.manualServicio
         });
-        this.successMessage = 'Hoja de vida actualizada.';
+        this.successMessage = `Hoja de vida actualizada.${this.catalogReviewNotice(result.catalogReview)}`;
       } else {
-        await this.biomed.createAsset(this.selectedClientId, {
+        const result = await this.biomed.createAsset(this.selectedClientId, {
           code: this.code.trim(),
           name: this.catalogStorageValue(this.name),
           brand: this.catalogStorageValue(this.brand) || undefined,
@@ -1672,7 +1682,7 @@ export class HojasDeVidaComponent implements OnDestroy {
           manualOperacion: this.manualOperacion,
           manualServicio: this.manualServicio
         });
-        this.successMessage = 'Hoja de vida creada.';
+        this.successMessage = `Hoja de vida creada.${this.catalogReviewNotice(result.catalogReview)}`;
       }
 
       this.resetForm();

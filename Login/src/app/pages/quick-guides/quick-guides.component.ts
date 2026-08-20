@@ -5,7 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
-import { BiomedService, EquipmentCatalogItemDto } from '../../biomed/biomed.service';
+import { BiomedService, CatalogReviewDto, EquipmentCatalogItemDto } from '../../biomed/biomed.service';
 import { getApiBase, getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 import { QuickGuideDto, QuickGuidePayload, QuickGuidesService } from '../../quick-guides/quick-guides.service';
@@ -341,11 +341,17 @@ export class QuickGuidesComponent {
         visual: this.visualFile
       };
       if (this.editingGuideId) {
-        await this.quickGuides.update(this.selectedClientId, this.editingGuideId, payload);
-        this.setMessage('Guía rápida actualizada correctamente.', 'success');
+        const result = await this.quickGuides.update(this.selectedClientId, this.editingGuideId, payload);
+        this.setMessage(
+          `Guía rápida actualizada correctamente.${this.catalogReviewNotice(result.catalogReview)}`,
+          'success'
+        );
       } else {
-        await this.quickGuides.create(this.selectedClientId, payload);
-        this.setMessage('Guía rápida creada correctamente.', 'success');
+        const result = await this.quickGuides.create(this.selectedClientId, payload);
+        this.setMessage(
+          `Guía rápida creada correctamente.${this.catalogReviewNotice(result.catalogReview)}`,
+          'success'
+        );
       }
       await Promise.all([this.loadGuides(), this.loadEquipmentCatalog()]);
       this.cancelForm();
@@ -457,6 +463,13 @@ export class QuickGuidesComponent {
       .trim()
       .replace(/\s+/g, ' ')
       .toLocaleUpperCase('es-CO');
+  }
+
+  private catalogReviewNotice(review?: CatalogReviewDto | null): string {
+    const pending = review?.pendingNodes ?? [];
+    if (!pending.length) return '';
+    const labels = pending.map((node) => `${node.label.toLowerCase()} ${node.value}`);
+    return ` Quedó pendiente de aprobación en el catálogo: ${labels.join(', ')}.`;
   }
 
   private findCatalogEquipment(name: string): EquipmentCatalogItemDto | undefined {

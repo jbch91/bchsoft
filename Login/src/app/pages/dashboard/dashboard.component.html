@@ -20,7 +20,7 @@
 
   <section
     class="admin-shortcuts"
-    *ngIf="!selectedSuite && (canOpenSaasAdministration() || auth.hasPermission('users:manage') || canOpenAuditAdministration())"
+    *ngIf="!selectedSuite && (canOpenSaasAdministration() || auth.hasPermission('users:manage') || canManageBiomedicalCatalog() || canOpenAuditAdministration())"
   >
     <a routerLink="/administracion-saas" class="ui-card module-card" *ngIf="canOpenSaasAdministration()">
       <h2>Administración SaaS</h2>
@@ -33,6 +33,14 @@
     <a routerLink="/roles-permisos" class="ui-card module-card" *ngIf="auth.hasPermission('users:manage')">
       <h2>Roles y permisos</h2>
       <p>Consulta alcances por rol y permisos activos del cliente.</p>
+    </a>
+    <a
+      routerLink="/catalogo-biomedico"
+      class="ui-card module-card"
+      *ngIf="canManageBiomedicalCatalog()"
+    >
+      <h2>Catálogo biomédico</h2>
+      <p>Equipos, marcas, modelos y propuestas pendientes de aprobación.</p>
     </a>
     <a routerLink="/auditoria" class="ui-card module-card" *ngIf="canOpenAuditAdministration()">
       <h2>Auditoría</h2>

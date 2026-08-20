@@ -4,6 +4,7 @@ const ADMIN_AUDIT_ACTION_FILTER = [
   "al.action LIKE 'CLIENT_%'",
   "al.action LIKE 'SUBSCRIPTION_%'",
   "al.action LIKE 'ROLE_%'",
+  "al.action LIKE 'BIOMEDICAL_CATALOG_%'",
   `(
     al.action LIKE 'USER_%'
     AND COALESCE(al.details->>'clientId', '') = ''

@@ -111,6 +111,7 @@ export class UsersComponent implements OnInit {
     'users:manage': 'Gestionar usuarios',
     'audit:client:view': 'Ver auditoría administrativa',
     'platform:templates:manage': 'Gestionar plantillas globales',
+    'platform:biomedical_catalog:manage': 'Administrar catálogo biomédico global',
     'saas:access': 'Acceder a administración SaaS',
     'saas:clients:view': 'Ver cartera de clientes SaaS',
     'saas:clients:update': 'Editar datos y configuración de clientes SaaS',
@@ -268,6 +269,7 @@ export class UsersComponent implements OnInit {
       'saas:plans:manage',
       'saas:client_admins:reset_password',
       'saas:audit:view',
+      'platform:biomedical_catalog:manage',
       'audit:client:view',
       'clients:view',
       'reports:view'
@@ -281,6 +283,7 @@ export class UsersComponent implements OnInit {
       'saas:plans:manage',
       'saas:client_admins:reset_password',
       'saas:audit:view',
+      'platform:biomedical_catalog:manage',
       'audit:client:view',
       'clients:view',
       'reports:view'
@@ -446,6 +449,7 @@ export class UsersComponent implements OnInit {
     'users:manage',
     'audit:client:view',
     'platform:templates:manage',
+    'platform:biomedical_catalog:manage',
     'saas:access',
     'saas:clients:view',
     'saas:clients:update',
@@ -1340,7 +1344,14 @@ export class UsersComponent implements OnInit {
 
   roleAssignablePermissions(role: Role): string[] {
     if (role === 'superuser') return this.permissions;
-    return this.permissions.filter((permission) => !this.temporaryOnlyPermissions.has(permission));
+    return this.permissions.filter((permission) =>
+      !this.temporaryOnlyPermissions.has(permission)
+      && (
+        permission !== 'platform:biomedical_catalog:manage'
+        || role === 'admin'
+        || role === 'saas_admin'
+      )
+    );
   }
 
   permissionGroupsForRole(role: Role): PermissionGroupView[] {
@@ -1394,7 +1405,12 @@ export class UsersComponent implements OnInit {
   }
 
   private permissionGroupKey(permission: string): string {
-    if (permission.startsWith('saas:') || permission.startsWith('clients:') || permission === 'reports:view' || permission === 'platform:templates:manage') {
+    if (
+      permission.startsWith('saas:')
+      || permission.startsWith('clients:')
+      || permission === 'reports:view'
+      || permission.startsWith('platform:')
+    ) {
       return 'saas';
     }
     if (permission === 'users:manage' || permission.startsWith('audit:')) {

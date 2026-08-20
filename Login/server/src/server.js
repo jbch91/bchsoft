@@ -327,7 +327,14 @@ import {
   setQuickGuideVisual,
   updateQuickGuide
 } from './quick-guides.js';
-import { listEquipmentCatalog } from './equipment-catalog.js';
+import {
+  createApprovedCatalogNode,
+  listEquipmentCatalog,
+  listEquipmentCatalogForAdmin,
+  mergeCatalogNodes,
+  reviewCatalogNode,
+  updateCatalogNode
+} from './equipment-catalog.js';
 import { sendNotificationEmail } from './mailer.js';
 import { listReaderAccess, replaceReaderAccess } from './reader-access.js';
 import { sendPreventiveRemindersForClient } from './preventive-reminders.js';
@@ -423,6 +430,7 @@ const SAAS_ADMIN_ROLES = ['saas_admin', 'saas_billing', 'saas_clients', 'saas_su
 const PLATFORM_LEGACY_ROLES = ['viewer'];
 const PLATFORM_ASSIGNABLE_ROLES = ['superuser', 'admin', ...SAAS_ADMIN_ROLES];
 const PLATFORM_ADMIN_ROLES = [...PLATFORM_ASSIGNABLE_ROLES, ...PLATFORM_LEGACY_ROLES];
+const BIOMEDICAL_CATALOG_ADMIN_ROLES = ['superuser', 'admin', 'saas_admin'];
 const SAAS_READ_PERMISSIONS = [
   'clients:manage',
   'saas:access',
@@ -482,6 +490,7 @@ const SUPERUSER_VISIBLE_ROLE_PERMISSIONS = [
   'users:manage',
   'audit:client:view',
   'platform:templates:manage',
+  'platform:biomedical_catalog:manage',
   'saas:access',
   'saas:clients:view',
   'saas:clients:update',
@@ -609,6 +618,22 @@ function denyPlatformOperationalAccess(req, res, next) {
     return res.status(403).json({
       message: 'La operación de clientes requiere una cuenta asignada al cliente. Usa un usuario interno del cliente para acceder a datos operativos.'
     });
+  }
+  return next();
+}
+
+function requirePlatformCatalogManager(req, res, next) {
+  if (
+    !isPlatformUser(req.user)
+    || req.user?.clientId
+    || !BIOMEDICAL_CATALOG_ADMIN_ROLES.some((role) => hasRole(req.user, role))
+  ) {
+    return res.status(403).json({
+      message: 'El catálogo biomédico global solo puede administrarse desde una cuenta de plataforma.'
+    });
+  }
+  if (!req.user?.permissions?.includes('platform:biomedical_catalog:manage')) {
+    return res.status(403).json({ message: 'Sin permisos para administrar el catálogo biomédico global.' });
   }
   return next();
 }
@@ -7667,6 +7692,149 @@ app.post(
   }
 );
 
+function sendCatalogError(res, error, fallbackMessage) {
+  const code = String(error?.code || '');
+  if (code === 'CATALOG_NODE_NOT_FOUND' || code === 'CATALOG_PARENT_NOT_FOUND') {
+    return res.status(404).json({ code, message: error.message });
+  }
+  if (
+    code === 'CATALOG_DUPLICATE'
+    || code === 'CATALOG_PARENT_NOT_APPROVED'
+    || code === 'CATALOG_MERGE_TARGET_NOT_APPROVED'
+    || code === 'CATALOG_APPROVED_REJECT_FORBIDDEN'
+  ) {
+    return res.status(409).json({ code, message: error.message });
+  }
+  if (code.startsWith('CATALOG_')) {
+    return res.status(400).json({ code, message: error.message });
+  }
+  console.error(error);
+  return res.status(500).json({ message: fallbackMessage });
+}
+
+app.get(
+  '/admin/biomedical-catalog',
+  requireAuth,
+  requirePlatformCatalogManager,
+  async (_req, res) => {
+    try {
+      return res.json(await listEquipmentCatalogForAdmin());
+    } catch (error) {
+      return sendCatalogError(res, error, 'No se pudo cargar el catálogo biomédico global.');
+    }
+  }
+);
+
+app.post(
+  '/admin/biomedical-catalog/nodes',
+  requireAuth,
+  requirePlatformCatalogManager,
+  async (req, res) => {
+    const { type, name, parentId = null } = req.body || {};
+    try {
+      const node = await createApprovedCatalogNode({
+        type,
+        name,
+        parentId,
+        actorUserId: req.user.sub
+      });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'BIOMEDICAL_CATALOG_CREATE',
+        targetUserId: node.id,
+        details: { type, name: node.name, parentId }
+      });
+      return res.status(201).json({ node });
+    } catch (error) {
+      return sendCatalogError(res, error, 'No se pudo crear el elemento del catálogo.');
+    }
+  }
+);
+
+app.patch(
+  '/admin/biomedical-catalog/:type/:id',
+  requireAuth,
+  requirePlatformCatalogManager,
+  async (req, res) => {
+    const { type, id } = req.params;
+    const { name, parentId, isActive } = req.body || {};
+    try {
+      const result = await updateCatalogNode({
+        type,
+        id,
+        name,
+        parentId,
+        isActive,
+        actorUserId: req.user.sub
+      });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'BIOMEDICAL_CATALOG_UPDATE',
+        targetUserId: id,
+        details: { type, name, parentId, isActive, sync: result.sync }
+      });
+      return res.json(result);
+    } catch (error) {
+      return sendCatalogError(res, error, 'No se pudo actualizar el elemento del catálogo.');
+    }
+  }
+);
+
+app.post(
+  '/admin/biomedical-catalog/:type/:id/review',
+  requireAuth,
+  requirePlatformCatalogManager,
+  async (req, res) => {
+    const { type, id } = req.params;
+    const { decision, cascade = false, notes = null } = req.body || {};
+    try {
+      const result = await reviewCatalogNode({
+        type,
+        id,
+        decision,
+        cascade: Boolean(cascade),
+        notes,
+        actorUserId: req.user.sub
+      });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: decision === 'approve' ? 'BIOMEDICAL_CATALOG_APPROVE' : 'BIOMEDICAL_CATALOG_REJECT',
+        targetUserId: id,
+        details: { type, cascade: Boolean(cascade), notes, sync: result.sync }
+      });
+      return res.json(result);
+    } catch (error) {
+      return sendCatalogError(res, error, 'No se pudo revisar el elemento del catálogo.');
+    }
+  }
+);
+
+app.post(
+  '/admin/biomedical-catalog/:type/:id/merge',
+  requireAuth,
+  requirePlatformCatalogManager,
+  async (req, res) => {
+    const { type, id } = req.params;
+    const { targetId } = req.body || {};
+    try {
+      const result = await mergeCatalogNodes({ type, sourceId: id, targetId });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'BIOMEDICAL_CATALOG_MERGE',
+        targetUserId: targetId,
+        details: { type, sourceId: id, targetId, sync: result.sync }
+      });
+      return res.json(result);
+    } catch (error) {
+      return sendCatalogError(res, error, 'No se pudieron fusionar los elementos del catálogo.');
+    }
+  }
+);
+
 function validateQuickGuidePayload(body) {
   const required = [
     ['equipmentName', 'Nombre del equipo'],
@@ -7816,8 +7984,8 @@ app.post(
       if (error?.code === '23505') {
         return res.status(409).json({ message: 'Ya existe una guía rápida para este equipo, marca y modelo en el cliente.' });
       }
-      if (error?.code === 'CATALOG_VALUE_TOO_LONG') {
-        return res.status(400).json({ message: error.message });
+      if (String(error?.code || '').startsWith('CATALOG_')) {
+        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo biomédico.');
       }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo crear la guía rápida.' });
@@ -7863,13 +8031,13 @@ app.put(
           hasNewVisual: Boolean(req.file)
         }
       });
-      return res.json({ ok: true });
+      return res.json({ ok: true, catalogReview: result.catalogReview });
     } catch (error) {
       if (error?.code === '23505') {
         return res.status(409).json({ message: 'Ya existe una guía rápida para este equipo, marca y modelo en el cliente.' });
       }
-      if (error?.code === 'CATALOG_VALUE_TOO_LONG') {
-        return res.status(400).json({ message: error.message });
+      if (String(error?.code || '').startsWith('CATALOG_')) {
+        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo biomédico.');
       }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo actualizar la guía rápida.' });
@@ -8162,7 +8330,10 @@ app.post(
       });
       return res.status(201).json(result);
     } catch (error) {
-      if (['CATALOG_VALUE_TOO_LONG', 'INVALID_RISK_CLASSIFICATION'].includes(error?.code)) {
+      if (String(error?.code || '').startsWith('CATALOG_')) {
+        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo biomédico.');
+      }
+      if (error?.code === 'INVALID_RISK_CLASSIFICATION') {
         return res.status(400).json({ message: error.message });
       }
       console.error(error);
@@ -8260,6 +8431,7 @@ app.post(
 
       const hvEngineerUserId = await resolveHvEngineerUserId(req);
       const imported = [];
+      const pendingCatalogNodes = new Map();
       for (const asset of assets) {
         const result = await createAsset(clientId, {
           code: String(asset.code).trim(),
@@ -8298,6 +8470,9 @@ app.post(
           hvEngineerUserId,
           catalogCreatedBy: req.user.sub
         });
+        for (const node of result.catalogReview?.pendingNodes || []) {
+          pendingCatalogNodes.set(`${node.type}:${node.id}`, node);
+        }
         const createdAsset = await getAssetById(clientId, result.id);
         imported.push(result.id);
         await logEquipmentAudit(req, {
@@ -8313,9 +8488,19 @@ app.post(
         });
       }
 
-      return res.status(201).json({ imported: imported.length, ids: imported });
+      return res.status(201).json({
+        imported: imported.length,
+        ids: imported,
+        catalogReview: {
+          status: pendingCatalogNodes.size ? 'pending' : 'approved',
+          pendingNodes: Array.from(pendingCatalogNodes.values())
+        }
+      });
     } catch (error) {
-      if (['CATALOG_VALUE_TOO_LONG', 'INVALID_RISK_CLASSIFICATION'].includes(error?.code)) {
+      if (String(error?.code || '').startsWith('CATALOG_')) {
+        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo biomédico.');
+      }
+      if (error?.code === 'INVALID_RISK_CLASSIFICATION') {
         return res.status(400).json({ message: error.message });
       }
       console.error(error);
@@ -8379,7 +8564,7 @@ app.put(
     try {
       const hvEngineerUserId = await resolveHvEngineerUserId(req);
       const beforeAsset = await getAssetById(clientId, assetId);
-      await updateAsset(clientId, assetId, {
+      const updateResult = await updateAsset(clientId, assetId, {
         code,
         name,
         brand,
@@ -8477,9 +8662,12 @@ app.put(
           }
         }
       });
-      return res.json({ ok: true });
+      return res.json({ ok: true, catalogReview: updateResult.catalogReview });
     } catch (error) {
-      if (['CATALOG_VALUE_TOO_LONG', 'INVALID_RISK_CLASSIFICATION'].includes(error?.code)) {
+      if (String(error?.code || '').startsWith('CATALOG_')) {
+        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo biomédico.');
+      }
+      if (error?.code === 'INVALID_RISK_CLASSIFICATION') {
         return res.status(400).json({ message: error.message });
       }
       console.error(error);

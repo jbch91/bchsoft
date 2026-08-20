@@ -101,7 +101,8 @@ const MIGRATIONS = [
   'asset_hv_engineer_backfill.sql',
   'history_indexes.sql',
   'biomedical_equipment_catalog.sql',
-  'asset_risk_classifications.sql'
+  'asset_risk_classifications.sql',
+  'biomedical_equipment_catalog_review.sql'
 ];
 
 async function ensureMigrationsTable() {

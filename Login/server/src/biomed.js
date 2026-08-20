@@ -407,7 +407,8 @@ export async function createAsset(clientId, payload) {
     equipmentName,
     brand: equipmentBrand,
     model: equipmentModel,
-    createdBy: catalogCreatedBy
+    submittedBy: catalogCreatedBy,
+    submittedClientId: clientId
   });
   const { rows } = await query(
     `INSERT INTO "${schema}".assets
@@ -460,7 +461,13 @@ export async function createAsset(clientId, payload) {
       catalogPath.modelId
     ]
   );
-  return rows[0];
+  return {
+    ...rows[0],
+    catalogReview: {
+      status: catalogPath.reviewStatus,
+      pendingNodes: catalogPath.pendingNodes
+    }
+  };
 }
 
 export async function setAssetPhoto(clientId, assetId, photoPath) {
@@ -530,7 +537,8 @@ export async function updateAsset(clientId, assetId, payload) {
     equipmentName,
     brand: equipmentBrand,
     model: equipmentModel,
-    createdBy: catalogCreatedBy
+    submittedBy: catalogCreatedBy,
+    submittedClientId: clientId
   });
   await query(
     `UPDATE "${schema}".assets
@@ -587,6 +595,12 @@ export async function updateAsset(clientId, assetId, payload) {
       assetId
     ]
   );
+  return {
+    catalogReview: {
+      status: catalogPath.reviewStatus,
+      pendingNodes: catalogPath.pendingNodes
+    }
+  };
 }
 
 export async function updateAssetStatus(clientId, assetId, status) {

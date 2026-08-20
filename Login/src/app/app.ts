@@ -57,6 +57,11 @@ export class App {
       title: 'Administración SaaS',
       subtitle: 'Clientes, planes, suscripciones y control comercial.'
     },
+    '/catalogo-biomedico': {
+      eyebrow: 'Plataforma',
+      title: 'Catálogo biomédico',
+      subtitle: 'Gobierno global de equipos, marcas y modelos.'
+    },
     '/clientes': {
       eyebrow: 'Plataforma',
       title: 'Clientes',
@@ -196,7 +201,11 @@ export class App {
     if (['/hojas-de-vida', '/inventario', '/sedes-areas-ubicaciones', '/guias-rapidas', '/mantenimiento', '/cronogramas', '/calibraciones'].includes(path)) {
       return 'Software biomédico';
     }
-    if (path.startsWith('/administracion-saas') || path.startsWith('/clientes')) return 'Administración SaaS';
+    if (
+      path.startsWith('/administracion-saas')
+      || path.startsWith('/clientes')
+      || path.startsWith('/catalogo-biomedico')
+    ) return 'Administración SaaS';
     return this.routeTitle();
   }
 
