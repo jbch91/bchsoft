@@ -1268,22 +1268,66 @@ export function buildBlankMaintenanceProtocolPdf(
   y += 26;
 
   y = drawBlankProtocolSection(doc, '2. DATOS DEL SERVICIO', left, y, width);
-  const serviceHeight = 34;
+  const serviceHeight = 40;
+  const maintenanceTypeWidth = 205;
+  const serviceDateWidth = 175;
+  const serviceDateX = left + maintenanceTypeWidth;
+  const workOrderX = serviceDateX + serviceDateWidth;
   doc
     .rect(left, y, width, serviceHeight)
     .strokeColor(PDF_TABLE_BORDER)
     .lineWidth(0.7)
     .stroke();
-  drawBlankProtocolCheckbox(doc, left + 8, y + 6, 'Preventivo', 75);
-  drawBlankProtocolCheckbox(doc, left + 86, y + 6, 'Correctivo', 75);
-  doc.font('Helvetica-Bold').fontSize(7).fillColor(PDF_BRAND_700).text('FECHA MANTENIMIENTO', left + 170, y + 5);
-  doc.font('Helvetica').fontSize(8).fillColor(PDF_INK).text('____ / ____ / ________', left + 170, y + 17);
-  doc.font('Helvetica-Bold').fontSize(7).fillColor(PDF_BRAND_700).text('HORA INICIO', left + 310, y + 5);
-  doc.font('Helvetica').fontSize(8).fillColor(PDF_INK).text('____ : ____', left + 310, y + 17);
-  doc.font('Helvetica-Bold').fontSize(7).fillColor(PDF_BRAND_700).text('HORA FIN', left + 392, y + 5);
-  doc.font('Helvetica').fontSize(8).fillColor(PDF_INK).text('____ : ____', left + 392, y + 17);
-  doc.font('Helvetica-Bold').fontSize(7).fillColor(PDF_BRAND_700).text('SOLICITUD / OT', left + 468, y + 5, { width: width - 476 });
-  doc.font('Helvetica').fontSize(8).fillColor(PDF_INK).text('____________', left + 468, y + 17, { width: width - 476 });
+  doc
+    .moveTo(serviceDateX, y)
+    .lineTo(serviceDateX, y + serviceHeight)
+    .moveTo(workOrderX, y)
+    .lineTo(workOrderX, y + serviceHeight)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .stroke();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7)
+    .fillColor(PDF_BRAND_700)
+    .text('TIPO DE MANTENIMIENTO', left + 8, y + 5, {
+      width: maintenanceTypeWidth - 16,
+      align: 'center'
+    });
+  drawBlankProtocolCheckbox(doc, left + 10, y + 22, 'Preventivo', 88);
+  drawBlankProtocolCheckbox(doc, left + 106, y + 22, 'Correctivo', 88);
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7)
+    .fillColor(PDF_BRAND_700)
+    .text('FECHA MANTENIMIENTO', serviceDateX + 6, y + 5, {
+      width: serviceDateWidth - 12,
+      align: 'center'
+    });
+  doc
+    .font('Helvetica')
+    .fontSize(8)
+    .fillColor(PDF_INK)
+    .text('____ / ____ / ________', serviceDateX + 6, y + 21, {
+      width: serviceDateWidth - 12,
+      align: 'center'
+    });
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7)
+    .fillColor(PDF_BRAND_700)
+    .text('SOLICITUD / OT', workOrderX + 6, y + 5, {
+      width: width - maintenanceTypeWidth - serviceDateWidth - 12,
+      align: 'center'
+    });
+  doc
+    .font('Helvetica')
+    .fontSize(8)
+    .fillColor(PDF_INK)
+    .text('____________________', workOrderX + 6, y + 21, {
+      width: width - maintenanceTypeWidth - serviceDateWidth - 12,
+      align: 'center'
+    });
   y += serviceHeight + 5;
 
   y = drawBlankProtocolSection(doc, '3. PROTOCOLO EJECUTADO - MARQUE LAS ACTIVIDADES REALIZADAS', left, y, width);
