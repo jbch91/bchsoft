@@ -1213,7 +1213,7 @@ export function buildBlankMaintenanceProtocolPdf(
     .font('Helvetica-Bold')
     .fontSize(12.5)
     .fillColor(PDF_INK)
-    .text('PROTOCOLO FÍSICO DE MANTENIMIENTO', titleX, y + 8, {
+    .text('PROTOCOLO DE MANTENIMIENTO', titleX, y + 8, {
       width: titleWidth,
       align: 'center'
     });
