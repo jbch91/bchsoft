@@ -1065,6 +1065,342 @@ export function buildAssetMovementPdf(doc, { client, asset, movement }) {
   return doc;
 }
 
+function drawBlankProtocolCell(doc, { x, y, width, height, label, value }) {
+  const text = safeText(value);
+  const textWidth = width - 10;
+  let valueFontSize = 8.4;
+
+  doc.font('Helvetica').fontSize(valueFontSize);
+  while (valueFontSize > 5.8 && doc.widthOfString(text) > textWidth) {
+    valueFontSize = Math.max(5.8, valueFontSize - 0.2);
+    doc.fontSize(valueFontSize);
+  }
+
+  doc
+    .rect(x, y, width, height)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .stroke();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(6.4)
+    .fillColor(PDF_BRAND_700)
+    .text(label, x + 5, y + 4, { width: width - 10, height: 8, ellipsis: true });
+  doc
+    .font('Helvetica')
+    .fontSize(valueFontSize)
+    .fillColor(PDF_INK)
+    .text(text, x + 5, y + 13, {
+      width: textWidth,
+      height: Math.max(8, height - 15),
+      ellipsis: true
+    });
+}
+
+function drawBlankProtocolSection(doc, title, x, y, width) {
+  doc
+    .rect(x, y, width, 17)
+    .fillColor(PDF_BRAND_700)
+    .fill();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(8.4)
+    .fillColor(PDF_WHITE)
+    .text(title, x + 7, y + 4.5, { width: width - 14 });
+  return y + 17;
+}
+
+function drawBlankProtocolCheckbox(doc, x, y, label, width) {
+  doc
+    .rect(x, y + 1, 7, 7)
+    .strokeColor(PDF_MUTED)
+    .lineWidth(0.65)
+    .stroke();
+  doc
+    .font('Helvetica')
+    .fontSize(7.1)
+    .fillColor(PDF_INK)
+    .text(label, x + 11, y, { width: width - 11, height: 10, ellipsis: true });
+}
+
+function drawBlankProtocolChecklist(doc, { x, y, width, height, title, items }) {
+  doc
+    .rect(x, y, width, height)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .stroke();
+  doc
+    .rect(x, y, width, 18)
+    .fillColor(PDF_BRAND_50)
+    .fill();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7.5)
+    .fillColor(PDF_BRAND_800)
+    .text(title, x + 6, y + 5, { width: width - 12, align: 'center' });
+
+  let itemY = y + 23;
+  for (const item of items) {
+    drawBlankProtocolCheckbox(doc, x + 7, itemY, item, width - 14);
+    itemY += 10.8;
+  }
+  doc
+    .font('Helvetica')
+    .fontSize(6.8)
+    .fillColor(PDF_MUTED)
+    .text('Otro: __________________________', x + 7, y + height - 15, {
+      width: width - 14,
+      height: 9,
+      ellipsis: true
+    });
+}
+
+function drawBlankProtocolWritingBox(doc, { x, y, width, height, label }) {
+  doc
+    .rect(x, y, width, height)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .stroke();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7.2)
+    .fillColor(PDF_BRAND_700)
+    .text(label, x + 6, y + 5, { width: width - 12 });
+  const lineStartY = y + 22;
+  for (let lineY = lineStartY; lineY < y + height - 7; lineY += 14) {
+    doc
+      .moveTo(x + 7, lineY)
+      .lineTo(x + width - 7, lineY)
+      .strokeColor(PDF_TABLE_DIVIDER)
+      .lineWidth(0.45)
+      .stroke();
+  }
+}
+
+export function buildBlankMaintenanceProtocolPdf(
+  doc,
+  { client, asset, batchCode, pageNumber = 1, totalPages = 1 }
+) {
+  paintPageBackground(doc);
+  const left = doc.page.margins.left;
+  const right = doc.page.width - doc.page.margins.right;
+  const width = right - left;
+  let y = doc.page.margins.top;
+
+  const headerHeight = 58;
+  const logoWidth = 118;
+  doc
+    .rect(left, y, width, headerHeight)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.9)
+    .stroke();
+  doc
+    .moveTo(left + logoWidth, y)
+    .lineTo(left + logoWidth, y + headerHeight)
+    .strokeColor(PDF_TABLE_BORDER)
+    .stroke();
+
+  if (client.logo_path) {
+    const logoPath = path.join(process.cwd(), client.logo_path.replace(/^\//, ''));
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, left + 8, y + 7, { fit: [logoWidth - 16, headerHeight - 14] });
+    }
+  }
+
+  const titleX = left + logoWidth + 10;
+  const titleWidth = width - logoWidth - 20;
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(12.5)
+    .fillColor(PDF_INK)
+    .text('PROTOCOLO FÍSICO DE MANTENIMIENTO', titleX, y + 8, {
+      width: titleWidth,
+      align: 'center'
+    });
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(8.5)
+    .fillColor(PDF_BRAND_700)
+    .text(safeText(client.name), titleX, y + 27, {
+      width: titleWidth,
+      align: 'center',
+      height: 11,
+      ellipsis: true
+    });
+  doc
+    .font('Helvetica')
+    .fontSize(6.8)
+    .fillColor(PDF_MUTED)
+    .text(`NIT: ${safeText(client.nit)}  |  Lote: ${batchCode}`, titleX, y + 43, {
+      width: titleWidth,
+      align: 'center',
+      height: 9,
+      ellipsis: true
+    });
+  y += headerHeight + 5;
+
+  doc
+    .rect(left, y, width, 20)
+    .fillColor(PDF_BRAND_50)
+    .fill();
+  doc
+    .rect(left, y, width, 20)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .stroke();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(8)
+    .fillColor(PDF_BRAND_800)
+    .text('FORMATO EN BLANCO - LA FECHA DEL SERVICIO DEBE DILIGENCIARSE MANUALMENTE', left + 7, y + 6, {
+      width: width - 14,
+      align: 'center'
+    });
+  y += 25;
+
+  y = drawBlankProtocolSection(doc, '1. IDENTIFICACIÓN DEL EQUIPO', left, y, width);
+  drawBlankProtocolCell(doc, {
+    x: left,
+    y,
+    width: 112,
+    height: 21,
+    label: 'CÓDIGO',
+    value: asset.code
+  });
+  drawBlankProtocolCell(doc, {
+    x: left + 112,
+    y,
+    width: width - 112,
+    height: 21,
+    label: 'EQUIPO',
+    value: asset.name
+  });
+  y += 21;
+  const third = width / 3;
+  drawBlankProtocolCell(doc, { x: left, y, width: third, height: 21, label: 'MARCA', value: asset.brand });
+  drawBlankProtocolCell(doc, { x: left + third, y, width: third, height: 21, label: 'MODELO', value: asset.model });
+  drawBlankProtocolCell(doc, { x: left + third * 2, y, width: width - third * 2, height: 21, label: 'SERIE', value: asset.serial });
+  y += 21;
+  drawBlankProtocolCell(doc, { x: left, y, width: third, height: 21, label: 'SEDE', value: asset.site_name });
+  drawBlankProtocolCell(doc, { x: left + third, y, width: third, height: 21, label: 'ÁREA', value: asset.area_name });
+  drawBlankProtocolCell(doc, { x: left + third * 2, y, width: width - third * 2, height: 21, label: 'UBICACIÓN', value: asset.location_name });
+  y += 26;
+
+  y = drawBlankProtocolSection(doc, '2. DATOS DEL SERVICIO', left, y, width);
+  const serviceHeight = 34;
+  doc
+    .rect(left, y, width, serviceHeight)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .stroke();
+  drawBlankProtocolCheckbox(doc, left + 8, y + 6, 'Preventivo', 75);
+  drawBlankProtocolCheckbox(doc, left + 86, y + 6, 'Correctivo', 75);
+  doc.font('Helvetica-Bold').fontSize(7).fillColor(PDF_BRAND_700).text('FECHA MANTENIMIENTO', left + 170, y + 5);
+  doc.font('Helvetica').fontSize(8).fillColor(PDF_INK).text('____ / ____ / ________', left + 170, y + 17);
+  doc.font('Helvetica-Bold').fontSize(7).fillColor(PDF_BRAND_700).text('HORA INICIO', left + 310, y + 5);
+  doc.font('Helvetica').fontSize(8).fillColor(PDF_INK).text('____ : ____', left + 310, y + 17);
+  doc.font('Helvetica-Bold').fontSize(7).fillColor(PDF_BRAND_700).text('HORA FIN', left + 392, y + 5);
+  doc.font('Helvetica').fontSize(8).fillColor(PDF_INK).text('____ : ____', left + 392, y + 17);
+  doc.font('Helvetica-Bold').fontSize(7).fillColor(PDF_BRAND_700).text('SOLICITUD / OT', left + 468, y + 5, { width: width - 476 });
+  doc.font('Helvetica').fontSize(8).fillColor(PDF_INK).text('____________', left + 468, y + 17, { width: width - 476 });
+  y += serviceHeight + 5;
+
+  y = drawBlankProtocolSection(doc, '3. PROTOCOLO EJECUTADO - MARQUE LAS ACTIVIDADES REALIZADAS', left, y, width);
+  const checklistGap = 5;
+  const checklistWidth = (width - checklistGap * 2) / 3;
+  const checklistHeight = 150;
+  drawBlankProtocolChecklist(doc, {
+    x: left,
+    y,
+    width: checklistWidth,
+    height: checklistHeight,
+    title: 'REVISIONES',
+    items: Object.values(MAINTENANCE_CHECK_LABELS)
+  });
+  drawBlankProtocolChecklist(doc, {
+    x: left + checklistWidth + checklistGap,
+    y,
+    width: checklistWidth,
+    height: checklistHeight,
+    title: 'ACTIVIDADES TÉCNICAS',
+    items: Object.values(MAINTENANCE_ACTIVITY_LABELS)
+  });
+  drawBlankProtocolChecklist(doc, {
+    x: left + (checklistWidth + checklistGap) * 2,
+    y,
+    width: checklistWidth,
+    height: checklistHeight,
+    title: 'PRUEBAS Y VERIFICACIONES',
+    items: Object.values(MAINTENANCE_TEST_LABELS)
+  });
+  y += checklistHeight + 5;
+
+  drawBlankProtocolWritingBox(doc, { x: left, y, width, height: 55, label: '4. HALLAZGOS / DIAGNÓSTICO' });
+  y += 60;
+  drawBlankProtocolWritingBox(doc, { x: left, y, width, height: 55, label: '5. ACCIONES REALIZADAS / RECOMENDACIONES' });
+  y += 60;
+
+  const half = width / 2;
+  doc
+    .rect(left, y, width, 52)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .stroke();
+  doc
+    .moveTo(left + half, y)
+    .lineTo(left + half, y + 52)
+    .strokeColor(PDF_TABLE_BORDER)
+    .stroke();
+  doc.font('Helvetica-Bold').fontSize(7.2).fillColor(PDF_BRAND_700).text('6. ESTADO FINAL DEL EQUIPO', left + 6, y + 5);
+  drawBlankProtocolCheckbox(doc, left + 7, y + 19, 'Operativo', 88);
+  drawBlankProtocolCheckbox(doc, left + 98, y + 19, 'Operativo con observación', half - 105);
+  drawBlankProtocolCheckbox(doc, left + 7, y + 35, 'Fuera de servicio', 130);
+  doc.font('Helvetica-Bold').fontSize(7.2).fillColor(PDF_BRAND_700).text('7. REPUESTOS', left + half + 6, y + 5);
+  drawBlankProtocolCheckbox(doc, left + half + 7, y + 19, 'No requiere', 90);
+  drawBlankProtocolCheckbox(doc, left + half + 101, y + 19, 'Requiere', 75);
+  doc.font('Helvetica').fontSize(7).fillColor(PDF_INK).text('Detalle: ____________________________________', left + half + 7, y + 35, { width: half - 14 });
+  y += 57;
+
+  y = drawBlankProtocolSection(doc, '8. FIRMAS DE LA INTERVENCIÓN', left, y, width);
+  const signatureGap = 8;
+  const signatureWidth = (width - signatureGap) / 2;
+  for (const [index, title] of ['INGENIERO BIOMÉDICO', 'RESPONSABLE / USUARIO DEL EQUIPO'].entries()) {
+    const x = left + index * (signatureWidth + signatureGap);
+    doc
+      .rect(x, y, signatureWidth, 70)
+      .strokeColor(PDF_TABLE_BORDER)
+      .lineWidth(0.7)
+      .stroke();
+    doc.font('Helvetica-Bold').fontSize(7.2).fillColor(PDF_BRAND_700).text(title, x + 6, y + 5, {
+      width: signatureWidth - 12,
+      align: 'center'
+    });
+    doc.font('Helvetica').fontSize(7).fillColor(PDF_INK).text('Firma: ___________________________________', x + 8, y + 25, { width: signatureWidth - 16 });
+    doc.text('Nombre: _________________________________', x + 8, y + 42, { width: signatureWidth - 16 });
+    doc.text(index === 0 ? 'Registro / documento: _____________________' : 'Cargo: __________________________________', x + 8, y + 56, { width: signatureWidth - 16 });
+  }
+  y += 75;
+
+  doc
+    .font('Helvetica')
+    .fontSize(6.3)
+    .fillColor(PDF_MUTED)
+    .text(
+      'Formato físico en blanco. No constituye un mantenimiento registrado hasta que el original diligenciado sea incorporado al historial del equipo.',
+      left,
+      y,
+      { width: width - 115, height: 18 }
+    );
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(6.5)
+    .fillColor(PDF_BRAND_700)
+    .text(`${batchCode}  |  Equipo ${pageNumber} de ${totalPages}`, right - 112, y, {
+      width: 112,
+      align: 'right'
+    });
+}
+
 export function buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures }) {
   documentTitle(doc, 'Reporte de Mantenimiento');
 

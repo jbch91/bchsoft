@@ -102,7 +102,8 @@ const MIGRATIONS = [
   'history_indexes.sql',
   'biomedical_equipment_catalog.sql',
   'asset_risk_classifications.sql',
-  'biomedical_equipment_catalog_review.sql'
+  'biomedical_equipment_catalog_review.sql',
+  'maintenance_blank_protocol_printing.sql'
 ];
 
 async function ensureMigrationsTable() {

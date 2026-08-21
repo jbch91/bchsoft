@@ -9,6 +9,7 @@ import { BiomedService } from '../../biomed/biomed.service';
 import { MaintenanceService, MaintenanceReportDto, MaintenanceRequestDto } from '../../maintenance/maintenance.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import { maintenanceAssetMatchesLookup } from './maintenance-view.utils';
 
 interface ClientLite {
   id: string;
@@ -39,11 +40,17 @@ interface PreventiveAreaGroup {
   requests: MaintenanceRequestDto[];
 }
 
+interface PendingSpareCase {
+  asset: AssetLite;
+  report: MaintenanceReportDto | null;
+}
+
 type MaintenanceViewMode =
   | 'crear_solicitud'
   | 'solicitudes'
   | 'preventivos'
   | 'reportes'
+  | 'protocolos_fisicos'
   | 'repuestos'
   | 'bajas'
   | 'equipos';
@@ -68,6 +75,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   private destroyed = false;
 
   loading = false;
+  lastUpdatedAt: Date | null = null;
   errorMessage = '';
   successMessage = '';
   alertMessage = '';
@@ -88,7 +96,19 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportSearchTerm = '';
   reportStatusFilter = '';
   reportSpareFilter = '';
+  reportTypeFilter = '';
   assetSearchTerm = '';
+  protocolSearchTerm = '';
+  protocolSiteFilter = '';
+  protocolAreaFilter = '';
+  protocolStatusFilter = '';
+  protocolReason = '';
+  protocolGenerating = false;
+  protocolConfirmationScope: 'selected' | 'all_active' | null = null;
+  selectedProtocolAssetIds = new Set<string>();
+  permissionsRefreshLoading = false;
+  private lastPermissionRefreshAt = 0;
+  private readonly permissionRefreshCooldownMs = 4000;
   qrScannerActive = false;
   qrScannerSupported = typeof window !== 'undefined' && 'BarcodeDetector' in window;
   qrScanError = '';
@@ -115,6 +135,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportFormActive = false;
   reportSubView: 'pendientes_firma' | 'historial' = 'pendientes_firma';
   viewMode: MaintenanceViewMode = 'crear_solicitud';
+  signConfirmationReport: MaintenanceReportDto | null = null;
+  signingReport = false;
+  correctionDialogReport: MaintenanceReportDto | null = null;
+  correctionReason = '';
+  correctionSubmitting = false;
 
   readonly requestStatuses = [
     { value: '', label: 'Todos' },
@@ -164,6 +189,14 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     { value: 'verificacion_parametros', label: 'Parámetros dentro de rango' },
     { value: 'equipo_operativo_entregado', label: 'Equipo operativo y entregado' }
   ];
+  readonly protocolStatusOptions = [
+    { value: '', label: 'Todos los estados' },
+    { value: 'activo', label: 'Activo' },
+    { value: 'operativo', label: 'Operativo' },
+    { value: 'operativo_observacion', label: 'Operativo con observación' },
+    { value: 'pendiente_repuesto', label: 'Pendiente por repuesto' },
+    { value: 'fuera_de_servicio', label: 'Fuera de servicio' }
+  ];
 
   constructor(
     private readonly admin: AdminService,
@@ -175,6 +208,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   ) {}
 
   async ngOnInit(): Promise<void> {
+    if (this.canRefreshMaintenanceTemporaryPermissions) {
+      await this.refreshCurrentPermissions(false);
+    }
     if (!this.auth.hasPermission('maintenance:request:create') && this.auth.hasPermission('maintenance:report:create')) {
       this.viewMode = 'preventivos';
     } else if (!this.auth.hasPermission('maintenance:request:create')) {
@@ -238,7 +274,17 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     await this.loadData();
   }
 
+  async refreshMaintenanceData(): Promise<void> {
+    if (this.loading) return;
+    const previousRefresh = this.lastUpdatedAt;
+    await this.loadData();
+    if (this.lastUpdatedAt && this.lastUpdatedAt !== previousRefresh && !this.errorMessage) {
+      this.successMessage = 'Información de mantenimiento actualizada.';
+    }
+  }
+
   async switchView(mode: MaintenanceViewMode): Promise<void> {
+    if (mode === 'protocolos_fisicos' && !this.canPrintBlankProtocols) return;
     this.viewMode = mode;
     this.refreshViewSoon();
 
@@ -278,8 +324,15 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       }
       const request = this.requests.find((item) => item.id === requestId);
       if (request && request.status === 'abierto') {
-        await this.maintenance.assignRequest(requestId);
-        await this.loadData();
+        try {
+          await this.maintenance.assignRequest(requestId);
+          await this.loadData();
+        } catch (error: any) {
+          await this.loadData();
+          this.viewMode = 'solicitudes';
+          this.errorMessage = error?.error?.message ?? 'La solicitud ya no está disponible.';
+          return;
+        }
       }
       this.activateReportForm(requestId, 'Abrí la solicitud desde la notificación. Completa el reporte cuando termines la intervención.');
       return;
@@ -325,13 +378,20 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         locationName: asset.location_name
       }));
       this.assetMap = new Map(this.assets.map((asset) => [asset.id, asset]));
+      const eligibleProtocolIds = new Set(this.activeAssets.map((asset) => asset.id));
+      this.selectedProtocolAssetIds = new Set(
+        Array.from(this.selectedProtocolAssetIds).filter((assetId) => eligibleProtocolIds.has(assetId))
+      );
       this.requests = requests;
       this.reports = reports;
-      this.requestAssetId = this.activeAssets[0]?.id ?? '';
+      if (!this.activeAssets.some((asset) => asset.id === this.requestAssetId)) {
+        this.requestAssetId = '';
+      }
       if (this.reportRequestId && !this.requests.some((request) => request.id === this.reportRequestId)) {
         this.reportRequestId = '';
         this.reportFormActive = false;
       }
+      this.lastUpdatedAt = new Date();
     } catch (error) {
       console.error(error);
       this.errorMessage = 'No se pudo cargar la información de mantenimiento.';
@@ -379,6 +439,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.errorMessage = 'Selecciona cliente y equipo.';
       return;
     }
+    const cleanDescription = this.requestDescription.replace(/\s+/g, ' ').trim();
+    if (this.requestType === 'correctivo' && cleanDescription.length < 10) {
+      this.errorMessage = 'Describe la falla o necesidad con al menos 10 caracteres.';
+      return;
+    }
     this.errorMessage = '';
     this.successMessage = '';
     try {
@@ -386,10 +451,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         clientId: this.selectedClientId,
         assetId: this.requestAssetId,
         type: this.requestType,
-        description: this.requestDescription?.trim()
+        description: cleanDescription
       });
       this.requestDescription = '';
-      this.requestAssetId = this.activeAssets[0]?.id ?? '';
+      this.requestAssetId = '';
       this.assetSearchTerm = '';
       await this.loadData();
       this.viewMode = 'solicitudes';
@@ -552,30 +617,67 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     }
   }
 
-  async signReport(reportId: string): Promise<void> {
+  openSignConfirmation(report: MaintenanceReportDto): void {
+    if (!this.canSignReport(report)) return;
+    this.signConfirmationReport = report;
+  }
+
+  closeSignConfirmation(): void {
+    if (this.signingReport) return;
+    this.signConfirmationReport = null;
+  }
+
+  async confirmSignReport(): Promise<void> {
+    const report = this.signConfirmationReport;
+    if (!report || this.signingReport) return;
+    this.signingReport = true;
     try {
-      await this.maintenance.signReport(reportId);
+      await this.maintenance.signReport(report.id);
       await this.loadData();
+      this.signConfirmationReport = null;
+      this.showAlert('Reporte firmado correctamente.', 'success');
     } catch (error: any) {
       console.error(error);
       this.errorMessage = error?.error?.message ?? 'No se pudo firmar el reporte.';
+      this.showAlert(this.errorMessage, 'error');
+    } finally {
+      this.signingReport = false;
     }
   }
 
-  async requestReportCorrection(report: MaintenanceReportDto): Promise<void> {
-    const reason = prompt('Describe claramente qué debe corregir el ingeniero antes de firmar:');
-    const cleanReason = reason?.trim();
-    if (!cleanReason) {
+  openCorrectionDialog(report: MaintenanceReportDto): void {
+    if (!this.canRequestReportCorrection(report)) return;
+    this.correctionDialogReport = report;
+    this.correctionReason = '';
+  }
+
+  closeCorrectionDialog(): void {
+    if (this.correctionSubmitting) return;
+    this.correctionDialogReport = null;
+    this.correctionReason = '';
+  }
+
+  async requestReportCorrection(): Promise<void> {
+    const report = this.correctionDialogReport;
+    const cleanReason = this.correctionReason.replace(/\s+/g, ' ').trim();
+    if (!report || this.correctionSubmitting) return;
+    if (cleanReason.length < 10) {
+      this.errorMessage = 'Describe la corrección solicitada con al menos 10 caracteres.';
       return;
     }
+    this.correctionSubmitting = true;
     try {
       await this.maintenance.requestReportCorrection(report.id, cleanReason);
       await this.loadData();
+      this.correctionDialogReport = null;
+      this.correctionReason = '';
       this.showAlert('Corrección solicitada. El ingeniero recibió una notificación con el motivo.', 'success');
     } catch (error: any) {
       console.error(error);
       this.errorMessage = error?.error?.message ?? 'No se pudo solicitar la corrección.';
       this.showAlert(this.errorMessage, 'error');
+    } finally {
+      this.correctionSubmitting = false;
     }
   }
 
@@ -613,6 +715,126 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     }
   }
 
+  async refreshCurrentPermissions(force = true): Promise<void> {
+    if (this.permissionsRefreshLoading || !this.auth.tokens()?.refreshToken) return;
+    const now = Date.now();
+    if (!force && now - this.lastPermissionRefreshAt < this.permissionRefreshCooldownMs) return;
+    this.lastPermissionRefreshAt = now;
+    const hadPermission = this.canPrintBlankProtocols;
+    this.permissionsRefreshLoading = true;
+    try {
+      let refreshed = await this.auth.refreshSession();
+      if (!refreshed) {
+        refreshed = await this.auth.reloadCurrentUser();
+      }
+      if (!refreshed) return;
+
+      if (!hadPermission && this.canPrintBlankProtocols) {
+        this.viewMode = 'protocolos_fisicos';
+        this.errorMessage = '';
+        this.successMessage = 'Permiso actualizado. Ya puedes preparar protocolos físicos.';
+      } else if (force && this.canPrintBlankProtocols) {
+        this.errorMessage = '';
+        this.successMessage = 'Permisos actualizados. La impresión temporal está activa.';
+      } else if (force) {
+        if (this.viewMode === 'protocolos_fisicos') this.viewMode = 'equipos';
+        this.successMessage = '';
+        this.errorMessage = 'El permiso temporal de protocolos físicos no está activo o ya venció.';
+      }
+    } finally {
+      this.permissionsRefreshLoading = false;
+      this.refreshViewSoon();
+    }
+  }
+
+  openProtocolConfirmation(scope: 'selected' | 'all_active'): void {
+    this.errorMessage = '';
+    this.successMessage = '';
+    if (!this.canPrintBlankProtocols) {
+      this.errorMessage = 'Necesitas un permiso temporal activo para generar protocolos físicos.';
+      return;
+    }
+    const reason = this.protocolReason.replace(/\s+/g, ' ').trim();
+    if (reason.length < 10) {
+      this.errorMessage = 'Registra un motivo de al menos 10 caracteres.';
+      return;
+    }
+    const count = scope === 'all_active' ? this.activeAssets.length : this.selectedProtocolAssetIds.size;
+    if (!count) {
+      this.errorMessage = scope === 'all_active'
+        ? 'No hay equipos vigentes para generar protocolos.'
+        : 'Selecciona al menos un equipo.';
+      return;
+    }
+    if (count > 500) {
+      this.errorMessage = 'Cada lote admite máximo 500 equipos. Usa los filtros y genera varios lotes seleccionados.';
+      return;
+    }
+    this.protocolReason = reason;
+    this.protocolConfirmationScope = scope;
+  }
+
+  closeProtocolConfirmation(): void {
+    if (this.protocolGenerating) return;
+    this.protocolConfirmationScope = null;
+  }
+
+  async generateBlankProtocols(): Promise<void> {
+    const scope = this.protocolConfirmationScope;
+    if (!scope || this.protocolGenerating) return;
+
+    const previewWindow = window.open('', '_blank');
+    if (previewWindow) {
+      previewWindow.opener = null;
+      previewWindow.document.title = 'Preparando protocolos';
+      previewWindow.document.body.textContent = 'Preparando PDF...';
+    }
+
+    this.protocolGenerating = true;
+    this.errorMessage = '';
+    this.successMessage = '';
+    try {
+      const result = await this.maintenance.generateBlankProtocols({
+        scope,
+        assetIds: scope === 'selected' ? Array.from(this.selectedProtocolAssetIds) : undefined,
+        reason: this.protocolReason
+      });
+      const file = new File(
+        [result.blob],
+        `protocolos-mantenimiento-${result.batchCode.toLowerCase()}.pdf`,
+        { type: 'application/pdf' }
+      );
+      const url = URL.createObjectURL(file);
+      if (previewWindow) {
+        previewWindow.location.href = url;
+      } else {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = file.name;
+        anchor.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      this.protocolConfirmationScope = null;
+      this.selectedProtocolAssetIds = new Set<string>();
+      this.protocolReason = '';
+      this.successMessage = `Lote ${result.batchCode} generado con ${result.assetCount} protocolo(s).`;
+    } catch (error: any) {
+      previewWindow?.close();
+      console.error(error);
+      this.errorMessage = await this.blankProtocolErrorMessage(error);
+      if (error?.status === 403) {
+        await this.auth.reloadCurrentUser();
+        if (!this.canPrintBlankProtocols) {
+          this.protocolConfirmationScope = null;
+          this.viewMode = 'equipos';
+        }
+      }
+    } finally {
+      this.protocolGenerating = false;
+      this.refreshViewSoon();
+    }
+  }
+
   async deleteReport(reportId: string): Promise<void> {
     if (!confirm('¿Eliminar reporte de mantenimiento?')) {
       return;
@@ -635,18 +857,112 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return this.assets.filter((asset) => asset.status !== 'dado_de_baja');
   }
 
+  get canPrintBlankProtocols(): boolean {
+    return Boolean(this.auth.currentUser()?.clientId)
+      && this.auth.hasRole('ingeniero_biomedico')
+      && this.auth.hasPermission('maintenance:protocol:print_blank');
+  }
+
+  get canRefreshMaintenanceTemporaryPermissions(): boolean {
+    return Boolean(this.auth.currentUser()?.clientId) && this.auth.hasRole('ingeniero_biomedico');
+  }
+
+  get protocolSiteOptions(): string[] {
+    return Array.from(new Set(this.activeAssets.map((asset) => asset.siteName).filter(Boolean) as string[]))
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  get protocolAreaOptions(): string[] {
+    const source = this.protocolSiteFilter
+      ? this.activeAssets.filter((asset) => asset.siteName === this.protocolSiteFilter)
+      : this.activeAssets;
+    return Array.from(new Set(source.map((asset) => asset.areaName).filter(Boolean) as string[]))
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  get filteredProtocolAssets(): AssetLite[] {
+    const term = this.normalize(this.protocolSearchTerm);
+    return this.activeAssets
+      .filter((asset) => !this.protocolSiteFilter || asset.siteName === this.protocolSiteFilter)
+      .filter((asset) => !this.protocolAreaFilter || asset.areaName === this.protocolAreaFilter)
+      .filter((asset) => !this.protocolStatusFilter || asset.status === this.protocolStatusFilter)
+      .filter((asset) => !term || this.assetHaystack(asset).includes(term))
+      .sort((a, b) =>
+        `${a.siteName || ''} ${a.areaName || ''} ${a.locationName || ''} ${a.code}`.localeCompare(
+          `${b.siteName || ''} ${b.areaName || ''} ${b.locationName || ''} ${b.code}`
+        )
+      );
+  }
+
+  get selectedProtocolAssetCount(): number {
+    return this.selectedProtocolAssetIds.size;
+  }
+
+  get allVisibleProtocolAssetsSelected(): boolean {
+    return this.filteredProtocolAssets.length > 0
+      && this.filteredProtocolAssets.every((asset) => this.selectedProtocolAssetIds.has(asset.id));
+  }
+
+  get protocolConfirmationCount(): number {
+    return this.protocolConfirmationScope === 'all_active'
+      ? this.activeAssets.length
+      : this.selectedProtocolAssetIds.size;
+  }
+
+  isProtocolAssetSelected(assetId: string): boolean {
+    return this.selectedProtocolAssetIds.has(assetId);
+  }
+
+  toggleProtocolAsset(assetId: string, selected: boolean): void {
+    const next = new Set(this.selectedProtocolAssetIds);
+    if (selected) next.add(assetId);
+    else next.delete(assetId);
+    this.selectedProtocolAssetIds = next;
+  }
+
+  toggleVisibleProtocolAssets(): void {
+    const next = new Set(this.selectedProtocolAssetIds);
+    if (this.allVisibleProtocolAssetsSelected) {
+      this.filteredProtocolAssets.forEach((asset) => next.delete(asset.id));
+    } else {
+      this.filteredProtocolAssets.forEach((asset) => next.add(asset.id));
+    }
+    this.selectedProtocolAssetIds = next;
+  }
+
+  clearProtocolSelection(): void {
+    this.selectedProtocolAssetIds = new Set<string>();
+  }
+
+  onProtocolSiteFilterChange(): void {
+    if (this.protocolAreaFilter && !this.protocolAreaOptions.includes(this.protocolAreaFilter)) {
+      this.protocolAreaFilter = '';
+    }
+  }
+
   get retiredAssets(): AssetLite[] {
     return this.assets.filter((asset) => asset.status === 'dado_de_baja');
   }
 
   get filteredAssets(): AssetLite[] {
     const term = this.normalize(this.assetSearchTerm);
-    if (!term) return this.activeAssets;
-    return this.activeAssets.filter((asset) => this.assetHaystack(asset).includes(term));
+    return this.activeAssets
+      .filter((asset) => !term || this.assetHaystack(asset).includes(term))
+      .sort((a, b) => `${a.code} ${a.name}`.localeCompare(`${b.code} ${b.name}`));
   }
 
   get selectedRequestAsset(): AssetLite | null {
     return this.assets.find((asset) => asset.id === this.requestAssetId) ?? null;
+  }
+
+  get canSubmitRequest(): boolean {
+    const description = this.requestDescription.replace(/\s+/g, ' ').trim();
+    return Boolean(
+      !this.loading
+      && this.selectedClientId
+      && this.requestAssetId
+      && (this.requestType !== 'correctivo' || description.length >= 10)
+    );
   }
 
   get filteredRequests(): MaintenanceRequestDto[] {
@@ -719,6 +1035,30 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     );
   }
 
+  setReportSubView(view: 'pendientes_firma' | 'historial'): void {
+    this.reportSubView = view;
+    const validStatuses = this.reportStatusOptions.map((option) => option.value);
+    if (!validStatuses.includes(this.reportStatusFilter)) {
+      this.reportStatusFilter = '';
+    }
+  }
+
+  get reportStatusOptions(): Array<{ value: string; label: string }> {
+    if (this.reportSubView === 'historial') {
+      return [
+        { value: '', label: 'Todos' },
+        { value: 'firmado', label: 'Firmados' }
+      ];
+    }
+    return [
+      { value: '', label: 'Todos' },
+      { value: 'reportado', label: 'Por firmar' },
+      { value: 'correccion', label: 'Corrección solicitada' },
+      { value: 'espera_repuesto', label: 'En espera de repuesto' },
+      { value: 'trazabilidad_repuesto', label: 'Trazabilidad de repuesto' }
+    ];
+  }
+
   get filteredReports(): MaintenanceReportDto[] {
     const term = this.normalize(this.reportSearchTerm);
     const source = this.reportSubView === 'pendientes_firma'
@@ -730,6 +1070,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       if (this.reportStatusFilter && reportState !== this.reportStatusFilter) return false;
       if (this.reportSpareFilter === 'con_repuesto' && !report.requires_spare_parts) return false;
       if (this.reportSpareFilter === 'sin_repuesto' && report.requires_spare_parts) return false;
+      if (this.reportTypeFilter && report.type !== this.reportTypeFilter) return false;
       if (!term) return true;
       const asset = this.assetMap.get(report.asset_id);
       const haystack = [
@@ -773,6 +1114,63 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   get pendingSpareAssets(): AssetLite[] {
     return this.assets.filter((asset) => asset.status === 'pendiente_repuesto');
+  }
+
+  get pendingSpareCases(): PendingSpareCase[] {
+    const cases = new Map<string, PendingSpareCase>();
+    for (const report of this.sparePartReports) {
+      const asset = this.assetMap.get(report.asset_id);
+      if (asset && !cases.has(asset.id)) {
+        cases.set(asset.id, { asset, report });
+      }
+    }
+    for (const asset of this.pendingSpareAssets) {
+      if (!cases.has(asset.id)) {
+        cases.set(asset.id, { asset, report: null });
+      }
+    }
+    return Array.from(cases.values()).sort((a, b) =>
+      `${a.asset.siteName || ''} ${a.asset.areaName || ''} ${a.asset.code}`.localeCompare(
+        `${b.asset.siteName || ''} ${b.asset.areaName || ''} ${b.asset.code}`
+      )
+    );
+  }
+
+  get pendingSpareCount(): number {
+    return this.pendingSpareCases.length;
+  }
+
+  assignedEngineerLabel(request: MaintenanceRequestDto): string {
+    if (!request.assigned_to) return 'Sin asignar';
+    if (request.assigned_to === this.auth.currentUser()?.id) return 'Tú';
+    return request.assigned_name || 'Otro ingeniero';
+  }
+
+  requestAgeLabel(request: MaintenanceRequestDto): string {
+    const createdAt = new Date(request.created_at).getTime();
+    const elapsedHours = Math.max(0, Math.floor((Date.now() - createdAt) / 3_600_000));
+    if (elapsedHours < 1) return 'Creada hace menos de una hora';
+    if (elapsedHours < 24) return `Creada hace ${elapsedHours} h`;
+    const days = Math.floor(elapsedHours / 24);
+    return `Creada hace ${days} día${days === 1 ? '' : 's'}`;
+  }
+
+  requestAgeClass(request: MaintenanceRequestDto): string {
+    if (request.status !== 'abierto') return 'neutral';
+    const elapsedHours = Math.max(0, (Date.now() - new Date(request.created_at).getTime()) / 3_600_000);
+    if (elapsedHours >= 48) return 'danger';
+    if (elapsedHours >= 24) return 'warn';
+    return 'neutral';
+  }
+
+  preventiveWindowClass(request: MaintenanceRequestDto): string {
+    if (!request.deadline_date) return 'neutral';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const deadline = new Date(`${request.deadline_date.slice(0, 10)}T23:59:59`);
+    if (deadline.getTime() < today.getTime()) return 'danger';
+    const remainingDays = Math.ceil((deadline.getTime() - today.getTime()) / 86_400_000);
+    return remainingDays <= 2 ? 'warn' : 'neutral';
   }
 
   selectedRequestLabel(requestId: string): string {
@@ -916,6 +1314,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   startSpareInstallation(report: MaintenanceReportDto): void {
+    if (!this.canContinueSpareCase(report)) return;
     this.reportRequestId = report.request_id;
     this.reportFormActive = true;
     this.reportSummary = `Instalación de repuesto para ${this.assetLabel(report.asset_id)}`;
@@ -936,6 +1335,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   startAssetRetirement(report: MaintenanceReportDto): void {
+    if (!this.canContinueSpareCase(report)) return;
     this.reportRequestId = report.request_id;
     this.reportFormActive = true;
     this.reportSummary = `Baja técnica para ${this.assetLabel(report.asset_id)}`;
@@ -976,6 +1376,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   reportsForAsset(assetId: string): MaintenanceReportDto[] {
     return this.reports.filter((report) => report.asset_id === assetId);
+  }
+
+  historicalReportsForRetiredAsset(assetId: string): MaintenanceReportDto[] {
+    const finalReportId = this.retirementReportForAsset(assetId)?.id;
+    return this.reportsForAsset(assetId).filter((report) => report.id !== finalReportId);
   }
 
   retirementReportForAsset(assetId: string): MaintenanceReportDto | null {
@@ -1074,14 +1479,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   private selectAssetFromCode(rawValue: string): boolean {
-    const value = this.normalize(rawValue);
-    const asset = this.activeAssets.find((item) => {
-      const candidates = [item.id, item.code, item.serial, `${item.code}-${item.serial}`];
-      return candidates.some((candidate) => {
-        const normalized = this.normalize(candidate);
-        return normalized && (value === normalized || value.includes(normalized));
-      });
-    });
+    const asset = this.activeAssets.find((item) => maintenanceAssetMatchesLookup(item, rawValue));
     if (!asset) {
       this.qrScanError = 'No encontré un equipo con ese código QR o serial.';
       return false;
@@ -1112,6 +1510,20 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       .join(' ');
   }
 
+  private async blankProtocolErrorMessage(error: any): Promise<string> {
+    const fallback = 'No se pudieron generar los protocolos físicos.';
+    if (error?.error instanceof Blob) {
+      try {
+        const text = await error.error.text();
+        const parsed = JSON.parse(text);
+        return parsed?.message || fallback;
+      } catch {
+        return fallback;
+      }
+    }
+    return error?.error?.message || error?.message || fallback;
+  }
+
   private normalize(value?: string | null): string {
     return String(value || '')
       .toLowerCase()
@@ -1124,11 +1536,14 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (!this.auth.hasPermission('maintenance:report:create')) {
       return false;
     }
-    if (['reportado', 'firmado', 'espera_repuesto'].includes(request.status)) {
+    if (['reportado', 'firmado', 'espera_repuesto', 'correccion'].includes(request.status)) {
+      return false;
+    }
+    const currentUserId = this.auth.currentUser()?.id;
+    if (!this.auth.hasRole('superuser') && request.assigned_to && request.assigned_to !== currentUserId) {
       return false;
     }
     if (request.status === 'en_proceso') {
-      const currentUserId = this.auth.currentUser()?.id;
       return this.auth.hasRole('superuser') || !request.assigned_to || request.assigned_to === currentUserId;
     }
     return true;
@@ -1136,6 +1551,20 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   takeRequestLabel(request: MaintenanceRequestDto): string {
     return request.status === 'en_proceso' ? 'Continuar reporte' : 'Tomar';
+  }
+
+  canContinueSpareCase(report: MaintenanceReportDto): boolean {
+    if (!this.auth.hasPermission('maintenance:report:create')) return false;
+    const request = this.requests.find((item) => item.id === report.request_id);
+    if (!request) return false;
+    return this.auth.hasRole('superuser')
+      || !request.assigned_to
+      || request.assigned_to === this.auth.currentUser()?.id;
+  }
+
+  spareCaseAssignmentLabel(report: MaintenanceReportDto): string {
+    const request = this.requests.find((item) => item.id === report.request_id);
+    return request ? this.assignedEngineerLabel(request) : 'otro ingeniero';
   }
 
   private isScheduledPreventive(request: MaintenanceRequestDto): boolean {

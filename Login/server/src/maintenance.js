@@ -36,11 +36,45 @@ export async function createMaintenanceRequest(payload) {
   return rows[0];
 }
 
+export async function createMaintenanceProtocolPrintBatch(payload) {
+  const {
+    batchCode,
+    clientId,
+    generatedBy,
+    temporaryPermissionId,
+    permissionExpiresAt,
+    selectionScope,
+    assetIds,
+    reason
+  } = payload;
+  const { rows } = await query(
+    `INSERT INTO maintenance_protocol_print_batches (
+       batch_code, client_id, generated_by, temporary_permission_id,
+       permission_expires_at, selection_scope, asset_ids, asset_count, reason
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7::uuid[],cardinality($7::uuid[]),$8)
+     RETURNING id, batch_code, asset_count, created_at`,
+    [
+      batchCode,
+      clientId,
+      generatedBy,
+      temporaryPermissionId,
+      permissionExpiresAt,
+      selectionScope,
+      assetIds,
+      reason
+    ]
+  );
+  return rows[0];
+}
+
 export async function listMaintenanceRequests(clientId) {
   const { rows } = await query(
-    `SELECT r.*, u.display_name AS requester_name, u.email AS requester_email
+    `SELECT r.*, u.display_name AS requester_name, u.email AS requester_email,
+            assigned.display_name AS assigned_name
      FROM maintenance_requests r
      LEFT JOIN users u ON u.id = r.requested_by
+     LEFT JOIN users assigned ON assigned.id = r.assigned_to
      WHERE r.client_id = $1
        AND r.status NOT IN ('firmado', 'vencido')
      ORDER BY r.created_at DESC`,
@@ -81,10 +115,12 @@ export async function listMaintenanceRequestsForReader(clientId, userId) {
   }
 
   const { rows } = await query(
-    `SELECT r.*, u.display_name AS requester_name, u.email AS requester_email
+    `SELECT r.*, u.display_name AS requester_name, u.email AS requester_email,
+            assigned.display_name AS assigned_name
      FROM maintenance_requests r
      JOIN "${schema}".assets a ON a.id = r.asset_id
      LEFT JOIN users u ON u.id = r.requested_by
+     LEFT JOIN users assigned ON assigned.id = r.assigned_to
      WHERE r.client_id = $1 ${where}
        AND r.status NOT IN ('firmado', 'vencido')
      ORDER BY r.created_at DESC`,
@@ -95,21 +131,35 @@ export async function listMaintenanceRequestsForReader(clientId, userId) {
 
 export async function getMaintenanceRequestById(requestId) {
   const { rows } = await query(
-    `SELECT r.*, u.display_name AS requester_name, u.email AS requester_email
+    `SELECT r.*, u.display_name AS requester_name, u.email AS requester_email,
+            assigned.display_name AS assigned_name
      FROM maintenance_requests r
      LEFT JOIN users u ON u.id = r.requested_by
+     LEFT JOIN users assigned ON assigned.id = r.assigned_to
      WHERE r.id = $1`,
     [requestId]
   );
   return rows[0];
 }
 
-export async function assignMaintenanceRequest(requestId, assignedTo) {
-  await query(
-    `UPDATE maintenance_requests SET assigned_to = $1, status = 'en_proceso', updated_at = NOW()
-     WHERE id = $2`,
-    [assignedTo, requestId]
+export async function assignMaintenanceRequest(
+  requestId,
+  assignedTo,
+  { allowedStatuses = ['abierto', 'en_proceso'], force = false } = {}
+) {
+  const ownershipClause = force ? '' : 'AND (assigned_to IS NULL OR assigned_to = $1)';
+  const { rows } = await query(
+    `UPDATE maintenance_requests
+     SET assigned_to = $1,
+         status = CASE WHEN status = 'abierto' THEN 'en_proceso' ELSE status END,
+         updated_at = NOW()
+     WHERE id = $2
+       AND status = ANY($3::text[])
+       ${ownershipClause}
+     RETURNING id, assigned_to, status, updated_at`,
+    [assignedTo, requestId, allowedStatuses]
   );
+  return rows[0] ?? null;
 }
 
 export async function createMaintenanceReport(payload) {

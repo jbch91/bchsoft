@@ -207,6 +207,44 @@ export async function listAssets(clientId) {
   return rows;
 }
 
+export async function listAssetsForBlankMaintenanceProtocols(
+  clientId,
+  { assetIds = null, limit = 501 } = {}
+) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const selected = Array.isArray(assetIds) ? assetIds : null;
+  const params = [];
+  let selectedClause = '';
+  if (selected) {
+    params.push(selected);
+    selectedClause = `AND a.id = ANY($${params.length}::uuid[])`;
+  }
+  params.push(limit);
+  const { rows } = await query(
+    `SELECT a.id, a.code, a.name, a.brand, a.model, a.serial, a.status,
+            a.manufacturer, a.maintenance_frequency,
+            s.name AS site_name, ar.name AS area_name, lo.name AS location_name
+     FROM "${schema}".assets a
+     LEFT JOIN "${schema}".sites s ON s.id = a.site_id
+     LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
+     LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
+     WHERE COALESCE(a.status, 'activo') <> 'dado_de_baja'
+       ${selectedClause}
+     ORDER BY
+       COALESCE(s.name, ''),
+       COALESCE(ar.name, ''),
+       COALESCE(lo.name, ''),
+       COALESCE(a.code, ''),
+       COALESCE(a.name, '')
+     LIMIT $${params.length}`,
+    params
+  );
+  return rows;
+}
+
 export async function listAssetsForReader(clientId, userId) {
   const schema = await getSchemaByClientId(clientId);
   if (!schema) {

@@ -39,6 +39,7 @@ export class AuditComponent {
     MAINTENANCE_REQUEST_CREATE: 'Solicitud de mantenimiento',
     MAINTENANCE_REQUEST_DELETE: 'Eliminación de solicitud',
     MAINTENANCE_REPORT_CREATE: 'Reporte de mantenimiento',
+    MAINTENANCE_BLANK_PROTOCOL_PRINT: 'Protocolos físicos en blanco',
     MAINTENANCE_REPORT_SIGN: 'Firma de reporte',
     MAINTENANCE_REPORT_FINALIZED: 'Reporte finalizado',
     MAINTENANCE_REPORT_DELETE: 'Eliminación de reporte',

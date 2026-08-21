@@ -21,7 +21,12 @@ import {
   revokeRoleActiveSessions,
   revokeUserActiveSessions
 } from './auth.js';
-import { requireAnyPermission, requireAuth, requirePermission } from './middleware.js';
+import {
+  requireActiveTemporaryPermission,
+  requireAnyPermission,
+  requireAuth,
+  requirePermission
+} from './middleware.js';
 import {
   SUITE_ACCESS_PERMISSIONS,
   TEMPORARY_ONLY_PERMISSIONS,
@@ -213,6 +218,7 @@ import {
   createAssetHistoryFile,
   deleteAssetHistoryFile,
   listAssetHistory,
+  listAssetsForBlankMaintenanceProtocols,
   listAssetsForReader,
   listAssetMovements,
   readerCanAccessAsset,
@@ -287,6 +293,7 @@ import {
 } from './calibration.js';
 import {
   createMaintenanceRequest,
+  createMaintenanceProtocolPrintBatch,
   listMaintenanceRequests,
   listMaintenanceRequestsForReader,
   getMaintenanceRequestById,
@@ -317,6 +324,20 @@ import {
   resolveMaintenanceReportCorrections,
   listUsersByRoleAndClient
 } from './maintenance.js';
+import {
+  MAINTENANCE_REQUEST_CLAIMABLE_STATUSES,
+  MAINTENANCE_REQUEST_REPORTABLE_STATUSES,
+  canOperateAssignedMaintenanceRequest,
+  maintenanceRequestDescriptionError,
+  normalizeMaintenanceRequestDescription
+} from './maintenance-workflow.js';
+import {
+  BLANK_MAINTENANCE_PROTOCOL_PERMISSION,
+  MAX_BLANK_MAINTENANCE_PROTOCOLS_PER_BATCH,
+  buildBlankMaintenanceProtocolBatchPdf,
+  createBlankMaintenanceProtocolBatchCode,
+  normalizeBlankMaintenanceProtocolRequest
+} from './blank-maintenance-protocols.js';
 import {
   approveQuickGuide,
   createQuickGuide,
@@ -1217,6 +1238,13 @@ app.post(
     if (!canReceiveTemporaryBiomedicalPermissions(target)) {
       return res.status(400).json({
         message: 'Los permisos temporales solo aplican a ingenieros biomédicos de un cliente.'
+      });
+    }
+    const targetModules = await listClientModules(target.client_id);
+    const allowedTemporaryPermissions = allowedClientPermissionsForModules(targetModules);
+    if (!allowedTemporaryPermissions.has(permission)) {
+      return res.status(400).json({
+        message: 'El permiso temporal no corresponde a un módulo biomédico contratado por el cliente.'
       });
     }
 
@@ -9774,6 +9802,11 @@ app.post(
     if (!['preventivo', 'correctivo'].includes(type)) {
       return res.status(400).json({ message: 'Tipo inválido.' });
     }
+    const cleanDescription = normalizeMaintenanceRequestDescription(description);
+    const descriptionError = maintenanceRequestDescriptionError(type, cleanDescription);
+    if (descriptionError) {
+      return res.status(400).json({ message: descriptionError });
+    }
     if (type === 'preventivo' && (req.user.roles?.includes('lector') || req.user.roles?.includes('almacenista'))) {
       return res.status(403).json({ message: 'No puedes solicitar mantenimiento preventivo.' });
     }
@@ -9797,7 +9830,7 @@ app.post(
       clientId,
       assetId,
       type,
-      description,
+      description: cleanDescription,
       requestedBy: req.user.sub
     });
 
@@ -9811,14 +9844,14 @@ app.post(
         eventType: 'solicitud_mantenimiento_creada',
         requestId: result.id,
         maintenanceType: type,
-        requestDescription: description ?? null
+        requestDescription: cleanDescription || null
       }
     });
 
     const engineers = await listUsersByRoleAndClient('ingeniero_biomedico', clientId);
     for (const engineer of engineers) {
       const title = 'Nueva solicitud de mantenimiento';
-      const message = `Se creó una solicitud ${type} para ${assetLabel(requestedAsset)}.${description ? ` Descripción: ${description}` : ''}`;
+      const message = `Se creó una solicitud ${type} para ${assetLabel(requestedAsset)}.${cleanDescription ? ` Descripción: ${cleanDescription}` : ''}`;
       await createNotification({
         userId: engineer.id,
         clientId,
@@ -9867,8 +9900,129 @@ app.post(
     if (!req.user.roles?.includes('superuser') && assignedTo !== req.user.sub) {
       return res.status(403).json({ message: 'Solo puedes asignarte a ti mismo.' });
     }
-    await assignMaintenanceRequest(requestId, assignedTo);
-    return res.json({ ok: true });
+    const assignment = await assignMaintenanceRequest(requestId, assignedTo, {
+      allowedStatuses: MAINTENANCE_REQUEST_CLAIMABLE_STATUSES,
+      force: isSuperuser(req.user)
+    });
+    if (!assignment) {
+      const current = await getMaintenanceRequestById(requestId);
+      if (!current || !MAINTENANCE_REQUEST_CLAIMABLE_STATUSES.includes(current.status)) {
+        return res.status(409).json({ message: 'Esta solicitud ya no está disponible para ser tomada.' });
+      }
+      return res.status(409).json({
+        message: current.assigned_name
+          ? `La solicitud ya fue tomada por ${current.assigned_name}.`
+          : 'La solicitud fue tomada por otro ingeniero.'
+      });
+    }
+    return res.json({ ok: true, assignment });
+  }
+);
+
+app.post(
+  '/maintenance/protocols/blank-pdf',
+  requireAuth,
+  requirePermission(BLANK_MAINTENANCE_PROTOCOL_PERMISSION),
+  requireActiveTemporaryPermission(BLANK_MAINTENANCE_PROTOCOL_PERMISSION),
+  async (req, res) => {
+    const clientId = req.user.clientId;
+    if (!clientId || !req.user.roles?.includes('ingeniero_biomedico')) {
+      return res.status(403).json({
+        message: 'Solo un ingeniero biomédico asignado al cliente puede generar estos protocolos.'
+      });
+    }
+
+    const normalized = normalizeBlankMaintenanceProtocolRequest(req.body);
+    if (normalized.error) {
+      return res.status(400).json({ message: normalized.error });
+    }
+    const { scope, reason, assetIds } = normalized.value;
+
+    try {
+      const assets = await listAssetsForBlankMaintenanceProtocols(clientId, {
+        assetIds: scope === 'selected' ? assetIds : null,
+        limit: MAX_BLANK_MAINTENANCE_PROTOCOLS_PER_BATCH + 1
+      });
+      if (assets.length > MAX_BLANK_MAINTENANCE_PROTOCOLS_PER_BATCH) {
+        return res.status(413).json({
+          message: `El cliente supera el máximo de ${MAX_BLANK_MAINTENANCE_PROTOCOLS_PER_BATCH} equipos por lote. Genera varios lotes seleccionados.`
+        });
+      }
+      if (scope === 'selected' && assets.length !== assetIds.length) {
+        return res.status(400).json({
+          message: 'Uno o más equipos seleccionados no pertenecen al cliente, no existen o están dados de baja.'
+        });
+      }
+      if (!assets.length) {
+        return res.status(404).json({ message: 'No hay equipos vigentes para generar protocolos.' });
+      }
+
+      const client = await getClientById(clientId);
+      if (!client) {
+        return res.status(404).json({ message: 'Cliente no encontrado.' });
+      }
+
+      const batchCode = createBlankMaintenanceProtocolBatchCode();
+      const pdfBuffer = await buildBlankMaintenanceProtocolBatchPdf({
+        client,
+        assets,
+        batchCode
+      });
+      const batch = await createMaintenanceProtocolPrintBatch({
+        batchCode,
+        clientId,
+        generatedBy: req.user.sub,
+        temporaryPermissionId: req.temporaryPermission.id,
+        permissionExpiresAt: req.temporaryPermission.expiresAt,
+        selectionScope: scope,
+        assetIds: assets.map((asset) => asset.id),
+        reason
+      });
+
+      try {
+        await logAudit({
+          actorUserId: req.user.sub,
+          actorUsername: req.user.username,
+          action: 'MAINTENANCE_BLANK_PROTOCOL_PRINT',
+          targetUserId: clientId,
+          targetUsername: client.name,
+          details: {
+            category: 'equipment',
+            description: `Generación de ${assets.length} protocolo(s) físico(s) de mantenimiento en blanco.`,
+            actorDisplayName: req.user.displayName ?? req.user.username,
+            actorUsername: req.user.username,
+            actorRoles: req.user.roles ?? [],
+            clientId,
+            clientName: client.name,
+            batchId: batch.id,
+            batchCode,
+            assetCount: assets.length,
+            selectionScope: scope,
+            reason,
+            temporaryPermissionExpiresAt: req.temporaryPermission.expiresAt
+          }
+        });
+      } catch (auditError) {
+        console.error('No se pudo registrar la auditoría del lote de protocolos', auditError);
+      }
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${pdfFilename(`protocolos-mantenimiento-${batchCode}`)}.pdf"`
+      );
+      res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+      res.setHeader('X-Protocol-Batch-Code', batchCode);
+      res.setHeader('X-Protocol-Asset-Count', String(assets.length));
+      res.setHeader(
+        'Access-Control-Expose-Headers',
+        'Content-Disposition, X-Protocol-Batch-Code, X-Protocol-Asset-Count'
+      );
+      return res.send(pdfBuffer);
+    } catch (error) {
+      console.error('No se pudieron generar los protocolos físicos', error);
+      return res.status(500).json({ message: 'No se pudieron generar los protocolos físicos.' });
+    }
   }
 );
 
@@ -9962,6 +10116,32 @@ app.post(
     if (['reportado', 'firmado', 'vencido'].includes(request.status)) {
       return res.status(409).json({ message: 'Esta solicitud ya tiene reporte o no está disponible.' });
     }
+    if (!MAINTENANCE_REQUEST_REPORTABLE_STATUSES.includes(request.status)) {
+      return res.status(409).json({ message: 'Esta solicitud no está disponible para crear un reporte.' });
+    }
+    const platformSuperuser = isSuperuser(req.user);
+    if (!canOperateAssignedMaintenanceRequest(request, req.user.sub, platformSuperuser)) {
+      return res.status(409).json({
+        message: request.assigned_name
+          ? `La solicitud está asignada a ${request.assigned_name}.`
+          : 'La solicitud está asignada a otro ingeniero.'
+      });
+    }
+    if (!platformSuperuser) {
+      const ownership = await assignMaintenanceRequest(requestId, req.user.sub, {
+        allowedStatuses: MAINTENANCE_REQUEST_REPORTABLE_STATUSES
+      });
+      if (!ownership) {
+        const current = await getMaintenanceRequestById(requestId);
+        return res.status(409).json({
+          message: current?.assigned_name
+            ? `La solicitud fue tomada por ${current.assigned_name}. Actualiza el listado.`
+            : 'La solicitud cambió de estado. Actualiza el listado antes de continuar.'
+        });
+      }
+      request.assigned_to = ownership.assigned_to;
+      request.status = ownership.status;
+    }
     if (request.status === 'espera_repuesto' && cleanLifecycleAction !== 'retire') {
       const waitingSpareReport = await getLatestWaitingSpareReportByRequest(requestId);
       cleanRequiresSpareParts = true;
@@ -10011,6 +10191,11 @@ app.post(
     const correctionReport = request.status === 'correccion'
       ? await getMaintenanceReportWithOpenCorrectionByRequest(requestId)
       : null;
+    if (correctionReport && !platformSuperuser && correctionReport.created_by !== req.user.sub) {
+      return res.status(409).json({
+        message: 'Solo el ingeniero que elaboró el reporte puede atender esta corrección.'
+      });
+    }
     const result = correctionReport
       ? await updateMaintenanceReport(correctionReport.id, reportPayload)
       : await createMaintenanceReport(reportPayload);
@@ -10299,12 +10484,12 @@ app.post(
   requireAuth,
   requireAnyPermissionOrRole(['maintenance:report:sign'], MAINTENANCE_ACCEPTANCE_SIGNER_ROLES),
   async (req, res) => {
-    const reason = String(req.body?.reason || '').trim();
-    if (!reason) {
-      return res.status(400).json({ message: 'Escribe el motivo de la corrección.' });
+    const reason = String(req.body?.reason || '').replace(/\s+/g, ' ').trim();
+    if (reason.length < 10) {
+      return res.status(400).json({ message: 'Describe la corrección con al menos 10 caracteres.' });
     }
-    if (reason.length > 1200) {
-      return res.status(400).json({ message: 'El motivo de corrección es demasiado largo.' });
+    if (reason.length > 600) {
+      return res.status(400).json({ message: 'El motivo de corrección admite máximo 600 caracteres.' });
     }
 
     const report = await getMaintenanceReportById(req.params.id);

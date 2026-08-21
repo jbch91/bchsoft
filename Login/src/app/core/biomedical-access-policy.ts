@@ -49,6 +49,7 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
       'maintenance:request:create',
       'maintenance:report:create',
       'maintenance:report:sign',
+      'maintenance:protocol:print_blank',
       'read:all'
     ]
   },

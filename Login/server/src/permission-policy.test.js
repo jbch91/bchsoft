@@ -26,6 +26,24 @@ test('excluye permisos temporales de la configuracion permanente del rol', () =>
   assert.equal(permissions.has('hb:create'), true);
   assert.equal(permissions.has('hb:import'), false);
   assert.equal(permissions.has('asset_history:upload'), false);
+  assert.equal(permissions.has('maintenance:protocol:print_blank'), false);
+});
+
+test('el protocolo físico solo se habilita temporalmente con mantenimiento contratado', () => {
+  const enabled = allowedClientPermissionsForModules([
+    { key: 'reportes_mantenimiento', suite_key: 'biomedico', enabled: true }
+  ]);
+  const permanent = allowedClientPermissionsForModules(
+    [{ key: 'reportes_mantenimiento', suite_key: 'biomedico', enabled: true }],
+    { includeTemporary: false }
+  );
+  const unrelated = allowedClientPermissionsForModules([
+    { key: 'hojas_de_vida', suite_key: 'biomedico', enabled: true }
+  ]);
+
+  assert.equal(enabled.has('maintenance:protocol:print_blank'), true);
+  assert.equal(permanent.has('maintenance:protocol:print_blank'), false);
+  assert.equal(unrelated.has('maintenance:protocol:print_blank'), false);
 });
 
 test('el acceso a cada software reconoce todos sus permisos operativos', () => {

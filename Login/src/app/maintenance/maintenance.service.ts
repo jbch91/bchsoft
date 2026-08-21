@@ -13,6 +13,7 @@ export interface MaintenanceRequestDto {
   requester_email?: string | null;
   requested_by: string;
   assigned_to?: string | null;
+  assigned_name?: string | null;
   status: string;
   planned_date?: string | null;
   deadline_date?: string | null;
@@ -59,6 +60,12 @@ export interface NotificationDto {
   link?: string | null;
   read_at?: string | null;
   created_at: string;
+}
+
+export interface BlankMaintenanceProtocolResult {
+  blob: Blob;
+  batchCode: string;
+  assetCount: number;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -142,6 +149,27 @@ export class MaintenanceService {
         responseType: 'blob'
       })
     );
+  }
+
+  async generateBlankProtocols(payload: {
+    scope: 'selected' | 'all_active';
+    assetIds?: string[];
+    reason: string;
+  }): Promise<BlankMaintenanceProtocolResult> {
+    const response = await firstValueFrom(
+      this.http.post(`${this.apiBase}/maintenance/protocols/blank-pdf`, payload, {
+        observe: 'response',
+        responseType: 'blob'
+      })
+    );
+    if (!response.body) {
+      throw new Error('El servidor no devolvió el PDF.');
+    }
+    return {
+      blob: response.body,
+      batchCode: response.headers.get('X-Protocol-Batch-Code') || 'PMF',
+      assetCount: Number(response.headers.get('X-Protocol-Asset-Count') || 0)
+    };
   }
 
   async deleteReport(reportId: string): Promise<void> {

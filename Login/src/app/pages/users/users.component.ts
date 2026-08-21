@@ -82,7 +82,7 @@ export class UsersComponent implements OnInit {
   temporaryPermissionLoading = false;
   temporaryPermissionForm = {
     expiresAt: '',
-    reason: 'Periodo temporal de creación/migración inicial del cliente'
+    reason: 'Autorización temporal para operación excepcional del cliente'
   };
   selectedTemporaryPermissions = new Set<string>();
 
@@ -129,6 +129,7 @@ export class UsersComponent implements OnInit {
     'maintenance:request:create': 'Crear solicitudes de mantenimiento',
     'maintenance:report:create': 'Crear reportes de mantenimiento',
     'maintenance:report:sign': 'Firmar reportes de mantenimiento',
+    'maintenance:protocol:print_blank': 'Imprimir protocolos físicos en blanco',
     'calibration:report:upload': 'Subir reportes de calibración',
     'inventory:move': 'Mover equipos y generar reportes de movimiento',
     'inventory:request': 'Solicitudes de inventario',
@@ -198,6 +199,11 @@ export class UsersComponent implements OnInit {
       value: 'asset_history:upload',
       label: 'Migración de PDFs históricos',
       description: 'Permite subir reportes físicos antiguos al historial del equipo.'
+    },
+    {
+      value: 'maintenance:protocol:print_blank',
+      label: 'Protocolos físicos en blanco',
+      description: 'Permite imprimir temporalmente formatos de mantenimiento para equipos vigentes.'
     }
   ];
   private readonly temporaryOnlyPermissions = new Set(
@@ -1077,8 +1083,8 @@ export class UsersComponent implements OnInit {
         });
       }
       this.successMessage = permissionsToGrant.length === 1
-        ? 'Permiso temporal activado. Si el usuario está conectado, puede volver a Hojas de vida o usar Actualizar permisos para verlo.'
-        : 'Permisos temporales activados. Si el usuario está conectado, puede volver a Hojas de vida o usar Actualizar permisos para verlos.';
+        ? 'Permiso temporal activado. Si el usuario está conectado, puede usar Actualizar permisos dentro del módulo correspondiente.'
+        : 'Permisos temporales activados. Si el usuario está conectado, puede usar Actualizar permisos dentro del módulo correspondiente.';
       await this.load();
       this.temporaryPanelUserId = user.id;
       this.selectedTemporaryPermissions.clear();
@@ -1126,7 +1132,7 @@ export class UsersComponent implements OnInit {
   private resetTemporaryPermissionForm(): void {
     this.temporaryPermissionForm = {
       expiresAt: this.toDatetimeLocal(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
-      reason: 'Periodo temporal de creación/migración inicial del cliente'
+      reason: 'Autorización temporal para operación excepcional del cliente'
     };
   }
 
