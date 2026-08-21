@@ -33,6 +33,15 @@ const assets = [
   }
 ];
 
+const engineer = {
+  username: 'ingeniero.prueba',
+  display_name: 'INGENIERO BIOMÉDICO DE PRUEBA',
+  document_type: 'CC',
+  document_number: '1000000000',
+  invima_registration: 'REG-001',
+  signature_path: null
+};
+
 test('normaliza una selección y elimina identificadores repetidos', () => {
   const result = normalizeBlankMaintenanceProtocolRequest({
     scope: 'selected',
@@ -72,6 +81,7 @@ test('genera una página física en blanco por cada equipo', async () => {
       logo_path: null
     },
     assets,
+    engineer,
     batchCode: 'PMF-PRUEBA001'
   });
 

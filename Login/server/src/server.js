@@ -9939,6 +9939,27 @@ app.post(
     const { scope, reason, assetIds } = normalized.value;
 
     try {
+      const engineer = await getUserById(req.user.sub);
+      if (!engineer || engineer.client_id !== clientId || !engineer.roles?.includes('ingeniero_biomedico')) {
+        return res.status(403).json({
+          message: 'No se pudo validar al ingeniero biomédico que genera los protocolos.'
+        });
+      }
+      if (!engineer.signature_path) {
+        return res.status(409).json({
+          message: 'Debes tener una firma digital configurada antes de generar protocolos físicos. Solicita al administrador actualizar tu firma.'
+        });
+      }
+      const engineerSignaturePath = path.join(
+        process.cwd(),
+        String(engineer.signature_path).replace(/^\//, '')
+      );
+      if (!fs.existsSync(engineerSignaturePath)) {
+        return res.status(409).json({
+          message: 'Tu firma digital registrada no está disponible. Solicita al administrador volver a cargarla.'
+        });
+      }
+
       const assets = await listAssetsForBlankMaintenanceProtocols(clientId, {
         assetIds: scope === 'selected' ? assetIds : null,
         limit: MAX_BLANK_MAINTENANCE_PROTOCOLS_PER_BATCH + 1
@@ -9966,6 +9987,7 @@ app.post(
       const pdfBuffer = await buildBlankMaintenanceProtocolBatchPdf({
         client,
         assets,
+        engineer,
         batchCode
       });
       const batch = await createMaintenanceProtocolPrintBatch({
@@ -9999,6 +10021,7 @@ app.post(
             assetCount: assets.length,
             selectionScope: scope,
             reason,
+            engineerSignatureApplied: true,
             temporaryPermissionExpiresAt: req.temporaryPermission.expiresAt
           }
         });

@@ -1179,7 +1179,7 @@ function drawBlankProtocolWritingBox(doc, { x, y, width, height, label }) {
 
 export function buildBlankMaintenanceProtocolPdf(
   doc,
-  { client, asset, batchCode, pageNumber = 1, totalPages = 1 }
+  { client, asset, engineer, batchCode, pageNumber = 1, totalPages = 1 }
 ) {
   paintPageBackground(doc);
   const left = doc.page.margins.left;
@@ -1238,25 +1238,6 @@ export function buildBlankMaintenanceProtocolPdf(
       ellipsis: true
     });
   y += headerHeight + 5;
-
-  doc
-    .rect(left, y, width, 20)
-    .fillColor(PDF_BRAND_50)
-    .fill();
-  doc
-    .rect(left, y, width, 20)
-    .strokeColor(PDF_TABLE_BORDER)
-    .lineWidth(0.7)
-    .stroke();
-  doc
-    .font('Helvetica-Bold')
-    .fontSize(8)
-    .fillColor(PDF_BRAND_800)
-    .text('FORMATO EN BLANCO - LA FECHA DEL SERVICIO DEBE DILIGENCIARSE MANUALMENTE', left + 7, y + 6, {
-      width: width - 14,
-      align: 'center'
-    });
-  y += 25;
 
   y = drawBlankProtocolSection(doc, '1. IDENTIFICACIÓN DEL EQUIPO', left, y, width);
   drawBlankProtocolCell(doc, {
@@ -1364,22 +1345,92 @@ export function buildBlankMaintenanceProtocolPdf(
   y = drawBlankProtocolSection(doc, '8. FIRMAS DE LA INTERVENCIÓN', left, y, width);
   const signatureGap = 8;
   const signatureWidth = (width - signatureGap) / 2;
-  for (const [index, title] of ['INGENIERO BIOMÉDICO', 'RESPONSABLE / USUARIO DEL EQUIPO'].entries()) {
-    const x = left + index * (signatureWidth + signatureGap);
-    doc
-      .rect(x, y, signatureWidth, 70)
-      .strokeColor(PDF_TABLE_BORDER)
-      .lineWidth(0.7)
-      .stroke();
-    doc.font('Helvetica-Bold').fontSize(7.2).fillColor(PDF_BRAND_700).text(title, x + 6, y + 5, {
+  const signatureHeight = 78;
+  const engineerX = left;
+  const responsibleX = left + signatureWidth + signatureGap;
+  const engineerSignaturePath = engineer?.signature_path
+    ? path.join(process.cwd(), String(engineer.signature_path).replace(/^\//, ''))
+    : null;
+  const engineerDocument = [engineer?.document_type, engineer?.document_number]
+    .filter(hasText)
+    .map((value) => String(value).trim())
+    .join(' ');
+  const engineerIdentifiers = [
+    engineerDocument ? `Documento: ${engineerDocument}` : null,
+    hasText(engineer?.invima_registration) ? `Registro: ${String(engineer.invima_registration).trim()}` : null
+  ].filter(Boolean).join('  |  ') || 'Documento / registro: -';
+
+  doc
+    .rect(engineerX, y, signatureWidth, signatureHeight)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .stroke();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7.2)
+    .fillColor(PDF_BRAND_700)
+    .text('INGENIERO BIOMÉDICO', engineerX + 6, y + 5, {
       width: signatureWidth - 12,
       align: 'center'
     });
-    doc.font('Helvetica').fontSize(7).fillColor(PDF_INK).text('Firma: ___________________________________', x + 8, y + 25, { width: signatureWidth - 16 });
-    doc.text('Nombre: _________________________________', x + 8, y + 42, { width: signatureWidth - 16 });
-    doc.text(index === 0 ? 'Registro / documento: _____________________' : 'Cargo: __________________________________', x + 8, y + 56, { width: signatureWidth - 16 });
+  if (engineerSignaturePath && fs.existsSync(engineerSignaturePath)) {
+    doc.image(engineerSignaturePath, engineerX + 10, y + 16, {
+      fit: [signatureWidth - 20, 31],
+      align: 'center',
+      valign: 'center'
+    });
+  } else {
+    doc
+      .font('Helvetica')
+      .fontSize(7)
+      .fillColor(PDF_DANGER)
+      .text('Firma digital no disponible', engineerX + 8, y + 28, {
+        width: signatureWidth - 16,
+        align: 'center'
+      });
   }
-  y += 75;
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7.3)
+    .fillColor(PDF_INK)
+    .text(safeText(engineer?.display_name || engineer?.username), engineerX + 8, y + 50, {
+      width: signatureWidth - 16,
+      height: 9,
+      align: 'center',
+      ellipsis: true
+    });
+  doc
+    .font('Helvetica')
+    .fontSize(6.2)
+    .fillColor(PDF_MUTED)
+    .text(engineerIdentifiers, engineerX + 8, y + 63, {
+      width: signatureWidth - 16,
+      height: 8,
+      align: 'center',
+      ellipsis: true
+    });
+
+  doc
+    .rect(responsibleX, y, signatureWidth, signatureHeight)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .stroke();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7.2)
+    .fillColor(PDF_BRAND_700)
+    .text('RESPONSABLE / USUARIO DEL EQUIPO', responsibleX + 6, y + 5, {
+      width: signatureWidth - 12,
+      align: 'center'
+    });
+  doc
+    .font('Helvetica')
+    .fontSize(7)
+    .fillColor(PDF_INK)
+    .text('Firma: ___________________________________', responsibleX + 8, y + 26, { width: signatureWidth - 16 });
+  doc.text('Nombre: _________________________________', responsibleX + 8, y + 45, { width: signatureWidth - 16 });
+  doc.text('Cargo: __________________________________', responsibleX + 8, y + 62, { width: signatureWidth - 16 });
+  y += signatureHeight + 5;
 
   doc
     .font('Helvetica')

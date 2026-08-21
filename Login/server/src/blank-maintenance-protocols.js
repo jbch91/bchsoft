@@ -51,7 +51,7 @@ export function createBlankMaintenanceProtocolBatchCode() {
   return `PMF-${randomBytes(5).toString('hex').toUpperCase()}`;
 }
 
-export function buildBlankMaintenanceProtocolBatchPdf({ client, assets, batchCode }) {
+export function buildBlankMaintenanceProtocolBatchPdf({ client, assets, engineer, batchCode }) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
@@ -71,6 +71,7 @@ export function buildBlankMaintenanceProtocolBatchPdf({ client, assets, batchCod
       buildBlankMaintenanceProtocolPdf(doc, {
         client,
         asset,
+        engineer,
         batchCode,
         pageNumber: index + 1,
         totalPages: assets.length
