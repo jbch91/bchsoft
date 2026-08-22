@@ -5,6 +5,7 @@ import {
   addBusinessDaysUtc,
   addMonthsUtc,
   buildRecurringDates,
+  capDateAtScheduleYearEndUtc,
   formatDateOnly,
   normalizeMaintenanceItemUpdates,
   normalizeScheduleStart,
@@ -39,6 +40,12 @@ test('genera recurrencias en días hábiles dentro del año', () => {
     '2026-02-02',
     '2026-08-03'
   ]);
+});
+
+test('limita las ventanas de servicio al cierre de la vigencia', () => {
+  const deadline = addBusinessDaysUtc(parseDateOnly('2026-12-29'), 10);
+  assert.equal(formatDateOnly(deadline), '2027-01-12');
+  assert.equal(formatDateOnly(capDateAtScheduleYearEndUtc(deadline, 2026)), '2026-12-31');
 });
 
 test('deduplica identificadores y rechaza UUID inválidos', () => {

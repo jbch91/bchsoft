@@ -131,6 +131,15 @@ export function addMonthsUtc(value, months) {
   return new Date(Date.UTC(targetYear, targetMonth, Math.min(source.getUTCDate(), lastDay)));
 }
 
+export function capDateAtScheduleYearEndUtc(value, year) {
+  const normalizedYear = normalizeScheduleYear(year);
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new ScheduleValidationError('La fecha límite del cronograma no es válida.');
+  }
+  const yearEnd = new Date(Date.UTC(normalizedYear, 11, 31));
+  return new Date(Math.min(value.getTime(), yearEnd.getTime()));
+}
+
 export function buildRecurringDates({ year, startDate, months }) {
   const normalized = normalizeScheduleStart({ year, startDate });
   if (!Number.isInteger(months) || months < 1 || months > 12) {

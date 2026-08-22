@@ -200,16 +200,36 @@ button:disabled {
   border-color: #9fc9e2;
 }
 
+.view-switcher {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 4px 6px;
+  background: #ffffff;
+  border: 1px solid #d9e0e8;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
 .view-tabs {
   display: flex;
-  gap: 4px;
+  flex: 0 1 auto;
+  gap: 2px;
   width: fit-content;
   max-width: 100%;
-  padding: 4px;
+  padding: 0;
   overflow-x: auto;
-  background: #eef2f6;
-  border: 1px solid #d6dde6;
-  border-radius: 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  scrollbar-width: none;
+}
+
+.view-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .view-tabs button {
@@ -217,30 +237,88 @@ button:disabled {
   color: #465469;
   background: transparent;
   border-color: transparent;
+  box-shadow: none;
   white-space: nowrap;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.view-tabs button:hover:not(:disabled):not(.active) {
+  color: #1f2937;
+  background: #f4f6f8;
+  filter: none;
 }
 
 .view-tabs button.active {
   color: #ffffff;
-  background: #293548;
-  border-color: #293548;
+  background: var(--brand-600);
+  border-color: var(--brand-600);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--brand-700) 28%, transparent);
 }
 
-.loading-line {
-  min-height: 34px;
-  padding: 8px 12px;
-  color: #334155;
-  background: #f5f7fa;
-  border: 1px solid #d9e0e8;
-  border-radius: 6px;
-  font-size: 12px;
+.view-tabs button.active:hover:not(:disabled) {
+  background: var(--brand-700);
+  border-color: var(--brand-700);
+  filter: none;
+}
+
+.view-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  width: 126px;
+  margin-left: auto;
+  color: #64748b;
+  font-size: 11px;
   font-weight: 700;
+  white-space: nowrap;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.view-loading::before {
+  width: 12px;
+  height: 12px;
+  content: '';
+  border: 2px solid #d7dde5;
+  border-top-color: var(--brand-600);
+  border-radius: 50%;
+  animation: view-loading-spin 700ms linear infinite;
+}
+
+.view-loading.visible {
+  visibility: visible;
+  opacity: 1;
+}
+
+@keyframes view-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .workspace-panel {
   display: grid;
+  align-content: start;
   gap: 14px;
+  min-height: 174px;
   padding: 16px;
+  animation: view-panel-enter 150ms ease-out;
+}
+
+@keyframes view-panel-enter {
+  from {
+    opacity: 0.86;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .section-heading,
@@ -389,7 +467,8 @@ button:disabled {
 
 .data-table th {
   color: #f8fafc;
-  background: #293548;
+  background: var(--table-header-bg);
+  box-shadow: var(--table-header-shadow);
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
@@ -612,6 +691,102 @@ button:disabled {
   background: rgba(15, 23, 42, 0.55);
 }
 
+.schedule-modal {
+  position: relative;
+  width: min(720px, 100%);
+  max-height: calc(100dvh - 36px);
+  padding: 20px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #c9d2dd;
+  border-radius: 8px;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+}
+
+.creation-modal-wide {
+  width: min(960px, 100%);
+}
+
+.schedule-modal-header {
+  padding-right: 42px;
+}
+
+.schedule-modal-header h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.schedule-modal-header > p:last-child {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 0 2px;
+  color: #475569;
+  background: #ffffff;
+  border-color: #c4ced9;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.annual-rule {
+  margin: 16px 0;
+  padding: 10px 12px;
+  color: #334155;
+  background: #f3f6f9;
+  border-left: 4px solid #a64045;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.schedule-modal .modal-form {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.schedule-detail-modal {
+  width: min(1440px, 100%);
+  height: min(820px, calc(100dvh - 36px));
+  min-height: min(620px, calc(100dvh - 36px));
+  padding: 20px;
+  overflow: hidden;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  border-color: #bcc7d4;
+  background: #fbfcfd;
+}
+
+.schedule-detail-modal .detail-heading {
+  padding-right: 42px;
+}
+
+.schedule-detail-modal > .table-wrap {
+  min-height: 0;
+  overflow: auto;
+}
+
+.schedule-detail-modal > .empty-state {
+  min-height: 0;
+}
+
 .confirm-modal {
   width: min(460px, 100%);
   padding: 20px;
@@ -723,12 +898,32 @@ button:disabled {
     width: 100%;
   }
 
+  .view-switcher {
+    position: relative;
+    gap: 4px;
+    padding: 4px;
+  }
+
   .view-tabs {
     width: 100%;
   }
 
   .view-tabs button {
-    flex: 1 0 130px;
+    flex: 1 0 108px;
+    min-width: 108px;
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+
+  .view-loading {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    width: 18px;
+    margin: 0;
+    overflow: hidden;
+    color: transparent;
+    transform: translateY(-50%);
   }
 
   .summary-strip {
@@ -855,5 +1050,50 @@ button:disabled {
 
   .modal-actions button {
     flex: 1 1 120px;
+  }
+
+  .modal-backdrop {
+    padding: 8px;
+  }
+
+  .schedule-modal {
+    max-height: calc(100dvh - 16px);
+    padding: 16px 12px;
+  }
+
+  .schedule-detail-modal {
+    display: block;
+    height: calc(100dvh - 16px);
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .schedule-detail-modal > * + * {
+    margin-top: 12px;
+  }
+
+  .schedule-detail-modal > .table-wrap {
+    overflow: visible;
+  }
+
+  .schedule-modal-header h2 {
+    font-size: 18px;
+  }
+
+  .modal-close {
+    top: 10px;
+    right: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view-tabs button,
+  .view-loading {
+    transition: none;
+  }
+
+  .view-loading::before,
+  .workspace-panel {
+    animation: none;
   }
 }

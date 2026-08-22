@@ -90,6 +90,7 @@ export class CronogramasComponent implements OnInit {
 
   viewMode: ViewMode = 'maintenance';
   showGenerator = false;
+  detailModalOpen = false;
   loading = false;
   detailLoading = false;
   busyAction = '';
@@ -228,9 +229,10 @@ export class CronogramasComponent implements OnInit {
     if (this.viewMode === mode) return;
     this.viewMode = mode;
     this.showGenerator = false;
+    this.clearSelections();
     this.clearNotice();
     try {
-      await this.loadActiveView(true);
+      await this.loadActiveView(false);
     } catch (error: any) {
       console.error(error);
       this.setNotice('error', this.errorText(error, 'No se pudo cargar la vista seleccionada.'));
@@ -238,7 +240,11 @@ export class CronogramasComponent implements OnInit {
   }
 
   async refreshActive(): Promise<void> {
-    await this.runAction('refresh', async () => this.loadActiveView(true), 'Información actualizada.');
+    await this.runAction(
+      'refresh',
+      async () => this.loadActiveView(this.detailModalOpen),
+      'Información actualizada.'
+    );
   }
 
   private async loadActiveView(preserveSelection: boolean): Promise<void> {
@@ -272,13 +278,14 @@ export class CronogramasComponent implements OnInit {
     try {
       const rows = await this.schedulesService.listSchedules(this.selectedClientId, this.selectedYear);
       this.schedules = rows;
-      const previous = preserveSelection ? this.selectedScheduleId : '';
-      this.selectedScheduleId = rows.some((row) => row.id === previous) ? previous : (rows[0]?.id ?? '');
+      const previous = preserveSelection && this.detailModalOpen ? this.selectedScheduleId : '';
+      this.selectedScheduleId = rows.some((row) => row.id === previous) ? previous : '';
       if (this.selectedScheduleId) {
         await this.loadItems(this.selectedScheduleId);
       } else {
         this.items = [];
         this.editing = false;
+        this.detailModalOpen = false;
       }
     } finally {
       this.loading = false;
@@ -287,12 +294,17 @@ export class CronogramasComponent implements OnInit {
   }
 
   async selectSchedule(scheduleId: string): Promise<void> {
+    this.showGenerator = false;
+    this.detailModalOpen = true;
     if (this.selectedScheduleId === scheduleId && this.items.length) return;
     this.selectedScheduleId = scheduleId;
+    this.items = [];
     try {
       await this.loadItems(scheduleId);
     } catch (error: any) {
       console.error(error);
+      this.detailModalOpen = false;
+      this.selectedScheduleId = '';
       this.setNotice('error', this.errorText(error, 'No se pudo cargar el detalle del cronograma.'));
     }
   }
@@ -536,15 +548,16 @@ export class CronogramasComponent implements OnInit {
         this.selectedClientId,
         this.selectedYear
       );
-      const previous = preserveSelection ? this.selectedTrainingScheduleId : '';
+      const previous = preserveSelection && this.detailModalOpen ? this.selectedTrainingScheduleId : '';
       this.selectedTrainingScheduleId = this.trainingSchedules.some((row) => row.id === previous)
         ? previous
-        : (this.trainingSchedules[0]?.id ?? '');
+        : '';
       if (this.selectedTrainingScheduleId) {
         await this.loadTrainingItems(this.selectedTrainingScheduleId);
       } else {
         this.trainingItems = [];
         this.trainingEditing = false;
+        this.detailModalOpen = false;
       }
     } finally {
       this.loading = false;
@@ -553,12 +566,17 @@ export class CronogramasComponent implements OnInit {
   }
 
   async selectTrainingSchedule(scheduleId: string): Promise<void> {
+    this.showGenerator = false;
+    this.detailModalOpen = true;
     if (this.selectedTrainingScheduleId === scheduleId && this.trainingItems.length) return;
     this.selectedTrainingScheduleId = scheduleId;
+    this.trainingItems = [];
     try {
       await this.loadTrainingItems(scheduleId);
     } catch (error: any) {
       console.error(error);
+      this.detailModalOpen = false;
+      this.selectedTrainingScheduleId = '';
       this.setNotice('error', this.errorText(error, 'No se pudo cargar el detalle de capacitaciones.'));
     }
   }
@@ -786,14 +804,15 @@ export class CronogramasComponent implements OnInit {
         this.selectedClientId,
         this.selectedYear
       );
-      const previous = preserveSelection ? this.selectedCalibrationScheduleId : '';
+      const previous = preserveSelection && this.detailModalOpen ? this.selectedCalibrationScheduleId : '';
       this.selectedCalibrationScheduleId = this.calibrationSchedules.some((row) => row.id === previous)
         ? previous
-        : (this.calibrationSchedules[0]?.id ?? '');
+        : '';
       if (this.selectedCalibrationScheduleId) {
         await this.loadCalibrationItems(this.selectedCalibrationScheduleId);
       } else {
         this.calibrationItems = [];
+        this.detailModalOpen = false;
       }
     } finally {
       this.loading = false;
@@ -802,12 +821,17 @@ export class CronogramasComponent implements OnInit {
   }
 
   async selectCalibrationSchedule(scheduleId: string): Promise<void> {
+    this.showGenerator = false;
+    this.detailModalOpen = true;
     if (this.selectedCalibrationScheduleId === scheduleId && this.calibrationItems.length) return;
     this.selectedCalibrationScheduleId = scheduleId;
+    this.calibrationItems = [];
     try {
       await this.loadCalibrationItems(scheduleId);
     } catch (error: any) {
       console.error(error);
+      this.detailModalOpen = false;
+      this.selectedCalibrationScheduleId = '';
       this.setNotice('error', this.errorText(error, 'No se pudo cargar el detalle de calibraciones.'));
     }
   }
@@ -1059,9 +1083,24 @@ export class CronogramasComponent implements OnInit {
     return key ? this.busyAction === key : Boolean(this.busyAction);
   }
 
-  toggleGenerator(): void {
-    this.showGenerator = !this.showGenerator;
-    if (this.showGenerator) this.clearNotice();
+  openGenerator(): void {
+    if (this.loading || this.isBusy()) return;
+    this.detailModalOpen = false;
+    this.clearActiveDetail();
+    this.showGenerator = true;
+    this.clearNotice();
+  }
+
+  closeGenerator(): void {
+    if (!this.isBusy()) this.showGenerator = false;
+  }
+
+  closeDetailModal(): void {
+    if (this.detailLoading || this.isBusy()) return;
+    if (this.editing) this.cancelMaintenanceEdit();
+    if (this.trainingEditing) this.cancelTrainingEdit();
+    this.detailModalOpen = false;
+    this.clearActiveDetail();
   }
 
   closeConfirm(): void {
@@ -1244,6 +1283,24 @@ export class CronogramasComponent implements OnInit {
     this.calibrationItems = [];
     this.editing = false;
     this.trainingEditing = false;
+    this.detailModalOpen = false;
+  }
+
+  private clearActiveDetail(): void {
+    if (this.viewMode === 'training') {
+      this.selectedTrainingScheduleId = '';
+      this.trainingItems = [];
+      this.trainingEditing = false;
+      return;
+    }
+    if (this.viewMode === 'calibration') {
+      this.selectedCalibrationScheduleId = '';
+      this.calibrationItems = [];
+      return;
+    }
+    this.selectedScheduleId = '';
+    this.items = [];
+    this.editing = false;
   }
 
   private setNotice(kind: NoticeKind, message: string): void {

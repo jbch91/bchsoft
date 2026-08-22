@@ -78,6 +78,7 @@ const MIGRATIONS = [
   'training_add_pdf.sql',
   'calibration_schedules.sql',
   'calibration_add_pdf.sql',
+  'schedule_annual_boundaries.sql',
   'permissions_hv.sql',
   'roles_hv_view_fix.sql',
   'roles_maintenance.sql',

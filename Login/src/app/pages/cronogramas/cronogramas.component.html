@@ -57,38 +57,47 @@
     {{ noticeMessage }}
   </div>
 
-  <nav class="view-tabs" role="tablist" aria-label="Tipos de cronograma">
-    <button
-      type="button"
-      role="tab"
-      [class.active]="viewMode === 'maintenance'"
-      [attr.aria-selected]="viewMode === 'maintenance'"
-      (click)="switchView('maintenance')"
-    >
-      Mantenimiento
-    </button>
-    <button
-      type="button"
-      role="tab"
-      [class.active]="viewMode === 'training'"
-      [attr.aria-selected]="viewMode === 'training'"
-      (click)="switchView('training')"
-    >
-      Capacitaciones
-    </button>
-    <button
-      *ngIf="canAccessCalibrationModule()"
-      type="button"
-      role="tab"
-      [class.active]="viewMode === 'calibration'"
-      [attr.aria-selected]="viewMode === 'calibration'"
-      (click)="switchView('calibration')"
-    >
-      Calibraciones
-    </button>
-  </nav>
+  <div class="view-switcher">
+    <nav class="view-tabs" role="tablist" aria-label="Tipos de cronograma">
+      <button
+        type="button"
+        role="tab"
+        [class.active]="viewMode === 'maintenance'"
+        [attr.aria-selected]="viewMode === 'maintenance'"
+        (click)="switchView('maintenance')"
+      >
+        Mantenimiento
+      </button>
+      <button
+        type="button"
+        role="tab"
+        [class.active]="viewMode === 'training'"
+        [attr.aria-selected]="viewMode === 'training'"
+        (click)="switchView('training')"
+      >
+        Capacitaciones
+      </button>
+      <button
+        *ngIf="canAccessCalibrationModule()"
+        type="button"
+        role="tab"
+        [class.active]="viewMode === 'calibration'"
+        [attr.aria-selected]="viewMode === 'calibration'"
+        (click)="switchView('calibration')"
+      >
+        Calibraciones
+      </button>
+    </nav>
 
-  <div *ngIf="loading" class="loading-line" role="status">Actualizando cronogramas...</div>
+    <span
+      class="view-loading"
+      [class.visible]="loading"
+      [attr.aria-hidden]="!loading"
+      role="status"
+    >
+      Actualizando...
+    </span>
+  </div>
 
   <section *ngIf="viewMode === 'maintenance'" class="workspace-panel" role="tabpanel">
     <div class="section-heading">
@@ -111,34 +120,62 @@
           class="primary"
           [disabled]="hasMaintenanceSchedule || loading || isBusy()"
           [title]="hasMaintenanceSchedule ? 'Ya existe un cronograma para el año seleccionado' : ''"
-          (click)="toggleGenerator()"
+          (click)="openGenerator()"
         >
           Nuevo cronograma
         </button>
       </div>
     </div>
 
-    <form *ngIf="showGenerator" class="creation-panel" (submit)="$event.preventDefault(); generateSchedule()">
-      <label>
-        Fecha inicial
-        <input
-          type="date"
-          [(ngModel)]="startDate"
-          name="maintenanceStartDate"
-          [min]="selectedYear + '-01-01'"
-          [max]="selectedYear + '-12-31'"
-          required
-        />
-      </label>
-      <div class="form-actions">
-        <button type="button" class="secondary" [disabled]="isBusy()" (click)="showGenerator = false">
-          Cancelar
+    <div *ngIf="showGenerator" class="modal-backdrop" (click)="closeGenerator()">
+      <section
+        class="schedule-modal creation-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-maintenance-title"
+        (click)="$event.stopPropagation()"
+      >
+        <button
+          type="button"
+          class="modal-close"
+          aria-label="Cerrar"
+          title="Cerrar"
+          [disabled]="isBusy()"
+          (click)="closeGenerator()"
+        >
+          &times;
         </button>
-        <button type="submit" class="primary" [disabled]="isBusy()">
-          {{ isBusy('generate-maintenance') ? 'Generando...' : 'Generar borrador' }}
-        </button>
-      </div>
-    </form>
+        <header class="schedule-modal-header">
+          <p class="eyebrow">Vigencia {{ selectedYear }}</p>
+          <h2 id="create-maintenance-title">Nuevo cronograma de mantenimiento</h2>
+          <p>Se programarán los mantenimientos recurrentes hasta el 31/12/{{ selectedYear }}.</p>
+        </header>
+        <div class="annual-rule">
+          Cada año requiere un cronograma nuevo. Al cambiar de vigencia, el listado comienza vacío para crear la nueva programación.
+        </div>
+        <form class="creation-panel modal-form" (submit)="$event.preventDefault(); generateSchedule()">
+          <label>
+            Fecha inicial
+            <input
+              type="date"
+              [(ngModel)]="startDate"
+              name="maintenanceStartDate"
+              [min]="selectedYear + '-01-01'"
+              [max]="selectedYear + '-12-31'"
+              required
+            />
+          </label>
+          <div class="form-actions">
+            <button type="button" class="secondary" [disabled]="isBusy()" (click)="closeGenerator()">
+              Cancelar
+            </button>
+            <button type="submit" class="primary" [disabled]="isBusy()">
+              {{ isBusy('generate-maintenance') ? 'Generando...' : 'Generar borrador' }}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
 
     <div class="table-wrap" *ngIf="filteredSchedules.length; else noMaintenanceSchedules">
       <table class="data-table schedule-table">
@@ -205,11 +242,33 @@
       <div class="empty-state">No hay cronogramas de mantenimiento para este año y filtro.</div>
     </ng-template>
 
-    <section *ngIf="selectedSchedule" class="detail-panel" [attr.aria-busy]="detailLoading">
+    <div
+      *ngIf="detailModalOpen && selectedSchedule"
+      class="modal-backdrop"
+      (click)="closeDetailModal()"
+    >
+    <section
+      class="detail-panel schedule-modal schedule-detail-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="maintenance-detail-title"
+      [attr.aria-busy]="detailLoading"
+      (click)="$event.stopPropagation()"
+    >
+      <button
+        type="button"
+        class="modal-close"
+        aria-label="Cerrar"
+        title="Cerrar"
+        [disabled]="detailLoading || isBusy()"
+        (click)="closeDetailModal()"
+      >
+        &times;
+      </button>
       <div class="detail-heading">
         <div>
           <p class="eyebrow">Cronograma seleccionado</p>
-          <h3>Mantenimiento {{ selectedSchedule.year }}</h3>
+          <h3 id="maintenance-detail-title">Mantenimiento {{ selectedSchedule.year }}</h3>
           <span>{{ formatDate(selectedSchedule.start_date) }} · {{ statusLabel(selectedSchedule.status) }}</span>
         </div>
         <div class="heading-actions">
@@ -339,6 +398,7 @@
         <div class="empty-state compact-empty">No hay mantenimientos para los filtros seleccionados.</div>
       </ng-template>
     </section>
+    </div>
   </section>
 
   <section *ngIf="viewMode === 'training'" class="workspace-panel" role="tabpanel">
@@ -362,59 +422,87 @@
           class="primary"
           [disabled]="hasTrainingSchedule || loading || isBusy()"
           [title]="hasTrainingSchedule ? 'Ya existe un cronograma para el año seleccionado' : ''"
-          (click)="toggleGenerator()"
+          (click)="openGenerator()"
         >
           Nuevo cronograma
         </button>
       </div>
     </div>
 
-    <form *ngIf="showGenerator" class="creation-panel training-form" (submit)="$event.preventDefault(); generateTrainingSchedule()">
-      <label>
-        Fecha inicial
-        <input
-          type="date"
-          [(ngModel)]="trainingStartDate"
-          name="trainingStartDate"
-          [min]="selectedYear + '-01-01'"
-          [max]="selectedYear + '-12-31'"
-          required
-        />
-      </label>
-      <label>
-        Periodicidad
-        <select [(ngModel)]="trainingPeriodicity" name="trainingPeriodicity">
-          <option *ngFor="let option of trainingPeriodOptions" [value]="option">{{ titleCase(option) }}</option>
-        </select>
-      </label>
-      <fieldset class="area-picker">
-        <legend>Áreas incluidas · {{ selectedAreas.length }} seleccionadas</legend>
-        <div class="area-picker-toolbar">
-          <input type="search" [(ngModel)]="areaSearch" name="areaSearch" placeholder="Buscar área" />
-          <button type="button" class="secondary compact" (click)="selectVisibleAreas()">Seleccionar visibles</button>
-          <button type="button" class="secondary compact" (click)="clearAreaSelection()">Limpiar</button>
+    <div *ngIf="showGenerator" class="modal-backdrop" (click)="closeGenerator()">
+      <section
+        class="schedule-modal creation-modal creation-modal-wide"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-training-title"
+        (click)="$event.stopPropagation()"
+      >
+        <button
+          type="button"
+          class="modal-close"
+          aria-label="Cerrar"
+          title="Cerrar"
+          [disabled]="isBusy()"
+          (click)="closeGenerator()"
+        >
+          &times;
+        </button>
+        <header class="schedule-modal-header">
+          <p class="eyebrow">Vigencia {{ selectedYear }}</p>
+          <h2 id="create-training-title">Nuevo cronograma de capacitaciones</h2>
+          <p>Las fechas recurrentes se crearán únicamente dentro de {{ selectedYear }}.</p>
+        </header>
+        <div class="annual-rule">
+          Cada año requiere un cronograma nuevo para conservar separadas las vigencias y sus actas.
         </div>
-        <div class="area-grid">
-          <label *ngFor="let area of filteredAreas; trackBy: trackById" class="check-option">
+        <form class="creation-panel training-form modal-form" (submit)="$event.preventDefault(); generateTrainingSchedule()">
+          <label>
+            Fecha inicial
             <input
-              type="checkbox"
-              [checked]="selectedAreas.includes(area.id)"
-              (change)="toggleAreaSelection(area.id, $any($event.target).checked)"
+              type="date"
+              [(ngModel)]="trainingStartDate"
+              name="trainingStartDate"
+              [min]="selectedYear + '-01-01'"
+              [max]="selectedYear + '-12-31'"
+              required
             />
-            <span>{{ area.name }}</span>
           </label>
-          <span *ngIf="!filteredAreas.length" class="muted">No hay áreas para mostrar.</span>
-        </div>
-      </fieldset>
-      <div class="form-actions full-row">
-        <button type="button" class="secondary" [disabled]="isBusy()" (click)="showGenerator = false">
-          Cancelar
-        </button>
-        <button type="submit" class="primary" [disabled]="isBusy()">
-          {{ isBusy('generate-training') ? 'Generando...' : 'Generar borrador' }}
-        </button>
-      </div>
-    </form>
+          <label>
+            Periodicidad
+            <select [(ngModel)]="trainingPeriodicity" name="trainingPeriodicity">
+              <option *ngFor="let option of trainingPeriodOptions" [value]="option">{{ titleCase(option) }}</option>
+            </select>
+          </label>
+          <fieldset class="area-picker">
+            <legend>Áreas incluidas · {{ selectedAreas.length }} seleccionadas</legend>
+            <div class="area-picker-toolbar">
+              <input type="search" [(ngModel)]="areaSearch" name="areaSearch" placeholder="Buscar área" />
+              <button type="button" class="secondary compact" (click)="selectVisibleAreas()">Seleccionar visibles</button>
+              <button type="button" class="secondary compact" (click)="clearAreaSelection()">Limpiar</button>
+            </div>
+            <div class="area-grid">
+              <label *ngFor="let area of filteredAreas; trackBy: trackById" class="check-option">
+                <input
+                  type="checkbox"
+                  [checked]="selectedAreas.includes(area.id)"
+                  (change)="toggleAreaSelection(area.id, $any($event.target).checked)"
+                />
+                <span>{{ area.name }}</span>
+              </label>
+              <span *ngIf="!filteredAreas.length" class="muted">No hay áreas para mostrar.</span>
+            </div>
+          </fieldset>
+          <div class="form-actions full-row">
+            <button type="button" class="secondary" [disabled]="isBusy()" (click)="closeGenerator()">
+              Cancelar
+            </button>
+            <button type="submit" class="primary" [disabled]="isBusy()">
+              {{ isBusy('generate-training') ? 'Generando...' : 'Generar borrador' }}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
 
     <div class="table-wrap" *ngIf="filteredTrainingSchedules.length; else noTrainingSchedules">
       <table class="data-table schedule-table">
@@ -479,11 +567,33 @@
       <div class="empty-state">No hay cronogramas de capacitaciones para este año y filtro.</div>
     </ng-template>
 
-    <section *ngIf="selectedTrainingSchedule" class="detail-panel" [attr.aria-busy]="detailLoading">
+    <div
+      *ngIf="detailModalOpen && selectedTrainingSchedule"
+      class="modal-backdrop"
+      (click)="closeDetailModal()"
+    >
+    <section
+      class="detail-panel schedule-modal schedule-detail-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="training-detail-title"
+      [attr.aria-busy]="detailLoading"
+      (click)="$event.stopPropagation()"
+    >
+      <button
+        type="button"
+        class="modal-close"
+        aria-label="Cerrar"
+        title="Cerrar"
+        [disabled]="detailLoading || isBusy()"
+        (click)="closeDetailModal()"
+      >
+        &times;
+      </button>
       <div class="detail-heading">
         <div>
           <p class="eyebrow">Cronograma seleccionado</p>
-          <h3>Capacitaciones {{ selectedTrainingSchedule.year }}</h3>
+          <h3 id="training-detail-title">Capacitaciones {{ selectedTrainingSchedule.year }}</h3>
           <span>{{ titleCase(selectedTrainingSchedule.periodicity) }} · {{ statusLabel(selectedTrainingSchedule.status) }}</span>
         </div>
         <div class="heading-actions">
@@ -612,6 +722,7 @@
         <div class="empty-state compact-empty">No hay capacitaciones para los filtros seleccionados.</div>
       </ng-template>
     </section>
+    </div>
   </section>
 
   <section
@@ -640,34 +751,66 @@
           class="primary"
           [disabled]="hasCalibrationSchedule || loading || isBusy()"
           [title]="hasCalibrationSchedule ? 'Ya existe un cronograma para el año seleccionado' : ''"
-          (click)="toggleGenerator()"
+          (click)="openGenerator()"
         >
           Nuevo cronograma
         </button>
       </div>
     </div>
 
-    <form *ngIf="showGenerator && canManageCalibrationSchedules()" class="creation-panel" (submit)="$event.preventDefault(); generateCalibrationSchedule()">
-      <label>
-        Fecha inicial
-        <input
-          type="date"
-          [(ngModel)]="calibrationStartDate"
-          name="calibrationStartDate"
-          [min]="selectedYear + '-01-01'"
-          [max]="selectedYear + '-12-31'"
-          required
-        />
-      </label>
-      <div class="form-actions">
-        <button type="button" class="secondary" [disabled]="isBusy()" (click)="showGenerator = false">
-          Cancelar
+    <div
+      *ngIf="showGenerator && canManageCalibrationSchedules()"
+      class="modal-backdrop"
+      (click)="closeGenerator()"
+    >
+      <section
+        class="schedule-modal creation-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-calibration-title"
+        (click)="$event.stopPropagation()"
+      >
+        <button
+          type="button"
+          class="modal-close"
+          aria-label="Cerrar"
+          title="Cerrar"
+          [disabled]="isBusy()"
+          (click)="closeGenerator()"
+        >
+          &times;
         </button>
-        <button type="submit" class="primary" [disabled]="isBusy()">
-          {{ isBusy('generate-calibration') ? 'Generando...' : 'Generar borrador' }}
-        </button>
-      </div>
-    </form>
+        <header class="schedule-modal-header">
+          <p class="eyebrow">Vigencia {{ selectedYear }}</p>
+          <h2 id="create-calibration-title">Nuevo cronograma de calibración</h2>
+          <p>Las calibraciones se programarán desde la fecha inicial hasta finalizar {{ selectedYear }}.</p>
+        </header>
+        <div class="annual-rule">
+          Cada año requiere un cronograma nuevo para mantener independiente la vigencia de sus certificados.
+        </div>
+        <form class="creation-panel modal-form" (submit)="$event.preventDefault(); generateCalibrationSchedule()">
+          <label>
+            Fecha inicial
+            <input
+              type="date"
+              [(ngModel)]="calibrationStartDate"
+              name="calibrationStartDate"
+              [min]="selectedYear + '-01-01'"
+              [max]="selectedYear + '-12-31'"
+              required
+            />
+          </label>
+          <div class="form-actions">
+            <button type="button" class="secondary" [disabled]="isBusy()" (click)="closeGenerator()">
+              Cancelar
+            </button>
+            <button type="submit" class="primary" [disabled]="isBusy()">
+              {{ isBusy('generate-calibration') ? 'Generando...' : 'Generar borrador' }}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
 
     <div class="table-wrap" *ngIf="filteredCalibrationSchedules.length; else noCalibrationSchedules">
       <table class="data-table schedule-table">
@@ -730,11 +873,33 @@
       <div class="empty-state">No hay cronogramas de calibración para este año y filtro.</div>
     </ng-template>
 
-    <section *ngIf="selectedCalibrationSchedule" class="detail-panel" [attr.aria-busy]="detailLoading">
+    <div
+      *ngIf="detailModalOpen && selectedCalibrationSchedule"
+      class="modal-backdrop"
+      (click)="closeDetailModal()"
+    >
+    <section
+      class="detail-panel schedule-modal schedule-detail-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="calibration-detail-title"
+      [attr.aria-busy]="detailLoading"
+      (click)="$event.stopPropagation()"
+    >
+      <button
+        type="button"
+        class="modal-close"
+        aria-label="Cerrar"
+        title="Cerrar"
+        [disabled]="detailLoading || isBusy()"
+        (click)="closeDetailModal()"
+      >
+        &times;
+      </button>
       <div class="detail-heading">
         <div>
           <p class="eyebrow">Cronograma seleccionado</p>
-          <h3>Calibraciones {{ selectedCalibrationSchedule.year }}</h3>
+          <h3 id="calibration-detail-title">Calibraciones {{ selectedCalibrationSchedule.year }}</h3>
           <span>{{ formatDate(selectedCalibrationSchedule.start_date) }} · {{ statusLabel(selectedCalibrationSchedule.status) }}</span>
         </div>
       </div>
@@ -857,6 +1022,7 @@
         <div class="empty-state compact-empty">No hay calibraciones para los filtros seleccionados.</div>
       </ng-template>
     </section>
+    </div>
   </section>
 
   <div *ngIf="confirmDialog" class="modal-backdrop" (click)="closeConfirm()">

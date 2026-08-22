@@ -337,6 +337,7 @@ import {
   addBusinessDaysUtc as addScheduleBusinessDays,
   addMonthsUtc as addScheduleMonths,
   buildRecurringDates,
+  capDateAtScheduleYearEndUtc as capScheduleDateAtYearEnd,
   dateOnlyFromDatabase,
   formatDateOnly as formatScheduleDate,
   frequencyToMonths as scheduleFrequencyToMonths,
@@ -10805,7 +10806,15 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
        AND type = 'preventivo'
        AND source = 'cronograma'
        AND status = 'abierto'
-       AND deadline_date < $2`,
+       AND (
+         deadline_date < $2
+         OR schedule_id IN (
+           SELECT id
+           FROM maintenance_schedules
+           WHERE client_id = $1
+             AND year < EXTRACT(YEAR FROM $2::date)::int
+         )
+       )`,
     [clientId, today]
   );
 
@@ -10817,7 +10826,10 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
        AND s.client_id = $1
        AND s.status = 'approved'
        AND i.status IN ('pending', 'active')
-       AND i.deadline_date < $2
+       AND (
+         i.deadline_date < $2
+         OR s.year < EXTRACT(YEAR FROM $2::date)::int
+       )
        AND NOT EXISTS (
          SELECT 1
          FROM maintenance_requests r
@@ -10834,6 +10846,7 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
      JOIN "${client.schema_name}".assets a ON a.id = i.asset_id
      WHERE s.client_id = $1
        AND s.status = 'approved'
+       AND s.year = EXTRACT(YEAR FROM $2::date)::int
        AND i.status IN ('pending', 'active')
        AND COALESCE(a.status, 'activo') <> 'dado_de_baja'
        AND i.planned_date <= $2
@@ -10974,7 +10987,10 @@ app.post(
       }
       for (const plannedDate of datesByFrequency.get(months)) {
         const deadlineDate = formatScheduleDate(
-          addScheduleBusinessDays(parseScheduleDate(plannedDate), 10)
+          capScheduleDateAtYearEnd(
+            addScheduleBusinessDays(parseScheduleDate(plannedDate), 10),
+            scheduleInput.year
+          )
         );
         items.push({
           assetId: asset.id,
@@ -11158,12 +11174,18 @@ app.get(
     if (req.user.clientId && req.user.clientId !== schedule.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (!schedule.pdf_path) {
-      return res.status(404).json({ message: 'PDF no disponible.' });
-    }
-    const pdfPath = path.join(process.cwd(), schedule.pdf_path.replace(/^\//, ''));
-    if (!fs.existsSync(pdfPath)) {
-      return res.status(404).json({ message: 'PDF no encontrado.' });
+    let publicPath = schedule.pdf_path;
+    let pdfPath = publicPath
+      ? path.join(process.cwd(), publicPath.replace(/^\//, ''))
+      : '';
+    if (!pdfPath || !fs.existsSync(pdfPath)) {
+      const client = await getClientById(schedule.client_id);
+      if (!client?.schema_name) {
+        return res.status(404).json({ message: 'Cliente no encontrado.' });
+      }
+      const items = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
+      publicPath = await writeSchedulePdf({ client, schedule, items });
+      pdfPath = path.join(process.cwd(), publicPath.replace(/^\//, ''));
     }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="cronograma-${schedule.id}.pdf"`);
@@ -11693,12 +11715,18 @@ app.get(
     if (req.user.clientId && req.user.clientId !== schedule.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (!schedule.pdf_path) {
-      return res.status(404).json({ message: 'PDF no disponible.' });
-    }
-    const pdfPath = path.join(process.cwd(), schedule.pdf_path.replace(/^\//, ''));
-    if (!fs.existsSync(pdfPath)) {
-      return res.status(404).json({ message: 'PDF no encontrado.' });
+    let publicPath = schedule.pdf_path;
+    let pdfPath = publicPath
+      ? path.join(process.cwd(), publicPath.replace(/^\//, ''))
+      : '';
+    if (!pdfPath || !fs.existsSync(pdfPath)) {
+      const client = await getClientById(schedule.client_id);
+      if (!client?.schema_name) {
+        return res.status(404).json({ message: 'Cliente no encontrado.' });
+      }
+      const items = await listCalibrationItemsWithSchema(schedule.id, client.schema_name);
+      publicPath = await writeCalibrationSchedulePdf({ client, schedule, items });
+      pdfPath = path.join(process.cwd(), publicPath.replace(/^\//, ''));
     }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="cronograma-calibracion-${schedule.id}.pdf"`);
@@ -11754,7 +11782,10 @@ app.post(
       }
       for (const plannedDate of datesByFrequency.get(months)) {
         const deadlineDate = formatScheduleDate(
-          addScheduleMonths(parseScheduleDate(plannedDate), 1)
+          capScheduleDateAtYearEnd(
+            addScheduleMonths(parseScheduleDate(plannedDate), 1),
+            scheduleInput.year
+          )
         );
         items.push({
           assetId: asset.id,
