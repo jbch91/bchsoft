@@ -1,4 +1,4 @@
-import { query } from './db.js';
+import { query, withTransaction } from './db.js';
 
 export async function createSchedule({ clientId, year, startDate, createdBy, pdfPath }) {
   const { rows } = await query(
@@ -8,6 +8,43 @@ export async function createSchedule({ clientId, year, startDate, createdBy, pdf
     [clientId, year, startDate, createdBy, pdfPath || null]
   );
   return rows[0];
+}
+
+export async function createScheduleWithItems({ clientId, year, startDate, createdBy, items }) {
+  return withTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1), $2)', [
+      `maintenance-schedule:${clientId}`,
+      year
+    ]);
+    const existing = await client.query(
+      'SELECT id FROM maintenance_schedules WHERE client_id = $1 AND year = $2 LIMIT 1',
+      [clientId, year]
+    );
+    if (existing.rows.length) return null;
+
+    const scheduleResult = await client.query(
+      `INSERT INTO maintenance_schedules (client_id, year, start_date, created_by, pdf_path)
+       VALUES ($1,$2,$3,$4,NULL)
+       RETURNING id, client_id, year, start_date, status, engineer_edited, created_by, pdf_path`,
+      [clientId, year, startDate, createdBy]
+    );
+    const schedule = scheduleResult.rows[0];
+    await client.query(
+      `INSERT INTO maintenance_schedule_items
+         (schedule_id, asset_id, frequency, planned_date, deadline_date)
+       SELECT $1, data.asset_id, data.frequency, data.planned_date, data.deadline_date
+       FROM UNNEST($2::uuid[], $3::text[], $4::date[], $5::date[])
+         AS data(asset_id, frequency, planned_date, deadline_date)`,
+      [
+        schedule.id,
+        items.map((item) => item.assetId),
+        items.map((item) => item.frequency),
+        items.map((item) => item.plannedDate),
+        items.map((item) => item.deadlineDate)
+      ]
+    );
+    return schedule;
+  });
 }
 
 export async function listSchedules(clientId, year) {
@@ -41,11 +78,11 @@ export async function setSchedulePdf(scheduleId, pdfPath) {
   await query('UPDATE maintenance_schedules SET pdf_path = $1 WHERE id = $2', [pdfPath, scheduleId]);
 }
 
-export async function approveSchedule(scheduleId, actorId, force = false) {
+export async function approveSchedule(scheduleId) {
   const { rows } = await query(
     `UPDATE maintenance_schedules
      SET status = 'approved', approved_at = NOW()
-     WHERE id = $1
+     WHERE id = $1 AND status = 'draft'
      RETURNING id`,
     [scheduleId]
   );
@@ -83,15 +120,43 @@ export async function insertScheduleItems(items) {
   }
 }
 
-export async function updateScheduleItems(items) {
-  for (const item of items) {
-    await query(
-      `UPDATE maintenance_schedule_items
-       SET planned_date = $1, deadline_date = $2
-       WHERE id = $3`,
-      [item.plannedDate, item.deadlineDate, item.id]
+export async function updateScheduleItems(scheduleId, items, { markEngineerEdited: edited = false } = {}) {
+  return withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `UPDATE maintenance_schedule_items AS target
+       SET planned_date = data.planned_date, deadline_date = data.deadline_date
+       FROM UNNEST($2::uuid[], $3::date[], $4::date[])
+         AS data(id, planned_date, deadline_date)
+       WHERE target.schedule_id = $1 AND target.id = data.id
+       RETURNING target.id`,
+      [
+        scheduleId,
+        items.map((item) => item.id),
+        items.map((item) => item.plannedDate),
+        items.map((item) => item.deadlineDate)
+      ]
     );
-  }
+    if (rows.length !== items.length) {
+      const error = new Error('Uno de los elementos no pertenece al cronograma.');
+      error.code = 'SCHEDULE_ITEM_MISMATCH';
+      throw error;
+    }
+    if (edited) {
+      await client.query(
+        'UPDATE maintenance_schedules SET engineer_edited = TRUE WHERE id = $1',
+        [scheduleId]
+      );
+    }
+    return rows;
+  });
+}
+
+export async function countScheduleItems(scheduleId) {
+  const { rows } = await query(
+    'SELECT COUNT(*)::int AS count FROM maintenance_schedule_items WHERE schedule_id = $1',
+    [scheduleId]
+  );
+  return rows[0]?.count ?? 0;
 }
 
 export async function setScheduleClosedIfDone(scheduleId) {
@@ -107,7 +172,6 @@ export async function setScheduleClosedIfDone(scheduleId) {
 }
 
 export async function deleteSchedule(scheduleId) {
-  await query('DELETE FROM maintenance_schedule_items WHERE schedule_id = $1', [scheduleId]);
   await query('DELETE FROM maintenance_schedules WHERE id = $1', [scheduleId]);
 }
 

@@ -1,87 +1,103 @@
 <section class="page">
   <app-module-tabs></app-module-tabs>
 
-  <div class="card header-card client-filter-card" *ngIf="!auth.currentUser()?.clientId">
-    <div class="client-selector">
-      <div class="filters">
-        <label>
-          Buscar cliente
-          <input type="text" [(ngModel)]="clientSearchTerm" placeholder="Escribe para filtrar..." />
-        </label>
-        <label>
-          Cliente
-          <select [(ngModel)]="selectedClientId" (change)="onClientChange()">
-            <option *ngFor="let client of filteredClients" [value]="client.id">{{ client.name }}</option>
-          </select>
-        </label>
-      </div>
-      <div class="client-meta" *ngIf="selectedClient">
-        <div class="client-meta-text">
-          <strong>{{ selectedClient.name }}</strong>
-          <span>NIT {{ selectedClient.nit }}</span>
-          <span>Ciudad {{ selectedClient.city }}</span>
-          <span *ngIf="selectedClient.address">Dirección {{ selectedClient.address }}</span>
-          <span>{{ selectedClient.email }}</span>
-        </div>
-        <img
-          *ngIf="clientLogoUrl(selectedClient)"
-          [src]="clientLogoUrl(selectedClient)!"
-          alt="Logo cliente"
+  <header class="module-header">
+    <div class="module-title">
+      <p class="eyebrow">Software biomédico</p>
+      <h1>Cronogramas</h1>
+      <span>{{ currentClientLabel }} · {{ selectedYear }}</span>
+    </div>
+
+    <div class="module-controls">
+      <label *ngIf="!auth.currentUser()?.clientId" class="client-search">
+        Buscar cliente
+        <input
+          type="search"
+          [(ngModel)]="clientSearchTerm"
+          placeholder="Nombre, NIT o ciudad"
         />
-      </div>
-    </div>
-  </div>
-
-  <div class="tab-bar">
-    <button
-      type="button"
-      class="tab"
-      [class.active]="viewMode === 'maintenance'"
-      (click)="viewMode = 'maintenance'"
-    >
-      Cronogramas de mantenimiento
-    </button>
-    <button
-      type="button"
-      class="tab"
-      [class.active]="viewMode === 'training'"
-      (click)="viewMode = 'training'"
-    >
-      Cronograma de capacitaciones
-    </button>
-    <button
-      type="button"
-      class="tab"
-      *ngIf="canAccessCalibrationModule()"
-      [class.active]="viewMode === 'calibration'"
-      (click)="viewMode = 'calibration'"
-    >
-      Cronograma de calibraciones
-    </button>
-  </div>
-
-  <ng-container *ngIf="viewMode === 'maintenance'">
-  <div class="card header-card">
-    <div class="form-grid">
-      <label>
+      </label>
+      <label *ngIf="!auth.currentUser()?.clientId">
+        Cliente
+        <select [(ngModel)]="selectedClientId" (change)="onClientChange()">
+          <option *ngFor="let client of filteredClients; trackBy: trackById" [value]="client.id">
+            {{ client.name }}
+          </option>
+        </select>
+      </label>
+      <label class="year-control">
         Año
-        <input type="number" [(ngModel)]="selectedYear" />
+        <input
+          type="number"
+          [(ngModel)]="selectedYear"
+          [min]="minimumYear"
+          [max]="maximumYear"
+          (change)="onYearChange()"
+        />
       </label>
-      <label>
-        Fecha inicial
-        <input type="date" [(ngModel)]="startDate" />
-      </label>
-      <button type="button" (click)="generateSchedule()">Generar cronograma</button>
+      <button
+        type="button"
+        class="secondary"
+        [disabled]="loading || isBusy()"
+        (click)="refreshActive()"
+      >
+        {{ isBusy('refresh') ? 'Actualizando...' : 'Actualizar' }}
+      </button>
+      <span class="updated-at">Última actualización: {{ lastUpdatedLabel }}</span>
     </div>
-    <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
-    <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+  </header>
+
+  <div
+    *ngIf="noticeMessage"
+    class="notice"
+    [ngClass]="noticeKind"
+    role="status"
+    aria-live="polite"
+  >
+    {{ noticeMessage }}
   </div>
 
-  <div class="card">
-    <div class="card-header">
-      <h2>Cronogramas de mantenimiento</h2>
-      <div class="card-actions">
-        <label class="inline">
+  <nav class="view-tabs" role="tablist" aria-label="Tipos de cronograma">
+    <button
+      type="button"
+      role="tab"
+      [class.active]="viewMode === 'maintenance'"
+      [attr.aria-selected]="viewMode === 'maintenance'"
+      (click)="switchView('maintenance')"
+    >
+      Mantenimiento
+    </button>
+    <button
+      type="button"
+      role="tab"
+      [class.active]="viewMode === 'training'"
+      [attr.aria-selected]="viewMode === 'training'"
+      (click)="switchView('training')"
+    >
+      Capacitaciones
+    </button>
+    <button
+      *ngIf="canAccessCalibrationModule()"
+      type="button"
+      role="tab"
+      [class.active]="viewMode === 'calibration'"
+      [attr.aria-selected]="viewMode === 'calibration'"
+      (click)="switchView('calibration')"
+    >
+      Calibraciones
+    </button>
+  </nav>
+
+  <div *ngIf="loading" class="loading-line" role="status">Actualizando cronogramas...</div>
+
+  <section *ngIf="viewMode === 'maintenance'" class="workspace-panel" role="tabpanel">
+    <div class="section-heading">
+      <div>
+        <h2>Cronogramas de mantenimiento</h2>
+        <p>{{ filteredSchedules.length }} registro{{ filteredSchedules.length === 1 ? '' : 's' }}</p>
+      </div>
+      <div class="heading-actions">
+        <label class="inline-control">
           Estado
           <select [(ngModel)]="maintenanceStatusFilter">
             <option value="">Todos</option>
@@ -90,63 +106,168 @@
             <option value="closed">Cerrado</option>
           </select>
         </label>
-        <span class="pill">{{ filteredSchedules.length }} registros</span>
+        <button
+          type="button"
+          class="primary"
+          [disabled]="hasMaintenanceSchedule || loading || isBusy()"
+          [title]="hasMaintenanceSchedule ? 'Ya existe un cronograma para el año seleccionado' : ''"
+          (click)="toggleGenerator()"
+        >
+          Nuevo cronograma
+        </button>
       </div>
     </div>
-    <div class="schedule-list">
-      <div class="schedule-row header">
-        <span>Año</span>
-        <span>Fecha inicial</span>
-        <span>Estado</span>
-        <span>Acciones</span>
-      </div>
-      <div class="schedule-row" *ngFor="let schedule of filteredSchedules">
-        <span>{{ schedule.year }}</span>
-        <span>{{ schedule.start_date | date: 'dd/MM/yyyy' }}</span>
-        <span>{{ statusLabel(schedule.status) }}</span>
-        <span class="actions">
-          <button type="button" (click)="openPdf(schedule.id)">Ver</button>
-          <button
-            type="button"
-            class="primary"
-            *ngIf="schedule.status !== 'approved'"
-            (click)="selectedScheduleId = schedule.id; approveSchedule()"
-          >
-            Aprobar
-          </button>
-          <button
-            *ngIf="auth.hasRole('superuser')"
-            type="button"
-            class="danger"
-            (click)="deleteSchedule(schedule.id)"
-          >
-            Eliminar
-          </button>
-        </span>
-      </div>
-      <p class="muted" *ngIf="filteredSchedules.length === 0">No hay cronogramas para este filtro.</p>
-    </div>
-  </div>
 
-  <div class="card" *ngIf="selectedScheduleId">
-    <div class="card-header">
-      <h2>Detalle del cronograma</h2>
-      <div class="card-actions">
-        <label class="inline">
+    <form *ngIf="showGenerator" class="creation-panel" (submit)="$event.preventDefault(); generateSchedule()">
+      <label>
+        Fecha inicial
+        <input
+          type="date"
+          [(ngModel)]="startDate"
+          name="maintenanceStartDate"
+          [min]="selectedYear + '-01-01'"
+          [max]="selectedYear + '-12-31'"
+          required
+        />
+      </label>
+      <div class="form-actions">
+        <button type="button" class="secondary" [disabled]="isBusy()" (click)="showGenerator = false">
+          Cancelar
+        </button>
+        <button type="submit" class="primary" [disabled]="isBusy()">
+          {{ isBusy('generate-maintenance') ? 'Generando...' : 'Generar borrador' }}
+        </button>
+      </div>
+    </form>
+
+    <div class="table-wrap" *ngIf="filteredSchedules.length; else noMaintenanceSchedules">
+      <table class="data-table schedule-table">
+        <thead>
+          <tr>
+            <th>Año</th>
+            <th>Fecha inicial</th>
+            <th>Estado</th>
+            <th>Edición del ingeniero</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            *ngFor="let schedule of filteredSchedules; trackBy: trackById"
+            [class.selected]="schedule.id === selectedScheduleId"
+          >
+            <td data-label="Año"><strong>{{ schedule.year }}</strong></td>
+            <td data-label="Fecha inicial">{{ formatDate(schedule.start_date) }}</td>
+            <td data-label="Estado">
+              <span class="status-pill" [ngClass]="schedule.status">{{ statusLabel(schedule.status) }}</span>
+            </td>
+            <td data-label="Edición del ingeniero">
+              {{ schedule.engineer_edited ? 'Realizada' : 'Disponible' }}
+            </td>
+            <td data-label="Acciones">
+              <div class="row-actions">
+                <button type="button" class="secondary compact" (click)="selectSchedule(schedule.id)">
+                  Abrir detalle
+                </button>
+                <button
+                  type="button"
+                  class="secondary compact"
+                  [disabled]="isBusy()"
+                  (click)="openPdf(schedule.id)"
+                >
+                  {{ isBusy('maintenance-pdf-' + schedule.id) ? 'Abriendo...' : 'PDF' }}
+                </button>
+                <button
+                  *ngIf="schedule.status === 'draft'"
+                  type="button"
+                  class="primary compact"
+                  [disabled]="isBusy()"
+                  (click)="requestApproveSchedule(schedule)"
+                >
+                  Aprobar
+                </button>
+                <button
+                  *ngIf="auth.hasRole('superuser')"
+                  type="button"
+                  class="danger-text compact"
+                  [disabled]="isBusy()"
+                  (click)="requestDeleteSchedule(schedule)"
+                >
+                  Eliminar
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <ng-template #noMaintenanceSchedules>
+      <div class="empty-state">No hay cronogramas de mantenimiento para este año y filtro.</div>
+    </ng-template>
+
+    <section *ngIf="selectedSchedule" class="detail-panel" [attr.aria-busy]="detailLoading">
+      <div class="detail-heading">
+        <div>
+          <p class="eyebrow">Cronograma seleccionado</p>
+          <h3>Mantenimiento {{ selectedSchedule.year }}</h3>
+          <span>{{ formatDate(selectedSchedule.start_date) }} · {{ statusLabel(selectedSchedule.status) }}</span>
+        </div>
+        <div class="heading-actions">
+          <span *ngIf="maintenanceEditRestriction" class="restriction">{{ maintenanceEditRestriction }}</span>
+          <button
+            *ngIf="canEditSelected() && !editing"
+            type="button"
+            class="secondary"
+            [disabled]="detailLoading || isBusy()"
+            (click)="startMaintenanceEdit()"
+          >
+            Editar fechas
+          </button>
+          <ng-container *ngIf="editing">
+            <button type="button" class="secondary" [disabled]="isBusy()" (click)="cancelMaintenanceEdit()">
+              Cancelar
+            </button>
+            <button type="button" class="primary" [disabled]="isBusy()" (click)="saveEdits()">
+              {{ isBusy('save-maintenance') ? 'Guardando...' : 'Guardar fechas' }}
+            </button>
+          </ng-container>
+        </div>
+      </div>
+
+      <div class="summary-strip" aria-label="Resumen del cronograma">
+        <div><strong>{{ items.length }}</strong><span>Total</span></div>
+        <div><strong>{{ maintenanceSummary.pending }}</strong><span>Programados</span></div>
+        <div><strong>{{ maintenanceSummary.active }}</strong><span>Activos</span></div>
+        <div><strong>{{ maintenanceSummary.done }}</strong><span>Realizados</span></div>
+        <div><strong>{{ maintenanceSummary.expired }}</strong><span>Vencidos</span></div>
+      </div>
+
+      <div class="filter-bar">
+        <label class="search-control">
+          Buscar
+          <input
+            type="search"
+            [(ngModel)]="maintenanceDetailSearch"
+            placeholder="Equipo, código, serie, área o sede"
+          />
+        </label>
+        <label>
           Área
           <select [(ngModel)]="maintenanceAreaFilter">
             <option value="">Todas</option>
             <option *ngFor="let area of maintenanceAreaOptions" [value]="area">{{ area }}</option>
           </select>
         </label>
-        <label class="inline">
+        <label>
           Frecuencia
           <select [(ngModel)]="maintenanceFrequencyFilter">
             <option value="">Todas</option>
-            <option *ngFor="let freq of maintenanceFrequencyOptions" [value]="freq">{{ freq | titlecase }}</option>
+            <option *ngFor="let frequency of maintenanceFrequencyOptions" [value]="frequency">
+              {{ titleCase(frequency) }}
+            </option>
           </select>
         </label>
-        <label class="inline">
+        <label>
           Estado
           <select [(ngModel)]="maintenanceItemStatusFilter">
             <option value="">Todos</option>
@@ -156,115 +277,78 @@
             <option value="expired">Vencido</option>
           </select>
         </label>
-        <input
-          class="search-input"
-          type="text"
-          placeholder="Buscar área, sede o equipo"
-          [(ngModel)]="maintenanceDetailSearch"
-        />
-        <span class="pill">{{ filteredGroupedItems.length }} áreas</span>
-      </div>
-    </div>
-    <div class="detail-actions" *ngIf="canEditSelected()">
-      <button type="button" class="ghost" *ngIf="!editing" (click)="editing = true">Editar fechas</button>
-    </div>
-    <div class="items-table">
-      <div class="item-row header">
-        <span>Área</span>
-        <span>Sede</span>
-        <span>Equipos</span>
-        <span>Frecuencia</span>
-        <span>Estado</span>
-        <span>Fechas</span>
-      </div>
-      <div class="item-row" *ngFor="let group of filteredGroupedItems">
-        <span>
-          <strong>{{ group.areaName }}</strong>
-          <small>{{ group.assetCount }} equipo{{ group.assetCount === 1 ? '' : 's' }} programado{{ group.assetCount === 1 ? '' : 's' }}</small>
-        </span>
-        <span>{{ group.siteName }}</span>
-        <span>{{ group.assetCount }}</span>
-        <span>{{ frequencyLabel(group) }}</span>
-        <span class="status-stack">
-          <span
-            class="status-pill"
-            *ngFor="let item of areaStatusItems(group)"
-            [ngClass]="maintenanceItemStatusClass(item.status)"
-          >
-            {{ maintenanceItemStatusLabel(item.status) }} {{ item.count }}
-          </span>
-        </span>
-        <span class="dates">
-          <div class="area-date-item" *ngFor="let dateGroup of group.dateGroups">
-            <input
-              *ngIf="editing; else dateText"
-              type="date"
-              [value]="dateGroup.plannedDate"
-              [min]="dateGroup.minDate"
-              [max]="dateGroup.maxDate"
-              (change)="onAreaPlannedDateChange(dateGroup, $event.target.value)"
-            />
-            <ng-template #dateText>
-              <span class="date-range compact">
-                {{ dateGroup.minDate | date: 'dd/MM/yyyy' }} - {{ dateGroup.maxDate | date: 'dd/MM/yyyy' }}
-              </span>
-            </ng-template>
-            <small>{{ dateGroup.items.length }} mantenimiento{{ dateGroup.items.length === 1 ? '' : 's' }}</small>
-            <span class="date-range" *ngIf="editing">
-              Rango: {{ dateGroup.minDate | date: 'dd/MM/yyyy' }} - {{ dateGroup.maxDate | date: 'dd/MM/yyyy' }}
-            </span>
-          </div>
+        <span class="result-count">
+          {{ filteredMaintenanceItems.length }} mantenimiento{{ filteredMaintenanceItems.length === 1 ? '' : 's' }}
         </span>
       </div>
-    </div>
-    <div class="footer-actions" *ngIf="editing">
-      <button type="button" class="primary" (click)="saveEdits()">
-        Guardar cambios
-      </button>
-    </div>
-  </div>
-  </ng-container>
 
-  <ng-container *ngIf="viewMode === 'training'">
-  <div class="card header-card">
-    <div class="card-header">
-      <h2>Cronograma de capacitaciones</h2>
-      <span class="pill">{{ filteredTrainingSchedules.length }} registros</span>
-    </div>
-    <div class="form-grid">
-      <label>
-        Fecha inicial
-        <input type="date" [(ngModel)]="trainingStartDate" />
-      </label>
-      <label>
-        Periodicidad
-        <select [(ngModel)]="trainingPeriodicity">
-          <option *ngFor="let option of trainingPeriodOptions" [value]="option">{{ option | titlecase }}</option>
-        </select>
-      </label>
-      <label class="area-select">
-        Áreas incluidas
-        <div class="area-list">
-          <label *ngFor="let area of areas" class="area-option">
-            <input
-              type="checkbox"
-              [value]="area.id"
-              [checked]="selectedAreas.includes(area.id)"
-              (change)="toggleAreaSelection(area.id, $event.target.checked)"
-            />
-            <span>{{ area.name }}</span>
-          </label>
-        </div>
-      </label>
-      <button type="button" (click)="generateTrainingSchedule()">Generar cronograma</button>
-    </div>
-  </div>
+      <div class="table-wrap" *ngIf="filteredGroupedItems.length; else noMaintenanceItems">
+        <table class="data-table detail-table maintenance-detail-table">
+          <thead>
+            <tr>
+              <th>Área</th>
+              <th>Sede</th>
+              <th>Equipos</th>
+              <th>Frecuencia</th>
+              <th>Estado</th>
+              <th>Ventanas de servicio</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let group of filteredGroupedItems; trackBy: trackByAreaKey">
+              <td data-label="Área"><strong>{{ group.areaName }}</strong></td>
+              <td data-label="Sede">{{ group.siteName }}</td>
+              <td data-label="Equipos">{{ group.assetCount }}</td>
+              <td data-label="Frecuencia">{{ frequencyLabel(group) }}</td>
+              <td data-label="Estado">
+                <div class="status-stack">
+                  <span
+                    *ngFor="let status of areaStatusItems(group)"
+                    class="status-pill"
+                    [ngClass]="status.status"
+                  >
+                    {{ itemStatusLabel(status.status) }} {{ status.count }}
+                  </span>
+                </div>
+              </td>
+              <td data-label="Ventanas de servicio">
+                <div class="date-list">
+                  <div *ngFor="let dateGroup of group.dateGroups" class="date-line">
+                    <input
+                      *ngIf="editing"
+                      type="date"
+                      [value]="dateGroup.plannedDate"
+                      [min]="dateGroup.minDate"
+                      [max]="dateGroup.maxDate"
+                      (change)="onAreaPlannedDateChange(dateGroup, $any($event.target).value)"
+                    />
+                    <span *ngIf="!editing">
+                      <strong>{{ formatDate(dateGroup.plannedDate) }}</strong>
+                      al {{ formatDate(dateGroup.maxDate) }}
+                    </span>
+                    <small>{{ dateGroup.items.length }} mantenimiento{{ dateGroup.items.length === 1 ? '' : 's' }}</small>
+                    <small *ngIf="editing">Límite: {{ formatDate(dateGroup.maxDate) }}</small>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ng-template #noMaintenanceItems>
+        <div class="empty-state compact-empty">No hay mantenimientos para los filtros seleccionados.</div>
+      </ng-template>
+    </section>
+  </section>
 
-  <div class="card">
-    <div class="card-header">
-      <h2>Cronograma de capacitaciones</h2>
-      <div class="card-actions">
-        <label class="inline">
+  <section *ngIf="viewMode === 'training'" class="workspace-panel" role="tabpanel">
+    <div class="section-heading">
+      <div>
+        <h2>Cronogramas de capacitaciones</h2>
+        <p>{{ filteredTrainingSchedules.length }} registro{{ filteredTrainingSchedules.length === 1 ? '' : 's' }}</p>
+      </div>
+      <div class="heading-actions">
+        <label class="inline-control">
           Estado
           <select [(ngModel)]="trainingStatusFilter">
             <option value="">Todos</option>
@@ -273,258 +357,531 @@
             <option value="closed">Cerrado</option>
           </select>
         </label>
-        <span class="pill">{{ filteredTrainingSchedules.length }} registros</span>
+        <button
+          type="button"
+          class="primary"
+          [disabled]="hasTrainingSchedule || loading || isBusy()"
+          [title]="hasTrainingSchedule ? 'Ya existe un cronograma para el año seleccionado' : ''"
+          (click)="toggleGenerator()"
+        >
+          Nuevo cronograma
+        </button>
       </div>
     </div>
-    <div class="schedule-list">
-      <div class="schedule-row header training">
-        <span>Año</span>
-        <span>Fecha inicial</span>
-        <span>Periodicidad</span>
-        <span>Estado</span>
-        <span>Áreas</span>
-        <span>Fechas</span>
-        <span>Acciones</span>
-      </div>
-      <div class="schedule-row training" *ngFor="let schedule of filteredTrainingSchedules">
-        <span>{{ schedule.year }}</span>
-        <span>{{ schedule.start_date | date: 'dd/MM/yyyy' }}</span>
-        <span>{{ schedule.periodicity | titlecase }}</span>
-        <span>{{ trainingStatusLabel(schedule.status) }}</span>
-        <span class="training-items">
-          <div class="training-item" *ngFor="let item of trainingItemsBySchedule[schedule.id]">
-            <div class="training-item-info">
-              <strong>{{ item.area_name || 'Área' }}</strong>
-              <span class="status-pill">{{ trainingItemStatus(item) }}</span>
-            </div>
-          </div>
-          <span class="muted" *ngIf="!(trainingItemsBySchedule[schedule.id]?.length)">Sin capacitaciones.</span>
-        </span>
-        <span class="training-items">
-          <div class="training-item" *ngFor="let item of trainingItemsBySchedule[schedule.id]">
-            <div class="training-item-info">
-              <input
-                *ngIf="schedule.status !== 'approved'; else dateLabel"
-                type="date"
-                [(ngModel)]="item.planned_date"
-              />
-              <ng-template #dateLabel>
-                <span>{{ item.planned_date | date: 'dd/MM/yyyy' }}</span>
-              </ng-template>
-            </div>
-            <div class="actions">
-              <button
-                *ngIf="item.pdf_path"
-                type="button"
-                class="ghost"
-                (click)="openTrainingPdf(item)"
-              >
-                Ver PDF
-              </button>
-              <button
-                *ngIf="item.pdf_path && auth.hasRole('superuser')"
-                type="button"
-                class="danger"
-                (click)="deleteTrainingPdf(item)"
-              >
-                Eliminar
-              </button>
-            <button
-              type="button"
-              class="upload-btn"
-              *ngIf="!item.pdf_path"
-              [disabled]="!canUploadTrainingPdf(item)"
-              (click)="fileInput.click()"
-            >
-              Subir Acta
-            </button>
+
+    <form *ngIf="showGenerator" class="creation-panel training-form" (submit)="$event.preventDefault(); generateTrainingSchedule()">
+      <label>
+        Fecha inicial
+        <input
+          type="date"
+          [(ngModel)]="trainingStartDate"
+          name="trainingStartDate"
+          [min]="selectedYear + '-01-01'"
+          [max]="selectedYear + '-12-31'"
+          required
+        />
+      </label>
+      <label>
+        Periodicidad
+        <select [(ngModel)]="trainingPeriodicity" name="trainingPeriodicity">
+          <option *ngFor="let option of trainingPeriodOptions" [value]="option">{{ titleCase(option) }}</option>
+        </select>
+      </label>
+      <fieldset class="area-picker">
+        <legend>Áreas incluidas · {{ selectedAreas.length }} seleccionadas</legend>
+        <div class="area-picker-toolbar">
+          <input type="search" [(ngModel)]="areaSearch" name="areaSearch" placeholder="Buscar área" />
+          <button type="button" class="secondary compact" (click)="selectVisibleAreas()">Seleccionar visibles</button>
+          <button type="button" class="secondary compact" (click)="clearAreaSelection()">Limpiar</button>
+        </div>
+        <div class="area-grid">
+          <label *ngFor="let area of filteredAreas; trackBy: trackById" class="check-option">
             <input
-              #fileInput
-              class="upload-input"
-              type="file"
-              accept="application/pdf"
-              [disabled]="!canUploadTrainingPdf(item)"
-              (change)="uploadTrainingPdf(item, $event)"
+              type="checkbox"
+              [checked]="selectedAreas.includes(area.id)"
+              (change)="toggleAreaSelection(area.id, $any($event.target).checked)"
             />
-            </div>
-          </div>
-          <span class="muted" *ngIf="!(trainingItemsBySchedule[schedule.id]?.length)">Sin fechas.</span>
-        </span>
-        <span class="actions">
-          <button type="button" (click)="openTrainingSchedulePdf(schedule.id)">Ver</button>
-          <button
-            type="button"
-            class="primary"
-            *ngIf="schedule.status !== 'approved'"
-            (click)="approveTrainingSchedule(schedule.id)"
-          >
-            Aprobar
-          </button>
-          <button
-            type="button"
-            class="ghost"
-            *ngIf="schedule.status !== 'approved'"
-            (click)="saveTrainingItems(schedule.id)"
-          >
-            Guardar cambios
-          </button>
-          <button
-            *ngIf="auth.hasRole('superuser')"
-            type="button"
-            class="danger"
-            (click)="deleteTrainingSchedule(schedule.id)"
-          >
-            Eliminar
-          </button>
-        </span>
+            <span>{{ area.name }}</span>
+          </label>
+          <span *ngIf="!filteredAreas.length" class="muted">No hay áreas para mostrar.</span>
+        </div>
+      </fieldset>
+      <div class="form-actions full-row">
+        <button type="button" class="secondary" [disabled]="isBusy()" (click)="showGenerator = false">
+          Cancelar
+        </button>
+        <button type="submit" class="primary" [disabled]="isBusy()">
+          {{ isBusy('generate-training') ? 'Generando...' : 'Generar borrador' }}
+        </button>
       </div>
-      <p class="muted" *ngIf="filteredTrainingSchedules.length === 0">No hay cronogramas de capacitaciones.</p>
-    </div>
-  </div>
-  </ng-container>
+    </form>
 
-  <ng-container *ngIf="viewMode === 'calibration' && canAccessCalibrationModule()">
-    <div class="card header-card">
-      <div class="form-grid">
-        <label>
-          Año
-          <input type="number" [(ngModel)]="selectedYear" />
+    <div class="table-wrap" *ngIf="filteredTrainingSchedules.length; else noTrainingSchedules">
+      <table class="data-table schedule-table">
+        <thead>
+          <tr>
+            <th>Año</th>
+            <th>Fecha inicial</th>
+            <th>Periodicidad</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            *ngFor="let schedule of filteredTrainingSchedules; trackBy: trackById"
+            [class.selected]="schedule.id === selectedTrainingScheduleId"
+          >
+            <td data-label="Año"><strong>{{ schedule.year }}</strong></td>
+            <td data-label="Fecha inicial">{{ formatDate(schedule.start_date) }}</td>
+            <td data-label="Periodicidad">{{ titleCase(schedule.periodicity) }}</td>
+            <td data-label="Estado">
+              <span class="status-pill" [ngClass]="schedule.status">{{ statusLabel(schedule.status) }}</span>
+            </td>
+            <td data-label="Acciones">
+              <div class="row-actions">
+                <button type="button" class="secondary compact" (click)="selectTrainingSchedule(schedule.id)">
+                  Abrir detalle
+                </button>
+                <button
+                  type="button"
+                  class="secondary compact"
+                  [disabled]="isBusy()"
+                  (click)="openTrainingSchedulePdf(schedule.id)"
+                >
+                  {{ isBusy('training-schedule-pdf-' + schedule.id) ? 'Abriendo...' : 'PDF' }}
+                </button>
+                <button
+                  *ngIf="schedule.status === 'draft'"
+                  type="button"
+                  class="primary compact"
+                  [disabled]="isBusy()"
+                  (click)="requestApproveTraining(schedule)"
+                >
+                  Aprobar
+                </button>
+                <button
+                  *ngIf="auth.hasRole('superuser')"
+                  type="button"
+                  class="danger-text compact"
+                  [disabled]="isBusy()"
+                  (click)="requestDeleteTrainingSchedule(schedule)"
+                >
+                  Eliminar
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <ng-template #noTrainingSchedules>
+      <div class="empty-state">No hay cronogramas de capacitaciones para este año y filtro.</div>
+    </ng-template>
+
+    <section *ngIf="selectedTrainingSchedule" class="detail-panel" [attr.aria-busy]="detailLoading">
+      <div class="detail-heading">
+        <div>
+          <p class="eyebrow">Cronograma seleccionado</p>
+          <h3>Capacitaciones {{ selectedTrainingSchedule.year }}</h3>
+          <span>{{ titleCase(selectedTrainingSchedule.periodicity) }} · {{ statusLabel(selectedTrainingSchedule.status) }}</span>
+        </div>
+        <div class="heading-actions">
+          <button
+            *ngIf="canEditTraining() && !trainingEditing"
+            type="button"
+            class="secondary"
+            [disabled]="detailLoading || isBusy()"
+            (click)="startTrainingEdit()"
+          >
+            Editar fechas
+          </button>
+          <ng-container *ngIf="trainingEditing">
+            <button type="button" class="secondary" [disabled]="isBusy()" (click)="cancelTrainingEdit()">
+              Cancelar
+            </button>
+            <button type="button" class="primary" [disabled]="isBusy()" (click)="saveTrainingItems()">
+              {{ isBusy('save-training') ? 'Guardando...' : 'Guardar fechas' }}
+            </button>
+          </ng-container>
+        </div>
+      </div>
+
+      <div class="summary-strip">
+        <div><strong>{{ trainingItems.length }}</strong><span>Total</span></div>
+        <div><strong>{{ trainingSummary.pending }}</strong><span>Programadas</span></div>
+        <div><strong>{{ trainingSummary.active }}</strong><span>Activas</span></div>
+        <div><strong>{{ trainingSummary.done }}</strong><span>Completadas</span></div>
+      </div>
+
+      <div class="filter-bar compact-filters">
+        <label class="search-control">
+          Buscar
+          <input type="search" [(ngModel)]="trainingSearch" placeholder="Área o fecha" />
         </label>
         <label>
-          Fecha inicial
-          <input type="date" [(ngModel)]="calibrationStartDate" />
+          Estado
+          <select [(ngModel)]="trainingItemStatusFilter">
+            <option value="">Todos</option>
+            <option value="pending">Programada</option>
+            <option value="active">Activa</option>
+            <option value="done">Completada</option>
+          </select>
         </label>
-        <button type="button" (click)="generateCalibrationSchedule()">Generar cronograma</button>
+        <span class="result-count">
+          {{ filteredTrainingItems.length }} capacitación{{ filteredTrainingItems.length === 1 ? '' : 'es' }}
+        </span>
       </div>
-      <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
-      <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
-    </div>
 
-    <div class="card">
-      <div class="card-header">
+      <div class="table-wrap" *ngIf="filteredTrainingItems.length; else noTrainingItems">
+        <table class="data-table detail-table">
+          <thead>
+            <tr>
+              <th>Área</th>
+              <th>Fecha programada</th>
+              <th>Estado</th>
+              <th>Acta</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filteredTrainingItems; trackBy: trackById">
+              <td data-label="Área"><strong>{{ item.area_name || 'Sin área' }}</strong></td>
+              <td data-label="Fecha programada">
+                <input
+                  *ngIf="trainingEditing"
+                  type="date"
+                  [value]="item.planned_date"
+                  [min]="selectedYear + '-01-01'"
+                  [max]="selectedYear + '-12-31'"
+                  (change)="onTrainingDateChange(item, $any($event.target).value)"
+                />
+                <span *ngIf="!trainingEditing">{{ formatDate(item.planned_date) }}</span>
+              </td>
+              <td data-label="Estado">
+                <span class="status-pill" [ngClass]="trainingItemStatusKey(item)">
+                  {{ trainingItemStatusLabel(item) }}
+                </span>
+              </td>
+              <td data-label="Acta">
+                <div class="row-actions">
+                  <button
+                    *ngIf="item.pdf_path"
+                    type="button"
+                    class="secondary compact"
+                    [disabled]="isBusy()"
+                    (click)="openTrainingPdf(item)"
+                  >
+                    {{ isBusy('training-pdf-' + item.id) ? 'Abriendo...' : 'Ver acta' }}
+                  </button>
+                  <button
+                    *ngIf="item.pdf_path && auth.hasRole('superuser')"
+                    type="button"
+                    class="danger-text compact"
+                    [disabled]="isBusy()"
+                    (click)="requestDeleteTrainingPdf(item)"
+                  >
+                    Eliminar
+                  </button>
+                  <button
+                    *ngIf="!item.pdf_path"
+                    type="button"
+                    class="secondary compact"
+                    [disabled]="!canUploadTrainingPdf(item) || isBusy()"
+                    (click)="trainingFile.click()"
+                  >
+                    {{ isBusy('training-upload-' + item.id) ? 'Subiendo...' : 'Subir acta' }}
+                  </button>
+                  <input
+                    #trainingFile
+                    class="file-input"
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    [disabled]="!canUploadTrainingPdf(item) || isBusy()"
+                    (change)="uploadTrainingPdf(item, $event)"
+                  />
+                  <span *ngIf="!item.pdf_path && !canUploadTrainingPdf(item)" class="availability">
+                    No habilitada
+                  </span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ng-template #noTrainingItems>
+        <div class="empty-state compact-empty">No hay capacitaciones para los filtros seleccionados.</div>
+      </ng-template>
+    </section>
+  </section>
+
+  <section
+    *ngIf="viewMode === 'calibration' && canAccessCalibrationModule()"
+    class="workspace-panel"
+    role="tabpanel"
+  >
+    <div class="section-heading">
+      <div>
         <h2>Cronogramas de calibración</h2>
-        <span class="pill">{{ calibrationSchedules.length }} registros</span>
+        <p>{{ filteredCalibrationSchedules.length }} registro{{ filteredCalibrationSchedules.length === 1 ? '' : 's' }}</p>
       </div>
-      <div class="schedule-list">
-        <div class="schedule-row header">
-          <span>Año</span>
-          <span>Fecha inicial</span>
-          <span>Estado</span>
-          <span>Acciones</span>
-        </div>
-        <div class="schedule-row" *ngFor="let schedule of calibrationSchedules">
-          <span>{{ schedule.year }}</span>
-          <span>{{ schedule.start_date | date: 'dd/MM/yyyy' }}</span>
-          <span>{{ calibrationStatusLabel(schedule.status) }}</span>
-          <span class="actions">
-            <button type="button" (click)="selectedCalibrationScheduleId = schedule.id; loadCalibrationItems()">Ver</button>
-            <button type="button" class="ghost" (click)="openCalibrationSchedulePdf(schedule.id)">PDF</button>
-            <button
-              type="button"
-              class="primary"
-              *ngIf="auth.hasPermission('calibration:schedule:manage') && schedule.status !== 'approved'"
-              (click)="selectedCalibrationScheduleId = schedule.id; approveCalibrationSchedule()"
-            >
-              Aprobar
-            </button>
-            <button
-              *ngIf="auth.hasRole('superuser')"
-              type="button"
-              class="danger"
-              (click)="deleteCalibrationSchedule(schedule.id)"
-            >
-              Eliminar
-            </button>
-          </span>
-        </div>
-        <p class="muted" *ngIf="calibrationSchedules.length === 0">No hay cronogramas de calibración.</p>
+      <div class="heading-actions">
+        <label class="inline-control">
+          Estado
+          <select [(ngModel)]="calibrationScheduleStatusFilter">
+            <option value="">Todos</option>
+            <option value="draft">Borrador</option>
+            <option value="approved">Aprobado</option>
+            <option value="closed">Cerrado</option>
+          </select>
+        </label>
+        <button
+          *ngIf="canManageCalibrationSchedules()"
+          type="button"
+          class="primary"
+          [disabled]="hasCalibrationSchedule || loading || isBusy()"
+          [title]="hasCalibrationSchedule ? 'Ya existe un cronograma para el año seleccionado' : ''"
+          (click)="toggleGenerator()"
+        >
+          Nuevo cronograma
+        </button>
       </div>
     </div>
 
-    <div class="card" *ngIf="selectedCalibrationScheduleId">
-      <div class="card-header">
-        <h2>Detalle de calibraciones</h2>
-        <div class="card-actions">
-          <label class="inline">
-            Área
-            <select [(ngModel)]="calibrationAreaFilter">
-              <option value="">Todas</option>
-              <option *ngFor="let area of calibrationAreaOptions" [value]="area">{{ area }}</option>
-            </select>
-          </label>
-          <label class="inline">
-            Estado
-            <select [(ngModel)]="calibrationStatusFilter">
-              <option value="">Todos</option>
-              <option value="Programado">Programado</option>
-              <option value="Activo">Activo</option>
-              <option value="Completado">Completado</option>
-            </select>
-          </label>
-          <input
-            class="search-input"
-            type="text"
-            placeholder="Buscar equipo"
-            [(ngModel)]="calibrationSearch"
-          />
-          <span class="pill">{{ filteredCalibrationItems.length }} registros</span>
-        </div>
+    <form *ngIf="showGenerator && canManageCalibrationSchedules()" class="creation-panel" (submit)="$event.preventDefault(); generateCalibrationSchedule()">
+      <label>
+        Fecha inicial
+        <input
+          type="date"
+          [(ngModel)]="calibrationStartDate"
+          name="calibrationStartDate"
+          [min]="selectedYear + '-01-01'"
+          [max]="selectedYear + '-12-31'"
+          required
+        />
+      </label>
+      <div class="form-actions">
+        <button type="button" class="secondary" [disabled]="isBusy()" (click)="showGenerator = false">
+          Cancelar
+        </button>
+        <button type="submit" class="primary" [disabled]="isBusy()">
+          {{ isBusy('generate-calibration') ? 'Generando...' : 'Generar borrador' }}
+        </button>
       </div>
-      <div class="items-table">
-        <div class="item-row header calibration-row">
-          <span>Código</span>
-          <span>Equipo</span>
-          <span>Área</span>
-          <span>Inicio</span>
-          <span>Fin</span>
-          <span>Estado</span>
-          <span>Acta</span>
-        </div>
-        <div class="item-row calibration-row" *ngFor="let item of filteredCalibrationItems">
-          <span>{{ item.code }}</span>
-          <span>{{ item.name }}</span>
-          <span>{{ item.area_name || '-' }}</span>
-          <span>{{ item.planned_date | date: 'dd/MM/yyyy' }}</span>
-          <span>{{ item.deadline_date | date: 'dd/MM/yyyy' }}</span>
-          <span>{{ calibrationItemStatus(item) }}</span>
-          <span class="actions">
-            <button
-              *ngIf="item.pdf_path"
-              type="button"
-              class="ghost"
-              (click)="openCalibrationPdf(item)"
-            >
-              Ver PDF
-            </button>
-            <button
-              *ngIf="item.pdf_path && auth.hasRole('superuser')"
-              type="button"
-              class="danger"
-              (click)="deleteCalibrationPdf(item)"
-            >
-              Eliminar
-            </button>
-            <button
-              type="button"
-              class="upload-btn"
-              *ngIf="!item.pdf_path"
-              [disabled]="!canUploadCalibration(item)"
-              (click)="fileInputCal.click()"
-            >
-              Subir Acta
-            </button>
-            <input
-              #fileInputCal
-              class="upload-input"
-              type="file"
-              accept="application/pdf"
-              [disabled]="!canUploadCalibration(item)"
-              (change)="uploadCalibrationPdf(item, $event)"
-            />
-          </span>
-        </div>
-        <p class="muted" *ngIf="filteredCalibrationItems.length === 0">No hay calibraciones para este filtro.</p>
-      </div>
+    </form>
+
+    <div class="table-wrap" *ngIf="filteredCalibrationSchedules.length; else noCalibrationSchedules">
+      <table class="data-table schedule-table">
+        <thead>
+          <tr>
+            <th>Año</th>
+            <th>Fecha inicial</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            *ngFor="let schedule of filteredCalibrationSchedules; trackBy: trackById"
+            [class.selected]="schedule.id === selectedCalibrationScheduleId"
+          >
+            <td data-label="Año"><strong>{{ schedule.year }}</strong></td>
+            <td data-label="Fecha inicial">{{ formatDate(schedule.start_date) }}</td>
+            <td data-label="Estado">
+              <span class="status-pill" [ngClass]="schedule.status">{{ statusLabel(schedule.status) }}</span>
+            </td>
+            <td data-label="Acciones">
+              <div class="row-actions">
+                <button type="button" class="secondary compact" (click)="selectCalibrationSchedule(schedule.id)">
+                  Abrir detalle
+                </button>
+                <button
+                  type="button"
+                  class="secondary compact"
+                  [disabled]="isBusy()"
+                  (click)="openCalibrationSchedulePdf(schedule.id)"
+                >
+                  {{ isBusy('calibration-schedule-pdf-' + schedule.id) ? 'Abriendo...' : 'PDF' }}
+                </button>
+                <button
+                  *ngIf="canManageCalibrationSchedules() && schedule.status === 'draft'"
+                  type="button"
+                  class="primary compact"
+                  [disabled]="isBusy()"
+                  (click)="requestApproveCalibration(schedule)"
+                >
+                  Aprobar
+                </button>
+                <button
+                  *ngIf="auth.hasRole('superuser')"
+                  type="button"
+                  class="danger-text compact"
+                  [disabled]="isBusy()"
+                  (click)="requestDeleteCalibrationSchedule(schedule)"
+                >
+                  Eliminar
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
-  </ng-container>
+    <ng-template #noCalibrationSchedules>
+      <div class="empty-state">No hay cronogramas de calibración para este año y filtro.</div>
+    </ng-template>
+
+    <section *ngIf="selectedCalibrationSchedule" class="detail-panel" [attr.aria-busy]="detailLoading">
+      <div class="detail-heading">
+        <div>
+          <p class="eyebrow">Cronograma seleccionado</p>
+          <h3>Calibraciones {{ selectedCalibrationSchedule.year }}</h3>
+          <span>{{ formatDate(selectedCalibrationSchedule.start_date) }} · {{ statusLabel(selectedCalibrationSchedule.status) }}</span>
+        </div>
+      </div>
+
+      <div class="summary-strip">
+        <div><strong>{{ calibrationItems.length }}</strong><span>Total</span></div>
+        <div><strong>{{ calibrationSummary.pending }}</strong><span>Programadas</span></div>
+        <div><strong>{{ calibrationSummary.active }}</strong><span>Activas</span></div>
+        <div><strong>{{ calibrationSummary.expired }}</strong><span>Vencidas</span></div>
+        <div><strong>{{ calibrationSummary.done }}</strong><span>Completadas</span></div>
+      </div>
+
+      <div class="filter-bar">
+        <label class="search-control">
+          Buscar
+          <input
+            type="search"
+            [(ngModel)]="calibrationSearch"
+            placeholder="Equipo, código, serie o marca"
+          />
+        </label>
+        <label>
+          Área
+          <select [(ngModel)]="calibrationAreaFilter">
+            <option value="">Todas</option>
+            <option *ngFor="let area of calibrationAreaOptions" [value]="area">{{ area }}</option>
+          </select>
+        </label>
+        <label>
+          Estado
+          <select [(ngModel)]="calibrationItemStatusFilter">
+            <option value="">Todos</option>
+            <option value="pending">Programada</option>
+            <option value="active">Activa</option>
+            <option value="expired">Vencida</option>
+            <option value="done">Completada</option>
+          </select>
+        </label>
+        <span class="result-count">
+          {{ filteredCalibrationItems.length }} calibración{{ filteredCalibrationItems.length === 1 ? '' : 'es' }}
+        </span>
+      </div>
+
+      <div class="table-wrap" *ngIf="filteredCalibrationItems.length; else noCalibrationItems">
+        <table class="data-table detail-table calibration-detail-table">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Equipo</th>
+              <th>Área</th>
+              <th>Ventana</th>
+              <th>Estado</th>
+              <th>Certificado</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of filteredCalibrationItems; trackBy: trackById">
+              <td data-label="Código"><strong>{{ item.code || '-' }}</strong></td>
+              <td data-label="Equipo">
+                <strong>{{ item.name || '-' }}</strong>
+                <small>{{ item.brand || 'Sin marca' }} · {{ item.model || 'Sin modelo' }}</small>
+                <small>Serie: {{ item.serial || 'NR' }}</small>
+              </td>
+              <td data-label="Área">{{ item.area_name || 'Sin área' }}</td>
+              <td data-label="Ventana">
+                {{ formatDate(item.planned_date) }} al {{ formatDate(item.deadline_date) }}
+              </td>
+              <td data-label="Estado">
+                <span class="status-pill" [ngClass]="calibrationItemStatusKey(item)">
+                  {{ calibrationItemStatusLabel(item) }}
+                </span>
+              </td>
+              <td data-label="Certificado">
+                <div class="row-actions">
+                  <button
+                    *ngIf="item.pdf_path"
+                    type="button"
+                    class="secondary compact"
+                    [disabled]="isBusy()"
+                    (click)="openCalibrationPdf(item)"
+                  >
+                    {{ isBusy('calibration-pdf-' + item.id) ? 'Abriendo...' : 'Ver certificado' }}
+                  </button>
+                  <button
+                    *ngIf="item.pdf_path && auth.hasRole('superuser')"
+                    type="button"
+                    class="danger-text compact"
+                    [disabled]="isBusy()"
+                    (click)="requestDeleteCalibrationPdf(item)"
+                  >
+                    Eliminar
+                  </button>
+                  <button
+                    *ngIf="!item.pdf_path"
+                    type="button"
+                    class="secondary compact"
+                    [disabled]="!canUploadCalibration(item) || isBusy()"
+                    (click)="calibrationFile.click()"
+                  >
+                    {{ isBusy('calibration-upload-' + item.id) ? 'Subiendo...' : 'Subir certificado' }}
+                  </button>
+                  <input
+                    #calibrationFile
+                    class="file-input"
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    [disabled]="!canUploadCalibration(item) || isBusy()"
+                    (change)="uploadCalibrationPdf(item, $event)"
+                  />
+                  <span *ngIf="!item.pdf_path && !canUploadCalibration(item)" class="availability">
+                    No habilitado
+                  </span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ng-template #noCalibrationItems>
+        <div class="empty-state compact-empty">No hay calibraciones para los filtros seleccionados.</div>
+      </ng-template>
+    </section>
+  </section>
+
+  <div *ngIf="confirmDialog" class="modal-backdrop" (click)="closeConfirm()">
+    <section
+      class="confirm-modal"
+      role="dialog"
+      aria-modal="true"
+      [attr.aria-labelledby]="'confirm-title'"
+      (click)="$event.stopPropagation()"
+    >
+      <h2 id="confirm-title">{{ confirmDialog.title }}</h2>
+      <p>{{ confirmDialog.message }}</p>
+      <div class="modal-actions">
+        <button type="button" class="secondary" [disabled]="confirmBusy" (click)="closeConfirm()">
+          Cancelar
+        </button>
+        <button
+          type="button"
+          [ngClass]="confirmDialog.danger ? 'danger' : 'primary'"
+          [disabled]="confirmBusy"
+          (click)="confirmCurrentAction()"
+        >
+          {{ confirmBusy ? 'Procesando...' : confirmDialog.confirmLabel }}
+        </button>
+      </div>
+    </section>
+  </div>
 </section>

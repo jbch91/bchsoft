@@ -251,45 +251,46 @@ import {
   buildTrainingSchedulePdf
 } from './pdf.js';
 import {
-  createSchedule,
+  createScheduleWithItems,
   listSchedules,
   getScheduleById,
   setSchedulePdf,
   approveSchedule,
-  markEngineerEdited,
   listScheduleItemsWithSchema,
-  insertScheduleItems,
   updateScheduleItems,
+  countScheduleItems,
   setScheduleClosedIfDone,
   markScheduleItemDone,
   findScheduleItemForAsset,
   deleteSchedule
 } from './schedules.js';
 import {
-  createTrainingSchedule,
+  createTrainingScheduleWithItems,
   listTrainingSchedules,
   getTrainingScheduleById,
   approveTrainingSchedule,
   deleteTrainingSchedule,
-  insertTrainingItems,
   listTrainingItemsWithSchema,
   setTrainingItemPdf,
   setTrainingSchedulePdf,
   clearTrainingItemPdf,
-  updateTrainingItems
+  updateTrainingItems,
+  countTrainingItems,
+  refreshTrainingScheduleStatus
 } from './training.js';
 import {
-  createCalibrationSchedule,
+  createCalibrationScheduleWithItems,
   listCalibrationSchedules,
   getCalibrationScheduleById,
   approveCalibrationSchedule,
   setCalibrationSchedulePdf,
   deleteCalibrationSchedule,
-  insertCalibrationItems,
   listCalibrationItemsWithSchema,
   setCalibrationItemPdf,
   clearCalibrationItemPdf,
-  listCalibrationReportsByAsset
+  listCalibrationReportsByAsset,
+  countCalibrationItems,
+  refreshCalibrationScheduleStatus
 } from './calibration.js';
 import {
   createMaintenanceRequest,
@@ -331,6 +332,21 @@ import {
   maintenanceRequestDescriptionError,
   normalizeMaintenanceRequestDescription
 } from './maintenance-workflow.js';
+import {
+  ScheduleValidationError,
+  addBusinessDaysUtc as addScheduleBusinessDays,
+  addMonthsUtc as addScheduleMonths,
+  buildRecurringDates,
+  dateOnlyFromDatabase,
+  formatDateOnly as formatScheduleDate,
+  frequencyToMonths as scheduleFrequencyToMonths,
+  normalizeMaintenanceItemUpdates,
+  normalizePeriodicity,
+  normalizeScheduleStart,
+  normalizeTrainingItemUpdates,
+  normalizeUuidList,
+  parseDateOnly as parseScheduleDate
+} from './schedule-workflow.js';
 import {
   BLANK_MAINTENANCE_PROTOCOL_PERMISSION,
   MAX_BLANK_MAINTENANCE_PROTOCOLS_PER_BATCH,
@@ -390,6 +406,43 @@ app.use(express.json({ limit: '2mb' }));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 const upload = multer({ storage: multer.memoryStorage() });
+const MAX_SCHEDULE_PDF_BYTES = 15 * 1024 * 1024;
+const schedulePdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_SCHEDULE_PDF_BYTES },
+  fileFilter: (_req, file, callback) => {
+    if (file.mimetype !== 'application/pdf') {
+      callback(new Error('Solo se permiten archivos PDF.'));
+      return;
+    }
+    callback(null, true);
+  }
+});
+const uploadSchedulePdf = (req, res, next) => {
+  schedulePdfUpload.single('pdf')(req, res, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+    const message =
+      error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE'
+        ? 'El PDF supera el límite de 15 MB.'
+        : error.message || 'No se pudo procesar el PDF.';
+    res.status(400).json({ message });
+  });
+};
+
+function isPdfFile(file) {
+  return Boolean(file?.buffer?.subarray(0, 5).equals(Buffer.from('%PDF-')));
+}
+
+function respondScheduleError(res, error, fallbackMessage) {
+  if (error instanceof ScheduleValidationError || error?.code === 'SCHEDULE_ITEM_MISMATCH') {
+    return res.status(400).json({ message: error.message });
+  }
+  console.error(error);
+  return res.status(500).json({ message: fallbackMessage });
+}
 const BIOMED_DOCUMENT_TYPES = ['cedula_ciudadania', 'cedula_extranjeria', 'pasaporte'];
 const MAINTENANCE_ASSET_STATUSES = [
   'operativo',
@@ -10883,25 +10936,11 @@ app.post(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    const { year, startDate } = req.body || {};
-    if (!year || !startDate) {
-      return res.status(400).json({ message: 'Año y fecha inicial requeridos.' });
-    }
-
-    const existing = await listSchedules(clientId, Number(year));
-    if (existing.length && !req.user.roles?.includes('superuser')) {
-      return res.status(409).json({ message: 'Ya existe un cronograma para este año.' });
-    }
-    if (existing.length && req.user.roles?.includes('superuser')) {
-      for (const prev of existing) {
-        if (prev.pdf_path) {
-          const pdfPath = path.join(process.cwd(), prev.pdf_path.replace(/^\//, ''));
-          if (fs.existsSync(pdfPath)) {
-            fs.unlinkSync(pdfPath);
-          }
-        }
-        await deleteSchedule(prev.id);
-      }
+    let scheduleInput;
+    try {
+      scheduleInput = normalizeScheduleStart(req.body || {});
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo validar el cronograma.');
     }
 
     const client = await getClientById(clientId);
@@ -10921,41 +10960,70 @@ app.post(
       return res.status(400).json({ message: 'No hay equipos con periodicidad definida.' });
     }
 
-    const schedule = await createSchedule({
-      clientId,
-      year: Number(year),
-      startDate,
-      createdBy: req.user.sub,
-      pdfPath: null
-    });
-
-    const start = new Date(startDate);
-    if (Number.isNaN(start.getTime())) {
-      return res.status(400).json({ message: 'Fecha inicial inválida.' });
-    }
-    start.setFullYear(Number(year));
     const items = [];
+    const datesByFrequency = new Map();
+    const unsupportedFrequencies = new Set();
     for (const asset of assets) {
-      const months = freqToMonths(asset.maintenance_frequency);
-      if (!months) continue;
-      let planned = adjustToWeekday(start);
-      while (planned.getFullYear() === Number(year)) {
-        const deadline = addBusinessDays(planned, 10);
+      const months = scheduleFrequencyToMonths(asset.maintenance_frequency);
+      if (!months) {
+        unsupportedFrequencies.add(String(asset.maintenance_frequency));
+        continue;
+      }
+      if (!datesByFrequency.has(months)) {
+        datesByFrequency.set(months, buildRecurringDates({ ...scheduleInput, months }));
+      }
+      for (const plannedDate of datesByFrequency.get(months)) {
+        const deadlineDate = formatScheduleDate(
+          addScheduleBusinessDays(parseScheduleDate(plannedDate), 10)
+        );
         items.push({
-          scheduleId: schedule.id,
           assetId: asset.id,
           frequency: asset.maintenance_frequency,
-          plannedDate: planned.toISOString().slice(0, 10),
-          deadlineDate: deadline.toISOString().slice(0, 10)
+          plannedDate,
+          deadlineDate
         });
-        planned = adjustToWeekday(addMonths(planned, months));
       }
     }
+    if (!items.length) {
+      const detail = unsupportedFrequencies.size
+        ? ` Revisa estas periodicidades: ${Array.from(unsupportedFrequencies).join(', ')}.`
+        : '';
+      return res.status(400).json({
+        message: `No se pudieron generar mantenimientos con las periodicidades registradas.${detail}`
+      });
+    }
 
-    await insertScheduleItems(items);
-    const scheduleItems = await listScheduleItemsWithSchema(schedule.id, schema);
-    await writeSchedulePdf({ client, schedule: { ...schedule, client_id: clientId }, items: scheduleItems });
-    return res.status(201).json({ id: schedule.id });
+    try {
+      const schedule = await createScheduleWithItems({
+        clientId,
+        ...scheduleInput,
+        createdBy: req.user.sub,
+        items
+      });
+      if (!schedule) {
+        return res.status(409).json({ message: 'Ya existe un cronograma de mantenimiento para este año.' });
+      }
+      const scheduleItems = await listScheduleItemsWithSchema(schedule.id, schema);
+      await writeSchedulePdf({ client, schedule, items: scheduleItems });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'MAINTENANCE_SCHEDULE_CREATE',
+        targetUserId: clientId,
+        targetUsername: client.name,
+        details: {
+          category: 'schedule',
+          clientId,
+          clientName: client.name,
+          scheduleId: schedule.id,
+          year: scheduleInput.year,
+          itemCount: items.length
+        }
+      });
+      return res.status(201).json({ id: schedule.id });
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo generar el cronograma de mantenimiento.');
+    }
   }
 );
 
@@ -10991,31 +11059,41 @@ app.patch(
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     const { items } = req.body || {};
-    if (!Array.isArray(items)) {
-      return res.status(400).json({ message: 'Items inválidos.' });
-    }
-    const canEdit = req.user.roles?.includes('superuser') || (!schedule.engineer_edited && schedule.status !== 'approved');
+    const canEdit =
+      req.user.roles?.includes('superuser') ||
+      (!schedule.engineer_edited && schedule.status === 'draft');
     if (!canEdit) {
       return res.status(403).json({ message: 'Cronograma bloqueado para edición.' });
     }
 
-    const normalized = items.map((item) => {
-      const planned = adjustToWeekday(new Date(item.plannedDate));
-      const deadline = addBusinessDays(planned, 10);
-      return {
-        id: item.id,
-        plannedDate: planned.toISOString().slice(0, 10),
-        deadlineDate: deadline.toISOString().slice(0, 10)
-      };
-    });
-    await updateScheduleItems(normalized);
-    if (!req.user.roles?.includes('superuser')) {
-      await markEngineerEdited(schedule.id);
+    try {
+      const client = await getClientById(schedule.client_id);
+      const currentItems = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
+      const normalized = normalizeMaintenanceItemUpdates(items, currentItems, schedule.year);
+      await updateScheduleItems(schedule.id, normalized, {
+        markEngineerEdited: !req.user.roles?.includes('superuser')
+      });
+      const scheduleItems = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
+      await writeSchedulePdf({ client, schedule, items: scheduleItems });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'MAINTENANCE_SCHEDULE_UPDATE',
+        targetUserId: schedule.client_id,
+        targetUsername: client.name,
+        details: {
+          category: 'schedule',
+          clientId: schedule.client_id,
+          clientName: client.name,
+          scheduleId: schedule.id,
+          year: schedule.year,
+          updatedItemCount: normalized.length
+        }
+      });
+      return res.json({ ok: true });
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo actualizar el cronograma de mantenimiento.');
     }
-    const client = await getClientById(schedule.client_id);
-    const scheduleItems = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
-    await writeSchedulePdf({ client, schedule, items: scheduleItems });
-    return res.json({ ok: true });
   }
 );
 
@@ -11031,15 +11109,39 @@ app.post(
     if (req.user.clientId && req.user.clientId !== schedule.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (!req.user.roles?.includes('superuser') && schedule.status === 'approved') {
-      return res.status(400).json({ message: 'Cronograma ya aprobado.' });
+    if (schedule.status !== 'draft') {
+      return res.status(409).json({ message: 'El cronograma ya fue aprobado o cerrado.' });
     }
-    await approveSchedule(schedule.id);
     const client = await getClientById(schedule.client_id);
-    if (client) {
-      const scheduleItems = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
-      await writeSchedulePdf({ client, schedule, items: scheduleItems });
+    if (!client) {
+      return res.status(404).json({ message: 'Cliente no encontrado.' });
     }
+    const itemCount = await countScheduleItems(schedule.id);
+    if (!itemCount) {
+      return res.status(400).json({ message: 'No se puede aprobar un cronograma sin mantenimientos.' });
+    }
+    const approved = await approveSchedule(schedule.id);
+    if (!approved) {
+      return res.status(409).json({ message: 'El cronograma cambió de estado. Actualiza la información.' });
+    }
+    const scheduleItems = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
+    await writeSchedulePdf({ client, schedule: { ...schedule, status: 'approved' }, items: scheduleItems });
+    await syncDueScheduleRequests(schedule.client_id, req.user.sub);
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'MAINTENANCE_SCHEDULE_APPROVE',
+      targetUserId: schedule.client_id,
+      targetUsername: client.name,
+      details: {
+        category: 'schedule',
+        clientId: schedule.client_id,
+        clientName: client.name,
+        scheduleId: schedule.id,
+        year: schedule.year,
+        itemCount
+      }
+    });
     return res.json({ ok: true });
   }
 );
@@ -11148,56 +11250,69 @@ app.post(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    const { year, startDate, periodicity, areaIds } = req.body || {};
-    if (!year || !startDate || !periodicity || !Array.isArray(areaIds) || !areaIds.length) {
-      return res.status(400).json({ message: 'Datos incompletos.' });
-    }
-    const months = freqToMonths(periodicity);
-    if (!months) {
-      return res.status(400).json({ message: 'Periodicidad inválida.' });
-    }
-
-    const existing = await listTrainingSchedules(clientId, Number(year));
-    if (existing.length && !req.user.roles?.includes('superuser')) {
-      return res.status(409).json({ message: 'Ya existe un cronograma de capacitaciones para este año.' });
+    let scheduleInput;
+    let periodicity;
+    let areaIds;
+    try {
+      scheduleInput = normalizeScheduleStart(req.body || {});
+      periodicity = normalizePeriodicity(req.body?.periodicity);
+      areaIds = normalizeUuidList(req.body?.areaIds, 'Las áreas');
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo validar el cronograma de capacitaciones.');
     }
 
     const client = await getClientById(clientId);
     if (!client) {
       return res.status(404).json({ message: 'Cliente no encontrado.' });
     }
-
-    const schedule = await createTrainingSchedule({
-      clientId,
-      year: Number(year),
-      startDate,
-      periodicity,
-      createdBy: req.user.sub
-    });
-
-    const start = new Date(startDate);
-    if (Number.isNaN(start.getTime())) {
-      return res.status(400).json({ message: 'Fecha inicial inválida.' });
+    const areaCheck = await query(
+      `SELECT id FROM "${client.schema_name}".areas WHERE id = ANY($1::uuid[])`,
+      [areaIds]
+    );
+    if (areaCheck.rows.length !== areaIds.length) {
+      return res.status(400).json({ message: 'Una o más áreas no pertenecen al cliente seleccionado.' });
     }
-    start.setFullYear(Number(year));
 
-    const items = [];
-    for (const areaId of areaIds) {
-      let planned = adjustToWeekday(start);
-      while (planned.getFullYear() === Number(year)) {
-        items.push({
-          scheduleId: schedule.id,
-          areaId,
-          plannedDate: planned.toISOString().slice(0, 10)
-        });
-        planned = adjustToWeekday(addMonths(planned, months));
+    const months = scheduleFrequencyToMonths(periodicity);
+    const dates = buildRecurringDates({ ...scheduleInput, months });
+    const items = areaIds.flatMap((areaId) =>
+      dates.map((plannedDate) => ({ areaId, plannedDate }))
+    );
+
+    try {
+      const schedule = await createTrainingScheduleWithItems({
+        clientId,
+        ...scheduleInput,
+        periodicity,
+        createdBy: req.user.sub,
+        items
+      });
+      if (!schedule) {
+        return res.status(409).json({ message: 'Ya existe un cronograma de capacitaciones para este año.' });
       }
+      const scheduleItems = await listTrainingItemsWithSchema(schedule.id, client.schema_name);
+      await writeTrainingSchedulePdf({ client, schedule, items: scheduleItems });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'TRAINING_SCHEDULE_CREATE',
+        targetUserId: clientId,
+        targetUsername: client.name,
+        details: {
+          category: 'schedule',
+          clientId,
+          clientName: client.name,
+          scheduleId: schedule.id,
+          year: scheduleInput.year,
+          periodicity,
+          areaCount: areaIds.length,
+          itemCount: items.length
+        }
+      });
+      return res.status(201).json({ id: schedule.id });
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo generar el cronograma de capacitaciones.');
     }
-
-    await insertTrainingItems(items);
-    const scheduleItems = await listTrainingItemsWithSchema(schedule.id, client.schema_name);
-    await writeTrainingSchedulePdf({ client, schedule: { ...schedule, client_id: clientId, periodicity }, items: scheduleItems });
-    return res.status(201).json({ id: schedule.id });
   }
 );
 
@@ -11215,7 +11330,7 @@ app.get(
     }
     const client = await getClientById(schedule.client_id);
     const items = await listTrainingItemsWithSchema(schedule.id, client.schema_name);
-    const today = todayLocalISO();
+    const today = todayInBogota();
     const normalized = items.map((item) => {
       const plannedDate = toLocalISODate(item.planned_date);
       return {
@@ -11261,7 +11376,7 @@ app.get(
        ORDER BY s.year DESC, i.planned_date ASC`,
       params
     );
-    const today = todayLocalISO();
+    const today = todayInBogota();
     const normalized = rows.map((item) => {
       const plannedDate = toLocalISODate(item.planned_date);
       return {
@@ -11289,15 +11404,38 @@ app.post(
     if (req.user.clientId && req.user.clientId !== schedule.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (!req.user.roles?.includes('superuser') && schedule.status === 'approved') {
-      return res.status(400).json({ message: 'Cronograma ya aprobado.' });
+    if (schedule.status !== 'draft') {
+      return res.status(409).json({ message: 'El cronograma ya fue aprobado o cerrado.' });
     }
-    await approveTrainingSchedule(schedule.id);
     const client = await getClientById(schedule.client_id);
-    if (client) {
-      const scheduleItems = await listTrainingItemsWithSchema(schedule.id, client.schema_name);
-      await writeTrainingSchedulePdf({ client, schedule, items: scheduleItems });
+    if (!client) {
+      return res.status(404).json({ message: 'Cliente no encontrado.' });
     }
+    const itemCount = await countTrainingItems(schedule.id);
+    if (!itemCount) {
+      return res.status(400).json({ message: 'No se puede aprobar un cronograma sin capacitaciones.' });
+    }
+    const approved = await approveTrainingSchedule(schedule.id);
+    if (!approved) {
+      return res.status(409).json({ message: 'El cronograma cambió de estado. Actualiza la información.' });
+    }
+    const scheduleItems = await listTrainingItemsWithSchema(schedule.id, client.schema_name);
+    await writeTrainingSchedulePdf({ client, schedule: { ...schedule, status: 'approved' }, items: scheduleItems });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'TRAINING_SCHEDULE_APPROVE',
+      targetUserId: schedule.client_id,
+      targetUsername: client.name,
+      details: {
+        category: 'schedule',
+        clientId: schedule.client_id,
+        clientName: client.name,
+        scheduleId: schedule.id,
+        year: schedule.year,
+        itemCount
+      }
+    });
     return res.json({ ok: true });
   }
 );
@@ -11314,24 +11452,38 @@ app.patch(
     if (req.user.clientId && req.user.clientId !== schedule.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (!req.user.roles?.includes('superuser') && schedule.status === 'approved') {
+    if (!req.user.roles?.includes('superuser') && schedule.status !== 'draft') {
       return res.status(403).json({ message: 'Cronograma bloqueado para edición.' });
     }
-    const { items } = req.body || {};
-    if (!Array.isArray(items)) {
-      return res.status(400).json({ message: 'Items inválidos.' });
-    }
-    const normalized = items.map((item) => ({
-      id: item.id,
-      plannedDate: item.plannedDate
-    }));
-    await updateTrainingItems(normalized);
-    const client = await getClientById(schedule.client_id);
-    if (client) {
+    try {
+      const client = await getClientById(schedule.client_id);
+      if (!client) {
+        return res.status(404).json({ message: 'Cliente no encontrado.' });
+      }
+      const currentItems = await listTrainingItemsWithSchema(schedule.id, client.schema_name);
+      const normalized = normalizeTrainingItemUpdates(req.body?.items, currentItems, schedule.year);
+      await updateTrainingItems(schedule.id, normalized);
       const scheduleItems = await listTrainingItemsWithSchema(schedule.id, client.schema_name);
       await writeTrainingSchedulePdf({ client, schedule, items: scheduleItems });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'TRAINING_SCHEDULE_UPDATE',
+        targetUserId: schedule.client_id,
+        targetUsername: client.name,
+        details: {
+          category: 'schedule',
+          clientId: schedule.client_id,
+          clientName: client.name,
+          scheduleId: schedule.id,
+          year: schedule.year,
+          updatedItemCount: normalized.length
+        }
+      });
+      return res.json({ ok: true });
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo actualizar el cronograma de capacitaciones.');
     }
-    return res.json({ ok: true });
   }
 );
 
@@ -11339,14 +11491,18 @@ app.post(
   '/training/items/:id/upload',
   requireAuth,
   requirePermission('schedules:manage'),
-  upload.single('pdf'),
+  uploadSchedulePdf,
   async (req, res) => {
     const itemId = req.params.id;
     if (!req.file) {
       return res.status(400).json({ message: 'Archivo requerido.' });
     }
+    if (!isPdfFile(req.file)) {
+      return res.status(400).json({ message: 'El archivo no contiene un PDF válido.' });
+    }
     const { rows } = await query(
-      `SELECT i.id, i.schedule_id, i.area_id, s.client_id
+      `SELECT i.id, i.schedule_id, i.area_id, i.planned_date, i.pdf_path,
+              s.client_id, s.status AS schedule_status
        FROM training_schedule_items i
        JOIN training_schedules s ON s.id = i.schedule_id
        WHERE i.id = $1`,
@@ -11358,6 +11514,15 @@ app.post(
     }
     if (req.user.clientId && req.user.clientId !== item.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (item.schedule_status !== 'approved') {
+      return res.status(409).json({ message: 'Aprueba el cronograma antes de cargar el acta.' });
+    }
+    if (item.pdf_path) {
+      return res.status(409).json({ message: 'Esta capacitación ya tiene un acta cargada.' });
+    }
+    if (dateOnlyFromDatabase(item.planned_date) > todayInBogota()) {
+      return res.status(409).json({ message: 'El acta se habilita a partir de la fecha programada.' });
     }
     if (req.user.roles?.includes('lector')) {
       const allowed = await readerCanAccessArea(item.client_id, req.user.sub, item.area_id);
@@ -11372,6 +11537,7 @@ app.post(
     await fs.promises.writeFile(filename, req.file.buffer);
     const publicPath = `/${path.join('uploads', 'clients', item.client_id, 'trainings', `capacitacion-${item.id}.pdf`)}`.replace(/\\/g, '/');
     await setTrainingItemPdf(item.id, publicPath);
+    await refreshTrainingScheduleStatus(item.schedule_id);
     const client = await getClientById(item.client_id);
     await logAudit({
       actorUserId: req.user.sub,
@@ -11446,7 +11612,7 @@ app.delete(
     }
     const itemId = req.params.id;
     const { rows } = await query(
-      `SELECT i.id, i.pdf_path, s.client_id
+      `SELECT i.id, i.schedule_id, i.pdf_path, s.client_id
        FROM training_schedule_items i
        JOIN training_schedules s ON s.id = i.schedule_id
        WHERE i.id = $1`,
@@ -11463,6 +11629,7 @@ app.delete(
       }
     }
     await clearTrainingItemPdf(itemId);
+    await refreshTrainingScheduleStatus(item.schedule_id);
     return res.json({ ok: true });
   }
 );
@@ -11548,14 +11715,11 @@ app.post(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    const { year, startDate } = req.body || {};
-    if (!year || !startDate) {
-      return res.status(400).json({ message: 'Año y fecha inicial requeridos.' });
-    }
-
-    const existing = await listCalibrationSchedules(clientId, Number(year));
-    if (existing.length && !req.user.roles?.includes('superuser')) {
-      return res.status(409).json({ message: 'Ya existe un cronograma de calibración para este año.' });
+    let scheduleInput;
+    try {
+      scheduleInput = normalizeScheduleStart(req.body || {});
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo validar el cronograma de calibración.');
     }
 
     const client = await getClientById(clientId);
@@ -11566,7 +11730,9 @@ app.post(
     const assetsResult = await query(
       `SELECT id, code, name, brand, model, serial, calibration_frequency, requires_calibration
        FROM "${schema}".assets
-       WHERE requires_calibration = TRUE AND calibration_frequency IS NOT NULL
+       WHERE requires_calibration = TRUE
+         AND calibration_frequency IS NOT NULL
+         AND COALESCE(status, 'activo') <> 'dado_de_baja'
        ORDER BY created_at ASC`
     );
     const assets = assetsResult.rows;
@@ -11574,41 +11740,70 @@ app.post(
       return res.status(400).json({ message: 'No hay equipos con calibración definida.' });
     }
 
-    const schedule = await createCalibrationSchedule({
-      clientId,
-      year: Number(year),
-      startDate,
-      createdBy: req.user.sub
-    });
-
-    const start = new Date(startDate);
-    if (Number.isNaN(start.getTime())) {
-      return res.status(400).json({ message: 'Fecha inicial inválida.' });
-    }
-    start.setFullYear(Number(year));
-
     const items = [];
+    const datesByFrequency = new Map();
+    const unsupportedFrequencies = new Set();
     for (const asset of assets) {
-      const months = freqToMonths(asset.calibration_frequency);
-      if (!months) continue;
-      let planned = adjustToWeekday(start);
-      while (planned.getFullYear() === Number(year)) {
-        const deadline = addMonths(planned, 1);
+      const months = scheduleFrequencyToMonths(asset.calibration_frequency);
+      if (!months) {
+        unsupportedFrequencies.add(String(asset.calibration_frequency));
+        continue;
+      }
+      if (!datesByFrequency.has(months)) {
+        datesByFrequency.set(months, buildRecurringDates({ ...scheduleInput, months }));
+      }
+      for (const plannedDate of datesByFrequency.get(months)) {
+        const deadlineDate = formatScheduleDate(
+          addScheduleMonths(parseScheduleDate(plannedDate), 1)
+        );
         items.push({
-          scheduleId: schedule.id,
           assetId: asset.id,
           frequency: asset.calibration_frequency,
-          plannedDate: planned.toISOString().slice(0, 10),
-          deadlineDate: deadline.toISOString().slice(0, 10)
+          plannedDate,
+          deadlineDate
         });
-        planned = adjustToWeekday(addMonths(planned, months));
       }
     }
+    if (!items.length) {
+      const detail = unsupportedFrequencies.size
+        ? ` Revisa estas periodicidades: ${Array.from(unsupportedFrequencies).join(', ')}.`
+        : '';
+      return res.status(400).json({
+        message: `No se pudieron generar calibraciones con las periodicidades registradas.${detail}`
+      });
+    }
 
-    await insertCalibrationItems(items);
-    const scheduleItems = await listCalibrationItemsWithSchema(schedule.id, schema);
-    await writeCalibrationSchedulePdf({ client, schedule: { ...schedule, client_id: clientId }, items: scheduleItems });
-    return res.status(201).json({ id: schedule.id });
+    try {
+      const schedule = await createCalibrationScheduleWithItems({
+        clientId,
+        ...scheduleInput,
+        createdBy: req.user.sub,
+        items
+      });
+      if (!schedule) {
+        return res.status(409).json({ message: 'Ya existe un cronograma de calibración para este año.' });
+      }
+      const scheduleItems = await listCalibrationItemsWithSchema(schedule.id, schema);
+      await writeCalibrationSchedulePdf({ client, schedule, items: scheduleItems });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'CALIBRATION_SCHEDULE_CREATE',
+        targetUserId: clientId,
+        targetUsername: client.name,
+        details: {
+          category: 'schedule',
+          clientId,
+          clientName: client.name,
+          scheduleId: schedule.id,
+          year: scheduleInput.year,
+          itemCount: items.length
+        }
+      });
+      return res.status(201).json({ id: schedule.id });
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo generar el cronograma de calibración.');
+    }
   }
 );
 
@@ -11626,7 +11821,7 @@ app.get(
     }
     const client = await getClientById(schedule.client_id);
     const items = await listCalibrationItemsWithSchema(schedule.id, client.schema_name);
-    const today = todayLocalISO();
+    const today = todayInBogota();
     const normalized = items.map((item) => {
       const planned = toLocalISODate(item.planned_date);
       const deadline = toLocalISODate(item.deadline_date);
@@ -11636,7 +11831,9 @@ app.get(
           ? 'done'
           : planned && deadline && planned <= today && today <= deadline
             ? 'active'
-            : 'pending'
+            : deadline && deadline < today
+              ? 'expired'
+              : 'pending'
       };
     });
     return res.json(normalized);
@@ -11655,12 +11852,38 @@ app.post(
     if (req.user.clientId && req.user.clientId !== schedule.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    await approveCalibrationSchedule(schedule.id);
-    const client = await getClientById(schedule.client_id);
-    if (client) {
-      const scheduleItems = await listCalibrationItemsWithSchema(schedule.id, client.schema_name);
-      await writeCalibrationSchedulePdf({ client, schedule, items: scheduleItems });
+    if (schedule.status !== 'draft') {
+      return res.status(409).json({ message: 'El cronograma ya fue aprobado o cerrado.' });
     }
+    const client = await getClientById(schedule.client_id);
+    if (!client) {
+      return res.status(404).json({ message: 'Cliente no encontrado.' });
+    }
+    const itemCount = await countCalibrationItems(schedule.id);
+    if (!itemCount) {
+      return res.status(400).json({ message: 'No se puede aprobar un cronograma sin calibraciones.' });
+    }
+    const approved = await approveCalibrationSchedule(schedule.id);
+    if (!approved) {
+      return res.status(409).json({ message: 'El cronograma cambió de estado. Actualiza la información.' });
+    }
+    const scheduleItems = await listCalibrationItemsWithSchema(schedule.id, client.schema_name);
+    await writeCalibrationSchedulePdf({ client, schedule: { ...schedule, status: 'approved' }, items: scheduleItems });
+    await logAudit({
+      actorUserId: req.user.sub,
+      actorUsername: req.user.username,
+      action: 'CALIBRATION_SCHEDULE_APPROVE',
+      targetUserId: schedule.client_id,
+      targetUsername: client.name,
+      details: {
+        category: 'schedule',
+        clientId: schedule.client_id,
+        clientName: client.name,
+        scheduleId: schedule.id,
+        year: schedule.year,
+        itemCount
+      }
+    });
     return res.json({ ok: true });
   }
 );
@@ -11669,14 +11892,18 @@ app.post(
   '/calibration/items/:id/upload',
   requireAuth,
   requirePermission('calibration:report:upload'),
-  upload.single('pdf'),
+  uploadSchedulePdf,
   async (req, res) => {
     const itemId = req.params.id;
     if (!req.file) {
       return res.status(400).json({ message: 'Archivo requerido.' });
     }
+    if (!isPdfFile(req.file)) {
+      return res.status(400).json({ message: 'El archivo no contiene un PDF válido.' });
+    }
     const { rows } = await query(
-      `SELECT i.id, i.schedule_id, i.asset_id, s.client_id
+      `SELECT i.id, i.schedule_id, i.asset_id, i.planned_date, i.pdf_path,
+              s.client_id, s.status AS schedule_status
        FROM calibration_schedule_items i
        JOIN calibration_schedules s ON s.id = i.schedule_id
        WHERE i.id = $1`,
@@ -11689,6 +11916,15 @@ app.post(
     if (req.user.clientId && req.user.clientId !== item.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
+    if (item.schedule_status !== 'approved') {
+      return res.status(409).json({ message: 'Aprueba el cronograma antes de cargar el certificado.' });
+    }
+    if (item.pdf_path) {
+      return res.status(409).json({ message: 'Esta calibración ya tiene un certificado cargado.' });
+    }
+    if (dateOnlyFromDatabase(item.planned_date) > todayInBogota()) {
+      return res.status(409).json({ message: 'El certificado se habilita a partir de la fecha programada.' });
+    }
 
     const dir = path.join(process.cwd(), 'uploads', 'clients', item.client_id, 'calibrations');
     await fs.promises.mkdir(dir, { recursive: true });
@@ -11696,6 +11932,7 @@ app.post(
     await fs.promises.writeFile(filename, req.file.buffer);
     const publicPath = `/${path.join('uploads', 'clients', item.client_id, 'calibrations', `calibracion-${item.id}.pdf`)}`.replace(/\\/g, '/');
     await setCalibrationItemPdf(item.id, publicPath);
+    await refreshCalibrationScheduleStatus(item.schedule_id);
     const calibratedAsset = await getAssetById(item.client_id, item.asset_id);
     await logEquipmentAudit(req, {
       action: 'CALIBRATION_CERTIFICATE_UPLOAD',
@@ -11721,7 +11958,7 @@ app.get(
   async (req, res) => {
     const itemId = req.params.id;
     const { rows } = await query(
-      `SELECT i.id, i.pdf_path, s.client_id
+      `SELECT i.id, i.schedule_id, i.pdf_path, s.client_id
        FROM calibration_schedule_items i
        JOIN calibration_schedules s ON s.id = i.schedule_id
        WHERE i.id = $1`,
@@ -11757,7 +11994,7 @@ app.delete(
     }
     const itemId = req.params.id;
     const { rows } = await query(
-      `SELECT i.id, i.pdf_path, s.client_id
+      `SELECT i.id, i.schedule_id, i.pdf_path, s.client_id
        FROM calibration_schedule_items i
        JOIN calibration_schedules s ON s.id = i.schedule_id
        WHERE i.id = $1`,
@@ -11774,6 +12011,7 @@ app.delete(
       }
     }
     await clearCalibrationItemPdf(itemId);
+    await refreshCalibrationScheduleStatus(item.schedule_id);
     return res.json({ ok: true });
   }
 );

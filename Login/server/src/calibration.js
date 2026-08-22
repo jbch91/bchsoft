@@ -1,13 +1,50 @@
-import { query } from './db.js';
+import { query, withTransaction } from './db.js';
 
 export async function createCalibrationSchedule({ clientId, year, startDate, createdBy }) {
   const { rows } = await query(
     `INSERT INTO calibration_schedules (client_id, year, start_date, created_by, status, pdf_path)
-     VALUES ($1,$2,$3,$4,'approved',$5)
+     VALUES ($1,$2,$3,$4,'draft',$5)
      RETURNING id`,
     [clientId, year, startDate, createdBy, null]
   );
   return rows[0];
+}
+
+export async function createCalibrationScheduleWithItems({ clientId, year, startDate, createdBy, items }) {
+  return withTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1), $2)', [
+      `calibration-schedule:${clientId}`,
+      year
+    ]);
+    const existing = await client.query(
+      'SELECT id FROM calibration_schedules WHERE client_id = $1 AND year = $2 LIMIT 1',
+      [clientId, year]
+    );
+    if (existing.rows.length) return null;
+
+    const scheduleResult = await client.query(
+      `INSERT INTO calibration_schedules (client_id, year, start_date, created_by, status, pdf_path)
+       VALUES ($1,$2,$3,$4,'draft',NULL)
+       RETURNING id, client_id, year, start_date, status, created_by, pdf_path`,
+      [clientId, year, startDate, createdBy]
+    );
+    const schedule = scheduleResult.rows[0];
+    await client.query(
+      `INSERT INTO calibration_schedule_items
+         (schedule_id, asset_id, frequency, planned_date, deadline_date)
+       SELECT $1, data.asset_id, data.frequency, data.planned_date, data.deadline_date
+       FROM UNNEST($2::uuid[], $3::text[], $4::date[], $5::date[])
+         AS data(asset_id, frequency, planned_date, deadline_date)`,
+      [
+        schedule.id,
+        items.map((item) => item.assetId),
+        items.map((item) => item.frequency),
+        items.map((item) => item.plannedDate),
+        items.map((item) => item.deadlineDate)
+      ]
+    );
+    return schedule;
+  });
 }
 
 export async function listCalibrationSchedules(clientId, year) {
@@ -41,7 +78,7 @@ export async function approveCalibrationSchedule(scheduleId) {
   const { rows } = await query(
     `UPDATE calibration_schedules
      SET status = 'approved', approved_at = NOW()
-     WHERE id = $1
+     WHERE id = $1 AND status = 'draft'
      RETURNING id`,
     [scheduleId]
   );
@@ -54,6 +91,32 @@ export async function setCalibrationSchedulePdf(scheduleId, pdfPath) {
 
 export async function deleteCalibrationSchedule(scheduleId) {
   await query('DELETE FROM calibration_schedules WHERE id = $1', [scheduleId]);
+}
+
+export async function countCalibrationItems(scheduleId) {
+  const { rows } = await query(
+    'SELECT COUNT(*)::int AS count FROM calibration_schedule_items WHERE schedule_id = $1',
+    [scheduleId]
+  );
+  return rows[0]?.count ?? 0;
+}
+
+export async function refreshCalibrationScheduleStatus(scheduleId) {
+  const { rows } = await query(
+    `UPDATE calibration_schedules AS schedule
+     SET status = CASE
+       WHEN NOT EXISTS (
+         SELECT 1 FROM calibration_schedule_items item
+         WHERE item.schedule_id = schedule.id AND item.status <> 'done'
+       ) THEN 'closed'
+       WHEN schedule.status = 'closed' THEN 'approved'
+       ELSE schedule.status
+     END
+     WHERE schedule.id = $1
+     RETURNING status`,
+    [scheduleId]
+  );
+  return rows[0]?.status;
 }
 
 export async function insertCalibrationItems(items) {

@@ -4,18 +4,17 @@ import { FormsModule } from '@angular/forms';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
 import { BiomedService } from '../../biomed/biomed.service';
-import { getPublicBase, joinBase } from '../../core/api-base';
 import {
-  SchedulesService,
   ScheduleDto,
   ScheduleItemDto,
-  TrainingScheduleDto,
-  TrainingItemDto
+  SchedulesService,
+  TrainingItemDto,
+  TrainingScheduleDto
 } from '../../schedules/schedules.service';
 import {
-  CalibrationService,
+  CalibrationItemDto,
   CalibrationScheduleDto,
-  CalibrationItemDto
+  CalibrationService
 } from '../../calibration/calibration.service';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 
@@ -26,7 +25,6 @@ interface ClientOption {
   city: string;
   address?: string | null;
   email: string;
-  logoPath?: string | null;
 }
 
 interface AreaOption {
@@ -51,6 +49,18 @@ interface MaintenanceItemGroup {
   items: ScheduleItemDto[];
   dateGroups: MaintenanceAreaDateGroup[];
 }
+
+interface ConfirmDialog {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger: boolean;
+  action: () => Promise<void>;
+}
+
+type ViewMode = 'maintenance' | 'training' | 'calibration';
+type NoticeKind = 'success' | 'error' | 'info';
+
 @Component({
   selector: 'app-cronogramas',
   standalone: true,
@@ -59,23 +69,8 @@ interface MaintenanceItemGroup {
   styleUrl: './cronogramas.component.scss'
 })
 export class CronogramasComponent implements OnInit {
-  private readonly publicBase = getPublicBase();
-  clients: ClientOption[] = [];
-  clientSearchTerm = '';
-  selectedClientId = '';
-  selectedYear = new Date().getFullYear();
-  startDate = '';
-  schedules: ScheduleDto[] = [];
-  selectedScheduleId = '';
-  items: ScheduleItemDto[] = [];
-  private readonly rangeMap = new Map<string, { min: string; max: string }>();
-  editing = false;
-  errorMessage = '';
-  successMessage = '';
-  loading = false;
-
-  areas: AreaOption[] = [];
-  trainingPeriodicity = 'semestral';
+  readonly minimumYear = 1900;
+  readonly maximumYear = 2200;
   readonly trainingPeriodOptions = [
     'mensual',
     'bimensual',
@@ -84,25 +79,58 @@ export class CronogramasComponent implements OnInit {
     'semestral',
     'anual'
   ];
-  trainingStartDate = '';
+
+  clients: ClientOption[] = [];
+  clientSearchTerm = '';
+  selectedClientId = '';
+  selectedYear = new Date().getFullYear();
+  areas: AreaOption[] = [];
+  areaSearch = '';
   selectedAreas: string[] = [];
-  trainingSchedules: TrainingScheduleDto[] = [];
-  trainingItemsBySchedule: Record<string, TrainingItemDto[]> = {};
-  trainingLoading = false;
+
+  viewMode: ViewMode = 'maintenance';
+  showGenerator = false;
+  loading = false;
+  detailLoading = false;
+  busyAction = '';
+  lastUpdatedLabel = 'Sin actualizar';
+  noticeMessage = '';
+  noticeKind: NoticeKind = 'info';
+  confirmDialog: ConfirmDialog | null = null;
+  confirmBusy = false;
+
+  startDate = '';
+  schedules: ScheduleDto[] = [];
+  selectedScheduleId = '';
+  items: ScheduleItemDto[] = [];
   maintenanceStatusFilter = '';
   maintenanceItemStatusFilter = '';
-  trainingStatusFilter = '';
   maintenanceDetailSearch = '';
   maintenanceAreaFilter = '';
   maintenanceFrequencyFilter = '';
-  viewMode: 'maintenance' | 'training' | 'calibration' = 'maintenance';
+  editing = false;
+  private readonly rangeMap = new Map<string, { min: string; max: string }>();
+  private maintenanceSnapshot = new Map<string, string>();
+
+  trainingStartDate = '';
+  trainingPeriodicity = 'semestral';
+  trainingSchedules: TrainingScheduleDto[] = [];
+  selectedTrainingScheduleId = '';
+  trainingItems: TrainingItemDto[] = [];
+  trainingStatusFilter = '';
+  trainingItemStatusFilter = '';
+  trainingSearch = '';
+  trainingEditing = false;
+  private trainingSnapshot = new Map<string, string>();
+
+  calibrationStartDate = '';
   calibrationSchedules: CalibrationScheduleDto[] = [];
   selectedCalibrationScheduleId = '';
   calibrationItems: CalibrationItemDto[] = [];
-  calibrationStartDate = '';
+  calibrationScheduleStatusFilter = '';
+  calibrationItemStatusFilter = '';
   calibrationSearch = '';
   calibrationAreaFilter = '';
-  calibrationStatusFilter = '';
 
   constructor(
     private readonly admin: AdminService,
@@ -111,786 +139,356 @@ export class CronogramasComponent implements OnInit {
     private readonly calibration: CalibrationService,
     public readonly auth: AuthService,
     private readonly cdr: ChangeDetectorRef
-  ) {}
+  ) {
+    this.resetGeneratorDates();
+  }
 
   async ngOnInit(): Promise<void> {
-    const userClient = this.auth.currentUser()?.clientId ?? '';
-    if (userClient) {
-      this.selectedClientId = userClient;
-      await this.loadSchedules();
-      await this.loadAreas();
-      await this.loadTrainingSchedules();
-      if (this.canAccessCalibrationModule()) {
-        await this.loadCalibrationSchedules();
-      }
-      return;
-    }
-    const rows = await this.admin.listClients();
-    this.clients = rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      nit: row.nit,
-      city: row.city,
-      address: row.address,
-      email: row.email,
-      logoPath: row.logo_path
-    }));
-    this.selectedClientId = this.clients[0]?.id ?? '';
-    await this.loadSchedules();
-    await this.loadAreas();
-    await this.loadTrainingSchedules();
-    if (this.canAccessCalibrationModule()) {
-      await this.loadCalibrationSchedules();
-    }
-  }
-
-  async loadSchedules(): Promise<void> {
-    if (!this.selectedClientId) return;
-    this.loading = true;
-    this.errorMessage = '';
     try {
-      this.schedules = await this.schedulesService.listSchedules(this.selectedClientId, this.selectedYear);
-      this.selectedScheduleId = this.schedules[0]?.id ?? '';
-      if (this.selectedScheduleId) {
-        await this.loadItems();
+      const userClient = this.auth.currentUser()?.clientId ?? '';
+      if (userClient) {
+        this.selectedClientId = userClient;
       } else {
-        this.items = [];
+        const rows = await this.admin.listClients();
+        this.clients = rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          nit: row.nit,
+          city: row.city,
+          address: row.address,
+          email: row.email
+        }));
+        this.selectedClientId = this.clients[0]?.id ?? '';
       }
-    } catch (error) {
-      console.error(error);
-      this.errorMessage = 'No se pudieron cargar los cronogramas.';
-    } finally {
-      this.loading = false;
-      this.cdr.detectChanges();
-    }
-  }
-
-  async onClientChange(): Promise<void> {
-    await this.loadSchedules();
-    await this.loadAreas();
-    await this.loadTrainingSchedules();
-    if (this.canAccessCalibrationModule()) {
-      await this.loadCalibrationSchedules();
-    } else {
-      this.calibrationSchedules = [];
-      this.selectedCalibrationScheduleId = '';
-      this.calibrationItems = [];
-      if (this.viewMode === 'calibration') {
-        this.viewMode = 'maintenance';
+      if (!this.selectedClientId) {
+        this.setNotice('error', 'No hay un cliente disponible para consultar cronogramas.');
+        return;
       }
-    }
-  }
-
-  async loadCalibrationSchedules(): Promise<void> {
-    if (!this.selectedClientId) return;
-    try {
-      this.calibrationSchedules = await this.calibration.listSchedules(this.selectedClientId, this.selectedYear);
-      this.selectedCalibrationScheduleId = this.calibrationSchedules[0]?.id ?? '';
-      if (this.selectedCalibrationScheduleId) {
-        await this.loadCalibrationItems();
-      } else {
-        this.calibrationItems = [];
-      }
-    } catch (error) {
+      await Promise.all([this.loadAreas(), this.loadActiveView(false)]);
+    } catch (error: any) {
       console.error(error);
-      this.calibrationSchedules = [];
+      this.setNotice('error', this.errorText(error, 'No se pudo iniciar el módulo de cronogramas.'));
     } finally {
-      this.cdr.detectChanges();
+      this.refreshView();
     }
-  }
-
-  async loadCalibrationItems(): Promise<void> {
-    if (!this.selectedCalibrationScheduleId) return;
-    try {
-      this.calibrationItems = await this.calibration.listItems(this.selectedCalibrationScheduleId);
-    } catch (error) {
-      console.error(error);
-      this.calibrationItems = [];
-    } finally {
-      this.cdr.detectChanges();
-    }
-  }
-
-  async generateCalibrationSchedule(): Promise<void> {
-    if (!this.selectedClientId || !this.calibrationStartDate) {
-      this.errorMessage = 'Selecciona cliente y fecha inicial.';
-      return;
-    }
-    this.errorMessage = '';
-    this.successMessage = '';
-    try {
-      await this.calibration.generateSchedule(this.selectedClientId, {
-        year: this.selectedYear,
-        startDate: this.calibrationStartDate
-      });
-      this.successMessage = 'Cronograma de calibración generado.';
-      await this.loadCalibrationSchedules();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo generar el cronograma.';
-    }
-  }
-
-  async approveCalibrationSchedule(): Promise<void> {
-    if (!this.selectedCalibrationScheduleId) return;
-    try {
-      await this.calibration.approveSchedule(this.selectedCalibrationScheduleId);
-      await this.loadCalibrationSchedules();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo aprobar el cronograma.';
-    }
-  }
-
-  async openCalibrationSchedulePdf(scheduleId: string): Promise<void> {
-    try {
-      const blob = await this.calibration.downloadSchedulePdf(scheduleId);
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo abrir el PDF.';
-    }
-  }
-
-  async deleteCalibrationSchedule(scheduleId: string): Promise<void> {
-    if (!confirm('¿Eliminar cronograma de calibración?')) return;
-    try {
-      await this.calibration.deleteSchedule(scheduleId);
-      await this.loadCalibrationSchedules();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo eliminar el cronograma.';
-    }
-  }
-
-  async uploadCalibrationPdf(item: CalibrationItemDto, event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    if (!input.files?.length) return;
-    const file = input.files[0];
-    try {
-      await this.calibration.uploadPdf(item.id, file);
-      await this.loadCalibrationItems();
-      this.successMessage = 'Acta cargada correctamente.';
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo subir el PDF.';
-    } finally {
-      input.value = '';
-      setTimeout(() => {
-        this.successMessage = '';
-        this.cdr.detectChanges();
-      }, 2500);
-    }
-  }
-
-  async openCalibrationPdf(item: CalibrationItemDto): Promise<void> {
-    if (!item.pdf_path) return;
-    try {
-      const blob = await this.calibration.downloadPdf(item.id);
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo abrir el PDF.';
-    }
-  }
-
-  async deleteCalibrationPdf(item: CalibrationItemDto): Promise<void> {
-    if (!confirm('¿Eliminar acta cargada?')) return;
-    try {
-      await this.calibration.deletePdf(item.id);
-      await this.loadCalibrationItems();
-      this.successMessage = 'Acta eliminada. Puedes cargar una nueva.';
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo eliminar el acta.';
-    } finally {
-      setTimeout(() => {
-        this.successMessage = '';
-        this.cdr.detectChanges();
-      }, 2500);
-    }
-  }
-
-  calibrationStatusLabel(status: string): string {
-    const value = String(status || '').toLowerCase();
-    if (value === 'draft') return 'Borrador';
-    if (value === 'approved') return 'Aprobado';
-    if (value === 'closed') return 'Cerrado';
-    return status;
-  }
-
-  calibrationItemStatus(item: CalibrationItemDto): string {
-    const status = item.display_status ?? item.status;
-    if (status === 'done') return 'Completado';
-    if (status === 'active') return 'Activo';
-    return 'Programado';
-  }
-
-  get calibrationAreaOptions(): string[] {
-    const areas = new Set<string>();
-    for (const item of this.calibrationItems) {
-      if (item.area_name) areas.add(item.area_name);
-    }
-    return Array.from(areas).sort((a, b) => a.localeCompare(b));
-  }
-
-  get filteredCalibrationItems(): CalibrationItemDto[] {
-    const term = this.calibrationSearch.trim().toLowerCase();
-    return this.calibrationItems.filter((item) => {
-      if (this.calibrationAreaFilter && item.area_name !== this.calibrationAreaFilter) return false;
-      const statusKey = this.calibrationItemStatus(item);
-      if (this.calibrationStatusFilter && statusKey !== this.calibrationStatusFilter) return false;
-      if (!term) return true;
-      const haystack = `${item.code ?? ''} ${item.name ?? ''} ${item.area_name ?? ''} ${item.serial ?? ''}`.toLowerCase();
-      return haystack.includes(term);
-    });
-  }
-
-  canUploadCalibration(item: CalibrationItemDto): boolean {
-    return this.auth.hasPermission('calibration:report:upload') && this.calibrationItemStatus(item) === 'Activo';
-  }
-
-  canAccessCalibrationModule(): boolean {
-    return this.auth.hasPermission('calibration:schedule:manage') || this.auth.hasPermission('calibration:report:upload');
   }
 
   get selectedClient(): ClientOption | null {
-    if (!this.selectedClientId) return null;
     return this.clients.find((client) => client.id === this.selectedClientId) ?? null;
   }
 
-  clientLogoUrl(client: ClientOption | null): string | null {
-    if (!client?.logoPath) return null;
-    if (client.logoPath.startsWith('http')) return client.logoPath;
-    return joinBase(this.publicBase, client.logoPath);
+  get currentClientLabel(): string {
+    return this.selectedClient?.name ?? (this.auth.currentUser()?.clientId ? 'Cliente asignado' : 'Sin cliente');
   }
 
   get filteredClients(): ClientOption[] {
-    const term = this.clientSearchTerm.toLowerCase().trim();
+    const term = this.clientSearchTerm.trim().toLowerCase();
     if (!term) return this.clients;
-    return this.clients.filter((client) => client.name.toLowerCase().includes(term));
+    return this.clients.filter((client) =>
+      `${client.name} ${client.nit} ${client.city}`.toLowerCase().includes(term)
+    );
   }
 
-  async loadAreas(): Promise<void> {
-    if (!this.selectedClientId) return;
+  get filteredAreas(): AreaOption[] {
+    const term = this.areaSearch.trim().toLowerCase();
+    if (!term) return this.areas;
+    return this.areas.filter((area) => area.name.toLowerCase().includes(term));
+  }
+
+  async onClientChange(): Promise<void> {
+    this.clearSelections();
+    this.showGenerator = false;
     try {
-      const rows = await this.biomed.listAreas(this.selectedClientId);
-      this.areas = rows.map((row) => ({ id: row.id, name: row.name }));
-      this.selectedAreas = this.selectedAreas.filter((id) => this.areas.some((area) => area.id === id));
-    } catch (error) {
+      await Promise.all([this.loadAreas(), this.loadActiveView(false)]);
+    } catch (error: any) {
       console.error(error);
-      this.areas = [];
+      this.setNotice('error', this.errorText(error, 'No se pudieron cargar los cronogramas del cliente.'));
     }
   }
 
-  async loadItems(): Promise<void> {
-    if (!this.selectedScheduleId) return;
+  async onYearChange(): Promise<void> {
+    const year = Math.trunc(Number(this.selectedYear));
+    this.selectedYear = Math.min(
+      this.maximumYear,
+      Math.max(this.minimumYear, year || new Date().getFullYear())
+    );
+    this.resetGeneratorDates();
+    this.clearSelections();
+    this.showGenerator = false;
     try {
-      this.items = await this.schedulesService.listScheduleItems(this.selectedScheduleId);
+      await this.loadActiveView(false);
+    } catch (error: any) {
+      console.error(error);
+      this.setNotice('error', this.errorText(error, 'No se pudieron cargar los cronogramas del año.'));
+    }
+  }
+
+  async switchView(mode: ViewMode): Promise<void> {
+    if (mode === 'calibration' && !this.canAccessCalibrationModule()) return;
+    if (this.viewMode === mode) return;
+    this.viewMode = mode;
+    this.showGenerator = false;
+    this.clearNotice();
+    try {
+      await this.loadActiveView(true);
+    } catch (error: any) {
+      console.error(error);
+      this.setNotice('error', this.errorText(error, 'No se pudo cargar la vista seleccionada.'));
+    }
+  }
+
+  async refreshActive(): Promise<void> {
+    await this.runAction('refresh', async () => this.loadActiveView(true), 'Información actualizada.');
+  }
+
+  private async loadActiveView(preserveSelection: boolean): Promise<void> {
+    if (!this.selectedClientId) return;
+    if (this.viewMode === 'training') {
+      await this.loadTrainingSchedules(preserveSelection);
+    } else if (this.viewMode === 'calibration') {
+      await this.loadCalibrationSchedules(preserveSelection);
+    } else {
+      await this.loadSchedules(preserveSelection);
+    }
+    this.lastUpdatedLabel = new Intl.DateTimeFormat('es-CO', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }).format(new Date());
+  }
+
+  private async loadAreas(): Promise<void> {
+    if (!this.selectedClientId) return;
+    const rows = await this.biomed.listAreas(this.selectedClientId);
+    this.areas = rows
+      .map((row) => ({ id: row.id, name: row.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    this.selectedAreas = this.selectedAreas.filter((id) => this.areas.some((area) => area.id === id));
+  }
+
+  async loadSchedules(preserveSelection = true): Promise<void> {
+    if (!this.selectedClientId) return;
+    this.loading = true;
+    try {
+      const rows = await this.schedulesService.listSchedules(this.selectedClientId, this.selectedYear);
+      this.schedules = rows;
+      const previous = preserveSelection ? this.selectedScheduleId : '';
+      this.selectedScheduleId = rows.some((row) => row.id === previous) ? previous : (rows[0]?.id ?? '');
+      if (this.selectedScheduleId) {
+        await this.loadItems(this.selectedScheduleId);
+      } else {
+        this.items = [];
+        this.editing = false;
+      }
+    } finally {
+      this.loading = false;
+      this.refreshView();
+    }
+  }
+
+  async selectSchedule(scheduleId: string): Promise<void> {
+    if (this.selectedScheduleId === scheduleId && this.items.length) return;
+    this.selectedScheduleId = scheduleId;
+    try {
+      await this.loadItems(scheduleId);
+    } catch (error: any) {
+      console.error(error);
+      this.setNotice('error', this.errorText(error, 'No se pudo cargar el detalle del cronograma.'));
+    }
+  }
+
+  private async loadItems(scheduleId: string): Promise<void> {
+    this.detailLoading = true;
+    try {
+      const rows = await this.schedulesService.listScheduleItems(scheduleId);
+      this.items = rows.map((item) => ({
+        ...item,
+        planned_date: this.dateOnly(item.planned_date),
+        deadline_date: this.dateOnly(item.deadline_date)
+      }));
       this.editing = false;
       this.rangeMap.clear();
+      this.maintenanceSnapshot.clear();
       for (const item of this.items) {
-        if (item.planned_date) {
-          item.planned_date = this.toDateOnly(item.planned_date);
-        }
-        if (item.deadline_date) {
-          item.deadline_date = this.toDateOnly(item.deadline_date);
-        }
         const min = this.computeRangeMin(item);
-        const max = this.toDateOnly(item.deadline_date);
-        this.rangeMap.set(item.id, {
-          min,
-          max
-        });
-        if (min && max) {
-          const planned = new Date(item.planned_date);
-          const minDate = new Date(min);
-          const maxDate = new Date(max);
-          if (planned < minDate || planned > maxDate) {
-            item.planned_date = min;
-          }
-        }
+        const max = item.deadline_date;
+        this.rangeMap.set(item.id, { min, max });
+        this.maintenanceSnapshot.set(item.id, item.planned_date);
       }
-    } catch (error) {
-      console.error(error);
-      this.items = [];
     } finally {
-      this.cdr.detectChanges();
+      this.detailLoading = false;
+      this.refreshView();
     }
   }
 
-  async generateSchedule(): Promise<void> {
-    if (!this.selectedClientId || !this.startDate) {
-      this.errorMessage = 'Selecciona cliente y fecha inicial.';
-      return;
-    }
-    this.errorMessage = '';
-    this.successMessage = '';
-    try {
-      await this.schedulesService.generateSchedule(this.selectedClientId, this.selectedYear, this.startDate);
-      this.successMessage = 'Cronograma generado.';
-      await this.loadSchedules();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo generar el cronograma.';
-    }
-  }
-
-  async loadTrainingSchedules(): Promise<void> {
-    if (!this.selectedClientId) return;
-    this.trainingLoading = true;
-    try {
-      this.trainingSchedules = await this.schedulesService.listTrainingSchedules(this.selectedClientId, this.selectedYear);
-      await this.loadTrainingItemsForClient();
-    } catch (error) {
-      console.error(error);
-    } finally {
-      this.trainingLoading = false;
-      this.cdr.detectChanges();
-    }
-  }
-
-  async generateTrainingSchedule(): Promise<void> {
-    if (!this.selectedClientId || !this.trainingStartDate || !this.trainingPeriodicity || !this.selectedAreas.length) {
-      this.errorMessage = 'Selecciona fecha inicial, periodicidad y áreas.';
-      return;
-    }
-    try {
-      await this.schedulesService.generateTrainingSchedule(this.selectedClientId, {
-        year: this.selectedYear,
-        startDate: this.trainingStartDate,
-        periodicity: this.trainingPeriodicity,
-        areaIds: this.selectedAreas
-      });
-      this.successMessage = 'Cronograma de capacitaciones generado.';
-      await this.loadTrainingSchedules();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo generar el cronograma de capacitaciones.';
-    }
-  }
-
-  async loadTrainingItemsForClient(): Promise<void> {
-    if (!this.selectedClientId) return;
-    try {
-      const items = await this.schedulesService.listTrainingItemsByClient(this.selectedClientId, this.selectedYear);
-      const grouped: Record<string, TrainingItemDto[]> = {};
-      for (const item of items) {
-        if (item.planned_date) {
-          item.planned_date = this.toDateOnly(item.planned_date);
-        }
-        if (!grouped[item.schedule_id]) {
-          grouped[item.schedule_id] = [];
-        }
-        grouped[item.schedule_id].push(item);
-      }
-      this.trainingItemsBySchedule = grouped;
-    } catch (error) {
-      console.error(error);
-      this.trainingItemsBySchedule = {};
-    }
-  }
-
-  async approveTrainingSchedule(scheduleId: string): Promise<void> {
-    if (!scheduleId) return;
-    try {
-      await this.schedulesService.approveTrainingSchedule(scheduleId);
-      await this.loadTrainingSchedules();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo aprobar el cronograma de capacitaciones.';
-    }
-  }
-
-  async openTrainingSchedulePdf(scheduleId: string): Promise<void> {
-    try {
-      const blob = await this.schedulesService.downloadTrainingSchedulePdf(scheduleId);
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo abrir el PDF.';
-    }
-  }
-
-  async uploadTrainingPdf(item: TrainingItemDto, event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    if (!input.files?.length) return;
-    const file = input.files[0];
-    try {
-      await this.schedulesService.uploadTrainingPdf(item.id, file);
-      const scheduleId = item.schedule_id;
-      if (scheduleId) {
-        const items = await this.schedulesService.listTrainingItems(scheduleId);
-        this.trainingItemsBySchedule[scheduleId] = items.map((row) => ({
-          ...row,
-          planned_date: row.planned_date ? this.toDateOnly(row.planned_date) : row.planned_date
-        }));
-      }
-      this.successMessage = 'Acta cargada correctamente.';
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo subir el PDF.';
-    } finally {
-      input.value = '';
-      setTimeout(() => {
-        this.successMessage = '';
-        this.cdr.detectChanges();
-      }, 2500);
-    }
-  }
-
-  async saveTrainingItems(scheduleId: string): Promise<void> {
-    const items = this.trainingItemsBySchedule[scheduleId] ?? [];
-    if (!items.length) return;
-    try {
-      await this.schedulesService.updateTrainingItems(
-        scheduleId,
-        items.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
-      );
-      await this.loadTrainingSchedules();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudieron guardar las fechas.';
-    }
-  }
-
-  async openTrainingPdf(item: TrainingItemDto): Promise<void> {
-    if (!item.pdf_path) return;
-    try {
-      const blob = await this.schedulesService.downloadTrainingPdf(item.id);
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo abrir el PDF.';
-    }
-  }
-
-  async deleteTrainingPdf(item: TrainingItemDto): Promise<void> {
-    if (!confirm('¿Eliminar acta cargada?')) return;
-    try {
-      await this.schedulesService.deleteTrainingPdf(item.id);
-      const scheduleId = item.schedule_id;
-      if (scheduleId) {
-        const items = await this.schedulesService.listTrainingItems(scheduleId);
-        this.trainingItemsBySchedule[scheduleId] = items.map((row) => ({
-          ...row,
-          planned_date: row.planned_date ? this.toDateOnly(row.planned_date) : row.planned_date
-        }));
-      }
-      this.successMessage = 'Acta eliminada. Puedes cargar una nueva.';
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo eliminar el acta.';
-    } finally {
-      setTimeout(() => {
-        this.successMessage = '';
-        this.cdr.detectChanges();
-      }, 2500);
-    }
-  }
-
-  async deleteTrainingSchedule(scheduleId: string): Promise<void> {
-    if (!confirm('¿Eliminar cronograma de capacitaciones?')) return;
-    try {
-      await this.schedulesService.deleteTrainingSchedule(scheduleId);
-      await this.loadTrainingSchedules();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo eliminar el cronograma.';
-    }
-  }
-
-  trainingStatusLabel(status: string): string {
-    const value = String(status || '').toLowerCase();
-    if (value === 'draft') return 'Borrador';
-    if (value === 'approved') return 'Aprobado';
-    if (value === 'closed') return 'Cerrado';
-    return status;
-  }
-
-  trainingItemStatus(item: TrainingItemDto): string {
-    const status = item.display_status ?? item.status;
-    if (status === 'done') return 'Completado';
-    if (status === 'active') return 'Activo';
-    return 'Programado';
-  }
-
-  canUploadTrainingPdf(item: TrainingItemDto): boolean {
-    return (item.display_status ?? item.status) === 'active';
-  }
-
-  toggleAreaSelection(areaId: string, checked: boolean): void {
-    if (checked) {
-      if (!this.selectedAreas.includes(areaId)) {
-        this.selectedAreas = [...this.selectedAreas, areaId];
-      }
-      return;
-    }
-    this.selectedAreas = this.selectedAreas.filter((id) => id !== areaId);
-  }
-
-  canEditSelected(): boolean {
-    const schedule = this.schedules.find((s) => s.id === this.selectedScheduleId);
-    if (!schedule) return false;
-    if (this.auth.hasRole('superuser')) return true;
-    if (schedule.status === 'approved') return false;
-    return true;
+  get selectedSchedule(): ScheduleDto | null {
+    return this.schedules.find((schedule) => schedule.id === this.selectedScheduleId) ?? null;
   }
 
   get filteredSchedules(): ScheduleDto[] {
-    if (!this.maintenanceStatusFilter) return this.schedules;
-    return this.schedules.filter((s) => s.status === this.maintenanceStatusFilter);
+    return this.maintenanceStatusFilter
+      ? this.schedules.filter((schedule) => schedule.status === this.maintenanceStatusFilter)
+      : this.schedules;
   }
 
-  get filteredTrainingSchedules(): TrainingScheduleDto[] {
-    if (!this.trainingStatusFilter) return this.trainingSchedules;
-    return this.trainingSchedules.filter((s) => s.status === this.trainingStatusFilter);
+  get hasMaintenanceSchedule(): boolean {
+    return this.schedules.length > 0;
   }
 
-  statusLabel(status: string): string {
-    const value = String(status || '').toLowerCase();
-    if (value === 'draft') return 'Borrador';
-    if (value === 'approved') return 'Aprobado';
-    if (value === 'closed') return 'Cerrado';
-    return status;
-  }
-
-  maintenanceItemStatusLabel(status: string): string {
-    const value = String(status || '').toLowerCase();
-    if (value === 'pending') return 'Programado';
-    if (value === 'active') return 'Activo';
-    if (value === 'done') return 'Realizado';
-    if (value === 'expired') return 'Vencido';
-    return status || '-';
-  }
-
-  maintenanceItemStatusClass(status: string): string {
-    const value = String(status || '').toLowerCase();
-    if (value === 'active') return 'active';
-    if (value === 'done') return 'done';
-    if (value === 'expired') return 'expired';
-    return 'pending';
-  }
-
-  isApprovedSelected(): boolean {
-    const schedule = this.schedules.find((s) => s.id === this.selectedScheduleId);
-    return schedule?.status === 'approved';
-  }
-
-  adjustToWeekday(date: Date): Date {
-    const d = new Date(date);
-    if (d.getDay() === 6) d.setDate(d.getDate() + 2);
-    if (d.getDay() === 0) d.setDate(d.getDate() + 1);
-    return d;
-  }
-
-  addBusinessDays(date: Date, days: number): Date {
-    let d = new Date(date);
-    let added = 0;
-    while (added < days) {
-      d.setDate(d.getDate() + 1);
-      const day = d.getDay();
-      if (day !== 0 && day !== 6) {
-        added += 1;
-      }
+  async generateSchedule(): Promise<void> {
+    if (!this.validGeneratorDate(this.startDate)) {
+      this.setNotice('error', 'Selecciona una fecha inicial válida dentro del año del cronograma.');
+      return;
     }
-    return d;
+    await this.runAction(
+      'generate-maintenance',
+      async () => {
+        await this.schedulesService.generateSchedule(this.selectedClientId, this.selectedYear, this.startDate);
+        await this.loadSchedules(false);
+        this.showGenerator = false;
+      },
+      'Cronograma de mantenimiento generado en borrador.'
+    );
   }
 
-  subtractBusinessDays(date: Date, days: number): Date {
-    let d = new Date(date);
-    let subtracted = 0;
-    while (subtracted < days) {
-      d.setDate(d.getDate() - 1);
-      const day = d.getDay();
-      if (day !== 0 && day !== 6) {
-        subtracted += 1;
-      }
+  canEditSelected(): boolean {
+    const schedule = this.selectedSchedule;
+    if (!schedule) return false;
+    if (this.auth.hasRole('superuser')) return true;
+    return schedule.status === 'draft' && !schedule.engineer_edited;
+  }
+
+  get maintenanceEditRestriction(): string {
+    const schedule = this.selectedSchedule;
+    if (!schedule || this.canEditSelected()) return '';
+    if (schedule.status !== 'draft') return 'Las fechas quedan bloqueadas al aprobar el cronograma.';
+    if (schedule.engineer_edited) return 'La edición permitida para el ingeniero ya fue utilizada.';
+    return '';
+  }
+
+  startMaintenanceEdit(): void {
+    if (!this.canEditSelected()) return;
+    this.maintenanceSnapshot = new Map(this.items.map((item) => [item.id, item.planned_date]));
+    this.editing = true;
+  }
+
+  cancelMaintenanceEdit(): void {
+    for (const item of this.items) {
+      item.planned_date = this.maintenanceSnapshot.get(item.id) ?? item.planned_date;
     }
-    return d;
-  }
-
-  toDateOnly(value: string): string {
-    if (!value) return '';
-    return new Date(value).toISOString().slice(0, 10);
-  }
-
-  computeRangeMin(item: ScheduleItemDto): string {
-    if (!item.deadline_date) return item.planned_date;
-    const deadline = new Date(item.deadline_date);
-    const minDate = this.subtractBusinessDays(deadline, 10);
-    return minDate.toISOString().slice(0, 10);
-  }
-
-  onPlannedDateChange(item: ScheduleItemDto, value: string): void {
-    const range = this.rangeMap.get(item.id);
-    if (!range) return;
-    const minDate = new Date(range.min);
-    const maxDate = new Date(range.max);
-    let planned = this.adjustToWeekday(new Date(value));
-    if (planned < minDate) planned = minDate;
-    if (planned > maxDate) planned = maxDate;
-    item.planned_date = planned.toISOString().slice(0, 10);
-    item.deadline_date = range.max;
-  }
-
-  rangeMin(item: ScheduleItemDto): string {
-    return this.rangeMap.get(item.id)?.min ?? item.planned_date;
-  }
-
-  rangeMax(item: ScheduleItemDto): string {
-    return this.rangeMap.get(item.id)?.max ?? item.deadline_date;
+    this.editing = false;
   }
 
   async saveEdits(): Promise<void> {
     if (!this.selectedScheduleId) return;
-    const payload = this.items.map((item) => ({
-      id: item.id,
-      plannedDate: item.planned_date
-    }));
-    try {
-      await this.schedulesService.updateScheduleItems(this.selectedScheduleId, payload);
-      this.editing = false;
-      await this.loadSchedules();
-      await this.loadItems();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo actualizar el cronograma.';
-    }
+    await this.runAction(
+      'save-maintenance',
+      async () => {
+        await this.schedulesService.updateScheduleItems(
+          this.selectedScheduleId,
+          this.items.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
+        );
+        await this.loadSchedules(true);
+      },
+      'Fechas de mantenimiento actualizadas.'
+    );
   }
 
-  async approveSchedule(): Promise<void> {
-    if (!this.selectedScheduleId) return;
-    try {
-      await this.schedulesService.approveSchedule(this.selectedScheduleId);
-      await this.loadSchedules();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo aprobar el cronograma.';
-    }
+  requestApproveSchedule(schedule: ScheduleDto): void {
+    this.openConfirm(
+      'Aprobar cronograma de mantenimiento',
+      `Se aprobará el cronograma ${schedule.year} y sus mantenimientos podrán generar solicitudes operativas.`,
+      'Aprobar cronograma',
+      false,
+      async () => {
+        this.selectedScheduleId = schedule.id;
+        await this.schedulesService.approveSchedule(schedule.id);
+        await this.loadSchedules(true);
+        this.setNotice('success', 'Cronograma de mantenimiento aprobado.');
+      }
+    );
+  }
+
+  requestDeleteSchedule(schedule: ScheduleDto): void {
+    this.openConfirm(
+      'Eliminar cronograma de mantenimiento',
+      `Se eliminará definitivamente el cronograma ${schedule.year}.`,
+      'Eliminar cronograma',
+      true,
+      async () => {
+        await this.schedulesService.deleteSchedule(schedule.id);
+        await this.loadSchedules(false);
+        this.setNotice('success', 'Cronograma de mantenimiento eliminado.');
+      }
+    );
   }
 
   async openPdf(scheduleId: string): Promise<void> {
-    try {
-      const blob = await this.schedulesService.downloadSchedulePdf(scheduleId);
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo abrir el PDF.';
-    }
+    await this.openPdfAction(
+      `maintenance-pdf-${scheduleId}`,
+      () => this.schedulesService.downloadSchedulePdf(scheduleId),
+      'No se pudo abrir el PDF del cronograma.'
+    );
   }
 
-  async deleteSchedule(scheduleId: string): Promise<void> {
-    if (!confirm('¿Eliminar cronograma?')) {
-      return;
-    }
-    try {
-      await this.schedulesService.deleteSchedule(scheduleId);
-      await this.loadSchedules();
-    } catch (error: any) {
-      console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo eliminar el cronograma.';
-    }
+  get maintenanceSummary(): Record<'pending' | 'active' | 'done' | 'expired', number> {
+    return this.countStatuses(this.items, (item) => item.status) as Record<
+      'pending' | 'active' | 'done' | 'expired',
+      number
+    >;
   }
 
-  get groupedItems(): MaintenanceItemGroup[] {
-    const map = new Map<string, Omit<MaintenanceItemGroup, 'dateGroups' | 'assetCount' | 'frequencies'> & { assets: Set<string>; frequenciesSet: Set<string> }>();
-    for (const item of this.items) {
+  get maintenanceAreaOptions(): string[] {
+    return this.uniqueSorted(this.items.map((item) => item.area_name || '').filter(Boolean));
+  }
+
+  get maintenanceFrequencyOptions(): string[] {
+    return this.uniqueSorted(this.items.map((item) => item.frequency).filter(Boolean));
+  }
+
+  get filteredMaintenanceItems(): ScheduleItemDto[] {
+    const term = this.maintenanceDetailSearch.trim().toLowerCase();
+    return this.items.filter((item) => {
+      if (this.maintenanceAreaFilter && item.area_name !== this.maintenanceAreaFilter) return false;
+      if (this.maintenanceFrequencyFilter && item.frequency !== this.maintenanceFrequencyFilter) return false;
+      if (this.maintenanceItemStatusFilter && item.status !== this.maintenanceItemStatusFilter) return false;
+      if (!term) return true;
+      return `${item.code ?? ''} ${item.name ?? ''} ${item.brand ?? ''} ${item.model ?? ''} ${item.serial ?? ''} ${item.site_name ?? ''} ${item.area_name ?? ''}`
+        .toLowerCase()
+        .includes(term);
+    });
+  }
+
+  get filteredGroupedItems(): MaintenanceItemGroup[] {
+    const map = new Map<
+      string,
+      Omit<MaintenanceItemGroup, 'assetCount' | 'frequencies' | 'dateGroups'>
+    >();
+    for (const item of this.filteredMaintenanceItems) {
       const areaName = item.area_name || 'Sin área';
       const siteName = item.site_name || 'Sin sede';
       const key = `${item.site_id || 'no-site'}:${item.area_id || areaName.toLowerCase()}`;
       if (!map.has(key)) {
-        map.set(key, {
-          areaKey: key,
-          areaName,
-          siteName,
-          items: [],
-          assets: new Set<string>(),
-          frequenciesSet: new Set<string>()
-        });
+        map.set(key, { areaKey: key, areaName, siteName, items: [] });
       }
-      const group = map.get(key)!;
-      group.items.push(item);
-      group.assets.add(item.asset_id);
-      if (item.frequency) group.frequenciesSet.add(item.frequency);
+      map.get(key)!.items.push(item);
     }
     return Array.from(map.values())
       .map((group) => ({
-        areaKey: group.areaKey,
-        areaName: group.areaName,
-        siteName: group.siteName,
-        assetCount: group.assets.size,
-        frequencies: Array.from(group.frequenciesSet).sort((a, b) => a.localeCompare(b)),
-        items: group.items,
+        ...group,
+        assetCount: new Set(group.items.map((item) => item.asset_id)).size,
+        frequencies: this.uniqueSorted(group.items.map((item) => item.frequency).filter(Boolean)),
         dateGroups: this.buildAreaDateGroups(group.items)
       }))
       .sort((a, b) => `${a.siteName} ${a.areaName}`.localeCompare(`${b.siteName} ${b.areaName}`));
   }
 
-  get maintenanceAreaOptions(): string[] {
-    const areas = new Set<string>();
-    for (const item of this.items) {
-      if (item.area_name) areas.add(item.area_name);
-    }
-    return Array.from(areas).sort((a, b) => a.localeCompare(b));
-  }
-
-  get maintenanceFrequencyOptions(): string[] {
-    const freqs = new Set<string>();
-    for (const item of this.items) {
-      if (item.frequency) freqs.add(item.frequency);
-    }
-    return Array.from(freqs);
-  }
-
-  get filteredGroupedItems(): MaintenanceItemGroup[] {
-    const query = this.maintenanceDetailSearch.trim().toLowerCase();
-    return this.groupedItems
-      .map((group) => ({
-        ...group,
-        items: this.maintenanceItemStatusFilter
-          ? group.items.filter((item) => item.status === this.maintenanceItemStatusFilter)
-          : group.items
-      }))
-      .map((group) => ({
-        ...group,
-        assetCount: new Set(group.items.map((item) => item.asset_id)).size,
-        frequencies: Array.from(new Set(group.items.map((item) => item.frequency).filter(Boolean))).sort((a, b) =>
-          a.localeCompare(b)
-        ),
-        dateGroups: this.buildAreaDateGroups(group.items)
-      }))
-      .filter((group) => {
-        const areaNames = group.items.map((item) => item.area_name ?? '').join(' ').toLowerCase();
-        const matchesArea = this.maintenanceAreaFilter
-          ? areaNames.includes(this.maintenanceAreaFilter.toLowerCase())
-          : true;
-        const matchesFreq = this.maintenanceFrequencyFilter ? group.frequencies.includes(this.maintenanceFrequencyFilter) : true;
-        const assetNames = group.items
-          .map((item) => `${item.code ?? ''} ${item.name ?? ''} ${item.brand ?? ''} ${item.model ?? ''} ${item.serial ?? ''}`)
-          .join(' ');
-        const haystack = `${group.siteName} ${group.areaName} ${assetNames}`.toLowerCase();
-        const matchesSearch = query ? haystack.includes(query) : true;
-        return group.items.length > 0 && matchesArea && matchesFreq && matchesSearch;
-      });
-  }
-
-  buildAreaDateGroups(items: ScheduleItemDto[]): MaintenanceAreaDateGroup[] {
+  private buildAreaDateGroups(items: ScheduleItemDto[]): MaintenanceAreaDateGroup[] {
     const map = new Map<string, MaintenanceAreaDateGroup>();
     for (const item of items) {
       const minDate = this.rangeMin(item);
       const maxDate = this.rangeMax(item);
-      const key = `${minDate}:${maxDate}`;
+      const key = `${item.planned_date}:${maxDate}`;
       if (!map.has(key)) {
         map.set(key, {
           key,
@@ -902,19 +500,546 @@ export class CronogramasComponent implements OnInit {
       }
       map.get(key)!.items.push(item);
     }
-    return Array.from(map.values()).sort((a, b) => a.minDate.localeCompare(b.minDate));
+    return Array.from(map.values()).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate));
   }
 
   areaStatusItems(group: MaintenanceItemGroup): { status: string; count: number }[] {
-    const counts = new Map<string, number>();
-    for (const item of group.items) {
-      counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
+    const counts = this.countStatuses(group.items, (item) => item.status);
+    return ['active', 'expired', 'pending', 'done']
+      .filter((status) => counts[status] > 0)
+      .map((status) => ({ status, count: counts[status] }));
+  }
+
+  onAreaPlannedDateChange(dateGroup: MaintenanceAreaDateGroup, value: string): void {
+    const normalized = this.normalizeEditableDate(value, dateGroup.minDate, dateGroup.maxDate);
+    for (const item of dateGroup.items) item.planned_date = normalized;
+    dateGroup.plannedDate = normalized;
+  }
+
+  rangeMin(item: ScheduleItemDto): string {
+    return this.rangeMap.get(item.id)?.min ?? item.planned_date;
+  }
+
+  rangeMax(item: ScheduleItemDto): string {
+    return this.rangeMap.get(item.id)?.max ?? item.deadline_date;
+  }
+
+  private computeRangeMin(item: ScheduleItemDto): string {
+    return item.deadline_date ? this.shiftBusinessDays(item.deadline_date, -10) : item.planned_date;
+  }
+
+  async loadTrainingSchedules(preserveSelection = true): Promise<void> {
+    if (!this.selectedClientId) return;
+    this.loading = true;
+    try {
+      this.trainingSchedules = await this.schedulesService.listTrainingSchedules(
+        this.selectedClientId,
+        this.selectedYear
+      );
+      const previous = preserveSelection ? this.selectedTrainingScheduleId : '';
+      this.selectedTrainingScheduleId = this.trainingSchedules.some((row) => row.id === previous)
+        ? previous
+        : (this.trainingSchedules[0]?.id ?? '');
+      if (this.selectedTrainingScheduleId) {
+        await this.loadTrainingItems(this.selectedTrainingScheduleId);
+      } else {
+        this.trainingItems = [];
+        this.trainingEditing = false;
+      }
+    } finally {
+      this.loading = false;
+      this.refreshView();
     }
-    return Array.from(counts.entries()).map(([status, count]) => ({ status, count }));
+  }
+
+  async selectTrainingSchedule(scheduleId: string): Promise<void> {
+    if (this.selectedTrainingScheduleId === scheduleId && this.trainingItems.length) return;
+    this.selectedTrainingScheduleId = scheduleId;
+    try {
+      await this.loadTrainingItems(scheduleId);
+    } catch (error: any) {
+      console.error(error);
+      this.setNotice('error', this.errorText(error, 'No se pudo cargar el detalle de capacitaciones.'));
+    }
+  }
+
+  private async loadTrainingItems(scheduleId: string): Promise<void> {
+    this.detailLoading = true;
+    try {
+      const rows = await this.schedulesService.listTrainingItems(scheduleId);
+      this.trainingItems = rows.map((item) => ({ ...item, planned_date: this.dateOnly(item.planned_date) }));
+      this.trainingSnapshot = new Map(this.trainingItems.map((item) => [item.id, item.planned_date]));
+      this.trainingEditing = false;
+    } finally {
+      this.detailLoading = false;
+      this.refreshView();
+    }
+  }
+
+  get selectedTrainingSchedule(): TrainingScheduleDto | null {
+    return this.trainingSchedules.find((schedule) => schedule.id === this.selectedTrainingScheduleId) ?? null;
+  }
+
+  get filteredTrainingSchedules(): TrainingScheduleDto[] {
+    return this.trainingStatusFilter
+      ? this.trainingSchedules.filter((schedule) => schedule.status === this.trainingStatusFilter)
+      : this.trainingSchedules;
+  }
+
+  get hasTrainingSchedule(): boolean {
+    return this.trainingSchedules.length > 0;
+  }
+
+  get filteredTrainingItems(): TrainingItemDto[] {
+    const term = this.trainingSearch.trim().toLowerCase();
+    return this.trainingItems.filter((item) => {
+      const status = this.trainingItemStatusKey(item);
+      if (this.trainingItemStatusFilter && status !== this.trainingItemStatusFilter) return false;
+      if (!term) return true;
+      return `${item.area_name ?? ''} ${this.formatDate(item.planned_date)}`.toLowerCase().includes(term);
+    });
+  }
+
+  get trainingSummary(): Record<'pending' | 'active' | 'done' | 'expired', number> {
+    return this.countStatuses(this.trainingItems, (item) => this.trainingItemStatusKey(item)) as Record<
+      'pending' | 'active' | 'done' | 'expired',
+      number
+    >;
+  }
+
+  async generateTrainingSchedule(): Promise<void> {
+    if (!this.validGeneratorDate(this.trainingStartDate)) {
+      this.setNotice('error', 'Selecciona una fecha inicial válida dentro del año del cronograma.');
+      return;
+    }
+    if (!this.selectedAreas.length) {
+      this.setNotice('error', 'Selecciona al menos un área para el cronograma de capacitaciones.');
+      return;
+    }
+    await this.runAction(
+      'generate-training',
+      async () => {
+        await this.schedulesService.generateTrainingSchedule(this.selectedClientId, {
+          year: this.selectedYear,
+          startDate: this.trainingStartDate,
+          periodicity: this.trainingPeriodicity,
+          areaIds: this.selectedAreas
+        });
+        await this.loadTrainingSchedules(false);
+        this.showGenerator = false;
+      },
+      'Cronograma de capacitaciones generado en borrador.'
+    );
+  }
+
+  canEditTraining(): boolean {
+    const schedule = this.selectedTrainingSchedule;
+    if (!schedule) return false;
+    return this.auth.hasRole('superuser') || schedule.status === 'draft';
+  }
+
+  startTrainingEdit(): void {
+    if (!this.canEditTraining()) return;
+    this.trainingSnapshot = new Map(this.trainingItems.map((item) => [item.id, item.planned_date]));
+    this.trainingEditing = true;
+  }
+
+  cancelTrainingEdit(): void {
+    for (const item of this.trainingItems) {
+      item.planned_date = this.trainingSnapshot.get(item.id) ?? item.planned_date;
+    }
+    this.trainingEditing = false;
+  }
+
+  onTrainingDateChange(item: TrainingItemDto, value: string): void {
+    item.planned_date = this.normalizeEditableDate(
+      value,
+      `${this.selectedYear}-01-01`,
+      `${this.selectedYear}-12-31`
+    );
+  }
+
+  async saveTrainingItems(): Promise<void> {
+    if (!this.selectedTrainingScheduleId) return;
+    await this.runAction(
+      'save-training',
+      async () => {
+        await this.schedulesService.updateTrainingItems(
+          this.selectedTrainingScheduleId,
+          this.trainingItems.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
+        );
+        await this.loadTrainingSchedules(true);
+      },
+      'Fechas de capacitación actualizadas.'
+    );
+  }
+
+  requestApproveTraining(schedule: TrainingScheduleDto): void {
+    this.openConfirm(
+      'Aprobar cronograma de capacitaciones',
+      `Se aprobarán las capacitaciones programadas para ${schedule.year}.`,
+      'Aprobar cronograma',
+      false,
+      async () => {
+        this.selectedTrainingScheduleId = schedule.id;
+        await this.schedulesService.approveTrainingSchedule(schedule.id);
+        await this.loadTrainingSchedules(true);
+        this.setNotice('success', 'Cronograma de capacitaciones aprobado.');
+      }
+    );
+  }
+
+  requestDeleteTrainingSchedule(schedule: TrainingScheduleDto): void {
+    this.openConfirm(
+      'Eliminar cronograma de capacitaciones',
+      `Se eliminará definitivamente el cronograma ${schedule.year}.`,
+      'Eliminar cronograma',
+      true,
+      async () => {
+        await this.schedulesService.deleteTrainingSchedule(schedule.id);
+        await this.loadTrainingSchedules(false);
+        this.setNotice('success', 'Cronograma de capacitaciones eliminado.');
+      }
+    );
+  }
+
+  async openTrainingSchedulePdf(scheduleId: string): Promise<void> {
+    await this.openPdfAction(
+      `training-schedule-pdf-${scheduleId}`,
+      () => this.schedulesService.downloadTrainingSchedulePdf(scheduleId),
+      'No se pudo abrir el PDF del cronograma de capacitaciones.'
+    );
+  }
+
+  async uploadTrainingPdf(item: TrainingItemDto, event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!this.validatePdf(file)) {
+      input.value = '';
+      return;
+    }
+    await this.runAction(
+      `training-upload-${item.id}`,
+      async () => {
+        await this.schedulesService.uploadTrainingPdf(item.id, file);
+        await this.loadTrainingSchedules(true);
+      },
+      'Acta de capacitación cargada correctamente.'
+    );
+    input.value = '';
+  }
+
+  async openTrainingPdf(item: TrainingItemDto): Promise<void> {
+    if (!item.pdf_path) return;
+    await this.openPdfAction(
+      `training-pdf-${item.id}`,
+      () => this.schedulesService.downloadTrainingPdf(item.id),
+      'No se pudo abrir el acta de capacitación.'
+    );
+  }
+
+  requestDeleteTrainingPdf(item: TrainingItemDto): void {
+    this.openConfirm(
+      'Eliminar acta de capacitación',
+      `Se eliminará el acta de ${item.area_name || 'la capacitación seleccionada'}.`,
+      'Eliminar acta',
+      true,
+      async () => {
+        await this.schedulesService.deleteTrainingPdf(item.id);
+        await this.loadTrainingSchedules(true);
+        this.setNotice('success', 'Acta de capacitación eliminada.');
+      }
+    );
+  }
+
+  canUploadTrainingPdf(item: TrainingItemDto): boolean {
+    return (
+      this.auth.hasPermission('schedules:manage') &&
+      this.selectedTrainingSchedule?.status === 'approved' &&
+      this.trainingItemStatusKey(item) === 'active' &&
+      !item.pdf_path
+    );
+  }
+
+  toggleAreaSelection(areaId: string, checked: boolean): void {
+    this.selectedAreas = checked
+      ? Array.from(new Set([...this.selectedAreas, areaId]))
+      : this.selectedAreas.filter((id) => id !== areaId);
+  }
+
+  selectVisibleAreas(): void {
+    this.selectedAreas = Array.from(
+      new Set([...this.selectedAreas, ...this.filteredAreas.map((area) => area.id)])
+    );
+  }
+
+  clearAreaSelection(): void {
+    this.selectedAreas = [];
+  }
+
+  async loadCalibrationSchedules(preserveSelection = true): Promise<void> {
+    if (!this.selectedClientId || !this.canAccessCalibrationModule()) return;
+    this.loading = true;
+    try {
+      this.calibrationSchedules = await this.calibration.listSchedules(
+        this.selectedClientId,
+        this.selectedYear
+      );
+      const previous = preserveSelection ? this.selectedCalibrationScheduleId : '';
+      this.selectedCalibrationScheduleId = this.calibrationSchedules.some((row) => row.id === previous)
+        ? previous
+        : (this.calibrationSchedules[0]?.id ?? '');
+      if (this.selectedCalibrationScheduleId) {
+        await this.loadCalibrationItems(this.selectedCalibrationScheduleId);
+      } else {
+        this.calibrationItems = [];
+      }
+    } finally {
+      this.loading = false;
+      this.refreshView();
+    }
+  }
+
+  async selectCalibrationSchedule(scheduleId: string): Promise<void> {
+    if (this.selectedCalibrationScheduleId === scheduleId && this.calibrationItems.length) return;
+    this.selectedCalibrationScheduleId = scheduleId;
+    try {
+      await this.loadCalibrationItems(scheduleId);
+    } catch (error: any) {
+      console.error(error);
+      this.setNotice('error', this.errorText(error, 'No se pudo cargar el detalle de calibraciones.'));
+    }
+  }
+
+  private async loadCalibrationItems(scheduleId: string): Promise<void> {
+    this.detailLoading = true;
+    try {
+      const rows = await this.calibration.listItems(scheduleId);
+      this.calibrationItems = rows.map((item) => ({
+        ...item,
+        planned_date: this.dateOnly(item.planned_date),
+        deadline_date: this.dateOnly(item.deadline_date)
+      }));
+    } finally {
+      this.detailLoading = false;
+      this.refreshView();
+    }
+  }
+
+  get selectedCalibrationSchedule(): CalibrationScheduleDto | null {
+    return this.calibrationSchedules.find((schedule) => schedule.id === this.selectedCalibrationScheduleId) ?? null;
+  }
+
+  get filteredCalibrationSchedules(): CalibrationScheduleDto[] {
+    return this.calibrationScheduleStatusFilter
+      ? this.calibrationSchedules.filter((schedule) => schedule.status === this.calibrationScheduleStatusFilter)
+      : this.calibrationSchedules;
+  }
+
+  get hasCalibrationSchedule(): boolean {
+    return this.calibrationSchedules.length > 0;
+  }
+
+  get calibrationAreaOptions(): string[] {
+    return this.uniqueSorted(this.calibrationItems.map((item) => item.area_name || '').filter(Boolean));
+  }
+
+  get filteredCalibrationItems(): CalibrationItemDto[] {
+    const term = this.calibrationSearch.trim().toLowerCase();
+    return this.calibrationItems.filter((item) => {
+      if (this.calibrationAreaFilter && item.area_name !== this.calibrationAreaFilter) return false;
+      if (
+        this.calibrationItemStatusFilter &&
+        this.calibrationItemStatusKey(item) !== this.calibrationItemStatusFilter
+      ) {
+        return false;
+      }
+      if (!term) return true;
+      return `${item.code ?? ''} ${item.name ?? ''} ${item.brand ?? ''} ${item.model ?? ''} ${item.serial ?? ''} ${item.area_name ?? ''}`
+        .toLowerCase()
+        .includes(term);
+    });
+  }
+
+  get calibrationSummary(): Record<'pending' | 'active' | 'done' | 'expired', number> {
+    return this.countStatuses(this.calibrationItems, (item) => this.calibrationItemStatusKey(item)) as Record<
+      'pending' | 'active' | 'done' | 'expired',
+      number
+    >;
+  }
+
+  async generateCalibrationSchedule(): Promise<void> {
+    if (!this.validGeneratorDate(this.calibrationStartDate)) {
+      this.setNotice('error', 'Selecciona una fecha inicial válida dentro del año del cronograma.');
+      return;
+    }
+    await this.runAction(
+      'generate-calibration',
+      async () => {
+        await this.calibration.generateSchedule(this.selectedClientId, {
+          year: this.selectedYear,
+          startDate: this.calibrationStartDate
+        });
+        await this.loadCalibrationSchedules(false);
+        this.showGenerator = false;
+      },
+      'Cronograma de calibración generado en borrador.'
+    );
+  }
+
+  requestApproveCalibration(schedule: CalibrationScheduleDto): void {
+    this.openConfirm(
+      'Aprobar cronograma de calibración',
+      `Se aprobarán las calibraciones programadas para ${schedule.year}.`,
+      'Aprobar cronograma',
+      false,
+      async () => {
+        this.selectedCalibrationScheduleId = schedule.id;
+        await this.calibration.approveSchedule(schedule.id);
+        await this.loadCalibrationSchedules(true);
+        this.setNotice('success', 'Cronograma de calibración aprobado.');
+      }
+    );
+  }
+
+  requestDeleteCalibrationSchedule(schedule: CalibrationScheduleDto): void {
+    this.openConfirm(
+      'Eliminar cronograma de calibración',
+      `Se eliminará definitivamente el cronograma ${schedule.year}.`,
+      'Eliminar cronograma',
+      true,
+      async () => {
+        await this.calibration.deleteSchedule(schedule.id);
+        await this.loadCalibrationSchedules(false);
+        this.setNotice('success', 'Cronograma de calibración eliminado.');
+      }
+    );
+  }
+
+  async openCalibrationSchedulePdf(scheduleId: string): Promise<void> {
+    await this.openPdfAction(
+      `calibration-schedule-pdf-${scheduleId}`,
+      () => this.calibration.downloadSchedulePdf(scheduleId),
+      'No se pudo abrir el PDF del cronograma de calibración.'
+    );
+  }
+
+  async uploadCalibrationPdf(item: CalibrationItemDto, event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!this.validatePdf(file)) {
+      input.value = '';
+      return;
+    }
+    await this.runAction(
+      `calibration-upload-${item.id}`,
+      async () => {
+        await this.calibration.uploadPdf(item.id, file);
+        await this.loadCalibrationSchedules(true);
+      },
+      'Certificado de calibración cargado correctamente.'
+    );
+    input.value = '';
+  }
+
+  async openCalibrationPdf(item: CalibrationItemDto): Promise<void> {
+    if (!item.pdf_path) return;
+    await this.openPdfAction(
+      `calibration-pdf-${item.id}`,
+      () => this.calibration.downloadPdf(item.id),
+      'No se pudo abrir el certificado de calibración.'
+    );
+  }
+
+  requestDeleteCalibrationPdf(item: CalibrationItemDto): void {
+    this.openConfirm(
+      'Eliminar certificado de calibración',
+      `Se eliminará el certificado de ${item.code || item.name || 'la calibración seleccionada'}.`,
+      'Eliminar certificado',
+      true,
+      async () => {
+        await this.calibration.deletePdf(item.id);
+        await this.loadCalibrationSchedules(true);
+        this.setNotice('success', 'Certificado de calibración eliminado.');
+      }
+    );
+  }
+
+  canUploadCalibration(item: CalibrationItemDto): boolean {
+    const status = this.calibrationItemStatusKey(item);
+    return (
+      this.auth.hasPermission('calibration:report:upload') &&
+      this.selectedCalibrationSchedule?.status === 'approved' &&
+      (status === 'active' || status === 'expired') &&
+      !item.pdf_path
+    );
+  }
+
+  canAccessCalibrationModule(): boolean {
+    return (
+      this.auth.hasPermission('calibration:schedule:manage') ||
+      this.auth.hasPermission('calibration:report:upload')
+    );
+  }
+
+  canManageCalibrationSchedules(): boolean {
+    return this.auth.hasPermission('calibration:schedule:manage');
+  }
+
+  statusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      draft: 'Borrador',
+      approved: 'Aprobado',
+      closed: 'Cerrado'
+    };
+    return labels[String(status || '').toLowerCase()] ?? status;
+  }
+
+  itemStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      pending: 'Programado',
+      active: 'Activo',
+      done: 'Realizado',
+      expired: 'Vencido'
+    };
+    return labels[String(status || '').toLowerCase()] ?? status;
+  }
+
+  trainingItemStatusKey(item: TrainingItemDto): string {
+    return item.display_status ?? item.status ?? 'pending';
+  }
+
+  trainingItemStatusLabel(item: TrainingItemDto): string {
+    const labels: Record<string, string> = {
+      pending: 'Programada',
+      active: 'Activa',
+      done: 'Completada'
+    };
+    const status = this.trainingItemStatusKey(item);
+    return labels[status] ?? this.itemStatusLabel(status);
+  }
+
+  calibrationItemStatusKey(item: CalibrationItemDto): string {
+    return item.display_status ?? item.status ?? 'pending';
+  }
+
+  calibrationItemStatusLabel(item: CalibrationItemDto): string {
+    const labels: Record<string, string> = {
+      pending: 'Programada',
+      active: 'Activa',
+      done: 'Completada',
+      expired: 'Vencida'
+    };
+    const status = this.calibrationItemStatusKey(item);
+    return labels[status] ?? this.itemStatusLabel(status);
   }
 
   frequencyLabel(group: MaintenanceItemGroup): string {
-    return group.frequencies.length ? group.frequencies.map((freq) => this.titleCase(freq)).join(', ') : '-';
+    return group.frequencies.length
+      ? group.frequencies.map((value) => this.titleCase(value)).join(', ')
+      : '-';
   }
 
   titleCase(value: string): string {
@@ -923,15 +1048,218 @@ export class CronogramasComponent implements OnInit {
       .replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 
-  onAreaPlannedDateChange(dateGroup: MaintenanceAreaDateGroup, value: string): void {
-    for (const item of dateGroup.items) {
-      this.onPlannedDateChange(item, value);
+  formatDate(value: string | null | undefined): string {
+    const normalized = this.dateOnly(value);
+    if (!normalized) return '-';
+    const [year, month, day] = normalized.split('-');
+    return `${day}/${month}/${year}`;
+  }
+
+  isBusy(key?: string): boolean {
+    return key ? this.busyAction === key : Boolean(this.busyAction);
+  }
+
+  toggleGenerator(): void {
+    this.showGenerator = !this.showGenerator;
+    if (this.showGenerator) this.clearNotice();
+  }
+
+  closeConfirm(): void {
+    if (!this.confirmBusy) this.confirmDialog = null;
+  }
+
+  async confirmCurrentAction(): Promise<void> {
+    const dialog = this.confirmDialog;
+    if (!dialog || this.confirmBusy) return;
+    this.confirmBusy = true;
+    this.clearNotice();
+    try {
+      await dialog.action();
+      this.confirmDialog = null;
+    } catch (error: any) {
+      console.error(error);
+      this.confirmDialog = null;
+      this.setNotice('error', this.errorText(error, 'No se pudo completar la acción.'));
+    } finally {
+      this.confirmBusy = false;
+      this.refreshView();
     }
-    const first = dateGroup.items[0];
-    if (first) {
-      dateGroup.plannedDate = first.planned_date;
-      dateGroup.minDate = this.rangeMin(first);
-      dateGroup.maxDate = this.rangeMax(first);
+  }
+
+  trackById(_index: number, item: { id: string }): string {
+    return item.id;
+  }
+
+  trackByAreaKey(_index: number, item: MaintenanceItemGroup): string {
+    return item.areaKey;
+  }
+
+  private openConfirm(
+    title: string,
+    message: string,
+    confirmLabel: string,
+    danger: boolean,
+    action: () => Promise<void>
+  ): void {
+    this.confirmDialog = { title, message, confirmLabel, danger, action };
+  }
+
+  private async runAction(key: string, action: () => Promise<void>, successMessage: string): Promise<void> {
+    if (this.busyAction) return;
+    this.busyAction = key;
+    this.clearNotice();
+    try {
+      await action();
+      this.setNotice('success', successMessage);
+    } catch (error: any) {
+      console.error(error);
+      this.setNotice('error', this.errorText(error, 'No se pudo completar la acción.'));
+    } finally {
+      this.busyAction = '';
+      this.refreshView();
     }
+  }
+
+  private async openPdfAction(key: string, fetcher: () => Promise<Blob>, fallback: string): Promise<void> {
+    if (this.busyAction) return;
+    this.busyAction = key;
+    this.clearNotice();
+    try {
+      const blob = await fetcher();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error: any) {
+      console.error(error);
+      this.setNotice('error', this.errorText(error, fallback));
+    } finally {
+      this.busyAction = '';
+      this.refreshView();
+    }
+  }
+
+  private validatePdf(file: File): boolean {
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      this.setNotice('error', 'Selecciona un archivo PDF.');
+      return false;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      this.setNotice('error', 'El PDF supera el límite de 15 MB.');
+      return false;
+    }
+    return true;
+  }
+
+  private validGeneratorDate(value: string): boolean {
+    return this.dateOnly(value).startsWith(`${this.selectedYear}-`);
+  }
+
+  private resetGeneratorDates(): void {
+    const date = this.firstWeekdayOfYear(this.selectedYear);
+    this.startDate = date;
+    this.trainingStartDate = date;
+    this.calibrationStartDate = date;
+  }
+
+  private firstWeekdayOfYear(year: number): string {
+    const date = new Date(Date.UTC(year, 0, 2));
+    while (date.getUTCDay() === 0 || date.getUTCDay() === 6) {
+      date.setUTCDate(date.getUTCDate() + 1);
+    }
+    return this.toDateOnly(date);
+  }
+
+  private normalizeEditableDate(value: string, min: string, max: string): string {
+    let normalized = this.dateOnly(value) || min;
+    normalized = this.nextWeekday(normalized);
+    if (normalized < min) normalized = min;
+    if (normalized > max) normalized = max;
+    if (this.isWeekend(normalized)) normalized = this.previousWeekday(normalized);
+    return normalized;
+  }
+
+  private nextWeekday(value: string): string {
+    const date = this.fromDateOnly(value);
+    if (date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() + 2);
+    if (date.getUTCDay() === 0) date.setUTCDate(date.getUTCDate() + 1);
+    return this.toDateOnly(date);
+  }
+
+  private previousWeekday(value: string): string {
+    const date = this.fromDateOnly(value);
+    if (date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() - 1);
+    if (date.getUTCDay() === 0) date.setUTCDate(date.getUTCDate() - 2);
+    return this.toDateOnly(date);
+  }
+
+  private isWeekend(value: string): boolean {
+    const day = this.fromDateOnly(value).getUTCDay();
+    return day === 0 || day === 6;
+  }
+
+  private shiftBusinessDays(value: string, amount: number): string {
+    const date = this.fromDateOnly(value);
+    const direction = amount < 0 ? -1 : 1;
+    let remaining = Math.abs(amount);
+    while (remaining > 0) {
+      date.setUTCDate(date.getUTCDate() + direction);
+      const day = date.getUTCDay();
+      if (day !== 0 && day !== 6) remaining -= 1;
+    }
+    return this.toDateOnly(date);
+  }
+
+  private fromDateOnly(value: string): Date {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day));
+  }
+
+  private toDateOnly(value: Date): string {
+    return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`;
+  }
+
+  private dateOnly(value: string | null | undefined): string {
+    return String(value || '').match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? '';
+  }
+
+  private countStatuses<T>(items: T[], selector: (item: T) => string): Record<string, number> {
+    const counts: Record<string, number> = { pending: 0, active: 0, done: 0, expired: 0 };
+    for (const item of items) {
+      const status = selector(item) || 'pending';
+      counts[status] = (counts[status] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  private uniqueSorted(values: string[]): string[] {
+    return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+  }
+
+  private clearSelections(): void {
+    this.selectedScheduleId = '';
+    this.items = [];
+    this.selectedTrainingScheduleId = '';
+    this.trainingItems = [];
+    this.selectedCalibrationScheduleId = '';
+    this.calibrationItems = [];
+    this.editing = false;
+    this.trainingEditing = false;
+  }
+
+  private setNotice(kind: NoticeKind, message: string): void {
+    this.noticeKind = kind;
+    this.noticeMessage = message;
+  }
+
+  private clearNotice(): void {
+    this.noticeMessage = '';
+  }
+
+  private errorText(error: any, fallback: string): string {
+    return error?.error?.message ?? error?.message ?? fallback;
+  }
+
+  private refreshView(): void {
+    this.cdr.markForCheck();
   }
 }
