@@ -259,10 +259,12 @@ import {
   listScheduleItemsWithSchema,
   updateScheduleItems,
   countScheduleItems,
+  countPendingScheduleItems,
   setScheduleClosedIfDone,
   markScheduleItemDone,
   findScheduleItemForAsset,
-  deleteSchedule
+  deleteDraftSchedule,
+  setScheduleEngineerEditAccess
 } from './schedules.js';
 import {
   createTrainingScheduleWithItems,
@@ -337,7 +339,9 @@ import {
   addBusinessDaysUtc as addScheduleBusinessDays,
   addMonthsUtc as addScheduleMonths,
   buildRecurringDates,
+  canEditMaintenanceSchedule,
   capDateAtScheduleYearEndUtc as capScheduleDateAtYearEnd,
+  changedMaintenanceItemUpdates,
   dateOnlyFromDatabase,
   formatDateOnly as formatScheduleDate,
   frequencyToMonths as scheduleFrequencyToMonths,
@@ -441,6 +445,9 @@ function respondScheduleError(res, error, fallbackMessage) {
   if (error instanceof ScheduleValidationError || error?.code === 'SCHEDULE_ITEM_MISMATCH') {
     return res.status(400).json({ message: error.message });
   }
+  if (error?.code === 'SCHEDULE_EDIT_LOCKED' || error?.code === 'SCHEDULE_EDIT_STATE_CHANGED') {
+    return res.status(409).json({ message: error.message });
+  }
   console.error(error);
   return res.status(500).json({ message: fallbackMessage });
 }
@@ -501,6 +508,8 @@ const SIGNATURE_ALLOWED_MIME_TYPES = [
 const SIGNATURE_MAX_FILE_SIZE_MB = 8;
 const SIGNATURE_MAX_FILE_SIZE_BYTES = SIGNATURE_MAX_FILE_SIZE_MB * 1024 * 1024;
 const CLIENT_ADMIN_ROLE = 'client_admin';
+const SCHEDULE_UNLOCK_PERMISSION = 'schedules:unlock_approved';
+const SCHEDULE_READ_PERMISSIONS = ['schedules:manage', SCHEDULE_UNLOCK_PERMISSION];
 const SAAS_ADMIN_ROLES = ['saas_admin', 'saas_billing', 'saas_clients', 'saas_support', 'saas_auditor'];
 const PLATFORM_LEGACY_ROLES = ['viewer'];
 const PLATFORM_ASSIGNABLE_ROLES = ['superuser', 'admin', ...SAAS_ADMIN_ROLES];
@@ -10928,7 +10937,7 @@ async function writeSchedulePdf({ client, schedule, items }) {
 app.get(
   '/maintenance/schedules/:clientId',
   requireAuth,
-  requirePermission('schedules:manage'),
+  requireAnyPermission(SCHEDULE_READ_PERMISSIONS),
   async (req, res) => {
     const { clientId } = req.params;
     if (req.user.clientId && req.user.clientId !== clientId) {
@@ -11046,7 +11055,7 @@ app.post(
 app.get(
   '/maintenance/schedules/:id/items',
   requireAuth,
-  requirePermission('schedules:manage'),
+  requireAnyPermission(SCHEDULE_READ_PERMISSIONS),
   async (req, res) => {
     const schedule = await getScheduleById(req.params.id);
     if (!schedule) {
@@ -11071,14 +11080,11 @@ app.patch(
     if (!schedule) {
       return res.status(404).json({ message: 'Cronograma no encontrado.' });
     }
-    if (req.user.clientId && req.user.clientId !== schedule.client_id) {
+    if (!req.user.clientId || req.user.clientId !== schedule.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     const { items } = req.body || {};
-    const canEdit =
-      req.user.roles?.includes('superuser') ||
-      (!schedule.engineer_edited && schedule.status === 'draft');
-    if (!canEdit) {
+    if (!canEditMaintenanceSchedule(schedule, req.user.roles || [])) {
       return res.status(403).json({ message: 'Cronograma bloqueado para edición.' });
     }
 
@@ -11086,11 +11092,27 @@ app.patch(
       const client = await getClientById(schedule.client_id);
       const currentItems = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
       const normalized = normalizeMaintenanceItemUpdates(items, currentItems, schedule.year);
-      await updateScheduleItems(schedule.id, normalized, {
-        markEngineerEdited: !req.user.roles?.includes('superuser')
+      const changedItems = changedMaintenanceItemUpdates(normalized, currentItems, {
+        approved: schedule.status === 'approved'
+      });
+      if (!changedItems.length) {
+        return res.json({ ok: true, updatedCount: 0, editAuthorizationConsumed: false });
+      }
+      const approvedEdit = schedule.status === 'approved';
+      await updateScheduleItems(schedule.id, changedItems, {
+        markEngineerEdited: hasRole(req.user, 'ingeniero_biomedico'),
+        consumeEngineerEdit: approvedEdit,
+        expectedStatus: schedule.status
       });
       const scheduleItems = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
-      await writeSchedulePdf({ client, schedule, items: scheduleItems });
+      await writeSchedulePdf({
+        client,
+        schedule: approvedEdit ? { ...schedule, engineer_edit_enabled: false } : schedule,
+        items: scheduleItems
+      });
+      if (approvedEdit) {
+        await syncDueScheduleRequests(schedule.client_id, req.user.sub);
+      }
       await logAudit({
         actorUserId: req.user.sub,
         actorUsername: req.user.username,
@@ -11103,10 +11125,15 @@ app.patch(
           clientName: client.name,
           scheduleId: schedule.id,
           year: schedule.year,
-          updatedItemCount: normalized.length
+          updatedItemCount: changedItems.length,
+          approvedEditAuthorizationConsumed: approvedEdit
         }
       });
-      return res.json({ ok: true });
+      return res.json({
+        ok: true,
+        updatedCount: changedItems.length,
+        editAuthorizationConsumed: approvedEdit
+      });
     } catch (error) {
       return respondScheduleError(res, error, 'No se pudo actualizar el cronograma de mantenimiento.');
     }
@@ -11162,10 +11189,69 @@ app.post(
   }
 );
 
+app.patch(
+  '/maintenance/schedules/:id/engineer-edit-access',
+  requireAuth,
+  requirePermission(SCHEDULE_UNLOCK_PERMISSION),
+  async (req, res) => {
+    if (!isClientAdmin(req.user) || !req.user.clientId) {
+      return res.status(403).json({ message: 'Solo el administrador del cliente puede habilitar esta edición.' });
+    }
+    const schedule = await getScheduleById(req.params.id);
+    if (!schedule) {
+      return res.status(404).json({ message: 'Cronograma no encontrado.' });
+    }
+    if (req.user.clientId !== schedule.client_id) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (schedule.status !== 'approved') {
+      return res.status(409).json({ message: 'Solo se puede habilitar la edición de un cronograma aprobado.' });
+    }
+    const enabled = req.body?.enabled;
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ message: 'Estado de autorización inválido.' });
+    }
+    try {
+      if (enabled && !(await countPendingScheduleItems(schedule.id))) {
+        return res.status(409).json({ message: 'El cronograma no tiene mantenimientos futuros pendientes para editar.' });
+      }
+      if (schedule.engineer_edit_enabled === enabled) {
+        return res.json({ ok: true, enabled });
+      }
+      const updated = await setScheduleEngineerEditAccess(schedule.id, enabled, req.user.sub);
+      if (!updated) {
+        return res.status(409).json({ message: 'El cronograma cambió de estado. Actualiza la información.' });
+      }
+      const client = await getClientById(schedule.client_id);
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: enabled
+          ? 'MAINTENANCE_SCHEDULE_ENGINEER_EDIT_ENABLE'
+          : 'MAINTENANCE_SCHEDULE_ENGINEER_EDIT_REVOKE',
+        targetUserId: schedule.client_id,
+        targetUsername: client?.name,
+        details: {
+          category: 'schedule',
+          clientId: schedule.client_id,
+          clientName: client?.name,
+          scheduleId: schedule.id,
+          year: schedule.year,
+          enabled
+        }
+      });
+      return res.json({ ok: true, enabled });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo actualizar la autorización de edición.' });
+    }
+  }
+);
+
 app.get(
   '/maintenance/schedules/:id/pdf',
   requireAuth,
-  requirePermission('schedules:manage'),
+  requireAnyPermission(SCHEDULE_READ_PERMISSIONS),
   async (req, res) => {
     const schedule = await getScheduleById(req.params.id);
     if (!schedule) {
@@ -11196,28 +11282,42 @@ app.get(
 app.delete(
   '/maintenance/schedules/:id',
   requireAuth,
-  requirePermission('users:manage'),
+  requirePermission('schedules:manage'),
   async (req, res) => {
-    if (!req.user.roles?.includes('superuser')) {
-      return res.status(403).json({ message: 'Solo superuser.' });
-    }
     const schedule = await getScheduleById(req.params.id);
     if (!schedule) {
       return res.status(404).json({ message: 'Cronograma no encontrado.' });
     }
-    if (schedule.pdf_path) {
-      const pdfPath = path.join(process.cwd(), schedule.pdf_path.replace(/^\//, ''));
+    if (!req.user.clientId || req.user.clientId !== schedule.client_id) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (schedule.status !== 'draft') {
+      return res.status(409).json({ message: 'Solo se puede eliminar un cronograma que aún está en borrador.' });
+    }
+    const deleted = await deleteDraftSchedule(schedule.id);
+    if (!deleted) {
+      return res.status(409).json({ message: 'El cronograma cambió de estado. Actualiza la información.' });
+    }
+    if (deleted.pdf_path) {
+      const pdfPath = path.join(process.cwd(), deleted.pdf_path.replace(/^\//, ''));
       if (fs.existsSync(pdfPath)) {
         fs.unlinkSync(pdfPath);
       }
     }
-    await deleteSchedule(schedule.id);
+    const client = await getClientById(schedule.client_id);
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,
-      action: 'SCHEDULE_DELETE',
+      action: 'MAINTENANCE_SCHEDULE_DELETE',
       targetUserId: schedule.client_id,
-      details: { scheduleId: schedule.id, year: schedule.year }
+      targetUsername: client?.name,
+      details: {
+        category: 'schedule',
+        clientId: schedule.client_id,
+        clientName: client?.name,
+        scheduleId: schedule.id,
+        year: schedule.year
+      }
     });
     return res.json({ ok: true });
   }

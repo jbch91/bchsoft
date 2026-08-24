@@ -66,6 +66,7 @@ export type Permission =
   | 'quick_guides:approve'
   | 'quick_guides:delete'
   | 'schedules:manage'
+  | 'schedules:unlock_approved'
   | 'calibration:schedule:manage'
   | 'inventory:move'
   | 'inventory:request'

@@ -5,7 +5,9 @@ import {
   addBusinessDaysUtc,
   addMonthsUtc,
   buildRecurringDates,
+  canEditMaintenanceSchedule,
   capDateAtScheduleYearEndUtc,
+  changedMaintenanceItemUpdates,
   formatDateOnly,
   normalizeMaintenanceItemUpdates,
   normalizeScheduleStart,
@@ -70,6 +72,63 @@ test('mantiene la fecha límite al editar mantenimientos dentro de su ventana', 
         2026
       ),
     /debe estar entre/
+  );
+});
+
+test('permite editar borradores y exige autorización administrativa para aprobados', () => {
+  assert.equal(
+    canEditMaintenanceSchedule({ status: 'draft', engineer_edited: true }, ['ingeniero_biomedico']),
+    true
+  );
+  assert.equal(
+    canEditMaintenanceSchedule(
+      { status: 'approved', engineer_edit_enabled: true },
+      ['ingeniero_biomedico']
+    ),
+    true
+  );
+  assert.equal(
+    canEditMaintenanceSchedule(
+      { status: 'approved', engineer_edit_enabled: false },
+      ['ingeniero_biomedico']
+    ),
+    false
+  );
+  assert.equal(
+    canEditMaintenanceSchedule(
+      { status: 'approved', engineer_edit_enabled: true },
+      ['client_admin']
+    ),
+    false
+  );
+});
+
+test('en aprobados solo acepta cambios de mantenimientos pendientes', () => {
+  const pendingId = '11111111-1111-4111-8111-111111111111';
+  const doneId = '22222222-2222-4222-8222-222222222222';
+  const current = [
+    { id: pendingId, planned_date: '2026-09-01', status: 'pending' },
+    { id: doneId, planned_date: '2026-08-03', status: 'done' }
+  ];
+  assert.deepEqual(
+    changedMaintenanceItemUpdates(
+      [
+        { id: pendingId, plannedDate: '2026-09-02' },
+        { id: doneId, plannedDate: '2026-08-03' }
+      ],
+      current,
+      { approved: true }
+    ),
+    [{ id: pendingId, plannedDate: '2026-09-02' }]
+  );
+  assert.throws(
+    () =>
+      changedMaintenanceItemUpdates(
+        [{ id: doneId, plannedDate: '2026-08-04' }],
+        current,
+        { approved: true }
+      ),
+    /futuros pendientes/
   );
 });
 

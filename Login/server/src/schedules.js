@@ -25,7 +25,9 @@ export async function createScheduleWithItems({ clientId, year, startDate, creat
     const scheduleResult = await client.query(
       `INSERT INTO maintenance_schedules (client_id, year, start_date, created_by, pdf_path)
        VALUES ($1,$2,$3,$4,NULL)
-       RETURNING id, client_id, year, start_date, status, engineer_edited, created_by, pdf_path`,
+       RETURNING id, client_id, year, start_date, status, engineer_edited,
+                 engineer_edit_enabled, engineer_edit_enabled_by, engineer_edit_enabled_at,
+                 created_by, pdf_path`,
       [clientId, year, startDate, createdBy]
     );
     const schedule = scheduleResult.rows[0];
@@ -55,7 +57,9 @@ export async function listSchedules(clientId, year) {
     where += ` AND year = $${params.length}`;
   }
   const { rows } = await query(
-    `SELECT id, client_id, year, start_date, status, engineer_edited, created_at, approved_at, pdf_path
+    `SELECT id, client_id, year, start_date, status, engineer_edited,
+            engineer_edit_enabled, engineer_edit_enabled_by, engineer_edit_enabled_at,
+            created_at, approved_at, pdf_path
      FROM maintenance_schedules
      WHERE ${where}
      ORDER BY year DESC, created_at DESC`,
@@ -66,7 +70,9 @@ export async function listSchedules(clientId, year) {
 
 export async function getScheduleById(scheduleId) {
   const { rows } = await query(
-    `SELECT id, client_id, year, start_date, status, engineer_edited, created_by, pdf_path
+    `SELECT id, client_id, year, start_date, status, engineer_edited,
+            engineer_edit_enabled, engineer_edit_enabled_by, engineer_edit_enabled_at,
+            created_by, pdf_path
      FROM maintenance_schedules
      WHERE id = $1`,
     [scheduleId]
@@ -81,7 +87,11 @@ export async function setSchedulePdf(scheduleId, pdfPath) {
 export async function approveSchedule(scheduleId) {
   const { rows } = await query(
     `UPDATE maintenance_schedules
-     SET status = 'approved', approved_at = NOW()
+     SET status = 'approved',
+         approved_at = NOW(),
+         engineer_edit_enabled = FALSE,
+         engineer_edit_enabled_by = NULL,
+         engineer_edit_enabled_at = NULL
      WHERE id = $1 AND status = 'draft'
      RETURNING id`,
     [scheduleId]
@@ -89,8 +99,17 @@ export async function approveSchedule(scheduleId) {
   return rows[0];
 }
 
-export async function markEngineerEdited(scheduleId) {
-  await query('UPDATE maintenance_schedules SET engineer_edited = TRUE WHERE id = $1', [scheduleId]);
+export async function setScheduleEngineerEditAccess(scheduleId, enabled, enabledBy) {
+  const { rows } = await query(
+    `UPDATE maintenance_schedules
+     SET engineer_edit_enabled = $2,
+         engineer_edit_enabled_by = CASE WHEN $2 THEN $3::uuid ELSE NULL END,
+         engineer_edit_enabled_at = CASE WHEN $2 THEN NOW() ELSE NULL END
+     WHERE id = $1 AND status = 'approved'
+     RETURNING id, engineer_edit_enabled, engineer_edit_enabled_by, engineer_edit_enabled_at`,
+    [scheduleId, enabled, enabledBy]
+  );
+  return rows[0];
 }
 
 export async function listScheduleItemsWithSchema(scheduleId, schema) {
@@ -120,31 +139,67 @@ export async function insertScheduleItems(items) {
   }
 }
 
-export async function updateScheduleItems(scheduleId, items, { markEngineerEdited: edited = false } = {}) {
+export async function updateScheduleItems(
+  scheduleId,
+  items,
+  {
+    markEngineerEdited: edited = false,
+    consumeEngineerEdit = false,
+    expectedStatus = null
+  } = {}
+) {
   return withTransaction(async (client) => {
-    const { rows } = await client.query(
-      `UPDATE maintenance_schedule_items AS target
-       SET planned_date = data.planned_date, deadline_date = data.deadline_date
-       FROM UNNEST($2::uuid[], $3::date[], $4::date[])
-         AS data(id, planned_date, deadline_date)
-       WHERE target.schedule_id = $1 AND target.id = data.id
-       RETURNING target.id`,
-      [
-        scheduleId,
-        items.map((item) => item.id),
-        items.map((item) => item.plannedDate),
-        items.map((item) => item.deadlineDate)
-      ]
+    const { rows: scheduleRows } = await client.query(
+      `SELECT status, engineer_edit_enabled
+       FROM maintenance_schedules
+       WHERE id = $1
+       FOR UPDATE`,
+      [scheduleId]
     );
+    const schedule = scheduleRows[0];
+    if (!schedule || (expectedStatus && schedule.status !== expectedStatus)) {
+      const error = new Error('El cronograma cambió de estado. Actualiza la información.');
+      error.code = 'SCHEDULE_EDIT_STATE_CHANGED';
+      throw error;
+    }
+    if (consumeEngineerEdit && (schedule.status !== 'approved' || !schedule.engineer_edit_enabled)) {
+      const error = new Error('La autorización de edición ya no está disponible.');
+      error.code = 'SCHEDULE_EDIT_LOCKED';
+      throw error;
+    }
+
+    let rows = [];
+    if (items.length) {
+      const result = await client.query(
+        `UPDATE maintenance_schedule_items AS target
+         SET planned_date = data.planned_date, deadline_date = data.deadline_date
+         FROM UNNEST($2::uuid[], $3::date[], $4::date[])
+           AS data(id, planned_date, deadline_date)
+         WHERE target.schedule_id = $1 AND target.id = data.id
+         RETURNING target.id`,
+        [
+          scheduleId,
+          items.map((item) => item.id),
+          items.map((item) => item.plannedDate),
+          items.map((item) => item.deadlineDate)
+        ]
+      );
+      rows = result.rows;
+    }
     if (rows.length !== items.length) {
       const error = new Error('Uno de los elementos no pertenece al cronograma.');
       error.code = 'SCHEDULE_ITEM_MISMATCH';
       throw error;
     }
-    if (edited) {
+    if (edited || consumeEngineerEdit) {
       await client.query(
-        'UPDATE maintenance_schedules SET engineer_edited = TRUE WHERE id = $1',
-        [scheduleId]
+        `UPDATE maintenance_schedules
+         SET engineer_edited = CASE WHEN $2 THEN TRUE ELSE engineer_edited END,
+             engineer_edit_enabled = CASE WHEN $3 THEN FALSE ELSE engineer_edit_enabled END,
+             engineer_edit_enabled_by = CASE WHEN $3 THEN NULL ELSE engineer_edit_enabled_by END,
+             engineer_edit_enabled_at = CASE WHEN $3 THEN NULL ELSE engineer_edit_enabled_at END
+         WHERE id = $1`,
+        [scheduleId, edited, consumeEngineerEdit]
       );
     }
     return rows;
@@ -154,6 +209,16 @@ export async function updateScheduleItems(scheduleId, items, { markEngineerEdite
 export async function countScheduleItems(scheduleId) {
   const { rows } = await query(
     'SELECT COUNT(*)::int AS count FROM maintenance_schedule_items WHERE schedule_id = $1',
+    [scheduleId]
+  );
+  return rows[0]?.count ?? 0;
+}
+
+export async function countPendingScheduleItems(scheduleId) {
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS count
+     FROM maintenance_schedule_items
+     WHERE schedule_id = $1 AND status = 'pending'`,
     [scheduleId]
   );
   return rows[0]?.count ?? 0;
@@ -171,8 +236,14 @@ export async function setScheduleClosedIfDone(scheduleId) {
   }
 }
 
-export async function deleteSchedule(scheduleId) {
-  await query('DELETE FROM maintenance_schedules WHERE id = $1', [scheduleId]);
+export async function deleteDraftSchedule(scheduleId) {
+  const { rows } = await query(
+    `DELETE FROM maintenance_schedules
+     WHERE id = $1 AND status = 'draft'
+     RETURNING id, pdf_path`,
+    [scheduleId]
+  );
+  return rows[0];
 }
 
 export async function markScheduleItemDone(scheduleId, itemId, reportId) {

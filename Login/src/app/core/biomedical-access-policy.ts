@@ -57,7 +57,7 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
     label: 'Cronogramas',
     route: '/cronogramas',
     moduleKey: 'cronogramas',
-    permissionsAny: ['schedules:manage']
+    permissionsAny: ['schedules:manage', 'schedules:unlock_approved']
   },
   calibraciones: {
     label: 'Calibraciones',

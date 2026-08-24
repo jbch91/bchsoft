@@ -90,6 +90,7 @@ const MIGRATIONS = [
   'admin_clients_permission.sql',
   'superuser_all_permissions.sql',
   'saas_platform_admin_roles.sql',
+  'schedule_engineer_edit_authorization.sql',
   'user_temporary_permissions.sql',
   'remove_legacy_unrelated_permissions.sql',
   'hv_import_permission.sql',

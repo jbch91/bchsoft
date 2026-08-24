@@ -5,7 +5,7 @@
     <div class="module-title">
       <p class="eyebrow">Software biomédico</p>
       <h1>Cronogramas</h1>
-      <span>{{ currentClientLabel }} · {{ selectedYear }}</span>
+      <span>{{ currentClientLabel }} · Vigencia {{ selectedYear }}</span>
     </div>
 
     <div class="module-controls">
@@ -69,6 +69,7 @@
         Mantenimiento
       </button>
       <button
+        *ngIf="canManageMaintenanceSchedules()"
         type="button"
         role="tab"
         [class.active]="viewMode === 'training'"
@@ -116,6 +117,7 @@
           </select>
         </label>
         <button
+          *ngIf="canManageMaintenanceSchedules()"
           type="button"
           class="primary"
           [disabled]="hasMaintenanceSchedule || loading || isBusy()"
@@ -199,12 +201,23 @@
               <span class="status-pill" [ngClass]="schedule.status">{{ statusLabel(schedule.status) }}</span>
             </td>
             <td data-label="Edición del ingeniero">
-              {{ schedule.engineer_edited ? 'Realizada' : 'Disponible' }}
+              <span class="status-pill" [ngClass]="maintenanceEditAccessClass(schedule)">
+                {{ maintenanceEditAccessLabel(schedule) }}
+              </span>
             </td>
             <td data-label="Acciones">
               <div class="row-actions">
                 <button type="button" class="secondary compact" (click)="selectSchedule(schedule.id)">
                   Abrir detalle
+                </button>
+                <button
+                  *ngIf="canEditSchedule(schedule)"
+                  type="button"
+                  class="secondary compact"
+                  [disabled]="isBusy()"
+                  (click)="openMaintenanceEdit(schedule)"
+                >
+                  Editar
                 </button>
                 <button
                   type="button"
@@ -215,7 +228,7 @@
                   {{ isBusy('maintenance-pdf-' + schedule.id) ? 'Abriendo...' : 'PDF' }}
                 </button>
                 <button
-                  *ngIf="schedule.status === 'draft'"
+                  *ngIf="canManageMaintenanceSchedules() && schedule.status === 'draft'"
                   type="button"
                   class="primary compact"
                   [disabled]="isBusy()"
@@ -224,7 +237,16 @@
                   Aprobar
                 </button>
                 <button
-                  *ngIf="auth.hasRole('superuser')"
+                  *ngIf="canAuthorizeMaintenanceEdit(schedule)"
+                  type="button"
+                  class="secondary compact"
+                  [disabled]="isBusy()"
+                  (click)="requestMaintenanceEditAccess(schedule, !schedule.engineer_edit_enabled)"
+                >
+                  {{ schedule.engineer_edit_enabled ? 'Revocar edición' : 'Habilitar edición' }}
+                </button>
+                <button
+                  *ngIf="canDeleteMaintenanceSchedule(schedule)"
                   type="button"
                   class="danger-text compact"
                   [disabled]="isBusy()"
@@ -282,11 +304,25 @@
           >
             Editar fechas
           </button>
+          <button
+            *ngIf="canAuthorizeMaintenanceEdit(selectedSchedule)"
+            type="button"
+            class="secondary"
+            [disabled]="detailLoading || isBusy()"
+            (click)="requestMaintenanceEditAccess(selectedSchedule, !selectedSchedule.engineer_edit_enabled)"
+          >
+            {{ selectedSchedule.engineer_edit_enabled ? 'Revocar edición' : 'Habilitar edición' }}
+          </button>
           <ng-container *ngIf="editing">
             <button type="button" class="secondary" [disabled]="isBusy()" (click)="cancelMaintenanceEdit()">
               Cancelar
             </button>
-            <button type="button" class="primary" [disabled]="isBusy()" (click)="saveEdits()">
+            <button
+              type="button"
+              class="primary"
+              [disabled]="isBusy() || !hasMaintenanceChanges()"
+              (click)="saveEdits()"
+            >
               {{ isBusy('save-maintenance') ? 'Guardando...' : 'Guardar fechas' }}
             </button>
           </ng-container>
@@ -374,19 +410,24 @@
                 <div class="date-list">
                   <div *ngFor="let dateGroup of group.dateGroups" class="date-line">
                     <input
-                      *ngIf="editing"
+                      *ngIf="editing && maintenanceDateGroupEditable(dateGroup)"
                       type="date"
                       [value]="dateGroup.plannedDate"
                       [min]="dateGroup.minDate"
                       [max]="dateGroup.maxDate"
                       (change)="onAreaPlannedDateChange(dateGroup, $any($event.target).value)"
                     />
-                    <span *ngIf="!editing">
+                    <span *ngIf="!editing || !maintenanceDateGroupEditable(dateGroup)">
                       <strong>{{ formatDate(dateGroup.plannedDate) }}</strong>
                       al {{ formatDate(dateGroup.maxDate) }}
                     </span>
                     <small>{{ dateGroup.items.length }} mantenimiento{{ dateGroup.items.length === 1 ? '' : 's' }}</small>
-                    <small *ngIf="editing">Límite: {{ formatDate(dateGroup.maxDate) }}</small>
+                    <small *ngIf="editing && maintenanceDateGroupEditable(dateGroup)">
+                      Límite: {{ formatDate(dateGroup.maxDate) }}
+                    </small>
+                    <small *ngIf="editing && !maintenanceDateGroupEditable(dateGroup)" class="locked-note">
+                      Bloqueado por estado
+                    </small>
                   </div>
                 </div>
               </td>

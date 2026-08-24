@@ -226,6 +226,37 @@ export function normalizeMaintenanceItemUpdates(items, existingItems, year) {
   });
 }
 
+export function canEditMaintenanceSchedule(schedule, roles = []) {
+  const status = String(schedule?.status || '').toLowerCase();
+  if (status === 'draft') return true;
+  return (
+    status === 'approved'
+    && schedule?.engineer_edit_enabled === true
+    && roles.includes('ingeniero_biomedico')
+  );
+}
+
+export function changedMaintenanceItemUpdates(
+  normalizedUpdates,
+  existingItems,
+  { approved = false } = {}
+) {
+  const existingById = new Map(existingItems.map((item) => [String(item.id), item]));
+  return normalizedUpdates.filter((update) => {
+    const current = existingById.get(String(update.id));
+    if (!current) {
+      throw new ScheduleValidationError('Uno de los elementos no pertenece al cronograma.');
+    }
+    const changed = update.plannedDate !== dateOnlyFromDatabase(current.planned_date, 'La fecha programada');
+    if (changed && approved && String(current.status || '').toLowerCase() !== 'pending') {
+      throw new ScheduleValidationError(
+        'En un cronograma aprobado solo se pueden modificar mantenimientos futuros pendientes.'
+      );
+    }
+    return changed;
+  });
+}
+
 export function normalizeTrainingItemUpdates(items, existingItems, year) {
   const normalizedYear = normalizeScheduleYear(year);
   return normalizeRequestedItems(items, existingItems).map(({ input, current }) => {

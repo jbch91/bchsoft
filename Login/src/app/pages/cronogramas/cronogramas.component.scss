@@ -609,6 +609,29 @@ button:disabled {
   border-color: #e9aaaa;
 }
 
+.status-pill.edit-ready {
+  color: #17653a;
+  background: #ebf8f0;
+  border-color: #9ed4b3;
+}
+
+.status-pill.edit-enabled {
+  color: #8a4b08;
+  background: #fff7e6;
+  border-color: #e9c27d;
+}
+
+.status-pill.edit-locked {
+  color: #5d6675;
+  background: #f1f3f5;
+  border-color: #d3d8de;
+}
+
+.locked-note {
+  color: #8f3237;
+  font-weight: 700;
+}
+
 .status-stack,
 .date-list {
   display: grid;

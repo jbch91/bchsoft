@@ -10,6 +10,9 @@ export interface ScheduleDto {
   start_date: string;
   status: string;
   engineer_edited: boolean;
+  engineer_edit_enabled: boolean;
+  engineer_edit_enabled_by?: string | null;
+  engineer_edit_enabled_at?: string | null;
   created_at: string;
   approved_at?: string | null;
   pdf_path?: string | null;
@@ -95,6 +98,14 @@ export class SchedulesService {
   async approveSchedule(scheduleId: string): Promise<void> {
     await firstValueFrom(
       this.http.post(`${this.apiBase}/maintenance/schedules/${scheduleId}/approve`, {})
+    );
+  }
+
+  async setEngineerEditAccess(scheduleId: string, enabled: boolean): Promise<void> {
+    await firstValueFrom(
+      this.http.patch(`${this.apiBase}/maintenance/schedules/${scheduleId}/engineer-edit-access`, {
+        enabled
+      })
     );
   }
 

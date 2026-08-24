@@ -225,6 +225,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   async switchView(mode: ViewMode): Promise<void> {
+    if (mode === 'training' && !this.canManageMaintenanceSchedules()) return;
     if (mode === 'calibration' && !this.canAccessCalibrationModule()) return;
     if (this.viewMode === mode) return;
     this.viewMode = mode;
@@ -363,19 +364,72 @@ export class CronogramasComponent implements OnInit {
     );
   }
 
+  canManageMaintenanceSchedules(): boolean {
+    return this.auth.hasPermission('schedules:manage');
+  }
+
+  canEditSchedule(schedule: ScheduleDto | null): boolean {
+    if (!schedule || !this.canManageMaintenanceSchedules()) return false;
+    if (schedule.status === 'draft') return true;
+    return (
+      schedule.status === 'approved' &&
+      schedule.engineer_edit_enabled &&
+      this.auth.hasRole('ingeniero_biomedico')
+    );
+  }
+
   canEditSelected(): boolean {
-    const schedule = this.selectedSchedule;
-    if (!schedule) return false;
-    if (this.auth.hasRole('superuser')) return true;
-    return schedule.status === 'draft' && !schedule.engineer_edited;
+    return this.canEditSchedule(this.selectedSchedule);
+  }
+
+  canDeleteMaintenanceSchedule(schedule: ScheduleDto): boolean {
+    return schedule.status === 'draft' && this.canManageMaintenanceSchedules();
+  }
+
+  canAuthorizeMaintenanceEdit(schedule: ScheduleDto | null): boolean {
+    return Boolean(
+      schedule &&
+      schedule.status === 'approved' &&
+      this.auth.hasRole('client_admin') &&
+      this.auth.hasPermission('schedules:unlock_approved')
+    );
+  }
+
+  maintenanceEditAccessLabel(schedule: ScheduleDto): string {
+    if (schedule.status === 'draft') return 'Editable';
+    if (schedule.status === 'approved' && schedule.engineer_edit_enabled) return 'Habilitada';
+    if (schedule.status === 'approved') return 'Bloqueada';
+    return 'Cerrada';
+  }
+
+  maintenanceEditAccessClass(schedule: ScheduleDto): string {
+    if (schedule.status === 'draft') return 'edit-ready';
+    if (schedule.status === 'approved' && schedule.engineer_edit_enabled) return 'edit-enabled';
+    return 'edit-locked';
   }
 
   get maintenanceEditRestriction(): string {
     const schedule = this.selectedSchedule;
     if (!schedule || this.canEditSelected()) return '';
-    if (schedule.status !== 'draft') return 'Las fechas quedan bloqueadas al aprobar el cronograma.';
-    if (schedule.engineer_edited) return 'La edición permitida para el ingeniero ya fue utilizada.';
-    return '';
+    if (schedule.status === 'closed') return 'El cronograma cerrado no admite modificaciones.';
+    if (schedule.status === 'approved' && schedule.engineer_edit_enabled) {
+      return 'La edición está habilitada exclusivamente para el ingeniero biomédico.';
+    }
+    if (schedule.status === 'approved' && this.canAuthorizeMaintenanceEdit(schedule)) {
+      return 'Puedes habilitar una edición controlada para el ingeniero biomédico.';
+    }
+    if (schedule.status === 'approved') {
+      return 'El administrador del cliente debe habilitar una edición para modificar las fechas.';
+    }
+    return 'No tienes permiso para modificar este cronograma.';
+  }
+
+  async openMaintenanceEdit(schedule: ScheduleDto): Promise<void> {
+    if (!this.canEditSchedule(schedule)) return;
+    await this.selectSchedule(schedule.id);
+    if (this.selectedScheduleId === schedule.id && this.canEditSelected()) {
+      this.startMaintenanceEdit();
+    }
   }
 
   startMaintenanceEdit(): void {
@@ -391,8 +445,24 @@ export class CronogramasComponent implements OnInit {
     this.editing = false;
   }
 
+  hasMaintenanceChanges(): boolean {
+    return this.items.some(
+      (item) => item.planned_date !== (this.maintenanceSnapshot.get(item.id) ?? item.planned_date)
+    );
+  }
+
+  maintenanceDateGroupEditable(dateGroup: MaintenanceAreaDateGroup): boolean {
+    if (this.selectedSchedule?.status !== 'approved') return true;
+    return dateGroup.items.every((item) => item.status === 'pending');
+  }
+
   async saveEdits(): Promise<void> {
     if (!this.selectedScheduleId) return;
+    if (!this.hasMaintenanceChanges()) {
+      this.setNotice('info', 'No hay cambios de fecha para guardar.');
+      return;
+    }
+    const approvedEdit = this.selectedSchedule?.status === 'approved';
     await this.runAction(
       'save-maintenance',
       async () => {
@@ -402,7 +472,32 @@ export class CronogramasComponent implements OnInit {
         );
         await this.loadSchedules(true);
       },
-      'Fechas de mantenimiento actualizadas.'
+      approvedEdit
+        ? 'Fechas actualizadas. La autorización fue utilizada y el cronograma volvió a quedar bloqueado.'
+        : 'Fechas de mantenimiento actualizadas.'
+    );
+  }
+
+  requestMaintenanceEditAccess(schedule: ScheduleDto | null, enabled: boolean): void {
+    if (!schedule) return;
+    if (!this.canAuthorizeMaintenanceEdit(schedule)) return;
+    this.openConfirm(
+      enabled ? 'Habilitar edición del cronograma' : 'Revocar edición del cronograma',
+      enabled
+        ? `El ingeniero biomédico podrá realizar una modificación de fechas en el cronograma ${schedule.year}. La autorización se consumirá al guardar.`
+        : `Se retirará la autorización de edición del cronograma ${schedule.year}.`,
+      enabled ? 'Habilitar edición' : 'Revocar edición',
+      false,
+      async () => {
+        await this.schedulesService.setEngineerEditAccess(schedule.id, enabled);
+        await this.loadSchedules(this.detailModalOpen);
+        this.setNotice(
+          'success',
+          enabled
+            ? 'Edición habilitada para el ingeniero biomédico.'
+            : 'Autorización de edición revocada.'
+        );
+      }
     );
   }
 
