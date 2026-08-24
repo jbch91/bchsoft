@@ -341,6 +341,7 @@ import {
   addMonthsUtc as addScheduleMonths,
   buildRecurringDates,
   canEditMaintenanceSchedule,
+  capDateAtMonthEndUtc as capScheduleDateAtMonthEnd,
   capDateAtScheduleYearEndUtc as capScheduleDateAtYearEnd,
   changedMaintenanceItemUpdates,
   dateOnlyFromDatabase,
@@ -10997,10 +10998,14 @@ app.post(
         datesByFrequency.set(months, buildRecurringDates({ ...scheduleInput, months }));
       }
       for (const plannedDate of datesByFrequency.get(months)) {
+        const planned = parseScheduleDate(plannedDate);
         const deadlineDate = formatScheduleDate(
-          capScheduleDateAtYearEnd(
-            addScheduleBusinessDays(parseScheduleDate(plannedDate), 10),
-            scheduleInput.year
+          capScheduleDateAtMonthEnd(
+            capScheduleDateAtYearEnd(
+              addScheduleBusinessDays(planned, 10),
+              scheduleInput.year
+            ),
+            planned
           )
         );
         items.push({

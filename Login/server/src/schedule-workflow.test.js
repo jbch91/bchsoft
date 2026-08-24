@@ -6,6 +6,7 @@ import {
   addMonthsUtc,
   buildRecurringDates,
   canEditMaintenanceSchedule,
+  capDateAtMonthEndUtc,
   capDateAtScheduleYearEndUtc,
   changedMaintenanceItemUpdates,
   formatDateOnly,
@@ -49,6 +50,23 @@ test('limita las ventanas de servicio al cierre de la vigencia', () => {
   const deadline = addBusinessDaysUtc(parseDateOnly('2026-12-29'), 10);
   assert.equal(formatDateOnly(deadline), '2027-01-12');
   assert.equal(formatDateOnly(capDateAtScheduleYearEndUtc(deadline, 2026)), '2026-12-31');
+});
+
+test('mantiene la fecha límite del mantenimiento en el mes programado', () => {
+  const lateMonthStart = parseDateOnly('2026-08-24');
+  const crossingDeadline = addBusinessDaysUtc(lateMonthStart, 10);
+  assert.equal(formatDateOnly(crossingDeadline), '2026-09-07');
+  assert.equal(
+    formatDateOnly(capDateAtMonthEndUtc(crossingDeadline, lateMonthStart)),
+    '2026-08-31'
+  );
+
+  const earlyMonthStart = parseDateOnly('2026-08-03');
+  const sameMonthDeadline = addBusinessDaysUtc(earlyMonthStart, 10);
+  assert.equal(
+    formatDateOnly(capDateAtMonthEndUtc(sameMonthDeadline, earlyMonthStart)),
+    '2026-08-17'
+  );
 });
 
 test('deduplica identificadores y rechaza UUID inválidos', () => {

@@ -140,6 +140,21 @@ export function capDateAtScheduleYearEndUtc(value, year) {
   return new Date(Math.min(value.getTime(), yearEnd.getTime()));
 }
 
+export function capDateAtMonthEndUtc(value, anchorDate) {
+  if (
+    !(value instanceof Date) ||
+    Number.isNaN(value.getTime()) ||
+    !(anchorDate instanceof Date) ||
+    Number.isNaN(anchorDate.getTime())
+  ) {
+    throw new ScheduleValidationError('La fecha límite del cronograma no es válida.');
+  }
+  const monthEnd = new Date(
+    Date.UTC(anchorDate.getUTCFullYear(), anchorDate.getUTCMonth() + 1, 0)
+  );
+  return new Date(Math.min(value.getTime(), monthEnd.getTime()));
+}
+
 export function buildRecurringDates({ year, startDate, months }) {
   const normalized = normalizeScheduleStart({ year, startDate });
   if (!Number.isInteger(months) || months < 1 || months > 12) {
