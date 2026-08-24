@@ -11,6 +11,9 @@ export interface CalibrationScheduleDto {
   status: string;
   created_at: string;
   approved_at?: string | null;
+  pdf_path?: string | null;
+  total_items: number;
+  programmed_items: number;
 }
 
 export interface CalibrationItemDto {
@@ -34,6 +37,9 @@ export interface CalibrationItemDto {
   model?: string | null;
   serial?: string | null;
   display_status?: string;
+  programming_confirmed: boolean;
+  programmed_at?: string | null;
+  programmed_by?: string | null;
 }
 
 export interface CalibrationReportDto {

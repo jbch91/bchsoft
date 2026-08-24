@@ -106,7 +106,8 @@ const MIGRATIONS = [
   'asset_risk_classifications.sql',
   'biomedical_equipment_catalog_review.sql',
   'maintenance_blank_protocol_printing.sql',
-  'maintenance_schedule_month_boundaries.sql'
+  'maintenance_schedule_month_boundaries.sql',
+  'schedule_programming_progress.sql'
 ];
 
 async function ensureMigrationsTable() {

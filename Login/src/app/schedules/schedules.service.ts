@@ -16,6 +16,8 @@ export interface ScheduleDto {
   created_at: string;
   approved_at?: string | null;
   pdf_path?: string | null;
+  total_items: number;
+  programmed_items: number;
 }
 
 export interface ScheduleItemDto {
@@ -37,6 +39,9 @@ export interface ScheduleItemDto {
   site_name?: string | null;
   area_name?: string | null;
   location_name?: string | null;
+  programming_confirmed: boolean;
+  programmed_at?: string | null;
+  programmed_by?: string | null;
 }
 
 export interface TrainingScheduleDto {
@@ -48,6 +53,9 @@ export interface TrainingScheduleDto {
   status: string;
   created_at: string;
   approved_at?: string | null;
+  pdf_path?: string | null;
+  total_items: number;
+  programmed_items: number;
 }
 
 export interface TrainingItemDto {
@@ -60,6 +68,9 @@ export interface TrainingItemDto {
   pdf_path?: string | null;
   completed_at?: string | null;
   display_status?: string;
+  programming_confirmed: boolean;
+  programmed_at?: string | null;
+  programmed_by?: string | null;
 }
 
 @Injectable({ providedIn: 'root' })

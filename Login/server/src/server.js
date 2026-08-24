@@ -260,6 +260,7 @@ import {
   updateScheduleItems,
   countScheduleItems,
   countPendingScheduleItems,
+  countUnprogrammedScheduleItems,
   setScheduleClosedIfDone,
   markScheduleItemDone,
   findScheduleItemForAsset,
@@ -278,6 +279,7 @@ import {
   clearTrainingItemPdf,
   updateTrainingItems,
   countTrainingItems,
+  countUnprogrammedTrainingItems,
   refreshTrainingScheduleStatus
 } from './training.js';
 import {
@@ -293,6 +295,7 @@ import {
   updateCalibrationItems,
   listCalibrationReportsByAsset,
   countCalibrationItems,
+  countUnprogrammedCalibrationItems,
   refreshCalibrationScheduleStatus
 } from './calibration.js';
 import {
@@ -11099,26 +11102,31 @@ app.patch(
       const client = await getClientById(schedule.client_id);
       const currentItems = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
       const normalized = normalizeMaintenanceItemUpdates(items, currentItems, schedule.year);
+      const approvedEdit = schedule.status === 'approved';
       const changedItems = changedMaintenanceItemUpdates(normalized, currentItems, {
-        approved: schedule.status === 'approved'
+        approved: approvedEdit
       });
-      if (!changedItems.length) {
+      if (approvedEdit && !changedItems.length) {
         return res.json({ ok: true, updatedCount: 0, editAuthorizationConsumed: false });
       }
-      const approvedEdit = schedule.status === 'approved';
-      await updateScheduleItems(schedule.id, changedItems, {
+      const persistedItems = approvedEdit ? changedItems : normalized;
+      await updateScheduleItems(schedule.id, persistedItems, {
         markEngineerEdited: hasRole(req.user, 'ingeniero_biomedico'),
         consumeEngineerEdit: approvedEdit,
-        expectedStatus: schedule.status
-      });
-      const scheduleItems = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
-      await writeSchedulePdf({
-        client,
-        schedule: approvedEdit ? { ...schedule, engineer_edit_enabled: false } : schedule,
-        items: scheduleItems
+        expectedStatus: schedule.status,
+        confirmProgramming: !approvedEdit,
+        programmedBy: req.user.sub
       });
       if (approvedEdit) {
+        const scheduleItems = await listScheduleItemsWithSchema(schedule.id, client.schema_name);
+        await writeSchedulePdf({
+          client,
+          schedule: { ...schedule, engineer_edit_enabled: false },
+          items: scheduleItems
+        });
         await syncDueScheduleRequests(schedule.client_id, req.user.sub);
+      } else {
+        await setSchedulePdf(schedule.id, null);
       }
       await logAudit({
         actorUserId: req.user.sub,
@@ -11133,12 +11141,14 @@ app.patch(
           scheduleId: schedule.id,
           year: schedule.year,
           updatedItemCount: changedItems.length,
+          programmedItemCount: approvedEdit ? 0 : normalized.length,
           approvedEditAuthorizationConsumed: approvedEdit
         }
       });
       return res.json({
         ok: true,
         updatedCount: changedItems.length,
+        programmedCount: approvedEdit ? 0 : normalized.length,
         editAuthorizationConsumed: approvedEdit
       });
     } catch (error) {
@@ -11169,6 +11179,14 @@ app.post(
     const itemCount = await countScheduleItems(schedule.id);
     if (!itemCount) {
       return res.status(400).json({ message: 'No se puede aprobar un cronograma sin mantenimientos.' });
+    }
+    const unprogrammedCount = await countUnprogrammedScheduleItems(schedule.id);
+    if (unprogrammedCount) {
+      return res.status(409).json({
+        message: unprogrammedCount === 1
+          ? 'Falta 1 mantenimiento por programar antes de aprobar.'
+          : `Faltan ${unprogrammedCount} mantenimientos por programar antes de aprobar.`
+      });
     }
     const approved = await approveSchedule(schedule.id);
     if (!approved) {
@@ -11357,12 +11375,18 @@ app.get(
     if (req.user.clientId && req.user.clientId !== schedule.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (!schedule.pdf_path) {
-      return res.status(404).json({ message: 'PDF no disponible.' });
-    }
-    const pdfPath = path.join(process.cwd(), schedule.pdf_path.replace(/^\//, ''));
-    if (!fs.existsSync(pdfPath)) {
-      return res.status(404).json({ message: 'PDF no encontrado.' });
+    let publicPath = schedule.pdf_path;
+    let pdfPath = publicPath
+      ? path.join(process.cwd(), publicPath.replace(/^\//, ''))
+      : '';
+    if (!pdfPath || !fs.existsSync(pdfPath)) {
+      const client = await getClientById(schedule.client_id);
+      if (!client?.schema_name) {
+        return res.status(404).json({ message: 'Cliente no encontrado.' });
+      }
+      const items = await listTrainingItemsWithSchema(schedule.id, client.schema_name);
+      publicPath = await writeTrainingSchedulePdf({ client, schedule, items });
+      pdfPath = path.join(process.cwd(), publicPath.replace(/^\//, ''));
     }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="cronograma-capacitaciones-${schedule.id}.pdf"`);
@@ -11544,6 +11568,14 @@ app.post(
     if (!itemCount) {
       return res.status(400).json({ message: 'No se puede aprobar un cronograma sin capacitaciones.' });
     }
+    const unprogrammedCount = await countUnprogrammedTrainingItems(schedule.id);
+    if (unprogrammedCount) {
+      return res.status(409).json({
+        message: unprogrammedCount === 1
+          ? 'Falta 1 capacitación por programar antes de aprobar.'
+          : `Faltan ${unprogrammedCount} capacitaciones por programar antes de aprobar.`
+      });
+    }
     const approved = await approveTrainingSchedule(schedule.id);
     if (!approved) {
       return res.status(409).json({ message: 'El cronograma cambió de estado. Actualiza la información.' });
@@ -11591,9 +11623,8 @@ app.patch(
       }
       const currentItems = await listTrainingItemsWithSchema(schedule.id, client.schema_name);
       const normalized = normalizeTrainingItemUpdates(req.body?.items, currentItems, schedule.year);
-      await updateTrainingItems(schedule.id, normalized);
-      const scheduleItems = await listTrainingItemsWithSchema(schedule.id, client.schema_name);
-      await writeTrainingSchedulePdf({ client, schedule, items: scheduleItems });
+      await updateTrainingItems(schedule.id, normalized, req.user.sub);
+      await setTrainingSchedulePdf(schedule.id, null);
       await logAudit({
         actorUserId: req.user.sub,
         actorUsername: req.user.username,
@@ -11606,10 +11637,11 @@ app.patch(
           clientName: client.name,
           scheduleId: schedule.id,
           year: schedule.year,
-          updatedItemCount: normalized.length
+          updatedItemCount: normalized.length,
+          programmedItemCount: normalized.length
         }
       });
-      return res.json({ ok: true });
+      return res.json({ ok: true, programmedCount: normalized.length });
     } catch (error) {
       return respondScheduleError(res, error, 'No se pudo actualizar el cronograma de capacitaciones.');
     }
@@ -12000,9 +12032,8 @@ app.patch(
       }
       const currentItems = await listCalibrationItemsWithSchema(schedule.id, client.schema_name);
       const normalized = normalizeCalibrationItemUpdates(req.body?.items, currentItems, schedule.year);
-      await updateCalibrationItems(schedule.id, normalized);
-      const scheduleItems = await listCalibrationItemsWithSchema(schedule.id, client.schema_name);
-      await writeCalibrationSchedulePdf({ client, schedule, items: scheduleItems });
+      await updateCalibrationItems(schedule.id, normalized, req.user.sub);
+      await setCalibrationSchedulePdf(schedule.id, null);
       await logAudit({
         actorUserId: req.user.sub,
         actorUsername: req.user.username,
@@ -12015,10 +12046,11 @@ app.patch(
           clientName: client.name,
           scheduleId: schedule.id,
           year: schedule.year,
-          updatedItemCount: normalized.length
+          updatedItemCount: normalized.length,
+          programmedItemCount: normalized.length
         }
       });
-      return res.json({ ok: true });
+      return res.json({ ok: true, programmedCount: normalized.length });
     } catch (error) {
       return respondScheduleError(res, error, 'No se pudo actualizar el cronograma de calibración.');
     }
@@ -12047,6 +12079,14 @@ app.post(
     const itemCount = await countCalibrationItems(schedule.id);
     if (!itemCount) {
       return res.status(400).json({ message: 'No se puede aprobar un cronograma sin calibraciones.' });
+    }
+    const unprogrammedCount = await countUnprogrammedCalibrationItems(schedule.id);
+    if (unprogrammedCount) {
+      return res.status(409).json({
+        message: unprogrammedCount === 1
+          ? 'Falta 1 calibración por programar antes de aprobar.'
+          : `Faltan ${unprogrammedCount} calibraciones por programar antes de aprobar.`
+      });
     }
     const approved = await approveCalibrationSchedule(schedule.id);
     if (!approved) {

@@ -186,6 +186,7 @@
             <th>Año</th>
             <th>Fecha inicial</th>
             <th>Estado</th>
+            <th>Programación</th>
             <th>Edición del ingeniero</th>
             <th>Acciones</th>
           </tr>
@@ -199,6 +200,13 @@
             <td data-label="Fecha inicial">{{ formatDate(schedule.start_date) }}</td>
             <td data-label="Estado">
               <span class="status-pill" [ngClass]="schedule.status">{{ statusLabel(schedule.status) }}</span>
+            </td>
+            <td data-label="Programación" class="schedule-progress-cell">
+              <strong>{{ schedule.programmed_items || 0 }} / {{ schedule.total_items || 0 }}</strong>
+              <small *ngIf="schedule.status === 'draft'">
+                {{ maintenanceScheduleUnprogrammed(schedule) }} pendiente{{ maintenanceScheduleUnprogrammed(schedule) === 1 ? '' : 's' }}
+              </small>
+              <small *ngIf="schedule.status !== 'draft'">Completa</small>
             </td>
             <td data-label="Edición del ingeniero">
               <span class="status-pill" [ngClass]="maintenanceEditAccessClass(schedule)">
@@ -231,7 +239,8 @@
                   *ngIf="canManageMaintenanceSchedules() && schedule.status === 'draft'"
                   type="button"
                   class="primary compact"
-                  [disabled]="isBusy()"
+                  [disabled]="isBusy() || maintenanceScheduleUnprogrammed(schedule) > 0"
+                  [title]="maintenanceScheduleUnprogrammed(schedule) ? 'Completa y guarda todas las secciones antes de aprobar' : 'Aprobar cronograma'"
                   (click)="requestApproveSchedule(schedule)"
                 >
                   Aprobar
@@ -314,27 +323,25 @@
             {{ selectedSchedule.engineer_edit_enabled ? 'Revocar edición' : 'Habilitar edición' }}
           </button>
           <ng-container *ngIf="editing">
-            <button type="button" class="secondary" [disabled]="isBusy()" (click)="cancelMaintenanceEdit()">
-              Cancelar
-            </button>
             <button
               type="button"
-              class="primary"
-              [disabled]="isBusy() || !hasMaintenanceChanges()"
-              (click)="saveEdits()"
+              class="secondary"
+              [disabled]="isBusy()"
+              title="Descartar únicamente los cambios que aún no se han guardado"
+              (click)="cancelMaintenanceEdit()"
             >
-              {{ isBusy('save-maintenance') ? 'Guardando...' : 'Guardar fechas' }}
+              Cancelar
             </button>
           </ng-container>
           <button
             *ngIf="selectedSchedule.status === 'draft' && canManageMaintenanceSchedules()"
             type="button"
             class="primary"
-            [disabled]="detailLoading || isBusy() || hasMaintenanceChanges()"
-            [title]="hasMaintenanceChanges() ? 'Guarda los cambios antes de aprobar' : ''"
+            [disabled]="detailLoading || isBusy() || !canApproveMaintenanceDraft()"
+            [title]="maintenanceUnprogrammedCount ? 'Completa y guarda todas las secciones antes de aprobar' : hasMaintenanceChanges() ? 'Guarda los cambios pendientes antes de aprobar' : 'Finalizar y aprobar cronograma'"
             (click)="requestApproveSchedule(selectedSchedule)"
           >
-            Aprobar cronograma
+            Finalizar y aprobar
           </button>
         </div>
       </div>
@@ -345,6 +352,48 @@
         <div><strong>{{ maintenanceSummary.active }}</strong><span>Activos</span></div>
         <div><strong>{{ maintenanceSummary.done }}</strong><span>Realizados</span></div>
         <div><strong>{{ maintenanceSummary.expired }}</strong><span>Vencidos</span></div>
+      </div>
+
+      <div *ngIf="selectedSchedule.status === 'draft'" class="programming-panel">
+        <div class="programming-progress">
+          <div class="programming-progress-copy">
+            <strong>{{ maintenanceProgrammedCount }} de {{ items.length }} guardados</strong>
+            <span>{{ maintenanceUnprogrammedCount }} pendiente{{ maintenanceUnprogrammedCount === 1 ? '' : 's' }} · {{ maintenanceProgrammingPercent }}%</span>
+          </div>
+          <div
+            class="progress-track"
+            role="progressbar"
+            aria-label="Avance de programación de mantenimiento"
+            [attr.aria-valuenow]="maintenanceProgrammingPercent"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <span [style.width.%]="maintenanceProgrammingPercent"></span>
+          </div>
+        </div>
+        <div class="programming-tabs segmented-control" role="group" aria-label="Estado de programación">
+          <button
+            type="button"
+            [class.active]="maintenanceProgrammingView === 'pending'"
+            (click)="maintenanceProgrammingView = 'pending'"
+          >
+            Pendientes ({{ maintenanceUnprogrammedCount }})
+          </button>
+          <button
+            type="button"
+            [class.active]="maintenanceProgrammingView === 'programmed'"
+            (click)="maintenanceProgrammingView = 'programmed'"
+          >
+            Programados ({{ maintenanceProgrammedCount }})
+          </button>
+          <button
+            type="button"
+            [class.active]="maintenanceProgrammingView === 'all'"
+            (click)="maintenanceProgrammingView = 'all'"
+          >
+            Todos
+          </button>
+        </div>
       </div>
 
       <div *ngIf="editing" class="edit-level-bar">
@@ -383,7 +432,6 @@
           <input
             type="search"
             [(ngModel)]="maintenanceDetailSearch"
-            (ngModelChange)="maintenanceEquipmentPage = 1"
             placeholder="Equipo, código, serie, área, ubicación o sede"
           />
         </label>
@@ -391,7 +439,6 @@
           Ubicación
           <select
             [(ngModel)]="maintenanceLocationFilter"
-            (ngModelChange)="maintenanceEquipmentPage = 1"
           >
             <option value="">Todas</option>
             <option *ngFor="let location of maintenanceLocationOptions" [value]="location">
@@ -403,7 +450,6 @@
           Área
           <select
             [(ngModel)]="maintenanceAreaFilter"
-            (ngModelChange)="maintenanceEquipmentPage = 1"
           >
             <option value="">Todas</option>
             <option *ngFor="let area of maintenanceAreaOptions" [value]="area">{{ area }}</option>
@@ -413,7 +459,6 @@
           Frecuencia
           <select
             [(ngModel)]="maintenanceFrequencyFilter"
-            (ngModelChange)="maintenanceEquipmentPage = 1"
           >
             <option value="">Todas</option>
             <option *ngFor="let frequency of maintenanceFrequencyOptions" [value]="frequency">
@@ -425,7 +470,6 @@
           Estado
           <select
             [(ngModel)]="maintenanceItemStatusFilter"
-            (ngModelChange)="maintenanceEquipmentPage = 1"
           >
             <option value="">Todos</option>
             <option value="pending">Programado</option>
@@ -440,64 +484,45 @@
       </div>
 
       <div
-        *ngIf="editing && maintenanceEditLevel === 'equipment' && filteredMaintenanceItems.length > maintenanceEquipmentPageSize"
-        class="table-pager"
-        aria-label="Paginación de equipos"
-      >
-        <span>
-          {{ maintenanceEquipmentRangeStart }} a {{ maintenanceEquipmentRangeEnd }} de
-          {{ filteredMaintenanceItems.length }} mantenimientos
-        </span>
-        <div>
-          <button
-            type="button"
-            class="secondary compact"
-            [disabled]="maintenanceEquipmentCurrentPage === 1"
-            (click)="changeMaintenanceEquipmentPage(-1)"
-          >
-            Anterior
-          </button>
-          <strong>
-            Página {{ maintenanceEquipmentCurrentPage }} de {{ maintenanceEquipmentPageCount }}
-          </strong>
-          <button
-            type="button"
-            class="secondary compact"
-            [disabled]="maintenanceEquipmentCurrentPage === maintenanceEquipmentPageCount"
-            (click)="changeMaintenanceEquipmentPage(1)"
-          >
-            Siguiente
-          </button>
-        </div>
-      </div>
-
-      <div
         class="table-wrap"
-        *ngIf="filteredMaintenanceItems.length && (!editing || maintenanceEditLevel !== 'equipment')"
+        *ngIf="filteredMaintenanceItems.length"
       >
         <table class="data-table detail-table maintenance-detail-table">
           <thead>
             <tr>
+              <th *ngIf="editing && maintenanceEditLevel === 'equipment'">Código</th>
+              <th *ngIf="editing && maintenanceEditLevel === 'equipment'">Equipo</th>
               <th>Área</th>
               <th>Sede</th>
-              <th *ngIf="editing && maintenanceEditLevel === 'location'">Ubicación</th>
-              <th>Equipos</th>
+              <th *ngIf="editing && maintenanceEditLevel !== 'area'">Ubicación</th>
+              <th *ngIf="!editing || maintenanceEditLevel !== 'equipment'">Equipos</th>
               <th>Frecuencia</th>
               <th>Estado</th>
               <th>Ventanas de servicio</th>
+              <th *ngIf="editing">Programación</th>
             </tr>
           </thead>
           <tbody>
             <tr *ngFor="let group of filteredGroupedItems; trackBy: trackByAreaKey">
+              <td *ngIf="editing && maintenanceEditLevel === 'equipment'" data-label="Código">
+                <strong>{{ group.code }}</strong>
+              </td>
+              <td *ngIf="editing && maintenanceEditLevel === 'equipment'" data-label="Equipo">
+                <strong>{{ group.name }}</strong>
+                <small>{{ group.brand }} · {{ group.model }}</small>
+                <small>Serie: {{ group.serial }}</small>
+              </td>
               <td data-label="Área"><strong>{{ group.areaName }}</strong></td>
               <td data-label="Sede">{{ group.siteName }}</td>
               <td
-                *ngIf="editing && maintenanceEditLevel === 'location'"
+                *ngIf="editing && maintenanceEditLevel !== 'area'"
                 data-label="Ubicación"
               >
                 {{ group.locationName }}
               </td>
-              <td data-label="Equipos">{{ group.assetCount }}</td>
+              <td *ngIf="!editing || maintenanceEditLevel !== 'equipment'" data-label="Equipos">
+                {{ group.assetCount }}
+              </td>
               <td data-label="Frecuencia">{{ frequencyLabel(group) }}</td>
               <td data-label="Estado">
                 <div class="status-stack">
@@ -510,7 +535,7 @@
                   </span>
                 </div>
               </td>
-              <td data-label="Ventanas de servicio">
+              <td data-label="Ventanas de servicio" class="service-windows-cell">
                 <div class="date-list">
                   <div *ngFor="let dateGroup of group.dateGroups" class="date-line">
                     <input
@@ -535,57 +560,24 @@
                   </div>
                 </div>
               </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div
-        class="table-wrap"
-        *ngIf="editing && maintenanceEditLevel === 'equipment' && filteredMaintenanceItems.length"
-      >
-        <table class="data-table detail-table equipment-edit-table">
-          <thead>
-            <tr>
-              <th>Código</th>
-              <th>Equipo</th>
-              <th>Área y ubicación</th>
-              <th>Frecuencia</th>
-              <th>Fecha programada</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let item of pagedMaintenanceEquipmentItems; trackBy: trackById">
-              <td data-label="Código"><strong>{{ item.code || '-' }}</strong></td>
-              <td data-label="Equipo">
-                <strong>{{ item.name || '-' }}</strong>
-                <small>{{ item.brand || 'Sin marca' }} · {{ item.model || 'Sin modelo' }}</small>
-                <small>Serie: {{ item.serial || 'NR' }}</small>
-              </td>
-              <td data-label="Área y ubicación">
-                <strong>{{ item.area_name || 'Sin área' }}</strong>
-                <small>{{ item.site_name || 'Sin sede' }} · {{ item.location_name || 'Sin ubicación' }}</small>
-              </td>
-              <td data-label="Frecuencia">{{ titleCase(item.frequency) }}</td>
-              <td data-label="Fecha programada">
-                <input
-                  *ngIf="maintenanceItemEditable(item)"
-                  type="date"
-                  [value]="item.planned_date"
-                  [min]="rangeMin(item)"
-                  [max]="rangeMax(item)"
-                  (change)="onMaintenanceItemDateChange(item, $any($event.target).value)"
-                />
-                <span *ngIf="!maintenanceItemEditable(item)">
-                  {{ formatDate(item.planned_date) }} al {{ formatDate(item.deadline_date) }}
-                </span>
-                <small>Límite: {{ formatDate(item.deadline_date) }}</small>
-              </td>
-              <td data-label="Estado">
-                <span class="status-pill" [ngClass]="item.status">
-                  {{ itemStatusLabel(item.status) }}
-                </span>
+              <td *ngIf="editing" data-label="Programación">
+                <div class="section-save-actions">
+                  <span
+                    class="status-pill"
+                    [class.programmed]="sectionProgrammingConfirmed(group.items)"
+                    [class.pending]="!sectionProgrammingConfirmed(group.items)"
+                  >
+                    {{ sectionProgrammingConfirmed(group.items) ? 'Guardada' : 'Pendiente' }}
+                  </span>
+                  <button
+                    type="button"
+                    class="primary compact section-save-button"
+                    [disabled]="isBusy() || !maintenanceSectionNeedsSave(group)"
+                    (click)="saveMaintenanceSection(group)"
+                  >
+                    {{ isBusy('save-maintenance-' + group.areaKey) ? 'Guardando...' : sectionProgrammingConfirmed(group.items) ? 'Guardar cambios' : 'Guardar ' + maintenanceSectionLabel().toLowerCase() }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -593,7 +585,12 @@
       </div>
 
       <div *ngIf="!filteredMaintenanceItems.length" class="empty-state compact-empty">
-        No hay mantenimientos para los filtros seleccionados.
+        <ng-container *ngIf="selectedSchedule.status === 'draft' && maintenanceProgrammingView === 'pending' && maintenanceUnprogrammedCount === 0; else noMaintenanceFilterResults">
+          Programación completa. Revisa las secciones guardadas y finaliza la aprobación.
+        </ng-container>
+        <ng-template #noMaintenanceFilterResults>
+          No hay mantenimientos para los filtros seleccionados.
+        </ng-template>
       </div>
     </section>
     </div>
@@ -710,6 +707,7 @@
             <th>Fecha inicial</th>
             <th>Periodicidad</th>
             <th>Estado</th>
+            <th>Programación</th>
             <th>Acciones</th>
           </tr>
         </thead>
@@ -723,6 +721,13 @@
             <td data-label="Periodicidad">{{ titleCase(schedule.periodicity) }}</td>
             <td data-label="Estado">
               <span class="status-pill" [ngClass]="schedule.status">{{ statusLabel(schedule.status) }}</span>
+            </td>
+            <td data-label="Programación" class="schedule-progress-cell">
+              <strong>{{ schedule.programmed_items || 0 }} / {{ schedule.total_items || 0 }}</strong>
+              <small *ngIf="schedule.status === 'draft'">
+                {{ trainingScheduleUnprogrammed(schedule) }} pendiente{{ trainingScheduleUnprogrammed(schedule) === 1 ? '' : 's' }}
+              </small>
+              <small *ngIf="schedule.status !== 'draft'">Completa</small>
             </td>
             <td data-label="Acciones">
               <div class="row-actions">
@@ -750,7 +755,8 @@
                   *ngIf="schedule.status === 'draft'"
                   type="button"
                   class="primary compact"
-                  [disabled]="isBusy()"
+                  [disabled]="isBusy() || trainingScheduleUnprogrammed(schedule) > 0"
+                  [title]="trainingScheduleUnprogrammed(schedule) ? 'Completa y guarda todas las áreas antes de aprobar' : 'Aprobar cronograma'"
                   (click)="requestApproveTraining(schedule)"
                 >
                   Aprobar
@@ -814,27 +820,25 @@
             Editar fechas
           </button>
           <ng-container *ngIf="trainingEditing">
-            <button type="button" class="secondary" [disabled]="isBusy()" (click)="cancelTrainingEdit()">
-              Cancelar
-            </button>
             <button
               type="button"
-              class="primary"
-              [disabled]="isBusy() || !hasTrainingChanges()"
-              (click)="saveTrainingItems()"
+              class="secondary"
+              [disabled]="isBusy()"
+              title="Descartar únicamente los cambios que aún no se han guardado"
+              (click)="cancelTrainingEdit()"
             >
-              {{ isBusy('save-training') ? 'Guardando...' : 'Guardar fechas' }}
+              Cancelar
             </button>
           </ng-container>
           <button
             *ngIf="selectedTrainingSchedule.status === 'draft' && canManageMaintenanceSchedules()"
             type="button"
             class="primary"
-            [disabled]="detailLoading || isBusy() || hasTrainingChanges()"
-            [title]="hasTrainingChanges() ? 'Guarda los cambios antes de aprobar' : ''"
+            [disabled]="detailLoading || isBusy() || !canApproveTrainingDraft()"
+            [title]="trainingUnprogrammedCount ? 'Completa y guarda todas las áreas antes de aprobar' : hasTrainingChanges() ? 'Guarda los cambios pendientes antes de aprobar' : 'Finalizar y aprobar cronograma'"
             (click)="requestApproveTraining(selectedTrainingSchedule)"
           >
-            Aprobar cronograma
+            Finalizar y aprobar
           </button>
         </div>
       </div>
@@ -844,6 +848,48 @@
         <div><strong>{{ trainingSummary.pending }}</strong><span>Programadas</span></div>
         <div><strong>{{ trainingSummary.active }}</strong><span>Activas</span></div>
         <div><strong>{{ trainingSummary.done }}</strong><span>Completadas</span></div>
+      </div>
+
+      <div *ngIf="selectedTrainingSchedule.status === 'draft'" class="programming-panel">
+        <div class="programming-progress">
+          <div class="programming-progress-copy">
+            <strong>{{ trainingProgrammedCount }} de {{ trainingItems.length }} guardadas</strong>
+            <span>{{ trainingUnprogrammedCount }} pendiente{{ trainingUnprogrammedCount === 1 ? '' : 's' }} · {{ trainingProgrammingPercent }}%</span>
+          </div>
+          <div
+            class="progress-track"
+            role="progressbar"
+            aria-label="Avance de programación de capacitaciones"
+            [attr.aria-valuenow]="trainingProgrammingPercent"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <span [style.width.%]="trainingProgrammingPercent"></span>
+          </div>
+        </div>
+        <div class="programming-tabs segmented-control" role="group" aria-label="Estado de programación">
+          <button
+            type="button"
+            [class.active]="trainingProgrammingView === 'pending'"
+            (click)="trainingProgrammingView = 'pending'"
+          >
+            Pendientes ({{ trainingUnprogrammedCount }})
+          </button>
+          <button
+            type="button"
+            [class.active]="trainingProgrammingView === 'programmed'"
+            (click)="trainingProgrammingView = 'programmed'"
+          >
+            Programadas ({{ trainingProgrammedCount }})
+          </button>
+          <button
+            type="button"
+            [class.active]="trainingProgrammingView === 'all'"
+            (click)="trainingProgrammingView = 'all'"
+          >
+            Todas
+          </button>
+        </div>
       </div>
 
       <div class="filter-bar compact-filters">
@@ -865,7 +911,62 @@
         </span>
       </div>
 
-      <div class="table-wrap" *ngIf="filteredTrainingItems.length; else noTrainingItems">
+      <div class="table-wrap" *ngIf="trainingEditing && filteredTrainingItems.length">
+        <table class="data-table detail-table training-programming-table">
+          <thead>
+            <tr>
+              <th>Área</th>
+              <th>Fechas programadas</th>
+              <th>Programación</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let group of filteredTrainingGroups; trackBy: trackByAreaKey">
+              <td data-label="Área">
+                <strong>{{ group.areaName }}</strong>
+                <small>{{ group.items.length }} capacitación{{ group.items.length === 1 ? '' : 'es' }}</small>
+              </td>
+              <td data-label="Fechas programadas">
+                <div class="date-list training-date-list">
+                  <div *ngFor="let item of group.items; trackBy: trackById" class="date-line">
+                    <input
+                      type="date"
+                      [value]="item.planned_date"
+                      [min]="selectedYear + '-01-01'"
+                      [max]="selectedYear + '-12-31'"
+                      (change)="onTrainingDateChange(item, $any($event.target).value)"
+                    />
+                    <span class="status-pill" [ngClass]="trainingItemStatusKey(item)">
+                      {{ trainingItemStatusLabel(item) }}
+                    </span>
+                  </div>
+                </div>
+              </td>
+              <td data-label="Programación">
+                <div class="section-save-actions">
+                  <span
+                    class="status-pill"
+                    [class.programmed]="sectionProgrammingConfirmed(group.items)"
+                    [class.pending]="!sectionProgrammingConfirmed(group.items)"
+                  >
+                    {{ sectionProgrammingConfirmed(group.items) ? 'Guardada' : 'Pendiente' }}
+                  </span>
+                  <button
+                    type="button"
+                    class="primary compact section-save-button"
+                    [disabled]="isBusy() || !trainingSectionNeedsSave(group)"
+                    (click)="saveTrainingSection(group)"
+                  >
+                    {{ isBusy('save-training-' + group.areaKey) ? 'Guardando...' : sectionProgrammingConfirmed(group.items) ? 'Guardar cambios' : 'Guardar área' }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap" *ngIf="!trainingEditing && filteredTrainingItems.length">
         <table class="data-table detail-table">
           <thead>
             <tr>
@@ -879,15 +980,7 @@
             <tr *ngFor="let item of filteredTrainingItems; trackBy: trackById">
               <td data-label="Área"><strong>{{ item.area_name || 'Sin área' }}</strong></td>
               <td data-label="Fecha programada">
-                <input
-                  *ngIf="trainingEditing"
-                  type="date"
-                  [value]="item.planned_date"
-                  [min]="selectedYear + '-01-01'"
-                  [max]="selectedYear + '-12-31'"
-                  (change)="onTrainingDateChange(item, $any($event.target).value)"
-                />
-                <span *ngIf="!trainingEditing">{{ formatDate(item.planned_date) }}</span>
+                <span>{{ formatDate(item.planned_date) }}</span>
               </td>
               <td data-label="Estado">
                 <span class="status-pill" [ngClass]="trainingItemStatusKey(item)">
@@ -940,9 +1033,14 @@
           </tbody>
         </table>
       </div>
-      <ng-template #noTrainingItems>
-        <div class="empty-state compact-empty">No hay capacitaciones para los filtros seleccionados.</div>
-      </ng-template>
+      <div *ngIf="!filteredTrainingItems.length" class="empty-state compact-empty">
+        <ng-container *ngIf="selectedTrainingSchedule.status === 'draft' && trainingProgrammingView === 'pending' && trainingUnprogrammedCount === 0; else noTrainingFilterResults">
+          Programación completa. Revisa las áreas guardadas y finaliza la aprobación.
+        </ng-container>
+        <ng-template #noTrainingFilterResults>
+          No hay capacitaciones para los filtros seleccionados.
+        </ng-template>
+      </div>
     </section>
     </div>
   </section>
@@ -1041,6 +1139,7 @@
             <th>Año</th>
             <th>Fecha inicial</th>
             <th>Estado</th>
+            <th>Programación</th>
             <th>Acciones</th>
           </tr>
         </thead>
@@ -1053,6 +1152,13 @@
             <td data-label="Fecha inicial">{{ formatDate(schedule.start_date) }}</td>
             <td data-label="Estado">
               <span class="status-pill" [ngClass]="schedule.status">{{ statusLabel(schedule.status) }}</span>
+            </td>
+            <td data-label="Programación" class="schedule-progress-cell">
+              <strong>{{ schedule.programmed_items || 0 }} / {{ schedule.total_items || 0 }}</strong>
+              <small *ngIf="schedule.status === 'draft'">
+                {{ calibrationScheduleUnprogrammed(schedule) }} pendiente{{ calibrationScheduleUnprogrammed(schedule) === 1 ? '' : 's' }}
+              </small>
+              <small *ngIf="schedule.status !== 'draft'">Completa</small>
             </td>
             <td data-label="Acciones">
               <div class="row-actions">
@@ -1080,7 +1186,8 @@
                   *ngIf="canManageCalibrationSchedules() && schedule.status === 'draft'"
                   type="button"
                   class="primary compact"
-                  [disabled]="isBusy()"
+                  [disabled]="isBusy() || calibrationScheduleUnprogrammed(schedule) > 0"
+                  [title]="calibrationScheduleUnprogrammed(schedule) ? 'Completa y guarda todas las secciones antes de aprobar' : 'Aprobar cronograma'"
                   (click)="requestApproveCalibration(schedule)"
                 >
                   Aprobar
@@ -1144,27 +1251,25 @@
             Editar fechas
           </button>
           <ng-container *ngIf="calibrationEditing">
-            <button type="button" class="secondary" [disabled]="isBusy()" (click)="cancelCalibrationEdit()">
-              Cancelar
-            </button>
             <button
               type="button"
-              class="primary"
-              [disabled]="isBusy() || !hasCalibrationChanges()"
-              (click)="saveCalibrationItems()"
+              class="secondary"
+              [disabled]="isBusy()"
+              title="Descartar únicamente los cambios que aún no se han guardado"
+              (click)="cancelCalibrationEdit()"
             >
-              {{ isBusy('save-calibration') ? 'Guardando...' : 'Guardar fechas' }}
+              Cancelar
             </button>
           </ng-container>
           <button
             *ngIf="selectedCalibrationSchedule.status === 'draft' && canManageCalibrationSchedules()"
             type="button"
             class="primary"
-            [disabled]="detailLoading || isBusy() || hasCalibrationChanges()"
-            [title]="hasCalibrationChanges() ? 'Guarda los cambios antes de aprobar' : ''"
+            [disabled]="detailLoading || isBusy() || !canApproveCalibrationDraft()"
+            [title]="calibrationUnprogrammedCount ? 'Completa y guarda todas las secciones antes de aprobar' : hasCalibrationChanges() ? 'Guarda los cambios pendientes antes de aprobar' : 'Finalizar y aprobar cronograma'"
             (click)="requestApproveCalibration(selectedCalibrationSchedule)"
           >
-            Aprobar cronograma
+            Finalizar y aprobar
           </button>
         </div>
       </div>
@@ -1175,6 +1280,48 @@
         <div><strong>{{ calibrationSummary.active }}</strong><span>Activas</span></div>
         <div><strong>{{ calibrationSummary.expired }}</strong><span>Vencidas</span></div>
         <div><strong>{{ calibrationSummary.done }}</strong><span>Completadas</span></div>
+      </div>
+
+      <div *ngIf="selectedCalibrationSchedule.status === 'draft'" class="programming-panel">
+        <div class="programming-progress">
+          <div class="programming-progress-copy">
+            <strong>{{ calibrationProgrammedCount }} de {{ calibrationItems.length }} guardadas</strong>
+            <span>{{ calibrationUnprogrammedCount }} pendiente{{ calibrationUnprogrammedCount === 1 ? '' : 's' }} · {{ calibrationProgrammingPercent }}%</span>
+          </div>
+          <div
+            class="progress-track"
+            role="progressbar"
+            aria-label="Avance de programación de calibraciones"
+            [attr.aria-valuenow]="calibrationProgrammingPercent"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <span [style.width.%]="calibrationProgrammingPercent"></span>
+          </div>
+        </div>
+        <div class="programming-tabs segmented-control" role="group" aria-label="Estado de programación">
+          <button
+            type="button"
+            [class.active]="calibrationProgrammingView === 'pending'"
+            (click)="calibrationProgrammingView = 'pending'"
+          >
+            Pendientes ({{ calibrationUnprogrammedCount }})
+          </button>
+          <button
+            type="button"
+            [class.active]="calibrationProgrammingView === 'programmed'"
+            (click)="calibrationProgrammingView = 'programmed'"
+          >
+            Programadas ({{ calibrationProgrammedCount }})
+          </button>
+          <button
+            type="button"
+            [class.active]="calibrationProgrammingView === 'all'"
+            (click)="calibrationProgrammingView = 'all'"
+          >
+            Todas
+          </button>
+        </div>
       </div>
 
       <div *ngIf="calibrationEditing" class="edit-level-bar">
@@ -1328,28 +1475,41 @@
 
       <div
         class="table-wrap"
-        *ngIf="calibrationEditing && calibrationEditLevel !== 'equipment' && filteredCalibrationItems.length"
+        *ngIf="calibrationEditing && filteredCalibrationItems.length"
       >
         <table class="data-table detail-table maintenance-detail-table">
           <thead>
             <tr>
+              <th *ngIf="calibrationEditLevel === 'equipment'">Código</th>
+              <th *ngIf="calibrationEditLevel === 'equipment'">Equipo</th>
               <th>Área</th>
               <th>Sede</th>
-              <th *ngIf="calibrationEditLevel === 'location'">Ubicación</th>
-              <th>Equipos</th>
+              <th *ngIf="calibrationEditLevel !== 'area'">Ubicación</th>
+              <th *ngIf="calibrationEditLevel !== 'equipment'">Equipos</th>
               <th>Frecuencia</th>
               <th>Estado</th>
               <th>Ventanas de calibración</th>
+              <th>Programación</th>
             </tr>
           </thead>
           <tbody>
             <tr *ngFor="let group of filteredCalibrationGroups; trackBy: trackByAreaKey">
+              <td *ngIf="calibrationEditLevel === 'equipment'" data-label="Código">
+                <strong>{{ group.code }}</strong>
+              </td>
+              <td *ngIf="calibrationEditLevel === 'equipment'" data-label="Equipo">
+                <strong>{{ group.name }}</strong>
+                <small>{{ group.brand }} · {{ group.model }}</small>
+                <small>Serie: {{ group.serial }}</small>
+              </td>
               <td data-label="Área"><strong>{{ group.areaName }}</strong></td>
               <td data-label="Sede">{{ group.siteName }}</td>
-              <td *ngIf="calibrationEditLevel === 'location'" data-label="Ubicación">
+              <td *ngIf="calibrationEditLevel !== 'area'" data-label="Ubicación">
                 {{ group.locationName }}
               </td>
-              <td data-label="Equipos">{{ group.assetCount }}</td>
+              <td *ngIf="calibrationEditLevel !== 'equipment'" data-label="Equipos">
+                {{ group.assetCount }}
+              </td>
               <td data-label="Frecuencia">{{ frequencyLabel(group) }}</td>
               <td data-label="Estado">
                 <div class="status-stack">
@@ -1362,7 +1522,7 @@
                   </span>
                 </div>
               </td>
-              <td data-label="Ventanas de calibración">
+              <td data-label="Ventanas de calibración" class="service-windows-cell">
                 <div class="date-list">
                   <div *ngFor="let dateGroup of group.dateGroups" class="date-line">
                     <input
@@ -1377,53 +1537,24 @@
                   </div>
                 </div>
               </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div
-        class="table-wrap"
-        *ngIf="calibrationEditing && calibrationEditLevel === 'equipment' && filteredCalibrationItems.length"
-      >
-        <table class="data-table detail-table equipment-edit-table">
-          <thead>
-            <tr>
-              <th>Código</th>
-              <th>Equipo</th>
-              <th>Área y ubicación</th>
-              <th>Frecuencia</th>
-              <th>Fecha programada</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let item of filteredCalibrationItems; trackBy: trackById">
-              <td data-label="Código"><strong>{{ item.code || '-' }}</strong></td>
-              <td data-label="Equipo">
-                <strong>{{ item.name || '-' }}</strong>
-                <small>{{ item.brand || 'Sin marca' }} · {{ item.model || 'Sin modelo' }}</small>
-                <small>Serie: {{ item.serial || 'NR' }}</small>
-              </td>
-              <td data-label="Área y ubicación">
-                <strong>{{ item.area_name || 'Sin área' }}</strong>
-                <small>{{ item.site_name || 'Sin sede' }} · {{ item.location_name || 'Sin ubicación' }}</small>
-              </td>
-              <td data-label="Frecuencia">{{ titleCase(item.frequency) }}</td>
-              <td data-label="Fecha programada">
-                <input
-                  type="date"
-                  [value]="item.planned_date"
-                  [min]="calibrationRangeMin(item)"
-                  [max]="calibrationRangeMax(item)"
-                  (change)="onCalibrationItemDateChange(item, $any($event.target).value)"
-                />
-                <small>Límite: {{ formatDate(item.deadline_date) }}</small>
-              </td>
-              <td data-label="Estado">
-                <span class="status-pill" [ngClass]="calibrationItemStatusKey(item)">
-                  {{ calibrationItemStatusLabel(item) }}
-                </span>
+              <td data-label="Programación">
+                <div class="section-save-actions">
+                  <span
+                    class="status-pill"
+                    [class.programmed]="sectionProgrammingConfirmed(group.items)"
+                    [class.pending]="!sectionProgrammingConfirmed(group.items)"
+                  >
+                    {{ sectionProgrammingConfirmed(group.items) ? 'Guardada' : 'Pendiente' }}
+                  </span>
+                  <button
+                    type="button"
+                    class="primary compact section-save-button"
+                    [disabled]="isBusy() || !calibrationSectionNeedsSave(group)"
+                    (click)="saveCalibrationSection(group)"
+                  >
+                    {{ isBusy('save-calibration-' + group.areaKey) ? 'Guardando...' : sectionProgrammingConfirmed(group.items) ? 'Guardar cambios' : 'Guardar ' + calibrationSectionLabel().toLowerCase() }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -1431,7 +1562,12 @@
       </div>
 
       <div *ngIf="!filteredCalibrationItems.length" class="empty-state compact-empty">
-        No hay calibraciones para los filtros seleccionados.
+        <ng-container *ngIf="selectedCalibrationSchedule.status === 'draft' && calibrationProgrammingView === 'pending' && calibrationUnprogrammedCount === 0; else noCalibrationFilterResults">
+          Programación completa. Revisa las secciones guardadas y finaliza la aprobación.
+        </ng-container>
+        <ng-template #noCalibrationFilterResults>
+          No hay calibraciones para los filtros seleccionados.
+        </ng-template>
       </div>
     </section>
     </div>

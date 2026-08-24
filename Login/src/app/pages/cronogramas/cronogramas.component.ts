@@ -45,10 +45,21 @@ interface MaintenanceItemGroup {
   areaName: string;
   siteName: string;
   locationName: string;
+  code: string;
+  name: string;
+  brand: string;
+  model: string;
+  serial: string;
   assetCount: number;
   frequencies: string[];
   items: ScheduleItemDto[];
   dateGroups: MaintenanceAreaDateGroup[];
+}
+
+interface TrainingItemGroup {
+  areaKey: string;
+  areaName: string;
+  items: TrainingItemDto[];
 }
 
 interface CalibrationDateGroup {
@@ -64,6 +75,11 @@ interface CalibrationItemGroup {
   areaName: string;
   siteName: string;
   locationName: string;
+  code: string;
+  name: string;
+  brand: string;
+  model: string;
+  serial: string;
   assetCount: number;
   frequencies: string[];
   items: CalibrationItemDto[];
@@ -81,6 +97,7 @@ interface ConfirmDialog {
 type ViewMode = 'maintenance' | 'training' | 'calibration';
 type NoticeKind = 'success' | 'error' | 'info';
 type AssetEditLevel = 'area' | 'location' | 'equipment';
+type ProgrammingView = 'pending' | 'programmed' | 'all';
 
 @Component({
   selector: 'app-cronogramas',
@@ -133,8 +150,7 @@ export class CronogramasComponent implements OnInit {
   maintenanceFrequencyFilter = '';
   editing = false;
   maintenanceEditLevel: AssetEditLevel = 'area';
-  maintenanceEquipmentPage = 1;
-  readonly maintenanceEquipmentPageSize = 50;
+  maintenanceProgrammingView: ProgrammingView = 'pending';
   private readonly rangeMap = new Map<string, { min: string; max: string }>();
   private maintenanceSnapshot = new Map<string, string>();
 
@@ -147,6 +163,7 @@ export class CronogramasComponent implements OnInit {
   trainingItemStatusFilter = '';
   trainingSearch = '';
   trainingEditing = false;
+  trainingProgrammingView: ProgrammingView = 'pending';
   private trainingSnapshot = new Map<string, string>();
 
   calibrationStartDate = '';
@@ -160,6 +177,7 @@ export class CronogramasComponent implements OnInit {
   calibrationLocationFilter = '';
   calibrationEditing = false;
   calibrationEditLevel: AssetEditLevel = 'area';
+  calibrationProgrammingView: ProgrammingView = 'pending';
   private calibrationSnapshot = new Map<string, string>();
   private readonly calibrationRangeMap = new Map<string, { min: string; max: string }>();
 
@@ -358,6 +376,12 @@ export class CronogramasComponent implements OnInit {
         this.rangeMap.set(item.id, { min, max });
         this.maintenanceSnapshot.set(item.id, item.planned_date);
       }
+      this.maintenanceProgrammingView =
+        this.selectedSchedule?.status === 'draft'
+          ? this.items.some((item) => !item.programming_confirmed)
+            ? 'pending'
+            : 'programmed'
+          : 'all';
     } finally {
       this.detailLoading = false;
       this.refreshView();
@@ -473,6 +497,9 @@ export class CronogramasComponent implements OnInit {
   startMaintenanceEdit(): void {
     if (!this.canEditSelected()) return;
     this.maintenanceSnapshot = new Map(this.items.map((item) => [item.id, item.planned_date]));
+    if (this.selectedSchedule?.status === 'draft') {
+      this.maintenanceProgrammingView = this.maintenanceUnprogrammedCount ? 'pending' : 'programmed';
+    }
     this.editing = true;
   }
 
@@ -489,31 +516,84 @@ export class CronogramasComponent implements OnInit {
     );
   }
 
+  get maintenanceProgrammedCount(): number {
+    return this.items.filter((item) => item.programming_confirmed).length;
+  }
+
+  get maintenanceUnprogrammedCount(): number {
+    return this.items.length - this.maintenanceProgrammedCount;
+  }
+
+  get maintenanceProgrammingPercent(): number {
+    return this.programmingPercent(this.maintenanceProgrammedCount, this.items.length);
+  }
+
+  canApproveMaintenanceDraft(): boolean {
+    return Boolean(
+      this.selectedSchedule?.status === 'draft' &&
+      this.maintenanceUnprogrammedCount === 0 &&
+      !this.hasMaintenanceChanges()
+    );
+  }
+
   maintenanceDateGroupEditable(dateGroup: MaintenanceAreaDateGroup): boolean {
     if (this.selectedSchedule?.status !== 'approved') return true;
     return dateGroup.items.every((item) => item.status === 'pending');
   }
 
-  async saveEdits(): Promise<void> {
-    if (!this.selectedScheduleId) return;
-    if (!this.hasMaintenanceChanges()) {
-      this.setNotice('info', 'No hay cambios de fecha para guardar.');
+  maintenanceSectionHasChanges(group: MaintenanceItemGroup): boolean {
+    return group.items.some(
+      (item) => item.planned_date !== (this.maintenanceSnapshot.get(item.id) ?? item.planned_date)
+    );
+  }
+
+  maintenanceSectionNeedsSave(group: MaintenanceItemGroup): boolean {
+    if (this.selectedSchedule?.status === 'approved') {
+      return this.maintenanceSectionHasChanges(group);
+    }
+    return (
+      group.items.some((item) => !item.programming_confirmed) ||
+      this.maintenanceSectionHasChanges(group)
+    );
+  }
+
+  async saveMaintenanceSection(group: MaintenanceItemGroup): Promise<void> {
+    if (!this.selectedScheduleId || !this.editing) return;
+    const approvedEdit = this.selectedSchedule?.status === 'approved';
+    const sectionItems = approvedEdit
+      ? group.items.filter(
+          (item) => item.planned_date !== (this.maintenanceSnapshot.get(item.id) ?? item.planned_date)
+        )
+      : group.items;
+    if (!sectionItems.length) {
+      this.setNotice('info', 'No hay cambios en esta sección para guardar.');
       return;
     }
-    const approvedEdit = this.selectedSchedule?.status === 'approved';
     await this.runAction(
-      'save-maintenance',
+      `save-maintenance-${group.areaKey}`,
       async () => {
         await this.schedulesService.updateScheduleItems(
           this.selectedScheduleId,
-          this.items.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
+          sectionItems.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
         );
-        await this.loadSchedules(true);
-        if (this.selectedSchedule?.status === 'draft') this.startMaintenanceEdit();
+        if (approvedEdit) {
+          await this.loadSchedules(true);
+          return;
+        }
+        const programmedAt = new Date().toISOString();
+        for (const item of sectionItems) {
+          item.programming_confirmed = true;
+          item.programmed_at = programmedAt;
+          this.maintenanceSnapshot.set(item.id, item.planned_date);
+        }
+        if (this.selectedSchedule) {
+          this.selectedSchedule.programmed_items = this.maintenanceProgrammedCount;
+          this.selectedSchedule.total_items = this.items.length;
+        }
       },
       approvedEdit
         ? 'Fechas actualizadas. La autorización fue utilizada y el cronograma volvió a quedar bloqueado.'
-        : 'Fechas de mantenimiento actualizadas.'
+        : `Programación por ${this.maintenanceSectionLabel().toLowerCase()} guardada. El avance quedó registrado.`
     );
   }
 
@@ -541,6 +621,16 @@ export class CronogramasComponent implements OnInit {
   }
 
   requestApproveSchedule(schedule: ScheduleDto): void {
+    const unprogrammed = this.maintenanceScheduleUnprogrammed(schedule);
+    if (schedule.status === 'draft' && unprogrammed) {
+      this.setNotice(
+        'info',
+        unprogrammed === 1
+          ? 'Falta 1 mantenimiento por revisar y guardar.'
+          : `Faltan ${unprogrammed} mantenimientos por revisar y guardar.`
+      );
+      return;
+    }
     this.openConfirm(
       'Aprobar cronograma de mantenimiento',
       `Se aprobará el cronograma ${schedule.year} y sus mantenimientos podrán generar solicitudes operativas.`,
@@ -599,6 +689,12 @@ export class CronogramasComponent implements OnInit {
   get filteredMaintenanceItems(): ScheduleItemDto[] {
     const term = this.maintenanceDetailSearch.trim().toLowerCase();
     return this.items.filter((item) => {
+      if (
+        this.selectedSchedule?.status === 'draft' &&
+        !this.matchesProgrammingView(item.programming_confirmed, this.maintenanceProgrammingView)
+      ) {
+        return false;
+      }
       if (this.maintenanceAreaFilter && item.area_name !== this.maintenanceAreaFilter) return false;
       if (this.maintenanceLocationFilter && item.location_name !== this.maintenanceLocationFilter) return false;
       if (this.maintenanceFrequencyFilter && item.frequency !== this.maintenanceFrequencyFilter) return false;
@@ -610,49 +706,13 @@ export class CronogramasComponent implements OnInit {
     });
   }
 
-  get maintenanceEquipmentPageCount(): number {
-    return Math.max(
-      1,
-      Math.ceil(this.filteredMaintenanceItems.length / this.maintenanceEquipmentPageSize)
-    );
-  }
-
-  get maintenanceEquipmentCurrentPage(): number {
-    return Math.min(this.maintenanceEquipmentPage, this.maintenanceEquipmentPageCount);
-  }
-
-  get pagedMaintenanceEquipmentItems(): ScheduleItemDto[] {
-    const start =
-      (this.maintenanceEquipmentCurrentPage - 1) * this.maintenanceEquipmentPageSize;
-    return this.filteredMaintenanceItems.slice(start, start + this.maintenanceEquipmentPageSize);
-  }
-
-  get maintenanceEquipmentRangeStart(): number {
-    if (!this.filteredMaintenanceItems.length) return 0;
-    return (this.maintenanceEquipmentCurrentPage - 1) * this.maintenanceEquipmentPageSize + 1;
-  }
-
-  get maintenanceEquipmentRangeEnd(): number {
-    return Math.min(
-      this.maintenanceEquipmentCurrentPage * this.maintenanceEquipmentPageSize,
-      this.filteredMaintenanceItems.length
-    );
-  }
-
   setMaintenanceEditLevel(level: AssetEditLevel): void {
     this.maintenanceEditLevel = level;
-    if (level === 'equipment') this.maintenanceEquipmentPage = 1;
-  }
-
-  changeMaintenanceEquipmentPage(offset: number): void {
-    this.maintenanceEquipmentPage = Math.min(
-      this.maintenanceEquipmentPageCount,
-      Math.max(1, this.maintenanceEquipmentCurrentPage + offset)
-    );
   }
 
   get filteredGroupedItems(): MaintenanceItemGroup[] {
     const groupByLocation = this.editing && this.maintenanceEditLevel === 'location';
+    const groupByEquipment = this.editing && this.maintenanceEditLevel === 'equipment';
     const map = new Map<
       string,
       Omit<MaintenanceItemGroup, 'assetCount' | 'frequencies' | 'dateGroups'>
@@ -662,15 +722,22 @@ export class CronogramasComponent implements OnInit {
       const siteName = item.site_name || 'Sin sede';
       const locationName = item.location_name || 'Sin ubicación';
       const areaKey = `${item.site_id || 'no-site'}:${item.area_id || areaName.toLowerCase()}`;
-      const key = groupByLocation
-        ? `${areaKey}:${item.location_id || locationName.toLowerCase()}`
-        : areaKey;
+      const key = groupByEquipment
+        ? `equipment:${item.asset_id}`
+        : groupByLocation
+          ? `${areaKey}:${item.location_id || locationName.toLowerCase()}`
+          : areaKey;
       if (!map.has(key)) {
         map.set(key, {
           areaKey: key,
           areaName,
           siteName,
-          locationName: groupByLocation ? locationName : 'Todas las ubicaciones',
+          locationName: groupByLocation || groupByEquipment ? locationName : 'Todas las ubicaciones',
+          code: item.code || '-',
+          name: item.name || '-',
+          brand: item.brand || 'Sin marca',
+          model: item.model || 'Sin modelo',
+          serial: item.serial || 'NR',
           items: []
         });
       }
@@ -684,10 +751,20 @@ export class CronogramasComponent implements OnInit {
         dateGroups: this.buildAreaDateGroups(group.items)
       }))
       .sort((a, b) =>
-        `${a.siteName} ${a.areaName} ${a.locationName}`.localeCompare(
-          `${b.siteName} ${b.areaName} ${b.locationName}`
+        `${groupByEquipment ? `${a.code} ${a.name}` : `${a.siteName} ${a.areaName} ${a.locationName}`}`.localeCompare(
+          groupByEquipment ? `${b.code} ${b.name}` : `${b.siteName} ${b.areaName} ${b.locationName}`
         )
       );
+  }
+
+  maintenanceSectionLabel(): string {
+    if (this.maintenanceEditLevel === 'equipment') return 'Equipo';
+    if (this.maintenanceEditLevel === 'location') return 'Ubicación';
+    return 'Área';
+  }
+
+  sectionProgrammingConfirmed(items: { programming_confirmed: boolean }[]): boolean {
+    return Boolean(items.length) && items.every((item) => item.programming_confirmed);
   }
 
   private buildAreaDateGroups(items: ScheduleItemDto[]): MaintenanceAreaDateGroup[] {
@@ -790,6 +867,12 @@ export class CronogramasComponent implements OnInit {
       const rows = await this.schedulesService.listTrainingItems(scheduleId);
       this.trainingItems = rows.map((item) => ({ ...item, planned_date: this.dateOnly(item.planned_date) }));
       this.trainingSnapshot = new Map(this.trainingItems.map((item) => [item.id, item.planned_date]));
+      this.trainingProgrammingView =
+        this.selectedTrainingSchedule?.status === 'draft'
+          ? this.trainingItems.some((item) => !item.programming_confirmed)
+            ? 'pending'
+            : 'programmed'
+          : 'all';
       this.trainingEditing = false;
     } finally {
       this.detailLoading = false;
@@ -814,11 +897,38 @@ export class CronogramasComponent implements OnInit {
   get filteredTrainingItems(): TrainingItemDto[] {
     const term = this.trainingSearch.trim().toLowerCase();
     return this.trainingItems.filter((item) => {
+      if (
+        this.selectedTrainingSchedule?.status === 'draft' &&
+        !this.matchesProgrammingView(item.programming_confirmed, this.trainingProgrammingView)
+      ) {
+        return false;
+      }
       const status = this.trainingItemStatusKey(item);
       if (this.trainingItemStatusFilter && status !== this.trainingItemStatusFilter) return false;
       if (!term) return true;
       return `${item.area_name ?? ''} ${this.formatDate(item.planned_date)}`.toLowerCase().includes(term);
     });
+  }
+
+  get filteredTrainingGroups(): TrainingItemGroup[] {
+    const groups = new Map<string, TrainingItemGroup>();
+    for (const item of this.filteredTrainingItems) {
+      const areaKey = item.area_id || (item.area_name || 'Sin área').toLowerCase();
+      if (!groups.has(areaKey)) {
+        groups.set(areaKey, {
+          areaKey,
+          areaName: item.area_name || 'Sin área',
+          items: []
+        });
+      }
+      groups.get(areaKey)!.items.push(item);
+    }
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        items: [...group.items].sort((a, b) => a.planned_date.localeCompare(b.planned_date))
+      }))
+      .sort((a, b) => a.areaName.localeCompare(b.areaName));
   }
 
   get trainingSummary(): Record<'pending' | 'active' | 'done' | 'expired', number> {
@@ -873,6 +983,7 @@ export class CronogramasComponent implements OnInit {
   startTrainingEdit(): void {
     if (!this.canEditTraining()) return;
     this.trainingSnapshot = new Map(this.trainingItems.map((item) => [item.id, item.planned_date]));
+    this.trainingProgrammingView = this.trainingUnprogrammedCount ? 'pending' : 'programmed';
     this.trainingEditing = true;
   }
 
@@ -889,6 +1000,39 @@ export class CronogramasComponent implements OnInit {
     );
   }
 
+  get trainingProgrammedCount(): number {
+    return this.trainingItems.filter((item) => item.programming_confirmed).length;
+  }
+
+  get trainingUnprogrammedCount(): number {
+    return this.trainingItems.length - this.trainingProgrammedCount;
+  }
+
+  get trainingProgrammingPercent(): number {
+    return this.programmingPercent(this.trainingProgrammedCount, this.trainingItems.length);
+  }
+
+  canApproveTrainingDraft(): boolean {
+    return Boolean(
+      this.selectedTrainingSchedule?.status === 'draft' &&
+      this.trainingUnprogrammedCount === 0 &&
+      !this.hasTrainingChanges()
+    );
+  }
+
+  trainingSectionHasChanges(group: TrainingItemGroup): boolean {
+    return group.items.some(
+      (item) => item.planned_date !== (this.trainingSnapshot.get(item.id) ?? item.planned_date)
+    );
+  }
+
+  trainingSectionNeedsSave(group: TrainingItemGroup): boolean {
+    return (
+      group.items.some((item) => !item.programming_confirmed) ||
+      this.trainingSectionHasChanges(group)
+    );
+  }
+
   onTrainingDateChange(item: TrainingItemDto, value: string): void {
     item.planned_date = this.normalizeEditableDate(
       value,
@@ -897,27 +1041,41 @@ export class CronogramasComponent implements OnInit {
     );
   }
 
-  async saveTrainingItems(): Promise<void> {
-    if (!this.selectedTrainingScheduleId) return;
-    if (!this.hasTrainingChanges()) {
-      this.setNotice('info', 'No hay cambios de fecha para guardar.');
-      return;
-    }
+  async saveTrainingSection(group: TrainingItemGroup): Promise<void> {
+    if (!this.selectedTrainingScheduleId || !this.trainingEditing) return;
     await this.runAction(
-      'save-training',
+      `save-training-${group.areaKey}`,
       async () => {
         await this.schedulesService.updateTrainingItems(
           this.selectedTrainingScheduleId,
-          this.trainingItems.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
+          group.items.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
         );
-        await this.loadTrainingSchedules(true);
-        if (this.selectedTrainingSchedule?.status === 'draft') this.startTrainingEdit();
+        const programmedAt = new Date().toISOString();
+        for (const item of group.items) {
+          item.programming_confirmed = true;
+          item.programmed_at = programmedAt;
+          this.trainingSnapshot.set(item.id, item.planned_date);
+        }
+        if (this.selectedTrainingSchedule) {
+          this.selectedTrainingSchedule.programmed_items = this.trainingProgrammedCount;
+          this.selectedTrainingSchedule.total_items = this.trainingItems.length;
+        }
       },
-      'Fechas de capacitación actualizadas.'
+      'Área de capacitación guardada. El avance quedó registrado.'
     );
   }
 
   requestApproveTraining(schedule: TrainingScheduleDto): void {
+    const unprogrammed = this.trainingScheduleUnprogrammed(schedule);
+    if (unprogrammed) {
+      this.setNotice(
+        'info',
+        unprogrammed === 1
+          ? 'Falta 1 capacitación por revisar y guardar.'
+          : `Faltan ${unprogrammed} capacitaciones por revisar y guardar.`
+      );
+      return;
+    }
     this.openConfirm(
       'Aprobar cronograma de capacitaciones',
       `Se aprobarán las capacitaciones programadas para ${schedule.year}.`,
@@ -1082,6 +1240,12 @@ export class CronogramasComponent implements OnInit {
           max: item.deadline_date
         });
       }
+      this.calibrationProgrammingView =
+        this.selectedCalibrationSchedule?.status === 'draft'
+          ? this.calibrationItems.some((item) => !item.programming_confirmed)
+            ? 'pending'
+            : 'programmed'
+          : 'all';
     } finally {
       this.detailLoading = false;
       this.refreshView();
@@ -1115,6 +1279,12 @@ export class CronogramasComponent implements OnInit {
   get filteredCalibrationItems(): CalibrationItemDto[] {
     const term = this.calibrationSearch.trim().toLowerCase();
     return this.calibrationItems.filter((item) => {
+      if (
+        this.selectedCalibrationSchedule?.status === 'draft' &&
+        !this.matchesProgrammingView(item.programming_confirmed, this.calibrationProgrammingView)
+      ) {
+        return false;
+      }
       if (this.calibrationAreaFilter && item.area_name !== this.calibrationAreaFilter) return false;
       if (this.calibrationLocationFilter && item.location_name !== this.calibrationLocationFilter) return false;
       if (
@@ -1132,6 +1302,7 @@ export class CronogramasComponent implements OnInit {
 
   get filteredCalibrationGroups(): CalibrationItemGroup[] {
     const groupByLocation = this.calibrationEditing && this.calibrationEditLevel === 'location';
+    const groupByEquipment = this.calibrationEditing && this.calibrationEditLevel === 'equipment';
     const map = new Map<
       string,
       Omit<CalibrationItemGroup, 'assetCount' | 'frequencies' | 'dateGroups'>
@@ -1141,15 +1312,22 @@ export class CronogramasComponent implements OnInit {
       const siteName = item.site_name || 'Sin sede';
       const locationName = item.location_name || 'Sin ubicación';
       const baseKey = `${item.site_id || 'no-site'}:${item.area_id || areaName.toLowerCase()}`;
-      const key = groupByLocation
-        ? `${baseKey}:${item.location_id || locationName.toLowerCase()}`
-        : baseKey;
+      const key = groupByEquipment
+        ? `equipment:${item.asset_id}`
+        : groupByLocation
+          ? `${baseKey}:${item.location_id || locationName.toLowerCase()}`
+          : baseKey;
       if (!map.has(key)) {
         map.set(key, {
           areaKey: key,
           areaName,
           siteName,
-          locationName: groupByLocation ? locationName : 'Todas las ubicaciones',
+          locationName: groupByLocation || groupByEquipment ? locationName : 'Todas las ubicaciones',
+          code: item.code || '-',
+          name: item.name || '-',
+          brand: item.brand || 'Sin marca',
+          model: item.model || 'Sin modelo',
+          serial: item.serial || 'NR',
           items: []
         });
       }
@@ -1163,8 +1341,8 @@ export class CronogramasComponent implements OnInit {
         dateGroups: this.buildCalibrationDateGroups(group.items)
       }))
       .sort((a, b) =>
-        `${a.siteName} ${a.areaName} ${a.locationName}`.localeCompare(
-          `${b.siteName} ${b.areaName} ${b.locationName}`
+        `${groupByEquipment ? `${a.code} ${a.name}` : `${a.siteName} ${a.areaName} ${a.locationName}`}`.localeCompare(
+          groupByEquipment ? `${b.code} ${b.name}` : `${b.siteName} ${b.areaName} ${b.locationName}`
         )
       );
   }
@@ -1235,6 +1413,7 @@ export class CronogramasComponent implements OnInit {
     this.calibrationSnapshot = new Map(
       this.calibrationItems.map((item) => [item.id, item.planned_date])
     );
+    this.calibrationProgrammingView = this.calibrationUnprogrammedCount ? 'pending' : 'programmed';
     this.calibrationEditing = true;
   }
 
@@ -1248,6 +1427,39 @@ export class CronogramasComponent implements OnInit {
   hasCalibrationChanges(): boolean {
     return this.calibrationItems.some(
       (item) => item.planned_date !== (this.calibrationSnapshot.get(item.id) ?? item.planned_date)
+    );
+  }
+
+  get calibrationProgrammedCount(): number {
+    return this.calibrationItems.filter((item) => item.programming_confirmed).length;
+  }
+
+  get calibrationUnprogrammedCount(): number {
+    return this.calibrationItems.length - this.calibrationProgrammedCount;
+  }
+
+  get calibrationProgrammingPercent(): number {
+    return this.programmingPercent(this.calibrationProgrammedCount, this.calibrationItems.length);
+  }
+
+  canApproveCalibrationDraft(): boolean {
+    return Boolean(
+      this.selectedCalibrationSchedule?.status === 'draft' &&
+      this.calibrationUnprogrammedCount === 0 &&
+      !this.hasCalibrationChanges()
+    );
+  }
+
+  calibrationSectionHasChanges(group: CalibrationItemGroup): boolean {
+    return group.items.some(
+      (item) => item.planned_date !== (this.calibrationSnapshot.get(item.id) ?? item.planned_date)
+    );
+  }
+
+  calibrationSectionNeedsSave(group: CalibrationItemGroup): boolean {
+    return (
+      group.items.some((item) => !item.programming_confirmed) ||
+      this.calibrationSectionHasChanges(group)
     );
   }
 
@@ -1280,27 +1492,41 @@ export class CronogramasComponent implements OnInit {
       .map((status) => ({ status, count: counts[status] }));
   }
 
-  async saveCalibrationItems(): Promise<void> {
-    if (!this.selectedCalibrationScheduleId) return;
-    if (!this.hasCalibrationChanges()) {
-      this.setNotice('info', 'No hay cambios de fecha para guardar.');
-      return;
-    }
+  async saveCalibrationSection(group: CalibrationItemGroup): Promise<void> {
+    if (!this.selectedCalibrationScheduleId || !this.calibrationEditing) return;
     await this.runAction(
-      'save-calibration',
+      `save-calibration-${group.areaKey}`,
       async () => {
         await this.calibration.updateScheduleItems(
           this.selectedCalibrationScheduleId,
-          this.calibrationItems.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
+          group.items.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
         );
-        await this.loadCalibrationSchedules(true);
-        if (this.selectedCalibrationSchedule?.status === 'draft') this.startCalibrationEdit();
+        const programmedAt = new Date().toISOString();
+        for (const item of group.items) {
+          item.programming_confirmed = true;
+          item.programmed_at = programmedAt;
+          this.calibrationSnapshot.set(item.id, item.planned_date);
+        }
+        if (this.selectedCalibrationSchedule) {
+          this.selectedCalibrationSchedule.programmed_items = this.calibrationProgrammedCount;
+          this.selectedCalibrationSchedule.total_items = this.calibrationItems.length;
+        }
       },
-      'Fechas de calibración actualizadas.'
+      `Programación de calibración por ${this.calibrationSectionLabel().toLowerCase()} guardada. El avance quedó registrado.`
     );
   }
 
   requestApproveCalibration(schedule: CalibrationScheduleDto): void {
+    const unprogrammed = this.calibrationScheduleUnprogrammed(schedule);
+    if (unprogrammed) {
+      this.setNotice(
+        'info',
+        unprogrammed === 1
+          ? 'Falta 1 calibración por revisar y guardar.'
+          : `Faltan ${unprogrammed} calibraciones por revisar y guardar.`
+      );
+      return;
+    }
     this.openConfirm(
       'Aprobar cronograma de calibración',
       `Se aprobarán las calibraciones programadas para ${schedule.year}.`,
@@ -1398,6 +1624,39 @@ export class CronogramasComponent implements OnInit {
 
   canManageCalibrationSchedules(): boolean {
     return this.auth.hasPermission('calibration:schedule:manage');
+  }
+
+  calibrationSectionLabel(): string {
+    if (this.calibrationEditLevel === 'equipment') return 'Equipo';
+    if (this.calibrationEditLevel === 'location') return 'Ubicación';
+    return 'Área';
+  }
+
+  maintenanceScheduleUnprogrammed(schedule: ScheduleDto): number {
+    if (schedule.id === this.selectedScheduleId && this.items.length === Number(schedule.total_items)) {
+      return this.maintenanceUnprogrammedCount;
+    }
+    return Math.max(0, Number(schedule.total_items || 0) - Number(schedule.programmed_items || 0));
+  }
+
+  trainingScheduleUnprogrammed(schedule: TrainingScheduleDto): number {
+    if (
+      schedule.id === this.selectedTrainingScheduleId &&
+      this.trainingItems.length === Number(schedule.total_items)
+    ) {
+      return this.trainingUnprogrammedCount;
+    }
+    return Math.max(0, Number(schedule.total_items || 0) - Number(schedule.programmed_items || 0));
+  }
+
+  calibrationScheduleUnprogrammed(schedule: CalibrationScheduleDto): number {
+    if (
+      schedule.id === this.selectedCalibrationScheduleId &&
+      this.calibrationItems.length === Number(schedule.total_items)
+    ) {
+      return this.calibrationUnprogrammedCount;
+    }
+    return Math.max(0, Number(schedule.total_items || 0) - Number(schedule.programmed_items || 0));
   }
 
   statusLabel(status: string): string {
@@ -1667,6 +1926,17 @@ export class CronogramasComponent implements OnInit {
 
   private dateOnly(value: string | null | undefined): string {
     return String(value || '').match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? '';
+  }
+
+  private matchesProgrammingView(confirmed: boolean, view: ProgrammingView): boolean {
+    if (view === 'pending') return !confirmed;
+    if (view === 'programmed') return confirmed;
+    return true;
+  }
+
+  private programmingPercent(programmed: number, total: number): number {
+    if (!total) return 100;
+    return Math.round((programmed / total) * 100);
   }
 
   private countStatuses<T>(items: T[], selector: (item: T) => string): Record<string, number> {

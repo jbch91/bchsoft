@@ -49,16 +49,21 @@ export async function createCalibrationScheduleWithItems({ clientId, year, start
 
 export async function listCalibrationSchedules(clientId, year) {
   const params = [clientId];
-  let where = 'client_id = $1';
+  let where = 'schedule.client_id = $1';
   if (year) {
     params.push(year);
-    where += ` AND year = $${params.length}`;
+    where += ` AND schedule.year = $${params.length}`;
   }
   const { rows } = await query(
-    `SELECT id, client_id, year, start_date, status, created_at, approved_at, pdf_path
-     FROM calibration_schedules
+    `SELECT schedule.id, schedule.client_id, schedule.year, schedule.start_date,
+            schedule.status, schedule.created_at, schedule.approved_at, schedule.pdf_path,
+            (SELECT COUNT(*)::int FROM calibration_schedule_items item
+             WHERE item.schedule_id = schedule.id) AS total_items,
+            (SELECT COUNT(*)::int FROM calibration_schedule_items item
+             WHERE item.schedule_id = schedule.id AND item.programming_confirmed) AS programmed_items
+     FROM calibration_schedules schedule
      WHERE ${where}
-     ORDER BY year DESC, created_at DESC`,
+     ORDER BY schedule.year DESC, schedule.created_at DESC`,
     params
   );
   return rows;
@@ -76,10 +81,15 @@ export async function getCalibrationScheduleById(scheduleId) {
 
 export async function approveCalibrationSchedule(scheduleId) {
   const { rows } = await query(
-    `UPDATE calibration_schedules
+    `UPDATE calibration_schedules AS schedule
      SET status = 'approved', approved_at = NOW()
-     WHERE id = $1 AND status = 'draft'
-     RETURNING id`,
+     WHERE schedule.id = $1
+       AND schedule.status = 'draft'
+       AND NOT EXISTS (
+         SELECT 1 FROM calibration_schedule_items item
+         WHERE item.schedule_id = schedule.id AND NOT item.programming_confirmed
+       )
+     RETURNING schedule.id`,
     [scheduleId]
   );
   return rows[0];
@@ -96,6 +106,16 @@ export async function deleteCalibrationSchedule(scheduleId) {
 export async function countCalibrationItems(scheduleId) {
   const { rows } = await query(
     'SELECT COUNT(*)::int AS count FROM calibration_schedule_items WHERE schedule_id = $1',
+    [scheduleId]
+  );
+  return rows[0]?.count ?? 0;
+}
+
+export async function countUnprogrammedCalibrationItems(scheduleId) {
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS count
+     FROM calibration_schedule_items
+     WHERE schedule_id = $1 AND NOT programming_confirmed`,
     [scheduleId]
   );
   return rows[0]?.count ?? 0;
@@ -132,6 +152,7 @@ export async function insertCalibrationItems(items) {
 export async function listCalibrationItemsWithSchema(scheduleId, schema) {
   const { rows } = await query(
     `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date, i.status, i.pdf_path,
+            i.programming_confirmed, i.programmed_at, i.programmed_by,
             a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id, a.location_id,
             ar.name AS area_name, s.name AS site_name, lo.name AS location_name
      FROM calibration_schedule_items i
@@ -146,7 +167,7 @@ export async function listCalibrationItemsWithSchema(scheduleId, schema) {
   return rows;
 }
 
-export async function updateCalibrationItems(scheduleId, items) {
+export async function updateCalibrationItems(scheduleId, items, programmedBy) {
   return withTransaction(async (client) => {
     const { rows: scheduleRows } = await client.query(
       `SELECT status
@@ -162,7 +183,11 @@ export async function updateCalibrationItems(scheduleId, items) {
     }
     const { rows } = await client.query(
       `UPDATE calibration_schedule_items AS target
-       SET planned_date = data.planned_date, deadline_date = data.deadline_date
+       SET planned_date = data.planned_date,
+           deadline_date = data.deadline_date,
+           programming_confirmed = TRUE,
+           programmed_at = NOW(),
+           programmed_by = $5::uuid
        FROM UNNEST($2::uuid[], $3::date[], $4::date[])
          AS data(id, planned_date, deadline_date)
        WHERE target.schedule_id = $1 AND target.id = data.id
@@ -171,7 +196,8 @@ export async function updateCalibrationItems(scheduleId, items) {
         scheduleId,
         items.map((item) => item.id),
         items.map((item) => item.plannedDate),
-        items.map((item) => item.deadlineDate)
+        items.map((item) => item.deadlineDate),
+        programmedBy
       ]
     );
     if (rows.length !== items.length) {

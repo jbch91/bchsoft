@@ -52,16 +52,22 @@ export async function createTrainingScheduleWithItems({
 
 export async function listTrainingSchedules(clientId, year) {
   const params = [clientId];
-  let where = 'client_id = $1';
+  let where = 'schedule.client_id = $1';
   if (year) {
     params.push(year);
-    where += ` AND year = $${params.length}`;
+    where += ` AND schedule.year = $${params.length}`;
   }
   const { rows } = await query(
-    `SELECT id, client_id, year, start_date, periodicity, status, created_at, approved_at, pdf_path
-     FROM training_schedules
+    `SELECT schedule.id, schedule.client_id, schedule.year, schedule.start_date,
+            schedule.periodicity, schedule.status, schedule.created_at, schedule.approved_at,
+            schedule.pdf_path,
+            (SELECT COUNT(*)::int FROM training_schedule_items item
+             WHERE item.schedule_id = schedule.id) AS total_items,
+            (SELECT COUNT(*)::int FROM training_schedule_items item
+             WHERE item.schedule_id = schedule.id AND item.programming_confirmed) AS programmed_items
+     FROM training_schedules schedule
      WHERE ${where}
-     ORDER BY year DESC, created_at DESC`,
+     ORDER BY schedule.year DESC, schedule.created_at DESC`,
     params
   );
   return rows;
@@ -79,10 +85,15 @@ export async function getTrainingScheduleById(scheduleId) {
 
 export async function approveTrainingSchedule(scheduleId) {
   const { rows } = await query(
-    `UPDATE training_schedules
+    `UPDATE training_schedules AS schedule
      SET status = 'approved', approved_at = NOW()
-     WHERE id = $1 AND status = 'draft'
-     RETURNING id`,
+     WHERE schedule.id = $1
+       AND schedule.status = 'draft'
+       AND NOT EXISTS (
+         SELECT 1 FROM training_schedule_items item
+         WHERE item.schedule_id = schedule.id AND NOT item.programming_confirmed
+       )
+     RETURNING schedule.id`,
     [scheduleId]
   );
   return rows[0];
@@ -109,6 +120,7 @@ export async function insertTrainingItems(items) {
 export async function listTrainingItemsWithSchema(scheduleId, schema) {
   const { rows } = await query(
     `SELECT i.id, i.schedule_id, i.area_id, i.planned_date, i.status, i.pdf_path, i.completed_at,
+            i.programming_confirmed, i.programmed_at, i.programmed_by,
             a.name AS area_name
      FROM training_schedule_items i
      LEFT JOIN "${schema}".areas a ON a.id = i.area_id
@@ -137,7 +149,7 @@ export async function clearTrainingItemPdf(itemId) {
   );
 }
 
-export async function updateTrainingItems(scheduleId, items) {
+export async function updateTrainingItems(scheduleId, items, programmedBy) {
   return withTransaction(async (client) => {
     const { rows: scheduleRows } = await client.query(
       `SELECT status
@@ -153,11 +165,19 @@ export async function updateTrainingItems(scheduleId, items) {
     }
     const { rows } = await client.query(
       `UPDATE training_schedule_items AS target
-       SET planned_date = data.planned_date
+       SET planned_date = data.planned_date,
+           programming_confirmed = TRUE,
+           programmed_at = NOW(),
+           programmed_by = $4::uuid
        FROM UNNEST($2::uuid[], $3::date[]) AS data(id, planned_date)
        WHERE target.schedule_id = $1 AND target.id = data.id
        RETURNING target.id`,
-      [scheduleId, items.map((item) => item.id), items.map((item) => item.plannedDate)]
+      [
+        scheduleId,
+        items.map((item) => item.id),
+        items.map((item) => item.plannedDate),
+        programmedBy
+      ]
     );
     if (rows.length !== items.length) {
       const error = new Error('Uno de los elementos no pertenece al cronograma.');
@@ -171,6 +191,16 @@ export async function updateTrainingItems(scheduleId, items) {
 export async function countTrainingItems(scheduleId) {
   const { rows } = await query(
     'SELECT COUNT(*)::int AS count FROM training_schedule_items WHERE schedule_id = $1',
+    [scheduleId]
+  );
+  return rows[0]?.count ?? 0;
+}
+
+export async function countUnprogrammedTrainingItems(scheduleId) {
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS count
+     FROM training_schedule_items
+     WHERE schedule_id = $1 AND NOT programming_confirmed`,
     [scheduleId]
   );
   return rows[0]?.count ?? 0;

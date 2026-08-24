@@ -51,18 +51,23 @@ export async function createScheduleWithItems({ clientId, year, startDate, creat
 
 export async function listSchedules(clientId, year) {
   const params = [clientId];
-  let where = 'client_id = $1';
+  let where = 'schedule.client_id = $1';
   if (year) {
     params.push(year);
-    where += ` AND year = $${params.length}`;
+    where += ` AND schedule.year = $${params.length}`;
   }
   const { rows } = await query(
-    `SELECT id, client_id, year, start_date, status, engineer_edited,
-            engineer_edit_enabled, engineer_edit_enabled_by, engineer_edit_enabled_at,
-            created_at, approved_at, pdf_path
-     FROM maintenance_schedules
+    `SELECT schedule.id, schedule.client_id, schedule.year, schedule.start_date, schedule.status,
+            schedule.engineer_edited, schedule.engineer_edit_enabled,
+            schedule.engineer_edit_enabled_by, schedule.engineer_edit_enabled_at,
+            schedule.created_at, schedule.approved_at, schedule.pdf_path,
+            (SELECT COUNT(*)::int FROM maintenance_schedule_items item
+             WHERE item.schedule_id = schedule.id) AS total_items,
+            (SELECT COUNT(*)::int FROM maintenance_schedule_items item
+             WHERE item.schedule_id = schedule.id AND item.programming_confirmed) AS programmed_items
+     FROM maintenance_schedules schedule
      WHERE ${where}
-     ORDER BY year DESC, created_at DESC`,
+     ORDER BY schedule.year DESC, schedule.created_at DESC`,
     params
   );
   return rows;
@@ -86,14 +91,19 @@ export async function setSchedulePdf(scheduleId, pdfPath) {
 
 export async function approveSchedule(scheduleId) {
   const { rows } = await query(
-    `UPDATE maintenance_schedules
+    `UPDATE maintenance_schedules AS schedule
      SET status = 'approved',
          approved_at = NOW(),
          engineer_edit_enabled = FALSE,
          engineer_edit_enabled_by = NULL,
          engineer_edit_enabled_at = NULL
-     WHERE id = $1 AND status = 'draft'
-     RETURNING id`,
+     WHERE schedule.id = $1
+       AND schedule.status = 'draft'
+       AND NOT EXISTS (
+         SELECT 1 FROM maintenance_schedule_items item
+         WHERE item.schedule_id = schedule.id AND NOT item.programming_confirmed
+       )
+     RETURNING schedule.id`,
     [scheduleId]
   );
   return rows[0];
@@ -115,6 +125,7 @@ export async function setScheduleEngineerEditAccess(scheduleId, enabled, enabled
 export async function listScheduleItemsWithSchema(scheduleId, schema) {
   const { rows } = await query(
     `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date, i.status,
+            i.programming_confirmed, i.programmed_at, i.programmed_by,
             a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id, a.location_id,
             ar.name AS area_name, s.name AS site_name, lo.name AS location_name
      FROM maintenance_schedule_items i
@@ -145,7 +156,9 @@ export async function updateScheduleItems(
   {
     markEngineerEdited: edited = false,
     consumeEngineerEdit = false,
-    expectedStatus = null
+    expectedStatus = null,
+    confirmProgramming = false,
+    programmedBy = null
   } = {}
 ) {
   return withTransaction(async (client) => {
@@ -172,7 +185,11 @@ export async function updateScheduleItems(
     if (items.length) {
       const result = await client.query(
         `UPDATE maintenance_schedule_items AS target
-         SET planned_date = data.planned_date, deadline_date = data.deadline_date
+         SET planned_date = data.planned_date,
+             deadline_date = data.deadline_date,
+             programming_confirmed = CASE WHEN $5 THEN TRUE ELSE target.programming_confirmed END,
+             programmed_at = CASE WHEN $5 THEN NOW() ELSE target.programmed_at END,
+             programmed_by = CASE WHEN $5 THEN $6::uuid ELSE target.programmed_by END
          FROM UNNEST($2::uuid[], $3::date[], $4::date[])
            AS data(id, planned_date, deadline_date)
          WHERE target.schedule_id = $1 AND target.id = data.id
@@ -181,7 +198,9 @@ export async function updateScheduleItems(
           scheduleId,
           items.map((item) => item.id),
           items.map((item) => item.plannedDate),
-          items.map((item) => item.deadlineDate)
+          items.map((item) => item.deadlineDate),
+          confirmProgramming,
+          programmedBy
         ]
       );
       rows = result.rows;
@@ -219,6 +238,16 @@ export async function countPendingScheduleItems(scheduleId) {
     `SELECT COUNT(*)::int AS count
      FROM maintenance_schedule_items
      WHERE schedule_id = $1 AND status = 'pending'`,
+    [scheduleId]
+  );
+  return rows[0]?.count ?? 0;
+}
+
+export async function countUnprogrammedScheduleItems(scheduleId) {
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS count
+     FROM maintenance_schedule_items
+     WHERE schedule_id = $1 AND NOT programming_confirmed`,
     [scheduleId]
   );
   return rows[0]?.count ?? 0;
