@@ -115,7 +115,7 @@ export async function setScheduleEngineerEditAccess(scheduleId, enabled, enabled
 export async function listScheduleItemsWithSchema(scheduleId, schema) {
   const { rows } = await query(
     `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date, i.status,
-            a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id,
+            a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id, a.location_id,
             ar.name AS area_name, s.name AS site_name, lo.name AS location_name
      FROM maintenance_schedule_items i
      LEFT JOIN "${schema}".assets a ON a.id = i.asset_id

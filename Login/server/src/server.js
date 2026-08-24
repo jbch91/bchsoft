@@ -290,6 +290,7 @@ import {
   listCalibrationItemsWithSchema,
   setCalibrationItemPdf,
   clearCalibrationItemPdf,
+  updateCalibrationItems,
   listCalibrationReportsByAsset,
   countCalibrationItems,
   refreshCalibrationScheduleStatus
@@ -345,6 +346,7 @@ import {
   dateOnlyFromDatabase,
   formatDateOnly as formatScheduleDate,
   frequencyToMonths as scheduleFrequencyToMonths,
+  normalizeCalibrationItemUpdates,
   normalizeMaintenanceItemUpdates,
   normalizePeriodicity,
   normalizeScheduleStart,
@@ -11571,10 +11573,10 @@ app.patch(
     if (!schedule) {
       return res.status(404).json({ message: 'Cronograma no encontrado.' });
     }
-    if (req.user.clientId && req.user.clientId !== schedule.client_id) {
+    if (!req.user.clientId || req.user.clientId !== schedule.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (!req.user.roles?.includes('superuser') && schedule.status !== 'draft') {
+    if (schedule.status !== 'draft') {
       return res.status(403).json({ message: 'Cronograma bloqueado para edición.' });
     }
     try {
@@ -11968,6 +11970,53 @@ app.get(
       };
     });
     return res.json(normalized);
+  }
+);
+
+app.patch(
+  '/calibration/schedules/:id/items',
+  requireAuth,
+  requirePermission('calibration:schedule:manage'),
+  async (req, res) => {
+    const schedule = await getCalibrationScheduleById(req.params.id);
+    if (!schedule) {
+      return res.status(404).json({ message: 'Cronograma no encontrado.' });
+    }
+    if (!req.user.clientId || req.user.clientId !== schedule.client_id) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (schedule.status !== 'draft') {
+      return res.status(403).json({ message: 'Cronograma bloqueado para edición.' });
+    }
+    try {
+      const client = await getClientById(schedule.client_id);
+      if (!client) {
+        return res.status(404).json({ message: 'Cliente no encontrado.' });
+      }
+      const currentItems = await listCalibrationItemsWithSchema(schedule.id, client.schema_name);
+      const normalized = normalizeCalibrationItemUpdates(req.body?.items, currentItems, schedule.year);
+      await updateCalibrationItems(schedule.id, normalized);
+      const scheduleItems = await listCalibrationItemsWithSchema(schedule.id, client.schema_name);
+      await writeCalibrationSchedulePdf({ client, schedule, items: scheduleItems });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'CALIBRATION_SCHEDULE_UPDATE',
+        targetUserId: schedule.client_id,
+        targetUsername: client.name,
+        details: {
+          category: 'schedule',
+          clientId: schedule.client_id,
+          clientName: client.name,
+          scheduleId: schedule.id,
+          year: schedule.year,
+          updatedItemCount: normalized.length
+        }
+      });
+      return res.json({ ok: true });
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo actualizar el cronograma de calibración.');
+    }
   }
 );
 

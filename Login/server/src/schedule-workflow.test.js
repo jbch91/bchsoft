@@ -9,6 +9,7 @@ import {
   capDateAtScheduleYearEndUtc,
   changedMaintenanceItemUpdates,
   formatDateOnly,
+  normalizeCalibrationItemUpdates,
   normalizeMaintenanceItemUpdates,
   normalizeScheduleStart,
   normalizeTrainingItemUpdates,
@@ -141,6 +142,23 @@ test('rechaza fechas de capacitación en fin de semana o fuera del año', () => 
   );
   assert.throws(
     () => normalizeTrainingItemUpdates([{ id, plannedDate: '2027-01-04' }], current, 2026),
+    /año del cronograma/
+  );
+});
+
+test('mantiene la ventana de calibración y valida su vigencia', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const current = [{ id, deadline_date: '2026-09-30' }];
+  assert.deepEqual(
+    normalizeCalibrationItemUpdates([{ id, plannedDate: '2026-09-15' }], current, 2026),
+    [{ id, plannedDate: '2026-09-15', deadlineDate: '2026-09-30' }]
+  );
+  assert.throws(
+    () => normalizeCalibrationItemUpdates([{ id, plannedDate: '2026-08-28' }], current, 2026),
+    /debe estar entre/
+  );
+  assert.throws(
+    () => normalizeCalibrationItemUpdates([{ id, plannedDate: '2027-01-04' }], current, 2026),
     /año del cronograma/
   );
 });

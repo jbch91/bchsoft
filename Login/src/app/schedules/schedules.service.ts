@@ -33,6 +33,7 @@ export interface ScheduleItemDto {
   serial?: string | null;
   area_id?: string | null;
   site_id?: string | null;
+  location_id?: string | null;
   site_name?: string | null;
   area_name?: string | null;
   location_name?: string | null;
@@ -74,13 +75,14 @@ export class SchedulesService {
     );
   }
 
-  async generateSchedule(clientId: string, year: number, startDate: string): Promise<void> {
-    await firstValueFrom(
-      this.http.post(`${this.apiBase}/maintenance/schedules/${clientId}/generate`, {
+  async generateSchedule(clientId: string, year: number, startDate: string): Promise<string> {
+    const response = await firstValueFrom(
+      this.http.post<{ id: string }>(`${this.apiBase}/maintenance/schedules/${clientId}/generate`, {
         year,
         startDate
       })
     );
+    return response.id;
   }
 
   async listScheduleItems(scheduleId: string): Promise<ScheduleItemDto[]> {
@@ -134,10 +136,11 @@ export class SchedulesService {
     );
   }
 
-  async generateTrainingSchedule(clientId: string, payload: { year: number; startDate: string; periodicity: string; areaIds: string[] }): Promise<void> {
-    await firstValueFrom(
-      this.http.post(`${this.apiBase}/training/schedules/${clientId}/generate`, payload)
+  async generateTrainingSchedule(clientId: string, payload: { year: number; startDate: string; periodicity: string; areaIds: string[] }): Promise<string> {
+    const response = await firstValueFrom(
+      this.http.post<{ id: string }>(`${this.apiBase}/training/schedules/${clientId}/generate`, payload)
     );
+    return response.id;
   }
 
   async listTrainingItems(scheduleId: string): Promise<TrainingItemDto[]> {

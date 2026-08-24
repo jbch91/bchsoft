@@ -139,6 +139,18 @@ export async function clearTrainingItemPdf(itemId) {
 
 export async function updateTrainingItems(scheduleId, items) {
   return withTransaction(async (client) => {
+    const { rows: scheduleRows } = await client.query(
+      `SELECT status
+       FROM training_schedules
+       WHERE id = $1
+       FOR UPDATE`,
+      [scheduleId]
+    );
+    if (!scheduleRows[0] || scheduleRows[0].status !== 'draft') {
+      const error = new Error('El cronograma cambió de estado. Actualiza la información.');
+      error.code = 'SCHEDULE_EDIT_STATE_CHANGED';
+      throw error;
+    }
     const { rows } = await client.query(
       `UPDATE training_schedule_items AS target
        SET planned_date = data.planned_date

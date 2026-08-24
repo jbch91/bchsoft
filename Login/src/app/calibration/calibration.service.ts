@@ -23,7 +23,11 @@ export interface CalibrationItemDto {
   status: string;
   pdf_path?: string | null;
   area_id?: string | null;
+  site_id?: string | null;
+  location_id?: string | null;
   area_name?: string | null;
+  site_name?: string | null;
+  location_name?: string | null;
   code?: string | null;
   name?: string | null;
   brand?: string | null;
@@ -59,15 +63,25 @@ export class CalibrationService {
     );
   }
 
-  async generateSchedule(clientId: string, payload: { year: number; startDate: string }): Promise<void> {
-    await firstValueFrom(
-      this.http.post(`${this.apiBase}/calibration/schedules/${clientId}/generate`, payload)
+  async generateSchedule(clientId: string, payload: { year: number; startDate: string }): Promise<string> {
+    const response = await firstValueFrom(
+      this.http.post<{ id: string }>(`${this.apiBase}/calibration/schedules/${clientId}/generate`, payload)
     );
+    return response.id;
   }
 
   async listItems(scheduleId: string): Promise<CalibrationItemDto[]> {
     return firstValueFrom(
       this.http.get<CalibrationItemDto[]>(`${this.apiBase}/calibration/schedules/${scheduleId}/items`)
+    );
+  }
+
+  async updateScheduleItems(
+    scheduleId: string,
+    items: { id: string; plannedDate: string }[]
+  ): Promise<void> {
+    await firstValueFrom(
+      this.http.patch(`${this.apiBase}/calibration/schedules/${scheduleId}/items`, { items })
     );
   }
 

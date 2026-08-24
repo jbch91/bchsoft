@@ -132,15 +132,55 @@ export async function insertCalibrationItems(items) {
 export async function listCalibrationItemsWithSchema(scheduleId, schema) {
   const { rows } = await query(
     `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date, i.status, i.pdf_path,
-            a.code, a.name, a.brand, a.model, a.serial, a.area_id, ar.name AS area_name
+            a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id, a.location_id,
+            ar.name AS area_name, s.name AS site_name, lo.name AS location_name
      FROM calibration_schedule_items i
      LEFT JOIN "${schema}".assets a ON a.id = i.asset_id
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
+     LEFT JOIN "${schema}".sites s ON s.id = a.site_id
+     LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
      WHERE i.schedule_id = $1
      ORDER BY i.planned_date ASC`,
     [scheduleId]
   );
   return rows;
+}
+
+export async function updateCalibrationItems(scheduleId, items) {
+  return withTransaction(async (client) => {
+    const { rows: scheduleRows } = await client.query(
+      `SELECT status
+       FROM calibration_schedules
+       WHERE id = $1
+       FOR UPDATE`,
+      [scheduleId]
+    );
+    if (!scheduleRows[0] || scheduleRows[0].status !== 'draft') {
+      const error = new Error('El cronograma cambió de estado. Actualiza la información.');
+      error.code = 'SCHEDULE_EDIT_STATE_CHANGED';
+      throw error;
+    }
+    const { rows } = await client.query(
+      `UPDATE calibration_schedule_items AS target
+       SET planned_date = data.planned_date, deadline_date = data.deadline_date
+       FROM UNNEST($2::uuid[], $3::date[], $4::date[])
+         AS data(id, planned_date, deadline_date)
+       WHERE target.schedule_id = $1 AND target.id = data.id
+       RETURNING target.id`,
+      [
+        scheduleId,
+        items.map((item) => item.id),
+        items.map((item) => item.plannedDate),
+        items.map((item) => item.deadlineDate)
+      ]
+    );
+    if (rows.length !== items.length) {
+      const error = new Error('Uno de los elementos no pertenece al cronograma.');
+      error.code = 'SCHEDULE_ITEM_MISMATCH';
+      throw error;
+    }
+    return rows;
+  });
 }
 
 export async function setCalibrationItemPdf(itemId, pdfPath) {

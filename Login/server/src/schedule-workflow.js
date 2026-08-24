@@ -265,3 +265,20 @@ export function normalizeTrainingItemUpdates(items, existingItems, year) {
     return { id: String(current.id), plannedDate };
   });
 }
+
+export function normalizeCalibrationItemUpdates(items, existingItems, year) {
+  const normalizedYear = normalizeScheduleYear(year);
+  return normalizeRequestedItems(items, existingItems).map(({ input, current }) => {
+    const plannedDate = normalizeDateOnly(input.plannedDate, 'La fecha programada');
+    const planned = assertWeekdayAndYear(plannedDate, normalizedYear);
+    const deadlineDate = dateOnlyFromDatabase(current.deadline_date, 'La fecha límite');
+    const deadline = parseDateOnly(deadlineDate);
+    const minimum = addMonthsUtc(deadline, -1);
+    if (planned < minimum || planned > deadline) {
+      throw new ScheduleValidationError(
+        `La fecha de calibración debe estar entre ${formatDateOnly(minimum)} y ${deadlineDate}.`
+      );
+    }
+    return { id: String(current.id), plannedDate, deadlineDate };
+  });
+}
