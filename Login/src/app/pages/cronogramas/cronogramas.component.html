@@ -436,23 +436,27 @@
           />
         </label>
         <label>
-          Ubicación
-          <select
-            [(ngModel)]="maintenanceLocationFilter"
-          >
-            <option value="">Todas</option>
-            <option *ngFor="let location of maintenanceLocationOptions" [value]="location">
-              {{ location }}
-            </option>
-          </select>
-        </label>
-        <label>
           Área
           <select
             [(ngModel)]="maintenanceAreaFilter"
+            (ngModelChange)="onMaintenanceAreaFilterChange($event)"
           >
             <option value="">Todas</option>
             <option *ngFor="let area of maintenanceAreaOptions" [value]="area">{{ area }}</option>
+          </select>
+        </label>
+        <label>
+          Ubicación
+          <select
+            [(ngModel)]="maintenanceLocationFilter"
+            [disabled]="!maintenanceAreaFilter"
+          >
+            <option value="">
+              {{ maintenanceAreaFilter ? 'Todas' : 'Selecciona un área' }}
+            </option>
+            <option *ngFor="let location of maintenanceLocationOptions" [value]="location">
+              {{ location }}
+            </option>
           </select>
         </label>
         <label>
@@ -1364,19 +1368,27 @@
           />
         </label>
         <label>
-          Ubicación
-          <select [(ngModel)]="calibrationLocationFilter">
+          Área
+          <select
+            [(ngModel)]="calibrationAreaFilter"
+            (ngModelChange)="onCalibrationAreaFilterChange($event)"
+          >
             <option value="">Todas</option>
-            <option *ngFor="let location of calibrationLocationOptions" [value]="location">
-              {{ location }}
-            </option>
+            <option *ngFor="let area of calibrationAreaOptions" [value]="area">{{ area }}</option>
           </select>
         </label>
         <label>
-          Área
-          <select [(ngModel)]="calibrationAreaFilter">
-            <option value="">Todas</option>
-            <option *ngFor="let area of calibrationAreaOptions" [value]="area">{{ area }}</option>
+          Ubicación
+          <select
+            [(ngModel)]="calibrationLocationFilter"
+            [disabled]="!calibrationAreaFilter"
+          >
+            <option value="">
+              {{ calibrationAreaFilter ? 'Todas' : 'Selecciona un área' }}
+            </option>
+            <option *ngFor="let location of calibrationLocationOptions" [value]="location">
+              {{ location }}
+            </option>
           </select>
         </label>
         <label>

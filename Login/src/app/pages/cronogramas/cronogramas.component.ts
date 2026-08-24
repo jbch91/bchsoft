@@ -683,7 +683,18 @@ export class CronogramasComponent implements OnInit {
   }
 
   get maintenanceLocationOptions(): string[] {
-    return this.uniqueSorted(this.items.map((item) => item.location_name || '').filter(Boolean));
+    if (!this.maintenanceAreaFilter) return [];
+    return this.uniqueSorted(
+      this.items
+        .filter((item) => item.area_name === this.maintenanceAreaFilter)
+        .map((item) => item.location_name || '')
+        .filter(Boolean)
+    );
+  }
+
+  onMaintenanceAreaFilterChange(areaName: string): void {
+    this.maintenanceAreaFilter = areaName;
+    this.maintenanceLocationFilter = '';
   }
 
   get filteredMaintenanceItems(): ScheduleItemDto[] {
@@ -1271,9 +1282,18 @@ export class CronogramasComponent implements OnInit {
   }
 
   get calibrationLocationOptions(): string[] {
+    if (!this.calibrationAreaFilter) return [];
     return this.uniqueSorted(
-      this.calibrationItems.map((item) => item.location_name || '').filter(Boolean)
+      this.calibrationItems
+        .filter((item) => item.area_name === this.calibrationAreaFilter)
+        .map((item) => item.location_name || '')
+        .filter(Boolean)
     );
+  }
+
+  onCalibrationAreaFilterChange(areaName: string): void {
+    this.calibrationAreaFilter = areaName;
+    this.calibrationLocationFilter = '';
   }
 
   get filteredCalibrationItems(): CalibrationItemDto[] {
