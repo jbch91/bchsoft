@@ -86,6 +86,18 @@ interface CalibrationItemGroup {
   dateGroups: CalibrationDateGroup[];
 }
 
+type CalendarPickerState =
+  | { kind: 'maintenance'; group: MaintenanceAreaDateGroup }
+  | { kind: 'calibration'; group: CalibrationDateGroup };
+
+interface CalendarPickerDay {
+  date: string;
+  day: number;
+  disabled: boolean;
+  selected: boolean;
+  today: boolean;
+}
+
 interface ConfirmDialog {
   title: string;
   message: string;
@@ -137,6 +149,8 @@ export class CronogramasComponent implements OnInit {
   noticeKind: NoticeKind = 'info';
   confirmDialog: ConfirmDialog | null = null;
   confirmBusy = false;
+  calendarPicker: CalendarPickerState | null = null;
+  readonly calendarWeekdays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
   startDate = '';
   schedules: ScheduleDto[] = [];
@@ -504,6 +518,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   cancelMaintenanceEdit(): void {
+    this.closeDatePicker();
     for (const item of this.items) {
       item.planned_date = this.maintenanceSnapshot.get(item.id) ?? item.planned_date;
     }
@@ -832,19 +847,73 @@ export class CronogramasComponent implements OnInit {
     return anchor ? `${anchor.slice(0, 7)}-01` : item.planned_date;
   }
 
-  openNativeDatePicker(input: HTMLInputElement): void {
-    if (input.disabled) return;
-    input.focus({ preventScroll: true });
-    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
-    if (typeof pickerInput.showPicker !== 'function') {
-      input.click();
-      return;
+  openMaintenanceDatePicker(group: MaintenanceAreaDateGroup): void {
+    this.calendarPicker = { kind: 'maintenance', group };
+  }
+
+  openCalibrationDatePicker(group: CalibrationDateGroup): void {
+    this.calendarPicker = { kind: 'calibration', group };
+  }
+
+  closeDatePicker(): void {
+    this.calendarPicker = null;
+  }
+
+  get calendarPickerMonthLabel(): string {
+    const anchor = this.calendarPicker?.group.minDate;
+    if (!anchor) return '';
+    const [year, month] = anchor.split('-').map(Number);
+    if (!year || !month) return '';
+    const label = new Intl.DateTimeFormat('es-CO', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC'
+    }).format(new Date(Date.UTC(year, month - 1, 1)));
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
+  get calendarPickerDays(): Array<CalendarPickerDay | null> {
+    const picker = this.calendarPicker;
+    if (!picker) return [];
+    const [year, month] = picker.group.minDate.split('-').map(Number);
+    if (!year || !month) return [];
+
+    const firstWeekday = (new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 6) % 7;
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+      today.getDate()
+    ).padStart(2, '0')}`;
+    const days: Array<CalendarPickerDay | null> = Array.from(
+      { length: firstWeekday },
+      () => null
+    );
+
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+      days.push({
+        date,
+        day,
+        disabled:
+          date < picker.group.minDate || date > picker.group.maxDate || weekday === 0 || weekday === 6,
+        selected: date === picker.group.plannedDate,
+        today: date === todayKey
+      });
     }
-    try {
-      pickerInput.showPicker();
-    } catch {
-      input.click();
+    while (days.length < 42) days.push(null);
+    return days;
+  }
+
+  selectCalendarDate(date: string): void {
+    const picker = this.calendarPicker;
+    if (!picker || date < picker.group.minDate || date > picker.group.maxDate) return;
+    if (picker.kind === 'maintenance') {
+      this.onAreaPlannedDateChange(picker.group, date);
+    } else {
+      this.onCalibrationDateGroupChange(picker.group, date);
     }
+    this.closeDatePicker();
   }
 
   async loadTrainingSchedules(preserveSelection = true): Promise<void> {
@@ -1454,6 +1523,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   cancelCalibrationEdit(): void {
+    this.closeDatePicker();
     for (const item of this.calibrationItems) {
       item.planned_date = this.calibrationSnapshot.get(item.id) ?? item.planned_date;
     }
@@ -1792,6 +1862,7 @@ export class CronogramasComponent implements OnInit {
 
   closeDetailModal(): void {
     if (this.detailLoading || this.isBusy()) return;
+    this.closeDatePicker();
     if (this.editing) this.cancelMaintenanceEdit();
     if (this.trainingEditing) this.cancelTrainingEdit();
     if (this.calibrationEditing) this.cancelCalibrationEdit();
@@ -1977,6 +2048,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   private clearSelections(): void {
+    this.closeDatePicker();
     this.selectedScheduleId = '';
     this.items = [];
     this.selectedTrainingScheduleId = '';
@@ -1990,6 +2062,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   private clearActiveDetail(): void {
+    this.closeDatePicker();
     if (this.viewMode === 'training') {
       this.selectedTrainingScheduleId = '';
       this.trainingItems = [];

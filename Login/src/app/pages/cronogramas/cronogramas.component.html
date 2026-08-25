@@ -547,20 +547,20 @@
                       class="date-picker-control"
                     >
                       <input
-                        #maintenanceDateInput
-                        type="date"
-                        [value]="dateGroup.plannedDate"
-                        [min]="dateGroup.minDate"
-                        [max]="dateGroup.maxDate"
-                        title="Fecha programada dentro de la ventana mensual"
-                        (change)="onAreaPlannedDateChange(dateGroup, $any($event.target).value)"
+                        type="text"
+                        [value]="formatDate(dateGroup.plannedDate)"
+                        title="Seleccionar fecha programada"
+                        aria-haspopup="dialog"
+                        readonly
+                        (click)="openMaintenanceDatePicker(dateGroup)"
                       />
                       <button
                         type="button"
                         class="date-picker-trigger"
                         title="Abrir calendario"
                         aria-label="Abrir calendario"
-                        (click)="openNativeDatePicker(maintenanceDateInput)"
+                        aria-haspopup="dialog"
+                        (click)="openMaintenanceDatePicker(dateGroup)"
                       >
                         <span class="calendar-glyph" aria-hidden="true"></span>
                       </button>
@@ -1554,20 +1554,20 @@
                   <div *ngFor="let dateGroup of group.dateGroups" class="date-line">
                     <div class="date-picker-control">
                       <input
-                        #calibrationDateInput
-                        type="date"
-                        [value]="dateGroup.plannedDate"
-                        [min]="dateGroup.minDate"
-                        [max]="dateGroup.maxDate"
-                        title="Fecha programada dentro de la ventana permitida"
-                        (change)="onCalibrationDateGroupChange(dateGroup, $any($event.target).value)"
+                        type="text"
+                        [value]="formatDate(dateGroup.plannedDate)"
+                        title="Seleccionar fecha programada"
+                        aria-haspopup="dialog"
+                        readonly
+                        (click)="openCalibrationDatePicker(dateGroup)"
                       />
                       <button
                         type="button"
                         class="date-picker-trigger"
                         title="Abrir calendario"
                         aria-label="Abrir calendario"
-                        (click)="openNativeDatePicker(calibrationDateInput)"
+                        aria-haspopup="dialog"
+                        (click)="openCalibrationDatePicker(dateGroup)"
                       >
                         <span class="calendar-glyph" aria-hidden="true"></span>
                       </button>
@@ -1612,6 +1612,65 @@
     </section>
     </div>
   </section>
+
+  <div *ngIf="calendarPicker as picker" class="calendar-picker-backdrop" (click)="closeDatePicker()">
+    <section
+      class="calendar-picker-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="calendar-picker-title"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="calendar-picker-header">
+        <div>
+          <p>Seleccionar día</p>
+          <h2 id="calendar-picker-title">{{ calendarPickerMonthLabel }}</h2>
+        </div>
+        <button
+          type="button"
+          class="calendar-picker-close"
+          aria-label="Cerrar calendario"
+          title="Cerrar"
+          (click)="closeDatePicker()"
+        >
+          &times;
+        </button>
+      </header>
+
+      <p class="calendar-picker-range">
+        Rango permitido: {{ formatDate(picker.group.minDate) }} al {{ formatDate(picker.group.maxDate) }}
+        <span>Días hábiles disponibles.</span>
+      </p>
+
+      <div class="calendar-weekdays" aria-hidden="true">
+        <span *ngFor="let weekday of calendarWeekdays">{{ weekday }}</span>
+      </div>
+      <div class="calendar-days" role="grid" [attr.aria-label]="calendarPickerMonthLabel">
+        <ng-container *ngFor="let calendarDay of calendarPickerDays">
+          <span *ngIf="!calendarDay" class="calendar-day-empty" aria-hidden="true"></span>
+          <button
+            *ngIf="calendarDay as day"
+            type="button"
+            class="calendar-day"
+            role="gridcell"
+            [class.selected]="day.selected"
+            [class.today]="day.today"
+            [disabled]="day.disabled"
+            [attr.aria-selected]="day.selected"
+            [attr.aria-label]="formatDate(day.date)"
+            (click)="selectCalendarDate(day.date)"
+          >
+            {{ day.day }}
+          </button>
+        </ng-container>
+      </div>
+
+      <footer class="calendar-picker-footer">
+        <span>Fecha actual: <strong>{{ formatDate(picker.group.plannedDate) }}</strong></span>
+        <button type="button" class="secondary" (click)="closeDatePicker()">Cancelar</button>
+      </footer>
+    </section>
+  </div>
 
   <div *ngIf="confirmDialog" class="modal-backdrop" (click)="closeConfirm()">
     <section

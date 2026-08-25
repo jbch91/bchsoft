@@ -96,35 +96,67 @@ describe('CronogramasComponent filtros dependientes', () => {
     expect((component as any).computeRangeMin(item)).toBe('2026-05-01');
   });
 
-  it('abre el calendario nativo cuando el navegador lo permite', () => {
+  it('abre un calendario propio limitado al mes del mantenimiento', () => {
     const component = createComponent();
-    let opened = false;
-    let focused = false;
-    component.openNativeDatePicker({
-      disabled: false,
-      focus: () => {
-        focused = true;
-      },
-      showPicker: () => {
-        opened = true;
-      }
-    } as unknown as HTMLInputElement);
+    const item = maintenanceItem('1', 'URGENCIAS', 'REANIMACIÓN');
+    item.planned_date = '2026-08-25';
+    item.deadline_date = '2026-08-31';
+    const group = {
+      key: '2026-08-25:2026-08-31',
+      plannedDate: '2026-08-25',
+      minDate: '2026-08-01',
+      maxDate: '2026-08-31',
+      items: [item]
+    };
 
-    expect(focused).toBe(true);
-    expect(opened).toBe(true);
+    component.openMaintenanceDatePicker(group);
+
+    expect(component.calendarPicker?.kind).toBe('maintenance');
+    expect(component.calendarPickerMonthLabel.toLowerCase()).toContain('agosto');
+    expect(component.calendarPickerDays).toHaveLength(42);
+    expect(component.calendarPickerDays.find((day) => day?.date === '2026-08-27')?.disabled).toBe(false);
+    expect(component.calendarPickerDays.find((day) => day?.date === '2026-08-29')?.disabled).toBe(true);
   });
 
-  it('conserva un fallback para navegadores sin showPicker', () => {
+  it('aplica el día elegido al grupo y cierra el calendario', () => {
     const component = createComponent();
-    let clicked = false;
-    component.openNativeDatePicker({
-      disabled: false,
-      focus: () => undefined,
-      click: () => {
-        clicked = true;
-      }
-    } as unknown as HTMLInputElement);
+    const item = maintenanceItem('1', 'URGENCIAS', 'REANIMACIÓN');
+    item.planned_date = '2026-08-25';
+    item.deadline_date = '2026-08-31';
+    const group = {
+      key: '2026-08-25:2026-08-31',
+      plannedDate: '2026-08-25',
+      minDate: '2026-08-01',
+      maxDate: '2026-08-31',
+      items: [item]
+    };
+    component.openMaintenanceDatePicker(group);
 
-    expect(clicked).toBe(true);
+    component.selectCalendarDate('2026-08-27');
+
+    expect(group.plannedDate).toBe('2026-08-27');
+    expect(item.planned_date).toBe('2026-08-27');
+    expect(component.calendarPicker).toBeNull();
+  });
+
+  it('impide seleccionar una fecha por fuera de la ventana permitida', () => {
+    const component = createComponent();
+    const item = maintenanceItem('1', 'URGENCIAS', 'REANIMACIÓN');
+    item.planned_date = '2026-08-25';
+    item.deadline_date = '2026-08-31';
+    const group = {
+      key: '2026-08-25:2026-08-31',
+      plannedDate: '2026-08-25',
+      minDate: '2026-08-20',
+      maxDate: '2026-08-31',
+      items: [item]
+    };
+    component.openMaintenanceDatePicker(group);
+
+    component.selectCalendarDate('2026-08-19');
+
+    expect(group.plannedDate).toBe('2026-08-25');
+    expect(component.calendarPickerDays.find((day) => day?.date === '2026-08-19')?.disabled).toBe(true);
+    expect(component.calendarPicker).not.toBeNull();
   });
 });
