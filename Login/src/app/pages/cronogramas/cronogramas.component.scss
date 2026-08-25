@@ -1132,6 +1132,65 @@ button:disabled {
   line-height: 1.45;
 }
 
+.maintenance-dates-modal {
+  width: min(760px, 100%);
+}
+
+.maintenance-dates-form {
+  display: grid;
+  gap: 16px;
+}
+
+.maintenance-date-editor-list {
+  display: grid;
+  max-height: min(480px, 56dvh);
+  overflow-y: auto;
+  border-top: 1px solid #dce2e9;
+  border-bottom: 1px solid #dce2e9;
+}
+
+.maintenance-date-editor-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, auto);
+  gap: 16px;
+  align-items: center;
+  min-height: 68px;
+  padding: 10px 4px;
+  border-bottom: 1px solid #e5e9ee;
+}
+
+.maintenance-date-editor-row:last-child {
+  border-bottom: 0;
+}
+
+.maintenance-date-editor-row.locked {
+  color: #64748b;
+  background: #f8fafc;
+}
+
+.maintenance-date-editor-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.maintenance-date-editor-copy strong {
+  color: #1f2937;
+  font-size: 13px;
+}
+
+.maintenance-date-editor-copy span,
+.maintenance-date-editor-copy small {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.maintenance-date-locked-value {
+  justify-self: end;
+  font-size: 13px;
+}
+
 .schedule-modal .modal-form {
   padding: 0;
   background: transparent;
@@ -1473,6 +1532,21 @@ button:disabled {
 
   .date-line input {
     width: 100%;
+  }
+
+  .maintenance-date-editor-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 12px 2px;
+  }
+
+  .maintenance-date-editor-row .date-picker-control {
+    grid-template-columns: minmax(0, 1fr) 34px;
+    width: 100%;
+  }
+
+  .maintenance-date-locked-value {
+    justify-self: start;
   }
 
   .area-picker-toolbar input,

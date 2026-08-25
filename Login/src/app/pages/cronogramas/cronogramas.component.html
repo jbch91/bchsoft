@@ -492,6 +492,16 @@
             {{ filteredMaintenanceItems.length }} mantenimiento{{ filteredMaintenanceItems.length === 1 ? '' : 's' }}
           </span>
           <button
+            *ngIf="maintenanceFilteredDateAssetGroup as filteredDateAssetGroup"
+            type="button"
+            class="secondary compact"
+            [disabled]="isBusy()"
+            title="Modificar únicamente las fechas del equipo filtrado"
+            (click)="openMaintenanceDates(filteredDateAssetGroup)"
+          >
+            Editar fechas
+          </button>
+          <button
             *ngIf="maintenanceFilteredAssetGroup as filteredAssetGroup"
             type="button"
             class="secondary compact"
@@ -499,7 +509,7 @@
             title="Cambiar la periodicidad del equipo filtrado"
             (click)="openMaintenanceReschedule(filteredAssetGroup)"
           >
-            Reprogramar equipo
+            Cambiar periodicidad
           </button>
         </div>
       </div>
@@ -614,6 +624,16 @@
                     {{ isBusy('save-maintenance-' + group.areaKey) ? 'Guardando...' : sectionProgrammingConfirmed(group.items) ? 'Guardar cambios' : 'Guardar ' + maintenanceSectionLabel().toLowerCase() }}
                   </button>
                   <button
+                    *ngIf="maintenanceGroupSupportsDateEdit(group)"
+                    type="button"
+                    class="secondary compact section-save-button"
+                    [disabled]="isBusy()"
+                    title="Modificar las fechas sin cambiar la periodicidad"
+                    (click)="openMaintenanceDates(group)"
+                  >
+                    Editar fechas
+                  </button>
+                  <button
                     *ngIf="maintenanceGroupSupportsReschedule(group)"
                     type="button"
                     class="secondary compact section-save-button"
@@ -621,7 +641,7 @@
                     title="Cambiar la periodicidad y devolver el equipo a pendientes"
                     (click)="openMaintenanceReschedule(group)"
                   >
-                    Reprogramar equipo
+                    Cambiar periodicidad
                   </button>
                 </div>
               </td>
@@ -1640,6 +1660,95 @@
     </div>
   </section>
 
+  <div
+    *ngIf="maintenanceDatesDialog as dateEditor"
+    class="modal-backdrop"
+    (click)="closeMaintenanceDates()"
+  >
+    <section
+      class="schedule-modal maintenance-dates-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="maintenance-dates-title"
+      (click)="$event.stopPropagation()"
+    >
+      <button
+        type="button"
+        class="modal-close"
+        aria-label="Cerrar"
+        title="Cerrar"
+        [disabled]="isBusy()"
+        (click)="closeMaintenanceDates()"
+      >
+        &times;
+      </button>
+      <header class="schedule-modal-header">
+        <p class="eyebrow">{{ dateEditor.code }}</p>
+        <h2 id="maintenance-dates-title">Editar fechas de {{ dateEditor.name }}</h2>
+        <p>Periodicidad: {{ titleCase(dateEditor.frequency) }}</p>
+      </header>
+
+      <div class="annual-rule">
+        La periodicidad se conserva. Cada ventana solo puede moverse a un día hábil de su mismo mes.
+      </div>
+
+      <form class="maintenance-dates-form" (submit)="$event.preventDefault(); applyMaintenanceDates()">
+        <div class="maintenance-date-editor-list">
+          <div
+            *ngFor="let dateGroup of dateEditor.dateGroups"
+            class="maintenance-date-editor-row"
+            [class.locked]="!maintenanceDateGroupEditable(dateGroup)"
+          >
+            <div class="maintenance-date-editor-copy">
+              <strong>{{ formatMonthYear(dateGroup.minDate) }}</strong>
+              <span>{{ formatDate(dateGroup.minDate) }} al {{ formatDate(dateGroup.maxDate) }}</span>
+              <small *ngIf="!maintenanceDateGroupEditable(dateGroup)">Fecha bloqueada por el estado del mantenimiento.</small>
+            </div>
+            <div
+              *ngIf="maintenanceDateGroupEditable(dateGroup); else lockedMaintenanceDate"
+              class="date-picker-control"
+            >
+              <input
+                type="text"
+                [value]="formatDate(dateGroup.plannedDate)"
+                title="Seleccionar fecha programada"
+                aria-haspopup="dialog"
+                readonly
+                (click)="openMaintenanceDatePicker(dateGroup)"
+              />
+              <button
+                type="button"
+                class="date-picker-trigger"
+                title="Abrir calendario"
+                aria-label="Abrir calendario"
+                aria-haspopup="dialog"
+                (click)="openMaintenanceDatePicker(dateGroup)"
+              >
+                <span class="calendar-glyph" aria-hidden="true"></span>
+              </button>
+            </div>
+            <ng-template #lockedMaintenanceDate>
+              <strong class="maintenance-date-locked-value">{{ formatDate(dateGroup.plannedDate) }}</strong>
+            </ng-template>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="secondary" [disabled]="isBusy()" (click)="closeMaintenanceDates()">
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            class="primary"
+            [disabled]="isBusy() || !maintenanceDatesHaveChanges(dateEditor)"
+          >
+            {{ isBusy('save-maintenance-dates-' + dateEditor.assetId) ? 'Guardando...' : 'Guardar fechas' }}
+          </button>
+        </div>
+      </form>
+    </section>
+  </div>
+
   <div *ngIf="calendarPicker as picker" class="calendar-picker-backdrop" (click)="closeDatePicker()">
     <section
       class="calendar-picker-dialog"
@@ -1723,7 +1832,7 @@
       </button>
       <header class="schedule-modal-header">
         <p class="eyebrow">{{ reschedule.code }}</p>
-        <h2 id="maintenance-reschedule-title">Reprogramar {{ reschedule.name }}</h2>
+        <h2 id="maintenance-reschedule-title">Cambiar periodicidad de {{ reschedule.name }}</h2>
         <p>La periodicidad quedará actualizada también en la hoja de vida del equipo.</p>
       </header>
       <div class="annual-rule">

@@ -117,6 +117,15 @@ interface MaintenanceRescheduleDialog {
   frequency: string;
 }
 
+interface MaintenanceDatesDialog {
+  assetId: string;
+  code: string;
+  name: string;
+  frequency: string;
+  dateGroups: MaintenanceAreaDateGroup[];
+  originalDates: Record<string, string>;
+}
+
 type ViewMode = 'maintenance' | 'training' | 'calibration';
 type NoticeKind = 'success' | 'error' | 'info';
 type AssetEditLevel = 'area' | 'location' | 'equipment';
@@ -162,6 +171,7 @@ export class CronogramasComponent implements OnInit {
   noticeKind: NoticeKind = 'info';
   confirmDialog: ConfirmDialog | null = null;
   confirmBusy = false;
+  maintenanceDatesDialog: MaintenanceDatesDialog | null = null;
   maintenanceRescheduleDialog: MaintenanceRescheduleDialog | null = null;
   calendarPicker: CalendarPickerState | null = null;
   readonly calendarWeekdays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
@@ -419,6 +429,7 @@ export class CronogramasComponent implements OnInit {
         planned_date: this.dateOnly(item.planned_date),
         deadline_date: this.dateOnly(item.deadline_date)
       }));
+      this.maintenanceDatesDialog = null;
       if (this.selectedSchedule) {
         this.selectedSchedule.total_items = this.items.length;
         this.selectedSchedule.programmed_items = this.items.filter(
@@ -630,6 +641,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   cancelMaintenanceEdit(): void {
+    if (this.maintenanceDatesDialog) this.closeMaintenanceDates();
     this.closeDatePicker();
     for (const item of this.items) {
       item.planned_date = this.maintenanceSnapshot.get(item.id) ?? item.planned_date;
@@ -664,8 +676,13 @@ export class CronogramasComponent implements OnInit {
   }
 
   maintenanceDateGroupEditable(dateGroup: MaintenanceAreaDateGroup): boolean {
-    if (this.selectedSchedule?.status !== 'approved') return true;
-    return dateGroup.items.every((item) => item.status === 'pending');
+    return dateGroup.items.every(
+      (item) =>
+        item.status === 'pending' &&
+        !item.report_id &&
+        !item.completion_source &&
+        !item.legacy_history_file_id
+    );
   }
 
   maintenanceSectionHasChanges(group: MaintenanceItemGroup): boolean {
@@ -939,19 +956,110 @@ export class CronogramasComponent implements OnInit {
     );
   }
 
-  get maintenanceFilteredAssetGroup(): MaintenanceItemGroup | null {
-    if (!this.maintenanceHasActiveDetailFilter) return null;
+  maintenanceGroupSupportsDateEdit(group: MaintenanceItemGroup): boolean {
+    return Boolean(
+      this.selectedSchedule &&
+      this.editing &&
+      group.assetCount === 1 &&
+      group.dateGroups.some((dateGroup) => this.maintenanceDateGroupEditable(dateGroup))
+    );
+  }
+
+  get maintenanceFilteredDateAssetGroup(): MaintenanceItemGroup | null {
+    if (!this.maintenanceHasActiveDetailFilter || !this.editing) return null;
     const assetIds = new Set(this.filteredMaintenanceItems.map((item) => item.asset_id));
     if (assetIds.size !== 1) return null;
-    const assetId = Array.from(assetIds)[0];
-    const group = this.filteredGroupedItems.find(
-      (candidate) => candidate.assetId === assetId && candidate.assetCount === 1
-    );
+    const group = this.buildMaintenanceAssetGroup(Array.from(assetIds)[0]);
+    return group && this.maintenanceGroupSupportsDateEdit(group) ? group : null;
+  }
+
+  get maintenanceFilteredAssetGroup(): MaintenanceItemGroup | null {
+    const group = this.maintenanceFilteredDateAssetGroup;
     return group && this.maintenanceGroupCanReschedule(group) ? group : null;
+  }
+
+  openMaintenanceDates(group: MaintenanceItemGroup): void {
+    const assetGroup = this.buildMaintenanceAssetGroup(group.assetId);
+    if (!assetGroup || !this.maintenanceGroupSupportsDateEdit(assetGroup)) return;
+    this.closeDatePicker();
+    this.maintenanceRescheduleDialog = null;
+    this.maintenanceDatesDialog = {
+      assetId: assetGroup.assetId,
+      code: assetGroup.code,
+      name: assetGroup.name,
+      frequency: assetGroup.frequencies[0] || 'anual',
+      dateGroups: assetGroup.dateGroups,
+      originalDates: Object.fromEntries(
+        assetGroup.items.map((item) => [item.id, item.planned_date])
+      )
+    };
+  }
+
+  maintenanceDatesHaveChanges(dialog = this.maintenanceDatesDialog): boolean {
+    if (!dialog) return false;
+    return dialog.dateGroups.some((dateGroup) =>
+      dateGroup.items.some(
+        (item) => item.planned_date !== (dialog.originalDates[item.id] ?? item.planned_date)
+      )
+    );
+  }
+
+  closeMaintenanceDates(): void {
+    const dialog = this.maintenanceDatesDialog;
+    if (!dialog || this.isBusy()) return;
+    this.closeDatePicker();
+    for (const dateGroup of dialog.dateGroups) {
+      for (const item of dateGroup.items) {
+        item.planned_date = dialog.originalDates[item.id] ?? item.planned_date;
+      }
+    }
+    this.maintenanceDatesDialog = null;
+  }
+
+  async applyMaintenanceDates(): Promise<void> {
+    const dialog = this.maintenanceDatesDialog;
+    if (!dialog || !this.selectedScheduleId || !this.maintenanceDatesHaveChanges(dialog)) return;
+    const approvedEdit = this.selectedSchedule?.status === 'approved';
+    const items = dialog.dateGroups.flatMap((dateGroup) => dateGroup.items);
+    const uniqueItems = Array.from(new Map(items.map((item) => [item.id, item])).values());
+    const itemsToPersist = approvedEdit
+      ? uniqueItems.filter(
+          (item) => item.planned_date !== (dialog.originalDates[item.id] ?? item.planned_date)
+        )
+      : uniqueItems;
+
+    await this.runAction(
+      `save-maintenance-dates-${dialog.assetId}`,
+      async () => {
+        await this.schedulesService.updateScheduleItems(
+          this.selectedScheduleId,
+          itemsToPersist.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
+        );
+        this.maintenanceDatesDialog = null;
+        if (approvedEdit) {
+          await this.loadSchedules(true);
+          return;
+        }
+        const programmedAt = new Date().toISOString();
+        for (const item of uniqueItems) {
+          item.programming_confirmed = true;
+          item.programmed_at = programmedAt;
+          this.maintenanceSnapshot.set(item.id, item.planned_date);
+        }
+        if (this.selectedSchedule) {
+          this.selectedSchedule.programmed_items = this.maintenanceProgrammedCount;
+          this.selectedSchedule.total_items = this.items.length;
+        }
+      },
+      approvedEdit
+        ? 'Fechas actualizadas sin cambiar la periodicidad. La autorización quedó utilizada.'
+        : 'Fechas del equipo actualizadas sin cambiar la periodicidad.'
+    );
   }
 
   openMaintenanceReschedule(group: MaintenanceItemGroup): void {
     if (!this.maintenanceGroupCanReschedule(group)) return;
+    if (this.maintenanceDatesDialog) this.closeMaintenanceDates();
     const currentFrequency = group.frequencies[0] || 'anual';
     this.maintenanceRescheduleDialog = {
       assetId: group.assetId,
@@ -1015,6 +1123,28 @@ export class CronogramasComponent implements OnInit {
     return Array.from(map.values()).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate));
   }
 
+  private buildMaintenanceAssetGroup(assetId: string): MaintenanceItemGroup | null {
+    const items = this.items.filter((item) => item.asset_id === assetId);
+    const first = items[0];
+    if (!first) return null;
+    return {
+      areaKey: `equipment:${assetId}`,
+      assetId,
+      areaName: first.area_name || 'Sin área',
+      siteName: first.site_name || 'Sin sede',
+      locationName: first.location_name || 'Sin ubicación',
+      code: first.code || '-',
+      name: first.name || '-',
+      brand: first.brand || 'Sin marca',
+      model: first.model || 'Sin modelo',
+      serial: first.serial || 'NR',
+      assetCount: 1,
+      frequencies: this.uniqueSorted(items.map((item) => item.frequency).filter(Boolean)),
+      items,
+      dateGroups: this.buildAreaDateGroups(items)
+    };
+  }
+
   areaStatusItems(group: MaintenanceItemGroup): { status: string; count: number }[] {
     const counts = this.countStatuses(group.items, (item) => item.status);
     return ['active', 'expired', 'pending', 'done']
@@ -1037,7 +1167,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   rangeMin(item: ScheduleItemDto): string {
-    return this.rangeMap.get(item.id)?.min ?? item.planned_date;
+    return this.rangeMap.get(item.id)?.min ?? this.computeRangeMin(item);
   }
 
   rangeMax(item: ScheduleItemDto): string {
@@ -2034,6 +2164,18 @@ export class CronogramasComponent implements OnInit {
     return `${day}/${month}/${year}`;
   }
 
+  formatMonthYear(value: string | null | undefined): string {
+    const normalized = this.dateOnly(value);
+    if (!normalized) return '-';
+    const [year, month] = normalized.split('-').map(Number);
+    const label = new Intl.DateTimeFormat('es-CO', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC'
+    }).format(new Date(Date.UTC(year, month - 1, 1)));
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
   isBusy(key?: string): boolean {
     return key ? this.busyAction === key : Boolean(this.busyAction);
   }
@@ -2265,6 +2407,7 @@ export class CronogramasComponent implements OnInit {
 
   private clearActiveDetail(): void {
     this.closeDatePicker();
+    this.maintenanceDatesDialog = null;
     this.maintenanceRescheduleDialog = null;
     if (this.viewMode === 'training') {
       this.selectedTrainingScheduleId = '';

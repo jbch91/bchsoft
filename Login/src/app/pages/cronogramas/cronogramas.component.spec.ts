@@ -241,6 +241,123 @@ describe('CronogramasComponent filtros dependientes', () => {
     expect(component.maintenanceRescheduleDialog?.assetId).toBe('asset-nevera');
   });
 
+  it('abre el editor de fechas del equipo filtrado sin cambiar su periodicidad', () => {
+    const component = createComponent();
+    component.items = [1, 4, 7, 10].map((month, index) => {
+      const item = maintenanceItem(`n7r-${index}`, 'VACUNACIÓN', 'CADENA DE FRÍO');
+      const monthValue = String(month).padStart(2, '0');
+      item.asset_id = 'asset-nevera';
+      item.code = 'N7R';
+      item.name = 'NEVERA HORIZONTAL';
+      item.frequency = 'trimestral';
+      item.planned_date = `2026-${monthValue}-15`;
+      item.deadline_date = `2026-${monthValue}-${month === 4 ? '30' : '31'}`;
+      item.programming_confirmed = true;
+      return item;
+    });
+    component.schedules = [
+      {
+        id: 'maintenance-schedule',
+        client_id: 'client-id',
+        asset_category: 'biomedical',
+        year: 2026,
+        start_date: '2026-01-15',
+        status: 'draft',
+        engineer_edited: false,
+        engineer_edit_enabled: false,
+        created_at: '2026-01-01T00:00:00.000Z',
+        total_items: 4,
+        programmed_items: 4
+      }
+    ];
+    component.selectedScheduleId = 'maintenance-schedule';
+    component.editing = true;
+    component.maintenanceEditLevel = 'area';
+    component.maintenanceProgrammingView = 'programmed';
+    component.maintenanceDetailSearch = 'N7R';
+
+    const group = component.maintenanceFilteredDateAssetGroup;
+    component.openMaintenanceDates(group!);
+    component.onAreaPlannedDateChange(component.maintenanceDatesDialog!.dateGroups[0], '2026-01-20');
+
+    expect(component.maintenanceDatesDialog?.dateGroups).toHaveLength(4);
+    expect(component.maintenanceDatesHaveChanges()).toBe(true);
+    expect(component.items.every((item) => item.frequency === 'trimestral')).toBe(true);
+
+    component.closeMaintenanceDates();
+
+    expect(component.items[0].planned_date).toBe('2026-01-15');
+    expect(component.maintenanceDatesDialog).toBeNull();
+  });
+
+  it('guarda las fechas del equipo sin invocar la reprogramación', async () => {
+    const updateCalls: unknown[][] = [];
+    const schedulesService = {
+      updateScheduleItems: async (...args: unknown[]) => {
+        updateCalls.push(args);
+      }
+    };
+    const component = new CronogramasComponent(
+      {} as never,
+      schedulesService as never,
+      {} as never,
+      {} as never,
+      { hasPermission: () => true } as never,
+      { markForCheck: () => undefined } as never
+    );
+    const january = maintenanceItem('jan', 'VACUNACIÓN', 'CADENA DE FRÍO');
+    january.asset_id = 'asset-nevera';
+    january.code = 'N7R';
+    january.name = 'NEVERA HORIZONTAL';
+    january.frequency = 'mensual';
+    january.programming_confirmed = true;
+    const february = maintenanceItem('feb', 'VACUNACIÓN', 'CADENA DE FRÍO');
+    february.asset_id = 'asset-nevera';
+    february.code = 'N7R';
+    february.name = 'NEVERA HORIZONTAL';
+    february.frequency = 'mensual';
+    february.planned_date = '2026-02-16';
+    february.deadline_date = '2026-02-28';
+    february.programming_confirmed = true;
+    component.items = [january, february];
+    component.schedules = [
+      {
+        id: 'maintenance-schedule',
+        client_id: 'client-id',
+        asset_category: 'biomedical',
+        year: 2026,
+        start_date: '2026-01-15',
+        status: 'draft',
+        engineer_edited: false,
+        engineer_edit_enabled: false,
+        created_at: '2026-01-01T00:00:00.000Z',
+        total_items: 2,
+        programmed_items: 2
+      }
+    ];
+    component.selectedScheduleId = 'maintenance-schedule';
+    component.editing = true;
+    component.maintenanceEditLevel = 'equipment';
+    component.maintenanceProgrammingView = 'all';
+
+    const group = component.filteredGroupedItems[0];
+    component.openMaintenanceDates(group);
+    component.onAreaPlannedDateChange(component.maintenanceDatesDialog!.dateGroups[0], '2026-01-20');
+    await component.applyMaintenanceDates();
+
+    expect(updateCalls).toEqual([
+      [
+        'maintenance-schedule',
+        [
+          { id: 'jan', plannedDate: '2026-01-20' },
+          { id: 'feb', plannedDate: '2026-02-16' }
+        ]
+      ]
+    ]);
+    expect(component.items.every((item) => item.frequency === 'mensual')).toBe(true);
+    expect(component.maintenanceDatesDialog).toBeNull();
+  });
+
   it('sincroniza desde la hoja de vida un equipo pendiente sin guardar', async () => {
     const original = [2, 5, 8, 11].map((month, index) => {
       const item = maintenanceItem(`old-${index}`, 'VACUNACIÓN', 'CADENA DE FRÍO');
