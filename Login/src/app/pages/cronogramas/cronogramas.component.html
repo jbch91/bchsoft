@@ -542,16 +542,29 @@
               <td data-label="Ventanas de servicio" class="service-windows-cell">
                 <div class="date-list">
                   <div *ngFor="let dateGroup of group.dateGroups" class="date-line">
-                    <input
+                    <div
                       *ngIf="editing && maintenanceDateGroupEditable(dateGroup)"
-                      type="date"
-                      [value]="dateGroup.plannedDate"
-                      [min]="dateGroup.minDate"
-                      [max]="dateGroup.maxDate"
-                      title="Abrir calendario de la ventana mensual"
-                      (click)="openNativeDatePicker($event)"
-                      (change)="onAreaPlannedDateChange(dateGroup, $any($event.target).value)"
-                    />
+                      class="date-picker-control"
+                    >
+                      <input
+                        #maintenanceDateInput
+                        type="date"
+                        [value]="dateGroup.plannedDate"
+                        [min]="dateGroup.minDate"
+                        [max]="dateGroup.maxDate"
+                        title="Fecha programada dentro de la ventana mensual"
+                        (change)="onAreaPlannedDateChange(dateGroup, $any($event.target).value)"
+                      />
+                      <button
+                        type="button"
+                        class="date-picker-trigger"
+                        title="Abrir calendario"
+                        aria-label="Abrir calendario"
+                        (click)="openNativeDatePicker(maintenanceDateInput)"
+                      >
+                        <span class="calendar-glyph" aria-hidden="true"></span>
+                      </button>
+                    </div>
                     <span *ngIf="!editing || !maintenanceDateGroupEditable(dateGroup)">
                       <strong>{{ formatDate(dateGroup.plannedDate) }}</strong>
                       al {{ formatDate(dateGroup.maxDate) }}
@@ -1539,15 +1552,26 @@
               <td data-label="Ventanas de calibración" class="service-windows-cell">
                 <div class="date-list">
                   <div *ngFor="let dateGroup of group.dateGroups" class="date-line">
-                    <input
-                      type="date"
-                      [value]="dateGroup.plannedDate"
-                      [min]="dateGroup.minDate"
-                      [max]="dateGroup.maxDate"
-                      title="Abrir calendario de la ventana permitida"
-                      (click)="openNativeDatePicker($event)"
-                      (change)="onCalibrationDateGroupChange(dateGroup, $any($event.target).value)"
-                    />
+                    <div class="date-picker-control">
+                      <input
+                        #calibrationDateInput
+                        type="date"
+                        [value]="dateGroup.plannedDate"
+                        [min]="dateGroup.minDate"
+                        [max]="dateGroup.maxDate"
+                        title="Fecha programada dentro de la ventana permitida"
+                        (change)="onCalibrationDateGroupChange(dateGroup, $any($event.target).value)"
+                      />
+                      <button
+                        type="button"
+                        class="date-picker-trigger"
+                        title="Abrir calendario"
+                        aria-label="Abrir calendario"
+                        (click)="openNativeDatePicker(calibrationDateInput)"
+                      >
+                        <span class="calendar-glyph" aria-hidden="true"></span>
+                      </button>
+                    </div>
                     <small>{{ dateGroup.items.length }} calibración{{ dateGroup.items.length === 1 ? '' : 'es' }}</small>
                     <small>Límite: {{ formatDate(dateGroup.maxDate) }}</small>
                   </div>

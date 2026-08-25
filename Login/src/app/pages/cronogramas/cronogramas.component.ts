@@ -832,13 +832,18 @@ export class CronogramasComponent implements OnInit {
     return anchor ? `${anchor.slice(0, 7)}-01` : item.planned_date;
   }
 
-  openNativeDatePicker(event: Event): void {
-    const input = event.currentTarget as HTMLInputElement & { showPicker?: () => void };
-    if (input.disabled || typeof input.showPicker !== 'function') return;
+  openNativeDatePicker(input: HTMLInputElement): void {
+    if (input.disabled) return;
+    input.focus({ preventScroll: true });
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+    if (typeof pickerInput.showPicker !== 'function') {
+      input.click();
+      return;
+    }
     try {
-      input.showPicker();
+      pickerInput.showPicker();
     } catch {
-      // Some browsers already opened the native picker from the same click.
+      input.click();
     }
   }
 

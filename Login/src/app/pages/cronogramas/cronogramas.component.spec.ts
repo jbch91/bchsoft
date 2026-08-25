@@ -99,15 +99,32 @@ describe('CronogramasComponent filtros dependientes', () => {
   it('abre el calendario nativo cuando el navegador lo permite', () => {
     const component = createComponent();
     let opened = false;
+    let focused = false;
     component.openNativeDatePicker({
-      currentTarget: {
-        disabled: false,
-        showPicker: () => {
-          opened = true;
-        }
+      disabled: false,
+      focus: () => {
+        focused = true;
+      },
+      showPicker: () => {
+        opened = true;
       }
-    } as unknown as Event);
+    } as unknown as HTMLInputElement);
 
+    expect(focused).toBe(true);
     expect(opened).toBe(true);
+  });
+
+  it('conserva un fallback para navegadores sin showPicker', () => {
+    const component = createComponent();
+    let clicked = false;
+    component.openNativeDatePicker({
+      disabled: false,
+      focus: () => undefined,
+      click: () => {
+        clicked = true;
+      }
+    } as unknown as HTMLInputElement);
+
+    expect(clicked).toBe(true);
   });
 });
