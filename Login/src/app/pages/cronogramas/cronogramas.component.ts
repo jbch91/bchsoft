@@ -828,7 +828,18 @@ export class CronogramasComponent implements OnInit {
   }
 
   private computeRangeMin(item: ScheduleItemDto): string {
-    return item.deadline_date ? this.shiftBusinessDays(item.deadline_date, -10) : item.planned_date;
+    const anchor = item.deadline_date || item.planned_date;
+    return anchor ? `${anchor.slice(0, 7)}-01` : item.planned_date;
+  }
+
+  openNativeDatePicker(event: Event): void {
+    const input = event.currentTarget as HTMLInputElement & { showPicker?: () => void };
+    if (input.disabled || typeof input.showPicker !== 'function') return;
+    try {
+      input.showPicker();
+    } catch {
+      // Some browsers already opened the native picker from the same click.
+    }
   }
 
   async loadTrainingSchedules(preserveSelection = true): Promise<void> {
@@ -1909,18 +1920,6 @@ export class CronogramasComponent implements OnInit {
     const date = this.fromDateOnly(value);
     if (date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() - 1);
     if (date.getUTCDay() === 0) date.setUTCDate(date.getUTCDate() - 2);
-    return this.toDateOnly(date);
-  }
-
-  private shiftBusinessDays(value: string, amount: number): string {
-    const date = this.fromDateOnly(value);
-    const direction = amount < 0 ? -1 : 1;
-    let remaining = Math.abs(amount);
-    while (remaining > 0) {
-      date.setUTCDate(date.getUTCDate() + direction);
-      const day = date.getUTCDay();
-      if (day !== 0 && day !== 6) remaining -= 1;
-    }
     return this.toDateOnly(date);
   }
 

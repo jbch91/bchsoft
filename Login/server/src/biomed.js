@@ -1,6 +1,7 @@
-import { query } from './db.js';
+import { query, withTransaction } from './db.js';
 import { canonicalizeCatalogValue, ensureEquipmentCatalogPath } from './equipment-catalog.js';
 import { assertBiomedicalRiskClassifications } from './biomedical-risk.js';
+import { dateOnlyFromDatabase } from './schedule-workflow.js';
 
 async function getSchemaByClientId(clientId) {
   const { rows } = await query('SELECT schema_name FROM clients WHERE id = $1', [clientId]);
@@ -767,29 +768,212 @@ export async function listAssetMovements(clientId, assetId, limit = 4, offset = 
   return rows;
 }
 
+export async function listHistoricalMaintenanceOccurrences(clientId, assetId, documentDate) {
+  const { rows } = await query(
+    `WITH occurrences AS (
+       SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date,
+              i.status, i.completion_source, i.legacy_history_file_id, s.year,
+              s.status AS schedule_status,
+              ROW_NUMBER() OVER (
+                PARTITION BY i.schedule_id, i.asset_id
+                ORDER BY i.planned_date ASC, i.id ASC
+              )::int AS occurrence_number
+       FROM maintenance_schedule_items i
+       JOIN maintenance_schedules s ON s.id = i.schedule_id
+       WHERE s.client_id = $1
+         AND i.asset_id = $2
+     )
+     SELECT occurrence.*,
+            request.id AS request_id,
+            request.status AS request_status,
+            (
+              occurrence.schedule_status = 'approved'
+              AND occurrence.status IN ('pending', 'active', 'expired')
+              AND occurrence.legacy_history_file_id IS NULL
+              AND COALESCE(request.status, 'abierto') IN ('abierto', 'vencido')
+            ) AS eligible,
+            CASE
+              WHEN occurrence.schedule_status = 'draft' THEN 'Aprueba primero el cronograma.'
+              WHEN occurrence.schedule_status <> 'approved' THEN 'El cronograma no admite conciliaciones.'
+              WHEN occurrence.status = 'done' THEN 'Esta ocurrencia ya está realizada.'
+              WHEN occurrence.legacy_history_file_id IS NOT NULL THEN 'Ya tiene un PDF histórico conciliado.'
+              WHEN request.status NOT IN ('abierto', 'vencido') THEN 'La solicitud tiene un proceso operativo en curso.'
+              ELSE NULL
+            END AS unavailable_reason
+     FROM occurrences occurrence
+     LEFT JOIN LATERAL (
+       SELECT id, status
+       FROM maintenance_requests
+       WHERE schedule_item_id = occurrence.id
+       ORDER BY
+         CASE WHEN status IN ('abierto', 'vencido') THEN 1 ELSE 0 END ASC,
+         created_at DESC
+       LIMIT 1
+     ) request ON TRUE
+     WHERE DATE_TRUNC('month', occurrence.planned_date) = DATE_TRUNC('month', $3::date)
+     ORDER BY occurrence.year ASC, occurrence.planned_date ASC`,
+    [clientId, assetId, documentDate]
+  );
+  return rows;
+}
+
+function historicalReconciliationError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 export async function createAssetHistoryFile(clientId, payload) {
   const schema = await getSchemaByClientId(clientId);
   if (!schema) {
     throw new Error('Cliente no encontrado');
   }
-  const { assetId, title, description, documentDate, filePath, uploadedBy, uploadedByName } = payload;
-  const { rows } = await query(
-    `INSERT INTO "${schema}".asset_history_files (
-       asset_id, title, description, document_date, file_path, uploaded_by, uploaded_by_name
-     )
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
-     RETURNING *`,
-    [
-      assetId,
-      title || 'Mantenimiento histórico migrado',
-      description || null,
-      documentDate,
-      filePath,
-      uploadedBy || null,
-      uploadedByName || null
-    ]
-  );
-  return rows[0];
+  const {
+    assetId,
+    title,
+    description,
+    documentDate,
+    documentType,
+    maintenanceScheduleItemId,
+    filePath,
+    uploadedBy,
+    uploadedByName
+  } = payload;
+
+  return withTransaction(async (client) => {
+    let occurrence = null;
+    let requestRows = [];
+    if (maintenanceScheduleItemId) {
+      const occurrenceResult = await client.query(
+        `SELECT i.id, i.schedule_id, i.asset_id, i.planned_date, i.deadline_date, i.status,
+                i.legacy_history_file_id, s.status AS schedule_status, s.year
+         FROM maintenance_schedule_items i
+         JOIN maintenance_schedules s ON s.id = i.schedule_id
+         WHERE i.id = $1 AND i.asset_id = $2 AND s.client_id = $3
+         FOR UPDATE OF i, s`,
+        [maintenanceScheduleItemId, assetId, clientId]
+      );
+      occurrence = occurrenceResult.rows[0] || null;
+      if (!occurrence) {
+        throw historicalReconciliationError(
+          'HISTORICAL_OCCURRENCE_NOT_FOUND',
+          'La ocurrencia seleccionada no pertenece al equipo y cliente indicados.'
+        );
+      }
+      if (occurrence.schedule_status !== 'approved') {
+        throw historicalReconciliationError(
+          'HISTORICAL_SCHEDULE_NOT_APPROVED',
+          'El cronograma debe estar aprobado antes de conciliar un mantenimiento histórico.'
+        );
+      }
+      if (occurrence.status === 'done' || occurrence.legacy_history_file_id) {
+        throw historicalReconciliationError(
+          'HISTORICAL_OCCURRENCE_COMPLETED',
+          'La ocurrencia seleccionada ya está registrada como realizada.'
+        );
+      }
+      if (!['pending', 'active', 'expired'].includes(occurrence.status)) {
+        throw historicalReconciliationError(
+          'HISTORICAL_OCCURRENCE_INVALID_STATUS',
+          'La ocurrencia seleccionada no admite conciliación histórica.'
+        );
+      }
+      if (
+        dateOnlyFromDatabase(occurrence.planned_date, 'La fecha programada').slice(0, 7) !==
+        documentDate.slice(0, 7)
+      ) {
+        throw historicalReconciliationError(
+          'HISTORICAL_OCCURRENCE_MONTH_MISMATCH',
+          'La fecha real del documento debe pertenecer al mes de la ocurrencia seleccionada.'
+        );
+      }
+
+      const requestsResult = await client.query(
+        `SELECT id, status
+         FROM maintenance_requests
+         WHERE schedule_item_id = $1
+         FOR UPDATE`,
+        [occurrence.id]
+      );
+      requestRows = requestsResult.rows;
+      const activeRequest = requestRows.find(
+        (request) => !['abierto', 'vencido'].includes(request.status)
+      );
+      if (activeRequest) {
+        throw historicalReconciliationError(
+          'HISTORICAL_REQUEST_IN_PROGRESS',
+          'La solicitud asociada tiene un proceso operativo en curso y no puede cerrarse mediante migración.'
+        );
+      }
+    }
+
+    const { rows } = await client.query(
+      `INSERT INTO "${schema}".asset_history_files (
+         asset_id, title, description, document_date, file_path, uploaded_by, uploaded_by_name,
+         document_type, maintenance_schedule_item_id
+       )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING *`,
+      [
+        assetId,
+        title || 'Documento histórico migrado',
+        description || null,
+        documentDate,
+        filePath,
+        uploadedBy || null,
+        uploadedByName || null,
+        documentType || 'other',
+        maintenanceScheduleItemId || null
+      ]
+    );
+    const historyFile = rows[0];
+
+    if (occurrence) {
+      await client.query(
+        `UPDATE maintenance_schedule_items
+         SET status = 'done',
+             completed_at = ($2::date::timestamp AT TIME ZONE 'America/Bogota'),
+             report_id = NULL,
+             completion_source = 'historical_pdf',
+             legacy_history_file_id = $3
+         WHERE id = $1`,
+        [occurrence.id, documentDate, historyFile.id]
+      );
+      await client.query(
+        `UPDATE maintenance_requests
+         SET status = 'firmado', updated_at = NOW()
+         WHERE schedule_item_id = $1 AND status IN ('abierto', 'vencido')`,
+        [occurrence.id]
+      );
+      await client.query('UPDATE maintenance_schedules SET pdf_path = NULL WHERE id = $1', [
+        occurrence.schedule_id
+      ]);
+      await client.query(
+        `UPDATE maintenance_schedules schedule
+         SET status = 'closed'
+         WHERE schedule.id = $1
+           AND NOT EXISTS (
+             SELECT 1
+             FROM maintenance_schedule_items item
+             WHERE item.schedule_id = schedule.id AND item.status <> 'done'
+           )`,
+        [occurrence.schedule_id]
+      );
+    }
+
+    return {
+      ...historyFile,
+      reconciliation: occurrence
+        ? {
+            scheduleId: occurrence.schedule_id,
+            scheduleItemId: occurrence.id,
+            scheduleYear: occurrence.year,
+            plannedDate: occurrence.planned_date,
+            closedRequestIds: requestRows.map((request) => request.id)
+          }
+        : null
+    };
+  });
 }
 
 export async function listAssetHistory(clientId, assetId, { from, to, order = 'asc', limit = 4, offset = 0 } = {}) {
@@ -827,6 +1011,7 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
          COALESCE(NULLIF(r.summary, ''), 'Reporte de mantenimiento') AS title,
          r.findings AS description,
          r.pdf_path,
+         NULL::uuid AS maintenance_schedule_item_id,
          COALESCE(
            (SELECT MAX(s.signed_at) FROM report_signatures s WHERE s.report_id = r.id),
            r.created_at
@@ -875,6 +1060,7 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
          'Certificado de calibración' AS title,
          i.frequency AS description,
          i.pdf_path,
+         NULL::uuid AS maintenance_schedule_item_id,
          COALESCE(i.completed_at, i.planned_date) AS created_at
        FROM calibration_schedule_items i
        JOIN calibration_schedules s ON s.id = i.schedule_id
@@ -895,6 +1081,7 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
            NULLIF(CONCAT_WS(' / ', m.to_site_name, m.to_area_name, m.to_location_name), '')
          ) AS description,
          m.pdf_path,
+         NULL::uuid AS maintenance_schedule_item_id,
          m.created_at
        FROM "${schema}".asset_movements m
        WHERE m.asset_id = $1
@@ -904,11 +1091,12 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
        SELECT
          f.id,
          'legacy_pdf' AS item_type,
-         'mantenimiento_migrado' AS subtype,
+         f.document_type AS subtype,
          f.document_date::timestamptz AS event_date,
          f.title,
          f.description,
          f.file_path AS pdf_path,
+         f.maintenance_schedule_item_id,
          f.created_at
        FROM "${schema}".asset_history_files f
        WHERE f.asset_id = $1
@@ -950,6 +1138,18 @@ export async function getAssetHistoryFileById(clientId, fileId) {
     [fileId]
   );
   return rows[0] || null;
+}
+
+export async function isAssetHistoryFileReconciled(clientId, fileId) {
+  const { rows } = await query(
+    `SELECT 1
+     FROM maintenance_schedule_items item
+     JOIN maintenance_schedules schedule ON schedule.id = item.schedule_id
+     WHERE schedule.client_id = $1 AND item.legacy_history_file_id = $2
+     LIMIT 1`,
+    [clientId, fileId]
+  );
+  return rows.length > 0;
 }
 
 export async function deleteAssetHistoryFile(clientId, fileId) {

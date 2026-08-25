@@ -130,7 +130,36 @@ export interface AssetHistoryItemDto {
   title: string;
   description?: string | null;
   pdf_path?: string | null;
+  maintenance_schedule_item_id?: string | null;
   created_at?: string | null;
+}
+
+export interface HistoricalMaintenanceOccurrenceDto {
+  id: string;
+  schedule_id: string;
+  asset_id: string;
+  frequency: string;
+  planned_date: string;
+  deadline_date: string;
+  status: string;
+  schedule_status: string;
+  year: number;
+  occurrence_number: number;
+  request_id?: string | null;
+  request_status?: string | null;
+  eligible: boolean;
+  unavailable_reason?: string | null;
+}
+
+export interface AssetHistoryUploadResultDto {
+  id: string;
+  reconciliation?: {
+    scheduleId: string;
+    scheduleItemId: string;
+    scheduleYear: number;
+    plannedDate: string;
+    closedRequestIds: string[];
+  } | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -378,16 +407,38 @@ export class BiomedService {
   async uploadAssetHistoryFile(clientId: string, assetId: string, payload: {
     file: File;
     documentDate: string;
+    documentType: 'maintenance_preventive' | 'maintenance_corrective' | 'calibration' | 'other';
+    maintenanceScheduleItemId?: string;
     title?: string;
     description?: string;
-  }): Promise<void> {
+  }): Promise<AssetHistoryUploadResultDto> {
     const form = new FormData();
     form.append('file', payload.file);
     form.append('documentDate', payload.documentDate);
+    form.append('documentType', payload.documentType);
+    if (payload.maintenanceScheduleItemId) {
+      form.append('maintenanceScheduleItemId', payload.maintenanceScheduleItemId);
+    }
     if (payload.title) form.append('title', payload.title);
     if (payload.description) form.append('description', payload.description);
-    await firstValueFrom(
-      this.http.post(`${this.apiBase}/biomed/${clientId}/assets/${assetId}/history-files`, form)
+    return firstValueFrom(
+      this.http.post<AssetHistoryUploadResultDto>(
+        `${this.apiBase}/biomed/${clientId}/assets/${assetId}/history-files`,
+        form
+      )
+    );
+  }
+
+  async listHistoricalMaintenanceOccurrences(
+    clientId: string,
+    assetId: string,
+    documentDate: string
+  ): Promise<HistoricalMaintenanceOccurrenceDto[]> {
+    const query = new URLSearchParams({ documentDate });
+    return firstValueFrom(
+      this.http.get<HistoricalMaintenanceOccurrenceDto[]>(
+        `${this.apiBase}/biomed/${clientId}/assets/${assetId}/historical-maintenance-occurrences?${query}`
+      )
     );
   }
 

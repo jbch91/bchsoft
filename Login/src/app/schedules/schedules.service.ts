@@ -42,6 +42,8 @@ export interface ScheduleItemDto {
   programming_confirmed: boolean;
   programmed_at?: string | null;
   programmed_by?: string | null;
+  completion_source?: string | null;
+  legacy_history_file_id?: string | null;
 }
 
 export interface TrainingScheduleDto {

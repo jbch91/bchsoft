@@ -126,6 +126,7 @@ export async function listScheduleItemsWithSchema(scheduleId, schema) {
   const { rows } = await query(
     `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date, i.status,
             i.programming_confirmed, i.programmed_at, i.programmed_by,
+            i.completion_source, i.legacy_history_file_id,
             a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id, a.location_id,
             ar.name AS area_name, s.name AS site_name, lo.name AS location_name
      FROM maintenance_schedule_items i
@@ -278,7 +279,11 @@ export async function deleteDraftSchedule(scheduleId) {
 export async function markScheduleItemDone(scheduleId, itemId, reportId) {
   await query(
     `UPDATE maintenance_schedule_items
-     SET status = 'done', completed_at = NOW(), report_id = $3
+     SET status = 'done',
+         completed_at = NOW(),
+         report_id = $3,
+         completion_source = 'software_report',
+         legacy_history_file_id = NULL
      WHERE id = $1 AND schedule_id = $2`,
     [itemId, scheduleId, reportId]
   );

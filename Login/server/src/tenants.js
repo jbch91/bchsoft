@@ -196,11 +196,17 @@ CREATE TABLE IF NOT EXISTS "${schema}".asset_history_files (
   file_path TEXT NOT NULL,
   uploaded_by UUID,
   uploaded_by_name TEXT,
+  document_type TEXT NOT NULL DEFAULT 'other',
+  maintenance_schedule_item_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS "idx_asset_history_files_asset_date"
   ON "${schema}".asset_history_files (asset_id, document_date ASC, created_at ASC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_asset_history_files_schedule_item"
+  ON "${schema}".asset_history_files (maintenance_schedule_item_id)
+  WHERE maintenance_schedule_item_id IS NOT NULL;
 
 INSERT INTO "${schema}".sites (name)
 SELECT 'Sede principal'

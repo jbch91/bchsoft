@@ -217,7 +217,9 @@ import {
   getAssetMovementById,
   createAssetHistoryFile,
   deleteAssetHistoryFile,
+  isAssetHistoryFileReconciled,
   listAssetHistory,
+  listHistoricalMaintenanceOccurrences,
   listAssetsForBlankMaintenanceProtocols,
   listAssetsForReader,
   listAssetMovements,
@@ -340,17 +342,17 @@ import {
 } from './maintenance-workflow.js';
 import {
   ScheduleValidationError,
-  addBusinessDaysUtc as addScheduleBusinessDays,
   addMonthsUtc as addScheduleMonths,
   buildRecurringDates,
   canEditMaintenanceSchedule,
-  capDateAtMonthEndUtc as capScheduleDateAtMonthEnd,
   capDateAtScheduleYearEndUtc as capScheduleDateAtYearEnd,
   changedMaintenanceItemUpdates,
   dateOnlyFromDatabase,
+  endOfMonthUtc as endOfScheduleMonth,
   formatDateOnly as formatScheduleDate,
   frequencyToMonths as scheduleFrequencyToMonths,
   normalizeCalibrationItemUpdates,
+  normalizeDateOnly,
   normalizeMaintenanceItemUpdates,
   normalizePeriodicity,
   normalizeScheduleStart,
@@ -418,6 +420,7 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 const upload = multer({ storage: multer.memoryStorage() });
 const MAX_SCHEDULE_PDF_BYTES = 15 * 1024 * 1024;
+const MAX_HISTORICAL_PDF_BYTES = 15 * 1024 * 1024;
 const schedulePdfUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_SCHEDULE_PDF_BYTES },
@@ -431,6 +434,23 @@ const schedulePdfUpload = multer({
 });
 const uploadSchedulePdf = (req, res, next) => {
   schedulePdfUpload.single('pdf')(req, res, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+    const message =
+      error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE'
+        ? 'El PDF supera el límite de 15 MB.'
+        : error.message || 'No se pudo procesar el PDF.';
+    res.status(400).json({ message });
+  });
+};
+const historicalPdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_HISTORICAL_PDF_BYTES }
+});
+const uploadHistoricalPdf = (req, res, next) => {
+  historicalPdfUpload.single('file')(req, res, (error) => {
     if (!error) {
       next();
       return;
@@ -6785,10 +6805,23 @@ function isPdfBuffer(buffer) {
 }
 
 function isPdfUploadFile(file) {
-  const mimetype = String(file?.mimetype || '').toLowerCase();
   const extension = path.extname(String(file?.originalname || '')).toLowerCase();
-  return extension === '.pdf' && (mimetype === 'application/pdf' || isPdfBuffer(file?.buffer));
+  return extension === '.pdf' && isPdfFile(file);
 }
+
+const ASSET_HISTORY_DOCUMENT_TYPES = new Set([
+  'maintenance_preventive',
+  'maintenance_corrective',
+  'calibration',
+  'other'
+]);
+
+const ASSET_HISTORY_DEFAULT_TITLES = Object.freeze({
+  maintenance_preventive: 'Mantenimiento preventivo histórico',
+  maintenance_corrective: 'Mantenimiento correctivo histórico',
+  calibration: 'Calibración histórica',
+  other: 'Documento histórico migrado'
+});
 
 function odontologyAttachmentExtension(file) {
   const mimetype = String(file?.mimetype || '').toLowerCase();
@@ -8920,11 +8953,43 @@ app.get(
   }
 );
 
+app.get(
+  '/biomed/:clientId/assets/:assetId/historical-maintenance-occurrences',
+  requireAuth,
+  requirePermission('asset_history:upload'),
+  async (req, res) => {
+    const { clientId, assetId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    let documentDate;
+    try {
+      documentDate = normalizeDateOnly(String(req.query.documentDate || ''), 'La fecha del documento');
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+    if (documentDate > todayInBogota()) {
+      return res.status(400).json({ message: 'La fecha del documento no puede estar en el futuro.' });
+    }
+    const asset = await getAssetById(clientId, assetId);
+    if (!asset) {
+      return res.status(404).json({ message: 'Equipo no encontrado.' });
+    }
+    try {
+      const rows = await listHistoricalMaintenanceOccurrences(clientId, assetId, documentDate);
+      return res.json(rows);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudieron consultar las ocurrencias del cronograma.' });
+    }
+  }
+);
+
 app.post(
   '/biomed/:clientId/assets/:assetId/history-files',
   requireAuth,
   requirePermission('asset_history:upload'),
-  upload.single('file'),
+  uploadHistoricalPdf,
   async (req, res) => {
     const { clientId, assetId } = req.params;
     if (req.user.clientId && req.user.clientId !== clientId) {
@@ -8936,15 +9001,49 @@ app.post(
     if (!isPdfUploadFile(req.file)) {
       return res.status(400).json({ message: 'Solo se permiten archivos PDF.' });
     }
-    const documentDate = String(req.body?.documentDate || '').trim();
-    if (!documentDate || Number.isNaN(new Date(documentDate).getTime())) {
-      return res.status(400).json({ message: 'La fecha del documento es obligatoria.' });
+    let documentDate;
+    try {
+      documentDate = normalizeDateOnly(String(req.body?.documentDate || ''), 'La fecha del documento');
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+    if (documentDate > todayInBogota()) {
+      return res.status(400).json({ message: 'La fecha del documento no puede estar en el futuro.' });
+    }
+    const documentType = String(req.body?.documentType || 'other').trim();
+    if (!ASSET_HISTORY_DOCUMENT_TYPES.has(documentType)) {
+      return res.status(400).json({ message: 'El tipo de documento histórico no es válido.' });
+    }
+    const maintenanceScheduleItemId = String(req.body?.maintenanceScheduleItemId || '').trim() || null;
+    if (maintenanceScheduleItemId && documentType !== 'maintenance_preventive') {
+      return res.status(400).json({
+        message: 'Solo un mantenimiento preventivo histórico puede conciliarse con el cronograma.'
+      });
     }
 
+    let fullPath = '';
     try {
       const asset = await getAssetById(clientId, assetId);
       if (!asset) {
         return res.status(404).json({ message: 'Equipo no encontrado.' });
+      }
+      if (documentType === 'maintenance_preventive' && !maintenanceScheduleItemId) {
+        const occurrences = await listHistoricalMaintenanceOccurrences(clientId, assetId, documentDate);
+        if (occurrences.some((occurrence) => occurrence.eligible)) {
+          return res.status(400).json({
+            message: 'Selecciona la ocurrencia del cronograma que corresponde a este mantenimiento.'
+          });
+        }
+        if (occurrences.some((occurrence) => occurrence.status === 'done')) {
+          return res.status(409).json({
+            message: 'La ocurrencia de ese mes ya está registrada como realizada.'
+          });
+        }
+        if (occurrences.length) {
+          return res.status(409).json({
+            message: occurrences[0].unavailable_reason || 'La ocurrencia de ese mes no admite conciliación.'
+          });
+        }
       }
 
       const dir = await ensureClientLogoDir(clientId);
@@ -8959,15 +9058,19 @@ app.post(
         'history',
         `historico-${Date.now()}-${randomUUID()}.pdf`
       );
-      const fullPath = path.join(process.cwd(), filename);
+      fullPath = path.join(process.cwd(), filename);
       await fs.promises.writeFile(fullPath, req.file.buffer);
       const publicPath = `/${filename}`.replace(/\\/g, '/');
 
       const historyFile = await createAssetHistoryFile(clientId, {
         assetId,
-        title: String(req.body?.title || '').trim() || 'Mantenimiento histórico migrado',
+        title:
+          String(req.body?.title || '').trim() ||
+          ASSET_HISTORY_DEFAULT_TITLES[documentType],
         description: String(req.body?.description || '').trim() || null,
         documentDate,
+        documentType,
+        maintenanceScheduleItemId,
         filePath: publicPath,
         uploadedBy: req.user.sub,
         uploadedByName: req.user.displayName || req.user.username
@@ -8983,13 +9086,22 @@ app.post(
           eventType: 'pdf_historico_cargado',
           historyFileId: historyFile.id,
           documentDate,
+          documentType,
+          maintenanceScheduleItemId,
+          reconciliation: historyFile.reconciliation,
           pdfPath: publicPath
         }
       });
 
       return res.status(201).json(historyFile);
     } catch (error) {
+      if (fullPath && fs.existsSync(fullPath)) {
+        await fs.promises.rm(fullPath, { force: true });
+      }
       console.error(error);
+      if (String(error?.code || '').startsWith('HISTORICAL_') || error?.code === '23505') {
+        return res.status(409).json({ message: error.message });
+      }
       return res.status(500).json({ message: 'No se pudo cargar el PDF histórico.' });
     }
   }
@@ -9033,10 +9145,16 @@ app.delete(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    const file = await deleteAssetHistoryFile(clientId, fileId);
+    const file = await getAssetHistoryFileById(clientId, fileId);
     if (!file) {
       return res.status(404).json({ message: 'PDF histórico no encontrado.' });
     }
+    if (await isAssetHistoryFileReconciled(clientId, fileId)) {
+      return res.status(409).json({
+        message: 'Este PDF acredita una ocurrencia del cronograma y no puede eliminarse.'
+      });
+    }
+    await deleteAssetHistoryFile(clientId, fileId);
     const fullPath = path.join(process.cwd(), file.file_path.replace(/^\//, ''));
     if (fs.existsSync(fullPath)) {
       await fs.promises.rm(fullPath, { force: true });
@@ -11002,15 +11120,7 @@ app.post(
       }
       for (const plannedDate of datesByFrequency.get(months)) {
         const planned = parseScheduleDate(plannedDate);
-        const deadlineDate = formatScheduleDate(
-          capScheduleDateAtMonthEnd(
-            capScheduleDateAtYearEnd(
-              addScheduleBusinessDays(planned, 10),
-              scheduleInput.year
-            ),
-            planned
-          )
-        );
+        const deadlineDate = formatScheduleDate(endOfScheduleMonth(planned));
         items.push({
           assetId: asset.id,
           frequency: asset.maintenance_frequency,

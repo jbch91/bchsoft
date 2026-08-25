@@ -1,7 +1,11 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, Output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { AssetHistoryItemDto, BiomedService } from '../../biomed/biomed.service';
+import {
+  AssetHistoryItemDto,
+  BiomedService,
+  HistoricalMaintenanceOccurrenceDto
+} from '../../biomed/biomed.service';
 import { CalibrationService } from '../../calibration/calibration.service';
 import { MaintenanceService } from '../../maintenance/maintenance.service';
 import { QuickGuidesService } from '../../quick-guides/quick-guides.service';
@@ -38,6 +42,12 @@ interface MoveLocationOption {
   name: string;
   area_id: string | null;
 }
+
+type HistoryDocumentType =
+  | 'maintenance_preventive'
+  | 'maintenance_corrective'
+  | 'calibration'
+  | 'other';
 
 @Component({
   selector: 'app-inventory-panel',
@@ -84,8 +94,12 @@ export class InventoryPanelComponent implements OnDestroy {
   historyHasMore = true;
   historyUploadFile: File | null = null;
   historyUploadDate = '';
-  historyUploadTitle = 'Mantenimiento histórico migrado';
+  historyUploadDocumentType: HistoryDocumentType = 'maintenance_preventive';
+  historyUploadTitle = 'Mantenimiento preventivo histórico';
   historyUploadDescription = '';
+  historicalMaintenanceOccurrences: HistoricalMaintenanceOccurrenceDto[] = [];
+  selectedHistoricalMaintenanceOccurrenceId = '';
+  historicalOccurrencesLoading = false;
   historyUploadLoading = false;
   historyUploadError = '';
   historyUploadSuccess = '';
@@ -104,6 +118,15 @@ export class InventoryPanelComponent implements OnDestroy {
     notes: ''
   };
   private destroyed = false;
+  private historicalOccurrenceLoadToken = 0;
+  private readonly maxHistoryPdfBytes = 15 * 1024 * 1024;
+
+  readonly historyDocumentTypeOptions: { value: HistoryDocumentType; label: string }[] = [
+    { value: 'maintenance_preventive', label: 'Mantenimiento preventivo' },
+    { value: 'maintenance_corrective', label: 'Mantenimiento correctivo' },
+    { value: 'calibration', label: 'Calibración' },
+    { value: 'other', label: 'Otro documento' }
+  ];
 
   constructor(
     private readonly biomed: BiomedService,
@@ -355,7 +378,83 @@ export class InventoryPanelComponent implements OnDestroy {
     }
     if (item.item_type === 'calibration_report') return 'Calibración';
     if (item.item_type === 'movement_report') return 'Movimiento';
+    if (item.subtype === 'maintenance_preventive') return 'Preventivo migrado';
+    if (item.subtype === 'maintenance_corrective') return 'Correctivo migrado';
+    if (item.subtype === 'calibration') return 'Calibración migrada';
     return 'PDF migrado';
+  }
+
+  get eligibleHistoricalMaintenanceOccurrences(): HistoricalMaintenanceOccurrenceDto[] {
+    return this.historicalMaintenanceOccurrences.filter((occurrence) => occurrence.eligible);
+  }
+
+  get historicalOccurrenceHelp(): string {
+    if (this.historyUploadDocumentType !== 'maintenance_preventive') return '';
+    if (!this.historyUploadDate) {
+      return 'Selecciona la fecha real para buscar la ocurrencia del cronograma de ese mes.';
+    }
+    if (this.historicalOccurrencesLoading) return 'Buscando ocurrencias del cronograma...';
+    if (!this.historicalMaintenanceOccurrences.length) {
+      return 'No existe una ocurrencia para ese mes. El PDF se archivará sin modificar el cronograma.';
+    }
+    if (!this.eligibleHistoricalMaintenanceOccurrences.length) {
+      return (
+        this.historicalMaintenanceOccurrences[0]?.unavailable_reason ||
+        'La ocurrencia encontrada no admite conciliación.'
+      );
+    }
+    return 'Al subir el PDF, esta ocurrencia quedará realizada con la fecha real del documento.';
+  }
+
+  historicalOccurrenceLabel(occurrence: HistoricalMaintenanceOccurrenceDto): string {
+    const planned = this.formatHistoryDate(occurrence.planned_date);
+    const frequency = this.titleCaseLabel(occurrence.frequency);
+    const status = this.historyOccurrenceStatusLabel(occurrence.status);
+    return `#${occurrence.occurrence_number} · ${planned} · ${frequency} · ${status}`;
+  }
+
+  onHistoryDocumentTypeChange(): void {
+    this.historyUploadTitle = this.historyDocumentDefaultTitle(this.historyUploadDocumentType);
+    this.clearHistoricalOccurrences();
+    if (this.historyUploadDocumentType === 'maintenance_preventive' && this.historyUploadDate) {
+      void this.loadHistoricalMaintenanceOccurrences();
+    }
+  }
+
+  onHistoryUploadDateChange(): void {
+    this.clearHistoricalOccurrences();
+    if (this.historyUploadDocumentType === 'maintenance_preventive' && this.historyUploadDate) {
+      void this.loadHistoricalMaintenanceOccurrences();
+    }
+  }
+
+  private async loadHistoricalMaintenanceOccurrences(): Promise<void> {
+    if (!this.selectedClientId || !this.historyAssetId || !this.historyUploadDate) return;
+    const token = ++this.historicalOccurrenceLoadToken;
+    this.historicalOccurrencesLoading = true;
+    this.historyUploadError = '';
+    try {
+      const rows = await this.biomed.listHistoricalMaintenanceOccurrences(
+        this.selectedClientId,
+        this.historyAssetId,
+        this.historyUploadDate
+      );
+      if (token !== this.historicalOccurrenceLoadToken) return;
+      this.historicalMaintenanceOccurrences = rows;
+      const eligible = rows.filter((occurrence) => occurrence.eligible);
+      this.selectedHistoricalMaintenanceOccurrenceId = eligible[0]?.id || '';
+    } catch (error: any) {
+      if (token !== this.historicalOccurrenceLoadToken) return;
+      this.historicalMaintenanceOccurrences = [];
+      this.selectedHistoricalMaintenanceOccurrenceId = '';
+      this.historyUploadError =
+        error?.error?.message || 'No se pudieron consultar las ocurrencias del cronograma.';
+    } finally {
+      if (token === this.historicalOccurrenceLoadToken) {
+        this.historicalOccurrencesLoading = false;
+        this.refreshViewSoon();
+      }
+    }
   }
 
   async loadHistory(reset = true): Promise<void> {
@@ -434,6 +533,12 @@ export class InventoryPanelComponent implements OnDestroy {
       this.historyUploadError = 'Solo se permiten archivos PDF.';
       return;
     }
+    if (file && file.size > this.maxHistoryPdfBytes) {
+      this.historyUploadFile = null;
+      input.value = '';
+      this.historyUploadError = 'El PDF supera el límite de 15 MB.';
+      return;
+    }
     this.historyUploadError = '';
     this.historyUploadFile = file;
   }
@@ -448,22 +553,36 @@ export class InventoryPanelComponent implements OnDestroy {
       this.historyUploadError = 'Selecciona un archivo PDF.';
       return;
     }
+    if (
+      this.historyUploadDocumentType === 'maintenance_preventive' &&
+      this.historicalMaintenanceOccurrences.length &&
+      !this.selectedHistoricalMaintenanceOccurrenceId
+    ) {
+      this.historyUploadError =
+        this.historicalMaintenanceOccurrences[0]?.unavailable_reason ||
+        'Selecciona una ocurrencia disponible del cronograma.';
+      return;
+    }
     this.historyUploadLoading = true;
     this.historyUploadError = '';
     this.historyUploadSuccess = '';
     try {
-      await this.biomed.uploadAssetHistoryFile(this.selectedClientId, this.historyAssetId, {
+      const result = await this.biomed.uploadAssetHistoryFile(this.selectedClientId, this.historyAssetId, {
         file: this.historyUploadFile,
         documentDate: this.historyUploadDate,
+        documentType: this.historyUploadDocumentType,
+        maintenanceScheduleItemId: this.selectedHistoricalMaintenanceOccurrenceId || undefined,
         title: this.historyUploadTitle.trim(),
         description: this.historyUploadDescription.trim()
       });
-      this.historyUploadSuccess = 'PDF histórico cargado correctamente.';
+      this.historyUploadSuccess = result.reconciliation
+        ? 'Mantenimiento histórico conciliado con el cronograma.'
+        : 'PDF histórico archivado correctamente.';
       this.resetHistoryUpload(true);
       await this.loadHistory(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      this.historyUploadError = 'No se pudo cargar el PDF histórico.';
+      this.historyUploadError = error?.error?.message || 'No se pudo cargar el PDF histórico.';
     } finally {
       this.historyUploadLoading = false;
       this.refreshViewSoon();
@@ -474,8 +593,12 @@ export class InventoryPanelComponent implements OnDestroy {
     if (!this.selectedClientId || item.item_type !== 'legacy_pdf') return;
     const ok = window.confirm('¿Eliminar este PDF histórico del equipo?');
     if (!ok) return;
-    await this.biomed.deleteAssetHistoryFile(this.selectedClientId, item.id);
-    await this.loadHistory(true);
+    try {
+      await this.biomed.deleteAssetHistoryFile(this.selectedClientId, item.id);
+      await this.loadHistory(true);
+    } catch (error: any) {
+      this.historyUploadError = error?.error?.message || 'No se pudo eliminar el PDF histórico.';
+    }
   }
 
   async startMove(item: InventoryPanelItem): Promise<void> {
@@ -569,10 +692,47 @@ export class InventoryPanelComponent implements OnDestroy {
   private resetHistoryUpload(keepSuccess = false): void {
     this.historyUploadFile = null;
     this.historyUploadDate = '';
-    this.historyUploadTitle = 'Mantenimiento histórico migrado';
+    this.historyUploadDocumentType = 'maintenance_preventive';
+    this.historyUploadTitle = 'Mantenimiento preventivo histórico';
     this.historyUploadDescription = '';
+    this.clearHistoricalOccurrences();
     this.historyUploadError = '';
     if (!keepSuccess) this.historyUploadSuccess = '';
+  }
+
+  private clearHistoricalOccurrences(): void {
+    this.historicalOccurrenceLoadToken += 1;
+    this.historicalMaintenanceOccurrences = [];
+    this.selectedHistoricalMaintenanceOccurrenceId = '';
+    this.historicalOccurrencesLoading = false;
+  }
+
+  private historyDocumentDefaultTitle(type: HistoryDocumentType): string {
+    return {
+      maintenance_preventive: 'Mantenimiento preventivo histórico',
+      maintenance_corrective: 'Mantenimiento correctivo histórico',
+      calibration: 'Calibración histórica',
+      other: 'Documento histórico migrado'
+    }[type];
+  }
+
+  private historyOccurrenceStatusLabel(status: string): string {
+    return {
+      pending: 'Programado',
+      active: 'Activo',
+      expired: 'Vencido',
+      done: 'Realizado'
+    }[status] || status;
+  }
+
+  private formatHistoryDate(value: string): string {
+    const [year, month, day] = String(value || '').slice(0, 10).split('-');
+    return year && month && day ? `${day}/${month}/${year}` : value;
+  }
+
+  private titleCaseLabel(value: string): string {
+    const clean = String(value || '').trim();
+    return clean ? clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase() : '-';
   }
 
   private isPdfFile(file: File): boolean {

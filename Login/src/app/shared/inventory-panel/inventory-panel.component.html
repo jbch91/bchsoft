@@ -189,16 +189,56 @@
         <div class="history-upload" *ngIf="canUploadHistoryFile">
           <div>
             <strong>Migrar PDF físico al historial</strong>
-            <p class="muted">Carga mantenimientos antiguos escaneados y asigna la fecha real del documento para ordenarlos correctamente.</p>
+            <p class="muted">Documento escaneado con fecha real y trazabilidad.</p>
           </div>
           <div class="history-upload-grid">
             <label>
-              Fecha del documento
-              <input type="date" [(ngModel)]="historyUploadDate" />
+              Tipo de documento
+              <select
+                [(ngModel)]="historyUploadDocumentType"
+                (change)="onHistoryDocumentTypeChange()"
+              >
+                <option *ngFor="let option of historyDocumentTypeOptions" [value]="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
+            <label>
+              Fecha real del servicio
+              <input
+                type="date"
+                [(ngModel)]="historyUploadDate"
+                (change)="onHistoryUploadDateChange()"
+              />
             </label>
             <label>
               Título
               <input type="text" [(ngModel)]="historyUploadTitle" placeholder="Ej: Mantenimiento preventivo 2025" />
+            </label>
+            <label
+              class="occurrence-field"
+              *ngIf="historyUploadDocumentType === 'maintenance_preventive'"
+            >
+              Ocurrencia del cronograma
+              <select
+                [(ngModel)]="selectedHistoricalMaintenanceOccurrenceId"
+                [disabled]="historicalOccurrencesLoading || !historicalMaintenanceOccurrences.length"
+              >
+                <option value="">Sin ocurrencia seleccionada</option>
+                <option
+                  *ngFor="let occurrence of historicalMaintenanceOccurrences"
+                  [value]="occurrence.id"
+                  [disabled]="!occurrence.eligible"
+                >
+                  {{ historicalOccurrenceLabel(occurrence) }}
+                </option>
+              </select>
+              <small
+                [class.reconciliation-ready]="eligibleHistoricalMaintenanceOccurrences.length"
+                [class.reconciliation-blocked]="historicalMaintenanceOccurrences.length && !eligibleHistoricalMaintenanceOccurrences.length"
+              >
+                {{ historicalOccurrenceHelp }}
+              </small>
             </label>
             <label class="wide">
               Descripción breve
@@ -207,12 +247,17 @@
             <label class="file-field">
               Archivo PDF
               <input class="file-input" type="file" accept="application/pdf,.pdf" (change)="onHistoryFileSelected($event)" />
-              <small>{{ historyUploadFile?.name || 'Selecciona un PDF escaneado' }}</small>
+              <small>{{ historyUploadFile?.name || 'Selecciona un PDF escaneado de hasta 15 MB' }}</small>
             </label>
             <div class="upload-action-wrap">
               <span>Acción</span>
-              <button type="button" class="history-btn upload-action" [disabled]="historyUploadLoading" (click)="uploadHistoryFile()">
-                {{ historyUploadLoading ? 'Subiendo...' : 'Subir PDF' }}
+              <button
+                type="button"
+                class="history-btn upload-action"
+                [disabled]="historyUploadLoading || historicalOccurrencesLoading"
+                (click)="uploadHistoryFile()"
+              >
+                {{ historyUploadLoading ? 'Subiendo...' : historicalOccurrencesLoading ? 'Consultando...' : 'Subir PDF' }}
               </button>
             </div>
           </div>
@@ -250,13 +295,14 @@
             <span>
               <strong>{{ event.title || 'Evento del equipo' }}</strong>
               <small *ngIf="event.description">{{ event.description }}</small>
+              <small *ngIf="event.maintenance_schedule_item_id">Cronograma conciliado</small>
             </span>
             <span class="history-actions">
               <button type="button" class="history-btn" [disabled]="!event.pdf_path" (click)="openHistoryItem(event)">VER</button>
               <button
                 type="button"
                 class="danger small"
-                *ngIf="canEdit && event.item_type === 'legacy_pdf'"
+                *ngIf="canEdit && event.item_type === 'legacy_pdf' && !event.maintenance_schedule_item_id"
                 (click)="deleteHistoryFile(event)"
               >
                 Eliminar

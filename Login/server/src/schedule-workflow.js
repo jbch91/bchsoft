@@ -112,16 +112,6 @@ export function addBusinessDaysUtc(value, days) {
   return date;
 }
 
-export function subtractBusinessDaysUtc(value, days) {
-  const date = new Date(value.getTime());
-  let remaining = Math.max(0, Number(days) || 0);
-  while (remaining > 0) {
-    date.setUTCDate(date.getUTCDate() - 1);
-    if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6) remaining -= 1;
-  }
-  return date;
-}
-
 export function addMonthsUtc(value, months) {
   const source = new Date(value.getTime());
   const targetMonthIndex = source.getUTCMonth() + Number(months);
@@ -153,6 +143,20 @@ export function capDateAtMonthEndUtc(value, anchorDate) {
     Date.UTC(anchorDate.getUTCFullYear(), anchorDate.getUTCMonth() + 1, 0)
   );
   return new Date(Math.min(value.getTime(), monthEnd.getTime()));
+}
+
+export function startOfMonthUtc(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new ScheduleValidationError('La ventana mensual del cronograma no es válida.');
+  }
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
+}
+
+export function endOfMonthUtc(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new ScheduleValidationError('La ventana mensual del cronograma no es válida.');
+  }
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 0));
 }
 
 export function buildRecurringDates({ year, startDate, months }) {
@@ -231,10 +235,10 @@ export function normalizeMaintenanceItemUpdates(items, existingItems, year) {
     const planned = assertWeekdayAndYear(plannedDate, normalizedYear);
     const deadlineDate = dateOnlyFromDatabase(current.deadline_date, 'La fecha límite');
     const deadline = parseDateOnly(deadlineDate);
-    const minimum = subtractBusinessDaysUtc(deadline, 10);
+    const minimum = startOfMonthUtc(deadline);
     if (planned < minimum || planned > deadline) {
       throw new ScheduleValidationError(
-        `La fecha programada debe estar entre ${formatDateOnly(minimum)} y ${deadlineDate}.`
+        `La fecha programada debe pertenecer al mes comprendido entre ${formatDateOnly(minimum)} y ${deadlineDate}.`
       );
     }
     return { id: String(current.id), plannedDate, deadlineDate };

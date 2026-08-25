@@ -784,6 +784,13 @@ button:disabled {
 
 .date-line input {
   width: 160px;
+  cursor: pointer;
+  color-scheme: light;
+}
+
+.date-line input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 1;
 }
 
 .date-line small,

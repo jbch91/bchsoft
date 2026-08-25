@@ -85,4 +85,29 @@ describe('CronogramasComponent filtros dependientes', () => {
     expect(component.calibrationLocationFilter).toBe('');
     expect(component.calibrationLocationOptions).toEqual(['REANIMACIÓN', 'SALA DE PARTOS']);
   });
+
+  it('mantiene la edición de mantenimiento dentro del mes periódico', () => {
+    const component = createComponent();
+    const item = maintenanceItem('1', 'URGENCIAS', 'REANIMACIÓN');
+    item.frequency = 'trimestral';
+    item.planned_date = '2026-05-04';
+    item.deadline_date = '2026-05-31';
+
+    expect((component as any).computeRangeMin(item)).toBe('2026-05-01');
+  });
+
+  it('abre el calendario nativo cuando el navegador lo permite', () => {
+    const component = createComponent();
+    let opened = false;
+    component.openNativeDatePicker({
+      currentTarget: {
+        disabled: false,
+        showPicker: () => {
+          opened = true;
+        }
+      }
+    } as unknown as Event);
+
+    expect(opened).toBe(true);
+  });
 });

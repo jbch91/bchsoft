@@ -9,6 +9,7 @@ import {
   capDateAtMonthEndUtc,
   capDateAtScheduleYearEndUtc,
   changedMaintenanceItemUpdates,
+  endOfMonthUtc,
   formatDateOnly,
   normalizeCalibrationItemUpdates,
   normalizeMaintenanceItemUpdates,
@@ -44,6 +45,12 @@ test('genera recurrencias en días hábiles dentro del año', () => {
     '2026-02-02',
     '2026-08-03'
   ]);
+  assert.deepEqual(buildRecurringDates({ year: 2026, startDate: '2026-02-02', months: 3 }), [
+    '2026-02-02',
+    '2026-05-04',
+    '2026-08-04',
+    '2026-11-04'
+  ]);
 });
 
 test('limita las ventanas de servicio al cierre de la vigencia', () => {
@@ -67,6 +74,7 @@ test('mantiene la fecha límite del mantenimiento en el mes programado', () => {
     formatDateOnly(capDateAtMonthEndUtc(sameMonthDeadline, earlyMonthStart)),
     '2026-08-17'
   );
+  assert.equal(formatDateOnly(endOfMonthUtc(earlyMonthStart)), '2026-08-31');
 });
 
 test('deduplica identificadores y rechaza UUID inválidos', () => {
@@ -78,19 +86,19 @@ test('deduplica identificadores y rechaza UUID inválidos', () => {
 test('mantiene la fecha límite al editar mantenimientos dentro de su ventana', () => {
   const id = '11111111-1111-4111-8111-111111111111';
   const result = normalizeMaintenanceItemUpdates(
-    [{ id, plannedDate: '2026-08-17' }],
+    [{ id, plannedDate: '2026-08-03' }],
     [{ id, deadline_date: '2026-08-31' }],
     2026
   );
-  assert.deepEqual(result, [{ id, plannedDate: '2026-08-17', deadlineDate: '2026-08-31' }]);
+  assert.deepEqual(result, [{ id, plannedDate: '2026-08-03', deadlineDate: '2026-08-31' }]);
   assert.throws(
     () =>
       normalizeMaintenanceItemUpdates(
-        [{ id, plannedDate: '2026-08-14' }],
+        [{ id, plannedDate: '2026-09-01' }],
         [{ id, deadline_date: '2026-08-31' }],
         2026
       ),
-    /debe estar entre/
+    /debe pertenecer al mes/
   );
 });
 
