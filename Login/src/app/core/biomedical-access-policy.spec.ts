@@ -38,4 +38,20 @@ describe('biomedical access policy', () => {
     expect(BIOMEDICAL_FEATURE_POLICIES.sedes_areas_ubicaciones.route)
       .toBe('/sedes-areas-ubicaciones');
   });
+
+  it('mantiene separados los accesos a hojas de vida y cronogramas industriales', () => {
+    const context = {
+      permissions: ['hb:view', 'maintenance:report:create', 'schedules:manage'] as const,
+      roles: ['ingeniero_biomedico'] as const,
+      enabledModules: new Set(['hojas_de_vida', 'reportes_mantenimiento', 'cronogramas'])
+    };
+
+    expect(canOpenBiomedicalFeature('hojas_de_vida_industriales', context)).toBe(true);
+    expect(canOpenBiomedicalFeature('cronogramas_industriales', context)).toBe(true);
+    expect(canOpenBiomedicalFeature('reportes_mantenimiento_industrial', context)).toBe(true);
+    expect(BIOMEDICAL_FEATURE_POLICIES.hojas_de_vida_industriales.route)
+      .toBe('/hojas-de-vida-industriales');
+    expect(BIOMEDICAL_FEATURE_POLICIES.cronogramas_industriales.route)
+      .toBe('/cronogramas-industriales');
+  });
 });

@@ -16,6 +16,13 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
     permissionsAny: ['hb:create', 'hb:view', 'read:all'],
     excludedRoles: ['lector']
   },
+  hojas_de_vida_industriales: {
+    label: 'Hojas de vida industriales',
+    route: '/hojas-de-vida-industriales',
+    moduleKey: 'hojas_de_vida',
+    permissionsAny: ['hb:create', 'hb:view', 'read:all'],
+    excludedRoles: ['lector']
+  },
   inventario: {
     label: 'Inventario',
     route: '/inventario',
@@ -53,9 +60,27 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
       'read:all'
     ]
   },
+  reportes_mantenimiento_industrial: {
+    label: 'Mantenimiento industrial',
+    route: '/mantenimiento-industrial',
+    moduleKey: 'reportes_mantenimiento',
+    permissionsAny: [
+      'maintenance:request:create',
+      'maintenance:report:create',
+      'maintenance:report:sign',
+      'maintenance:protocol:print_blank',
+      'read:all'
+    ]
+  },
   cronogramas: {
     label: 'Cronogramas',
     route: '/cronogramas',
+    moduleKey: 'cronogramas',
+    permissionsAny: ['schedules:manage', 'schedules:unlock_approved']
+  },
+  cronogramas_industriales: {
+    label: 'Cronogramas industriales',
+    route: '/cronogramas-industriales',
     moduleKey: 'cronogramas',
     permissionsAny: ['schedules:manage', 'schedules:unlock_approved']
   },

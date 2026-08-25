@@ -96,3 +96,28 @@ test('valida y normaliza los riesgos condicionales de la importación', () => {
   assert.equal(invalid.errors.some((error) => error.includes('riesgo sanitario debe estar vacía')), true);
   assert.equal(invalid.errors.some((error) => error.includes('protección eléctrica es obligatoria')), true);
 });
+
+test('separa equipos industriales y descarta campos exclusivamente biomédicos', () => {
+  const result = validateAndNormalizeHvImportAsset({
+    assetCategory: 'industrial',
+    name: 'nevera industrial',
+    requiresSanitaryClassification: true,
+    riskClass: 'Clase III',
+    requiresElectricalClassification: true,
+    electricalProtectionClass: 'Clase II',
+    appliedPartType: 'Tipo CF',
+    requiresCalibration: true,
+    calibrationFrequency: 'anual'
+  });
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.asset.assetCategory, 'industrial');
+  assert.equal(result.asset.name, 'NEVERA INDUSTRIAL');
+  assert.equal(result.asset.requiresSanitaryClassification, false);
+  assert.equal(result.asset.riskClass, null);
+  assert.equal(result.asset.requiresElectricalClassification, false);
+  assert.equal(result.asset.electricalProtectionClass, null);
+  assert.equal(result.asset.appliedPartType, null);
+  assert.equal(result.asset.requiresCalibration, false);
+  assert.equal(result.asset.calibrationFrequency, null);
+});

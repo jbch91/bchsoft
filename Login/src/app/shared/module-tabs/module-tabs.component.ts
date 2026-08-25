@@ -59,7 +59,7 @@ export class ModuleTabsComponent implements OnInit {
       platform: true
     },
     {
-      label: 'Catálogo biomédico',
+      label: 'Catálogo de equipos',
       route: '/catalogo-biomedico',
       roles: ['superuser', 'admin', 'saas_admin'],
       permissionsAny: ['platform:biomedical_catalog:manage'],

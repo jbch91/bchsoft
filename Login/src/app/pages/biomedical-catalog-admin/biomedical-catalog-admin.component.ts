@@ -11,9 +11,11 @@ import {
   BiomedicalCatalogReviewStatus,
   BiomedicalCatalogSyncResult
 } from '../../admin/biomedical-catalog-admin.service';
+import type { EquipmentCatalogCategory } from '../../admin/biomedical-catalog-admin.service';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 
 type CatalogFilter = 'all' | BiomedicalCatalogReviewStatus;
+type CategoryFilter = 'all' | EquipmentCatalogCategory;
 type CatalogModalMode = 'create' | 'edit' | 'review' | 'merge';
 
 interface ParentOption {
@@ -34,6 +36,7 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
   saving = false;
   search = '';
   statusFilter: CatalogFilter = 'all';
+  categoryFilter: CategoryFilter = 'all';
   errorMessage = '';
   successMessage = '';
 
@@ -47,6 +50,7 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
   modalParentId = '';
   modalTargetId = '';
   modalNotes = '';
+  modalAssetCategory: EquipmentCatalogCategory = 'biomedical';
   reviewDecision: 'approve' | 'reject' = 'approve';
   reviewCascade = true;
 
@@ -62,6 +66,9 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
   get filteredCatalog(): BiomedicalCatalogEquipment[] {
     const search = this.search.trim().toLocaleUpperCase('es');
     return this.catalog
+      .filter((equipment) =>
+        this.categoryFilter === 'all' || equipment.assetCategory === this.categoryFilter
+      )
       .map((equipment) => {
         const equipmentPath = equipment.name;
         const brands = equipment.brands
@@ -115,13 +122,17 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
     if (this.modalType === 'brand') {
       return this.catalog
         .filter((equipment) =>
+          equipment.assetCategory === this.modalAssetCategory
+          &&
           equipment.isActive
           && (equipment.reviewStatus === 'approved' || canUsePendingParent)
         )
         .map((equipment) => ({ id: equipment.id, label: equipment.name }));
     }
     if (this.modalType === 'model') {
-      return this.catalog.flatMap((equipment) =>
+      return this.catalog
+        .filter((equipment) => equipment.assetCategory === this.modalAssetCategory)
+        .flatMap((equipment) =>
         equipment.brands
           .filter((brand) =>
             brand.isActive
@@ -138,12 +149,17 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
     if (this.modalType === 'equipment') {
       return this.catalog
         .filter((equipment) =>
-          equipment.id !== sourceId && equipment.reviewStatus === 'approved' && equipment.isActive
+          equipment.id !== sourceId
+          && equipment.assetCategory === this.modalAssetCategory
+          && equipment.reviewStatus === 'approved'
+          && equipment.isActive
         )
         .map((equipment) => ({ id: equipment.id, label: equipment.name }));
     }
     if (this.modalType === 'brand') {
-      return this.catalog.flatMap((equipment) =>
+      return this.catalog
+        .filter((equipment) => equipment.assetCategory === this.modalAssetCategory)
+        .flatMap((equipment) =>
         equipment.brands
           .filter((brand) =>
             brand.id !== sourceId && brand.reviewStatus === 'approved' && brand.isActive
@@ -151,7 +167,9 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
           .map((brand) => ({ id: brand.id, label: `${equipment.name} / ${brand.name}` }))
       );
     }
-    return this.catalog.flatMap((equipment) =>
+    return this.catalog
+      .filter((equipment) => equipment.assetCategory === this.modalAssetCategory)
+      .flatMap((equipment) =>
       equipment.brands.flatMap((brand) =>
         brand.models
           .filter((model) =>
@@ -172,7 +190,7 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
       this.catalog = await this.catalogAdmin.list();
       this.expandPendingBranches();
     } catch (error) {
-      this.errorMessage = this.errorText(error, 'No se pudo cargar el catálogo biomédico global.');
+      this.errorMessage = this.errorText(error, 'No se pudo cargar el catálogo global de equipos.');
     } finally {
       this.loading = false;
       this.cdr.detectChanges();
@@ -186,6 +204,7 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
   clearFilters(): void {
     this.search = '';
     this.statusFilter = 'all';
+    this.categoryFilter = 'all';
   }
 
   isEquipmentExpanded(equipmentId: string): boolean {
@@ -209,6 +228,7 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
     this.modalMode = 'create';
     this.modalType = type;
     this.modalParentId = parent?.id || '';
+    this.modalAssetCategory = parent ? this.categoryForNode(parent) : 'biomedical';
   }
 
   openEdit(node: BiomedicalCatalogNode): void {
@@ -216,6 +236,7 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
     this.modalMode = 'edit';
     this.modalType = node.type;
     this.modalNode = node;
+    this.modalAssetCategory = this.categoryForNode(node);
     this.modalName = node.name;
     this.modalParentId = node.type === 'brand' ? node.equipmentId : node.type === 'model' ? node.brandId : '';
   }
@@ -225,6 +246,7 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
     this.modalMode = 'review';
     this.modalType = node.type;
     this.modalNode = node;
+    this.modalAssetCategory = this.categoryForNode(node);
     this.reviewDecision = decision;
     this.reviewCascade = decision === 'approve';
   }
@@ -234,6 +256,7 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
     this.modalMode = 'merge';
     this.modalType = node.type;
     this.modalNode = node;
+    this.modalAssetCategory = this.categoryForNode(node);
   }
 
   closeModal(): void {
@@ -270,7 +293,8 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
         await this.catalogAdmin.createNode({
           type: this.modalType,
           name: this.modalName.trim(),
-          parentId: this.modalType === 'equipment' ? null : this.modalParentId
+          parentId: this.modalType === 'equipment' ? null : this.modalParentId,
+          assetCategory: this.modalAssetCategory
         });
         this.successMessage = `${this.nodeTypeLabel(this.modalType)} creado y aprobado.`;
       } else if (this.modalMode === 'edit' && this.modalNode) {
@@ -340,6 +364,10 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
     return type === 'equipment' ? 'Equipo' : type === 'brand' ? 'Marca' : 'Modelo';
   }
 
+  categoryLabel(category: EquipmentCatalogCategory): string {
+    return category === 'industrial' ? 'Industrial' : 'Biomédico';
+  }
+
   originLabel(node: BiomedicalCatalogNode): string {
     if (!node.submittedClientName && !node.submittedByName) return 'Creado por plataforma';
     return [node.submittedClientName, node.submittedByName].filter(Boolean).join(' / ');
@@ -366,7 +394,7 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
   }
 
   private hasActiveFilters(): boolean {
-    return Boolean(this.search.trim()) || this.statusFilter !== 'all';
+    return Boolean(this.search.trim()) || this.statusFilter !== 'all' || this.categoryFilter !== 'all';
   }
 
   private allNodes(): BiomedicalCatalogNode[] {
@@ -396,6 +424,14 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
     else values.add(id);
   }
 
+  private categoryForNode(node: BiomedicalCatalogNode): EquipmentCatalogCategory {
+    if (node.type === 'equipment') return node.assetCategory;
+    const equipment = node.type === 'brand'
+      ? this.catalog.find((item) => item.id === node.equipmentId)
+      : this.catalog.find((item) => item.brands.some((brand) => brand.id === node.brandId));
+    return equipment?.assetCategory ?? 'biomedical';
+  }
+
   private resetModal(): void {
     this.modalMode = null;
     this.modalType = 'equipment';
@@ -404,6 +440,7 @@ export class BiomedicalCatalogAdminComponent implements OnInit {
     this.modalParentId = '';
     this.modalTargetId = '';
     this.modalNotes = '';
+    this.modalAssetCategory = 'biomedical';
     this.reviewDecision = 'approve';
     this.reviewCascade = true;
   }

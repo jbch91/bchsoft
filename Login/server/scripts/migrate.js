@@ -108,7 +108,8 @@ const MIGRATIONS = [
   'maintenance_blank_protocol_printing.sql',
   'maintenance_schedule_month_boundaries.sql',
   'schedule_programming_progress.sql',
-  'historical_maintenance_reconciliation.sql'
+  'historical_maintenance_reconciliation.sql',
+  'industrial_assets_and_schedules.sql'
 ];
 
 async function ensureMigrationsTable() {

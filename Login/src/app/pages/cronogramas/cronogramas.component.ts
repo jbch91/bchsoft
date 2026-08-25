@@ -1,6 +1,7 @@
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
 import { BiomedService } from '../../biomed/biomed.service';
@@ -17,6 +18,7 @@ import {
   CalibrationService
 } from '../../calibration/calibration.service';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import type { AssetCategory } from '../../biomed/biomed.service';
 
 interface ClientOption {
   id: string;
@@ -119,6 +121,7 @@ type ProgrammingView = 'pending' | 'programmed' | 'all';
   styleUrl: './cronogramas.component.scss'
 })
 export class CronogramasComponent implements OnInit {
+  readonly assetCategory: AssetCategory;
   readonly minimumYear = 1900;
   readonly maximumYear = 2200;
   readonly trainingPeriodOptions = [
@@ -201,9 +204,27 @@ export class CronogramasComponent implements OnInit {
     private readonly biomed: BiomedService,
     private readonly calibration: CalibrationService,
     public readonly auth: AuthService,
-    private readonly cdr: ChangeDetectorRef
+    private readonly cdr: ChangeDetectorRef,
+    private readonly route?: ActivatedRoute
   ) {
+    this.assetCategory = this.route?.snapshot.data['assetCategory'] === 'industrial'
+      ? 'industrial'
+      : 'biomedical';
     this.resetGeneratorDates();
+  }
+
+  get isIndustrialSchedule(): boolean {
+    return this.assetCategory === 'industrial';
+  }
+
+  get scheduleModuleTitle(): string {
+    return this.isIndustrialSchedule ? 'Cronogramas industriales' : 'Cronogramas';
+  }
+
+  get maintenanceSectionTitle(): string {
+    return this.isIndustrialSchedule
+      ? 'Cronogramas de mantenimiento industrial'
+      : 'Cronogramas de mantenimiento';
   }
 
   async ngOnInit(): Promise<void> {
@@ -287,6 +308,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   async switchView(mode: ViewMode): Promise<void> {
+    if (this.isIndustrialSchedule && mode !== 'maintenance') return;
     if (mode === 'training' && !this.canManageMaintenanceSchedules()) return;
     if (mode === 'calibration' && !this.canAccessCalibrationModule()) return;
     if (this.viewMode === mode) return;
@@ -339,7 +361,11 @@ export class CronogramasComponent implements OnInit {
     if (!this.selectedClientId) return;
     this.loading = true;
     try {
-      const rows = await this.schedulesService.listSchedules(this.selectedClientId, this.selectedYear);
+      const rows = await this.schedulesService.listSchedules(
+        this.selectedClientId,
+        this.selectedYear,
+        this.assetCategory
+      );
       this.schedules = rows;
       const previous = preserveSelection && this.detailModalOpen ? this.selectedScheduleId : '';
       this.selectedScheduleId = rows.some((row) => row.id === previous) ? previous : '';
@@ -427,7 +453,8 @@ export class CronogramasComponent implements OnInit {
         const scheduleId = await this.schedulesService.generateSchedule(
           this.selectedClientId,
           this.selectedYear,
-          this.startDate
+          this.startDate,
+          this.assetCategory
         );
         await this.loadSchedules(false);
         this.showGenerator = false;

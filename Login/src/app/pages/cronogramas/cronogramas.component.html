@@ -3,8 +3,8 @@
 
   <header class="module-header">
     <div class="module-title">
-      <p class="eyebrow">Software biomédico</p>
-      <h1>Cronogramas</h1>
+      <p class="eyebrow">{{ isIndustrialSchedule ? 'Gestión de equipos industriales' : 'Software biomédico' }}</p>
+      <h1>{{ scheduleModuleTitle }}</h1>
       <span>{{ currentClientLabel }} · Vigencia {{ selectedYear }}</span>
     </div>
 
@@ -69,7 +69,7 @@
         Mantenimiento
       </button>
       <button
-        *ngIf="canManageMaintenanceSchedules()"
+        *ngIf="!isIndustrialSchedule && canManageMaintenanceSchedules()"
         type="button"
         role="tab"
         [class.active]="viewMode === 'training'"
@@ -79,7 +79,7 @@
         Capacitaciones
       </button>
       <button
-        *ngIf="canAccessCalibrationModule()"
+        *ngIf="!isIndustrialSchedule && canAccessCalibrationModule()"
         type="button"
         role="tab"
         [class.active]="viewMode === 'calibration'"
@@ -103,7 +103,7 @@
   <section *ngIf="viewMode === 'maintenance'" class="workspace-panel" role="tabpanel">
     <div class="section-heading">
       <div>
-        <h2>Cronogramas de mantenimiento</h2>
+        <h2>{{ maintenanceSectionTitle }}</h2>
         <p>{{ filteredSchedules.length }} registro{{ filteredSchedules.length === 1 ? '' : 's' }}</p>
       </div>
       <div class="heading-actions">
@@ -149,8 +149,13 @@
         </button>
         <header class="schedule-modal-header">
           <p class="eyebrow">Vigencia {{ selectedYear }}</p>
-          <h2 id="create-maintenance-title">Nuevo cronograma de mantenimiento</h2>
-          <p>Se programarán los mantenimientos recurrentes hasta el 31/12/{{ selectedYear }}.</p>
+          <h2 id="create-maintenance-title">
+            Nuevo cronograma de mantenimiento{{ isIndustrialSchedule ? ' industrial' : '' }}
+          </h2>
+          <p>
+            Se programarán únicamente los mantenimientos de equipos
+            {{ isIndustrialSchedule ? 'industriales' : 'biomédicos' }} hasta el 31/12/{{ selectedYear }}.
+          </p>
         </header>
         <div class="annual-rule">
           Cada año requiere un cronograma nuevo. Al cambiar de vigencia, el listado comienza vacío para crear la nueva programación.

@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS "${schema}".locations (
 
 CREATE TABLE IF NOT EXISTS "${schema}".assets (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  asset_category TEXT NOT NULL DEFAULT 'biomedical'
+    CHECK (asset_category IN ('biomedical', 'industrial')),
   code TEXT NOT NULL,
   name TEXT NOT NULL,
   brand TEXT,

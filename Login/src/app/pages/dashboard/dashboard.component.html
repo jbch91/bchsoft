@@ -39,7 +39,7 @@
       class="ui-card module-card"
       *ngIf="canManageBiomedicalCatalog()"
     >
-      <h2>Catálogo biomédico</h2>
+      <h2>Catálogo de equipos</h2>
       <p>Equipos, marcas, modelos y propuestas pendientes de aprobación.</p>
     </a>
     <a routerLink="/auditoria" class="ui-card module-card" *ngIf="canOpenAuditAdministration()">
@@ -99,6 +99,15 @@
     </a>
 
     <a
+      routerLink="/hojas-de-vida-industriales"
+      class="ui-card module-card"
+      *ngIf="canOpenBiomedFeature('hojas_de_vida_industriales')"
+    >
+      <h2>Hojas de vida industriales</h2>
+      <p>Registro técnico e historial de neveras, aires, plantas, lavadoras y secadoras.</p>
+    </a>
+
+    <a
       routerLink="/inventario"
       class="ui-card module-card"
       *ngIf="canOpenBiomedFeature('inventario')"
@@ -135,12 +144,30 @@
     </a>
 
     <a
+      routerLink="/mantenimiento-industrial"
+      class="ui-card module-card"
+      *ngIf="canOpenBiomedFeature('reportes_mantenimiento_industrial')"
+    >
+      <h2>Mantenimiento industrial</h2>
+      <p>Solicitudes, reportes, repuestos e historial de los equipos industriales.</p>
+    </a>
+
+    <a
       routerLink="/cronogramas"
       class="ui-card module-card"
       *ngIf="canOpenBiomedFeature('cronogramas')"
     >
       <h2>Cronogramas y Capacitaciones</h2>
       <p>Plan anual de preventivos, capacitaciones y control documental.</p>
+    </a>
+
+    <a
+      routerLink="/cronogramas-industriales"
+      class="ui-card module-card"
+      *ngIf="canOpenBiomedFeature('cronogramas_industriales')"
+    >
+      <h2>Cronogramas industriales</h2>
+      <p>Plan anual de mantenimiento exclusivo para los equipos industriales.</p>
     </a>
 
     <a

@@ -59,7 +59,7 @@ export class App {
     },
     '/catalogo-biomedico': {
       eyebrow: 'Plataforma',
-      title: 'Catálogo biomédico',
+      title: 'Catálogo de equipos',
       subtitle: 'Gobierno global de equipos, marcas y modelos.'
     },
     '/clientes': {
@@ -95,7 +95,12 @@ export class App {
     '/hojas-de-vida': {
       eyebrow: 'Biomédico',
       title: 'Hojas de vida',
-      subtitle: 'Registro técnico e historial de equipos.'
+      subtitle: 'Registro técnico e historial de equipos biomédicos.'
+    },
+    '/hojas-de-vida-industriales': {
+      eyebrow: 'Industrial',
+      title: 'Hojas de vida industriales',
+      subtitle: 'Registro técnico e historial de equipos industriales.'
     },
     '/inventario': {
       eyebrow: 'Biomédico',
@@ -117,10 +122,20 @@ export class App {
       title: 'Mantenimiento',
       subtitle: 'Solicitudes, preventivos, correctivos y firmas.'
     },
+    '/mantenimiento-industrial': {
+      eyebrow: 'Industrial',
+      title: 'Mantenimiento industrial',
+      subtitle: 'Solicitudes, reportes, repuestos e historial industrial.'
+    },
     '/cronogramas': {
       eyebrow: 'Biomédico',
       title: 'Cronogramas',
       subtitle: 'Preventivos, capacitaciones y control documental.'
+    },
+    '/cronogramas-industriales': {
+      eyebrow: 'Industrial',
+      title: 'Cronogramas industriales',
+      subtitle: 'Plan anual de mantenimiento de equipos industriales.'
     },
     '/calibraciones': {
       eyebrow: 'Biomédico',
@@ -198,7 +213,18 @@ export class App {
   footerEnvironmentLabel(): string {
     const path = this.currentPath;
     if (path === '/odontologia') return 'Software odontológico';
-    if (['/hojas-de-vida', '/inventario', '/sedes-areas-ubicaciones', '/guias-rapidas', '/mantenimiento', '/cronogramas', '/calibraciones'].includes(path)) {
+    if ([
+      '/hojas-de-vida',
+      '/hojas-de-vida-industriales',
+      '/inventario',
+      '/sedes-areas-ubicaciones',
+      '/guias-rapidas',
+      '/mantenimiento',
+      '/mantenimiento-industrial',
+      '/cronogramas',
+      '/cronogramas-industriales',
+      '/calibraciones'
+    ].includes(path)) {
       return 'Software biomédico';
     }
     if (

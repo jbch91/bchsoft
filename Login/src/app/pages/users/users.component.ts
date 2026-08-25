@@ -111,7 +111,7 @@ export class UsersComponent implements OnInit {
     'users:manage': 'Gestionar usuarios',
     'audit:client:view': 'Ver auditoría administrativa',
     'platform:templates:manage': 'Gestionar plantillas globales',
-    'platform:biomedical_catalog:manage': 'Administrar catálogo biomédico global',
+    'platform:biomedical_catalog:manage': 'Administrar catálogo global de equipos',
     'saas:access': 'Acceder a administración SaaS',
     'saas:clients:view': 'Ver cartera de clientes SaaS',
     'saas:clients:update': 'Editar datos y configuración de clientes SaaS',

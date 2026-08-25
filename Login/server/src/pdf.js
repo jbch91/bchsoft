@@ -78,6 +78,10 @@ const MAINTENANCE_TEST_LABELS = {
   verificacion_accesorios: 'Verificación de accesorios',
   prueba_con_paciente_simulado: 'Prueba con paciente/simulador',
   verificacion_parametros: 'Verificación de parámetros',
+  verificacion_temperatura_presion: 'Verificación de temperatura o presión de operación',
+  prueba_carga_operativa: 'Prueba con carga operativa',
+  verificacion_consumo_electrico: 'Verificación de consumo y alimentación eléctrica',
+  verificacion_fugas_drenajes: 'Verificación de fugas, drenajes y sellos',
   equipo_operativo_entregado: 'Equipo operativo y entregado'
 };
 
@@ -255,6 +259,7 @@ function drawTable(
 }
 
 function drawAssetEngineerSignature(doc, asset) {
+  const isIndustrial = asset.asset_category === 'industrial';
   sectionTitle(doc, 'QUIEN ELABORO / ACTUALIZO LA HOJA DE VIDA');
   ensureSpace(doc, 125);
 
@@ -279,7 +284,14 @@ function drawAssetEngineerSignature(doc, asset) {
     .font('Helvetica-Bold')
     .fontSize(10)
     .fillColor(PDF_BRAND_800)
-    .text('Firma del ingeniero biomédico que elaboró o actualizó técnicamente', startX + 14, startY + 12, { width: width - 28 });
+    .text(
+      isIndustrial
+        ? 'Firma del responsable técnico que elaboró o actualizó la hoja de vida'
+        : 'Firma del ingeniero biomédico que elaboró o actualizó técnicamente',
+      startX + 14,
+      startY + 12,
+      { width: width - 28 }
+    );
 
   const signaturePath = asset.hv_engineer_signature_path
     ? path.join(process.cwd(), asset.hv_engineer_signature_path.replace(/^\//, ''))
@@ -307,19 +319,26 @@ function drawAssetEngineerSignature(doc, asset) {
 
   const infoX = signatureBoxX + signatureWidth + 24;
   const infoWidth = width - signatureWidth - 56;
+  const engineerLines = [
+    `Nombre completo: ${safeText(asset.hv_engineer_name)}`,
+    ...(!isIndustrial
+      ? [`Registro INVIMA: ${safeText(asset.hv_engineer_invima_registration)}`]
+      : []),
+    `Documento: ${safeText(asset.hv_engineer_document_number)}`,
+    `Fecha de elaboración/actualización: ${formatDate(asset.hv_engineer_signed_at)}`
+  ];
   doc
     .font('Helvetica')
     .fontSize(9.5)
     .fillColor(PDF_INK)
-    .text(`Nombre completo: ${safeText(asset.hv_engineer_name)}`, infoX, startY + 36, { width: infoWidth })
-    .text(`Registro INVIMA: ${safeText(asset.hv_engineer_invima_registration)}`, infoX, startY + 52, { width: infoWidth })
-    .text(`Documento: ${safeText(asset.hv_engineer_document_number)}`, infoX, startY + 68, { width: infoWidth })
-    .text(`Fecha de elaboración/actualización: ${formatDate(asset.hv_engineer_signed_at)}`, infoX, startY + 84, { width: infoWidth });
+    .text(engineerLines.join('\n'), infoX, startY + 36, { width: infoWidth, lineGap: 4 });
 
   doc
     .fontSize(8)
     .fillColor(PDF_MUTED)
-    .text('Esta firma queda fija y solo se actualiza cuando un ingeniero biomédico crea o modifica técnicamente la hoja de vida.', startX + 14, startY + 108, {
+    .text(isIndustrial
+      ? 'Esta firma queda fija y solo se actualiza cuando el responsable técnico crea o modifica la hoja de vida.'
+      : 'Esta firma queda fija y solo se actualiza cuando un ingeniero biomédico crea o modifica técnicamente la hoja de vida.', startX + 14, startY + 108, {
       width: width - 28
     });
 
@@ -327,7 +346,8 @@ function drawAssetEngineerSignature(doc, asset) {
 }
 
 export function buildAssetPdf(doc, { client, asset }) {
-  documentTitle(doc, 'Hoja de Vida - Equipo Biomédico');
+  const isIndustrial = asset.asset_category === 'industrial';
+  documentTitle(doc, isIndustrial ? 'Hoja de Vida - Equipo Industrial' : 'Hoja de Vida - Equipo Biomédico');
 
   const headerY = doc.y;
   const headerLeftX = doc.page.margins.left;
@@ -420,14 +440,16 @@ export function buildAssetPdf(doc, { client, asset }) {
     ['Área', safeText(asset.area_name)],
     ['Ubicación', safeText(asset.location_name)],
     ['Código', safeText(asset.code)],
-    ['Registro Invima', safeText(asset.invima_reg)],
-    ['Requiere riesgo sanitario', requiresSanitaryClassification ? 'Sí' : 'No'],
-    ['Riesgo sanitario', requiresSanitaryClassification ? safeText(asset.risk_class) : 'No aplica'],
-    ['Requiere riesgo eléctrico', requiresElectricalClassification ? 'Sí' : 'No'],
-    ['Clase protección eléctrica', requiresElectricalClassification
-      ? safeText(asset.electrical_protection_class)
-      : 'No aplica'],
-    ['Tipo parte aplicada', requiresElectricalClassification ? safeText(asset.applied_part_type) : 'No aplica'],
+    ...(!isIndustrial ? [
+      ['Registro Invima', safeText(asset.invima_reg)],
+      ['Requiere riesgo sanitario', requiresSanitaryClassification ? 'Sí' : 'No'],
+      ['Riesgo sanitario', requiresSanitaryClassification ? safeText(asset.risk_class) : 'No aplica'],
+      ['Requiere riesgo eléctrico', requiresElectricalClassification ? 'Sí' : 'No'],
+      ['Clase protección eléctrica', requiresElectricalClassification
+        ? safeText(asset.electrical_protection_class)
+        : 'No aplica'],
+      ['Tipo parte aplicada', requiresElectricalClassification ? safeText(asset.applied_part_type) : 'No aplica']
+    ] : []),
     ['Tipo', asset.is_mobile ? 'Móvil' : 'Fijo'],
     ['Fabricante', safeText(asset.manufacturer)],
     ['Tipo de alimentación', safeText(asset.power_type)],
@@ -507,11 +529,13 @@ export function buildAssetPdf(doc, { client, asset }) {
     drawTable(doc, [['Documentos', 'Sin documentación adjunta.']], { colWidths: [170, 320], header: true });
   }
 
-  sectionTitle(doc, 'DATOS DE MANTENIMIENTO Y CALIBRACION');
+  sectionTitle(doc, isIndustrial ? 'DATOS DE MANTENIMIENTO' : 'DATOS DE MANTENIMIENTO Y CALIBRACION');
   drawTable(doc, [
     ['Frecuencia mantenimiento', safeText(asset.maintenance_frequency)],
-    ['Requiere calibración', asset.requires_calibration ? 'Sí' : 'No'],
-    ['Frecuencia calibración', safeText(asset.calibration_frequency)],
+    ...(!isIndustrial ? [
+      ['Requiere calibración', asset.requires_calibration ? 'Sí' : 'No'],
+      ['Frecuencia calibración', safeText(asset.calibration_frequency)]
+    ] : [])
   ], { colWidths: [170, 320], header: true });
 
   sectionTitle(doc, 'GUIA DE LIMPIEZA Y DESINFECCION');
@@ -1181,6 +1205,7 @@ export function buildBlankMaintenanceProtocolPdf(
   doc,
   { client, asset, engineer, batchCode, pageNumber = 1, totalPages = 1 }
 ) {
+  const isIndustrial = asset.asset_category === 'industrial';
   paintPageBackground(doc);
   const left = doc.page.margins.left;
   const right = doc.page.width - doc.page.margins.right;
@@ -1213,7 +1238,7 @@ export function buildBlankMaintenanceProtocolPdf(
     .font('Helvetica-Bold')
     .fontSize(12.5)
     .fillColor(PDF_INK)
-    .text('PROTOCOLO DE MANTENIMIENTO', titleX, y + 8, {
+    .text(isIndustrial ? 'PROTOCOLO DE MANTENIMIENTO INDUSTRIAL' : 'PROTOCOLO DE MANTENIMIENTO', titleX, y + 8, {
       width: titleWidth,
       align: 'center'
     });
@@ -1401,7 +1426,9 @@ export function buildBlankMaintenanceProtocolPdf(
     .join(' ');
   const engineerIdentifiers = [
     engineerDocument ? `Documento: ${engineerDocument}` : null,
-    hasText(engineer?.invima_registration) ? `Registro: ${String(engineer.invima_registration).trim()}` : null
+    !isIndustrial && hasText(engineer?.invima_registration)
+      ? `Registro: ${String(engineer.invima_registration).trim()}`
+      : null
   ].filter(Boolean).join('  |  ') || 'Documento / registro: -';
 
   doc
@@ -1497,7 +1524,8 @@ export function buildBlankMaintenanceProtocolPdf(
 }
 
 export function buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures }) {
-  documentTitle(doc, 'Reporte de Mantenimiento');
+  const isIndustrial = asset.asset_category === 'industrial';
+  documentTitle(doc, isIndustrial ? 'Reporte de Mantenimiento Industrial' : 'Reporte de Mantenimiento Biomédico');
 
   const headerY = doc.y;
   const headerLeftX = doc.page.margins.left;
@@ -1548,6 +1576,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
 
   sectionTitle(doc, 'DATOS DEL EQUIPO');
   const assetRows = [
+    ['Categoría', isIndustrial ? 'Equipo industrial' : 'Equipo biomédico'],
     ['Código', safeText(asset.code)],
     ['Nombre', safeText(asset.name)],
     ['Marca', safeText(asset.brand)],
@@ -1649,7 +1678,13 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
 }
 
 export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
-  documentTitle(doc, 'Cronograma de Mantenimiento Preventivo');
+  const isIndustrial = schedule.asset_category === 'industrial';
+  documentTitle(
+    doc,
+    isIndustrial
+      ? 'Cronograma de Mantenimiento Preventivo Industrial'
+      : 'Cronograma de Mantenimiento Preventivo Biomédico'
+  );
 
   const headerY = doc.y;
   const headerLeftX = doc.page.margins.left;
@@ -1685,6 +1720,7 @@ export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
     .text(safeText(client.name), infoStartX, headerY + 8, { width: infoMaxWidth });
 
   const infoLines = [
+    `Categoría: ${isIndustrial ? 'Equipos industriales' : 'Equipos biomédicos'}`,
     `Año: ${safeText(schedule.year)}`,
     `Fecha inicial: ${formatDate(schedule.start_date)}`
   ];
@@ -1697,19 +1733,6 @@ export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
   doc.y = headerY + headerHeight + 10;
 
   sectionTitle(doc, 'DETALLE DEL CRONOGRAMA');
-
-  const subtractBusinessDays = (value, days) => {
-    let date = value instanceof Date ? new Date(value) : new Date(value);
-    let remaining = days;
-    while (remaining > 0) {
-      date.setDate(date.getDate() - 1);
-      const day = date.getDay();
-      if (day !== 0 && day !== 6) {
-        remaining -= 1;
-      }
-    }
-    return date;
-  };
 
   const grouped = new Map();
   for (const item of items) {
@@ -1724,10 +1747,9 @@ export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
         dates: []
       });
     }
-    const rangeStart = item.deadline_date ? subtractBusinessDays(item.deadline_date, 10) : item.planned_date;
     grouped
       .get(item.asset_id)
-      .dates.push(`${formatDate(rangeStart)}-${formatDate(item.deadline_date)}`);
+      .dates.push(`${formatDate(item.planned_date)}-${formatDate(item.deadline_date)}`);
   }
   const rows = Array.from(grouped.values()).map((item) => [
     safeText(item.code),

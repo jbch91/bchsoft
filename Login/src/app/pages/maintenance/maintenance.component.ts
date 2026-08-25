@@ -6,6 +6,7 @@ import { Subscription } from 'rxjs';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
 import { BiomedService } from '../../biomed/biomed.service';
+import type { AssetCategory } from '../../biomed/biomed.service';
 import { MaintenanceService, MaintenanceReportDto, MaintenanceRequestDto } from '../../maintenance/maintenance.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
@@ -73,6 +74,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   private qrDetector: any = null;
   private routeSub: Subscription | null = null;
   private destroyed = false;
+  readonly assetCategory: AssetCategory;
 
   loading = false;
   lastUpdatedAt: Date | null = null;
@@ -189,6 +191,17 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     { value: 'verificacion_parametros', label: 'Parámetros dentro de rango' },
     { value: 'equipo_operativo_entregado', label: 'Equipo operativo y entregado' }
   ];
+  readonly industrialMaintenanceTestOptions = [
+    { value: 'encendido_apagado', label: 'Encendido y apagado' },
+    { value: 'prueba_modos_operacion', label: 'Modos de operación' },
+    { value: 'verificacion_alarmas', label: 'Verificación de alarmas' },
+    { value: 'verificacion_parametros', label: 'Parámetros dentro de rango' },
+    { value: 'verificacion_temperatura_presion', label: 'Temperatura o presión de operación' },
+    { value: 'prueba_carga_operativa', label: 'Prueba con carga operativa' },
+    { value: 'verificacion_consumo_electrico', label: 'Consumo y alimentación eléctrica' },
+    { value: 'verificacion_fugas_drenajes', label: 'Fugas, drenajes y sellos' },
+    { value: 'equipo_operativo_entregado', label: 'Equipo operativo y entregado' }
+  ];
   readonly protocolStatusOptions = [
     { value: '', label: 'Todos los estados' },
     { value: 'activo', label: 'Activo' },
@@ -205,7 +218,27 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     private readonly maintenance: MaintenanceService,
     private readonly cdr: ChangeDetectorRef,
     private readonly route: ActivatedRoute
-  ) {}
+  ) {
+    this.assetCategory = this.route.snapshot.data['assetCategory'] === 'industrial'
+      ? 'industrial'
+      : 'biomedical';
+  }
+
+  get isIndustrialMaintenanceModule(): boolean {
+    return this.assetCategory === 'industrial';
+  }
+
+  get maintenanceModuleTitle(): string {
+    return this.isIndustrialMaintenanceModule
+      ? 'Mantenimiento de equipos industriales'
+      : 'Operación de mantenimiento';
+  }
+
+  get maintenanceTestOptionsForCategory(): readonly { value: string; label: string }[] {
+    return this.isIndustrialMaintenanceModule
+      ? this.industrialMaintenanceTestOptions
+      : this.maintenanceTestOptions;
+  }
 
   async ngOnInit(): Promise<void> {
     if (this.canRefreshMaintenanceTemporaryPermissions) {
@@ -361,9 +394,12 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.errorMessage = '';
     try {
       const [assets, requests, reports] = await Promise.all([
-        this.biomed.listAssets(this.selectedClientId),
-        this.maintenance.listRequests(this.selectedClientId),
-        this.maintenance.listReports(this.selectedClientId, { order: 'desc' })
+        this.biomed.listAssets(this.selectedClientId, this.assetCategory),
+        this.maintenance.listRequests(this.selectedClientId, this.assetCategory),
+        this.maintenance.listReports(this.selectedClientId, {
+          assetCategory: this.assetCategory,
+          order: 'desc'
+        })
       ]);
       this.assets = assets.map((asset) => ({
         id: asset.id,
@@ -450,6 +486,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       await this.maintenance.createRequest({
         clientId: this.selectedClientId,
         assetId: this.requestAssetId,
+        assetCategory: this.assetCategory,
         type: this.requestType,
         description: cleanDescription
       });
@@ -797,7 +834,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       const result = await this.maintenance.generateBlankProtocols({
         scope,
         assetIds: scope === 'selected' ? Array.from(this.selectedProtocolAssetIds) : undefined,
-        reason: this.protocolReason
+        reason: this.protocolReason,
+        assetCategory: this.assetCategory
       });
       const file = new File(
         [result.blob],

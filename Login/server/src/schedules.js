@@ -1,34 +1,51 @@
 import { query, withTransaction } from './db.js';
+import { normalizeAssetCategory } from './asset-category.js';
 
-export async function createSchedule({ clientId, year, startDate, createdBy, pdfPath }) {
+export async function createSchedule({
+  clientId,
+  year,
+  startDate,
+  createdBy,
+  pdfPath,
+  assetCategory = 'biomedical'
+}) {
+  const category = normalizeAssetCategory(assetCategory);
   const { rows } = await query(
-    `INSERT INTO maintenance_schedules (client_id, year, start_date, created_by, pdf_path)
-     VALUES ($1,$2,$3,$4,$5)
+    `INSERT INTO maintenance_schedules (client_id, year, start_date, created_by, pdf_path, asset_category)
+     VALUES ($1,$2,$3,$4,$5,$6)
      RETURNING id`,
-    [clientId, year, startDate, createdBy, pdfPath || null]
+    [clientId, year, startDate, createdBy, pdfPath || null, category]
   );
   return rows[0];
 }
 
-export async function createScheduleWithItems({ clientId, year, startDate, createdBy, items }) {
+export async function createScheduleWithItems({
+  clientId,
+  year,
+  startDate,
+  createdBy,
+  items,
+  assetCategory = 'biomedical'
+}) {
+  const category = normalizeAssetCategory(assetCategory);
   return withTransaction(async (client) => {
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1), $2)', [
-      `maintenance-schedule:${clientId}`,
+      `maintenance-schedule:${clientId}:${category}`,
       year
     ]);
     const existing = await client.query(
-      'SELECT id FROM maintenance_schedules WHERE client_id = $1 AND year = $2 LIMIT 1',
-      [clientId, year]
+      'SELECT id FROM maintenance_schedules WHERE client_id = $1 AND year = $2 AND asset_category = $3 LIMIT 1',
+      [clientId, year, category]
     );
     if (existing.rows.length) return null;
 
     const scheduleResult = await client.query(
-      `INSERT INTO maintenance_schedules (client_id, year, start_date, created_by, pdf_path)
-       VALUES ($1,$2,$3,$4,NULL)
-       RETURNING id, client_id, year, start_date, status, engineer_edited,
+      `INSERT INTO maintenance_schedules (client_id, year, start_date, created_by, pdf_path, asset_category)
+       VALUES ($1,$2,$3,$4,NULL,$5)
+       RETURNING id, client_id, asset_category, year, start_date, status, engineer_edited,
                  engineer_edit_enabled, engineer_edit_enabled_by, engineer_edit_enabled_at,
                  created_by, pdf_path`,
-      [clientId, year, startDate, createdBy]
+      [clientId, year, startDate, createdBy, category]
     );
     const schedule = scheduleResult.rows[0];
     await client.query(
@@ -49,15 +66,15 @@ export async function createScheduleWithItems({ clientId, year, startDate, creat
   });
 }
 
-export async function listSchedules(clientId, year) {
-  const params = [clientId];
-  let where = 'schedule.client_id = $1';
+export async function listSchedules(clientId, year, assetCategory = 'biomedical') {
+  const params = [clientId, normalizeAssetCategory(assetCategory)];
+  let where = 'schedule.client_id = $1 AND schedule.asset_category = $2';
   if (year) {
     params.push(year);
     where += ` AND schedule.year = $${params.length}`;
   }
   const { rows } = await query(
-    `SELECT schedule.id, schedule.client_id, schedule.year, schedule.start_date, schedule.status,
+    `SELECT schedule.id, schedule.client_id, schedule.asset_category, schedule.year, schedule.start_date, schedule.status,
             schedule.engineer_edited, schedule.engineer_edit_enabled,
             schedule.engineer_edit_enabled_by, schedule.engineer_edit_enabled_at,
             schedule.created_at, schedule.approved_at, schedule.pdf_path,
@@ -75,7 +92,7 @@ export async function listSchedules(clientId, year) {
 
 export async function getScheduleById(scheduleId) {
   const { rows } = await query(
-    `SELECT id, client_id, year, start_date, status, engineer_edited,
+    `SELECT id, client_id, asset_category, year, start_date, status, engineer_edited,
             engineer_edit_enabled, engineer_edit_enabled_by, engineer_edit_enabled_at,
             created_by, pdf_path
      FROM maintenance_schedules

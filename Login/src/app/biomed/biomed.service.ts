@@ -3,8 +3,11 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { getApiBase } from '../core/api-base';
 
+export type AssetCategory = 'biomedical' | 'industrial';
+
 interface AssetDto {
   id: string;
+  asset_category: AssetCategory;
   code: string;
   name: string;
   brand: string | null;
@@ -62,6 +65,7 @@ export interface EquipmentCatalogBrandDto {
 export interface EquipmentCatalogItemDto {
   id: string;
   name: string;
+  assetCategory?: AssetCategory;
   brands: EquipmentCatalogBrandDto[];
 }
 
@@ -168,13 +172,20 @@ export class BiomedService {
 
   constructor(private readonly http: HttpClient) {}
 
-  async listAssets(clientId: string): Promise<AssetDto[]> {
-    return firstValueFrom(this.http.get<AssetDto[]>(`${this.apiBase}/biomed/${clientId}/assets`));
+  async listAssets(clientId: string, assetCategory: AssetCategory = 'biomedical'): Promise<AssetDto[]> {
+    return firstValueFrom(
+      this.http.get<AssetDto[]>(`${this.apiBase}/biomed/${clientId}/assets?category=${assetCategory}`)
+    );
   }
 
-  async listEquipmentCatalog(clientId: string): Promise<EquipmentCatalogItemDto[]> {
+  async listEquipmentCatalog(
+    clientId: string,
+    assetCategory: AssetCategory = 'biomedical'
+  ): Promise<EquipmentCatalogItemDto[]> {
     return firstValueFrom(
-      this.http.get<EquipmentCatalogItemDto[]>(`${this.apiBase}/biomed/${clientId}/equipment-catalog`)
+      this.http.get<EquipmentCatalogItemDto[]>(
+        `${this.apiBase}/biomed/${clientId}/equipment-catalog?category=${assetCategory}`
+      )
     );
   }
 
@@ -286,6 +297,7 @@ export class BiomedService {
     maintenanceFrequency?: string;
     requiresCalibration?: boolean;
     calibrationFrequency?: string;
+    assetCategory?: AssetCategory;
     accessories?: any[];
     cleaning?: any[];
     recommendations?: any[];
@@ -333,6 +345,7 @@ export class BiomedService {
     if (payload.maintenanceFrequency) form.append('maintenanceFrequency', payload.maintenanceFrequency);
     if (payload.requiresCalibration !== undefined) form.append('requiresCalibration', String(payload.requiresCalibration));
     if (payload.calibrationFrequency) form.append('calibrationFrequency', payload.calibrationFrequency);
+    if (payload.assetCategory) form.append('assetCategory', payload.assetCategory);
     if (payload.accessories) form.append('accessories', JSON.stringify(payload.accessories));
     if (payload.cleaning) form.append('cleaning', JSON.stringify(payload.cleaning));
     if (payload.recommendations) form.append('recommendations', JSON.stringify(payload.recommendations));
@@ -346,12 +359,13 @@ export class BiomedService {
 
   async importAssets(
     clientId: string,
-    assets: any[]
+    assets: any[],
+    assetCategory: AssetCategory = 'biomedical'
   ): Promise<{ imported: number; ids: string[]; catalogReview: CatalogReviewDto }> {
     return firstValueFrom(
       this.http.post<{ imported: number; ids: string[]; catalogReview: CatalogReviewDto }>(
         `${this.apiBase}/biomed/${clientId}/assets/import`,
-        { assets }
+        { assets, assetCategory }
       )
     );
   }
@@ -489,6 +503,7 @@ export class BiomedService {
     maintenanceFrequency?: string;
     requiresCalibration?: boolean;
     calibrationFrequency?: string;
+    assetCategory?: AssetCategory;
     accessories?: any[];
     cleaning?: any[];
     recommendations?: any[];
@@ -536,6 +551,7 @@ export class BiomedService {
     if (payload.maintenanceFrequency) form.append('maintenanceFrequency', payload.maintenanceFrequency);
     if (payload.requiresCalibration !== undefined) form.append('requiresCalibration', String(payload.requiresCalibration));
     if (payload.calibrationFrequency) form.append('calibrationFrequency', payload.calibrationFrequency);
+    if (payload.assetCategory) form.append('assetCategory', payload.assetCategory);
     if (payload.accessories) form.append('accessories', JSON.stringify(payload.accessories));
     if (payload.cleaning) form.append('cleaning', JSON.stringify(payload.cleaning));
     if (payload.recommendations) form.append('recommendations', JSON.stringify(payload.recommendations));

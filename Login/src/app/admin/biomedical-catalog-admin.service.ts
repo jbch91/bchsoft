@@ -5,6 +5,7 @@ import { getApiBase } from '../core/api-base';
 
 export type BiomedicalCatalogNodeType = 'equipment' | 'brand' | 'model';
 export type BiomedicalCatalogReviewStatus = 'pending' | 'approved' | 'rejected';
+export type EquipmentCatalogCategory = 'biomedical' | 'industrial';
 
 export interface BiomedicalCatalogNodeBase {
   id: string;
@@ -37,6 +38,7 @@ export interface BiomedicalCatalogBrand extends BiomedicalCatalogNodeBase {
 
 export interface BiomedicalCatalogEquipment extends BiomedicalCatalogNodeBase {
   type: 'equipment';
+  assetCategory: EquipmentCatalogCategory;
   brands: BiomedicalCatalogBrand[];
 }
 
@@ -66,6 +68,7 @@ export class BiomedicalCatalogAdminService {
     type: BiomedicalCatalogNodeType;
     name: string;
     parentId?: string | null;
+    assetCategory?: EquipmentCatalogCategory;
   }): Promise<{ node: unknown }> {
     return firstValueFrom(
       this.http.post<{ node: unknown }>(`${this.apiBase}/admin/biomedical-catalog/nodes`, payload)

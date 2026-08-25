@@ -30,18 +30,20 @@ export async function sendPreventiveRemindersForClient(clientId) {
     `SELECT planned_date::text AS planned_date,
             MAX(deadline_date)::text AS deadline_date,
             COUNT(*)::int AS request_count,
-            COUNT(DISTINCT asset_id)::int AS asset_count
-     FROM maintenance_requests
-     WHERE client_id = $1
-       AND type = 'preventivo'
-       AND source = 'cronograma'
-       AND status NOT IN ('reportado', 'firmado', 'vencido')
+            COUNT(DISTINCT r.asset_id)::int AS asset_count,
+            COALESCE(s.asset_category, 'biomedical') AS asset_category
+     FROM maintenance_requests r
+     LEFT JOIN maintenance_schedules s ON s.id = r.schedule_id
+     WHERE r.client_id = $1
+       AND r.type = 'preventivo'
+       AND r.source = 'cronograma'
+       AND r.status NOT IN ('reportado', 'firmado', 'vencido')
        AND (
-         (planned_date = $2 AND reminder_day_sent_at IS NULL)
-         OR (planned_date = $3 AND reminder_3_sent_at IS NULL)
+         (r.planned_date = $2 AND r.reminder_day_sent_at IS NULL)
+         OR (r.planned_date = $3 AND r.reminder_3_sent_at IS NULL)
        )
-     GROUP BY planned_date
-     ORDER BY planned_date ASC`,
+     GROUP BY r.planned_date, COALESCE(s.asset_category, 'biomedical')
+     ORDER BY r.planned_date ASC, asset_category ASC`,
     [clientId, todayStr, threeDaysStr]
   );
 
@@ -54,10 +56,11 @@ export async function sendPreventiveRemindersForClient(clientId) {
     const deadlineDate = toDateOnly(group.deadline_date);
     const isToday = plannedDate === todayStr;
     const reminderField = isToday ? 'reminder_day_sent_at' : 'reminder_3_sent_at';
+    const isIndustrial = group.asset_category === 'industrial';
 
     const title = isToday
-      ? 'Inicio de mantenimiento preventivo'
-      : 'Recordatorio: mantenimiento preventivo próximo';
+      ? `Inicio de mantenimiento preventivo${isIndustrial ? ' industrial' : ''}`
+      : `Recordatorio: mantenimiento preventivo${isIndustrial ? ' industrial' : ''} próximo`;
     const message = isToday
       ? `Hoy inicia el mantenimiento preventivo programado. Equipos incluidos: ${group.asset_count}. Ventana de ejecución: ${plannedDate} a ${deadlineDate}.`
       : `Faltan 3 días para iniciar el mantenimiento preventivo. Equipos incluidos: ${group.asset_count}. Fecha de inicio: ${plannedDate}.`;
@@ -68,7 +71,7 @@ export async function sendPreventiveRemindersForClient(clientId) {
         clientId,
         title,
         message,
-        link: '/mantenimiento',
+        link: isIndustrial ? '/mantenimiento-industrial' : '/mantenimiento',
         type: isToday ? 'preventive_maintenance_start' : 'preventive_maintenance_reminder',
         priority: isToday ? 'high' : 'normal',
         data: {
@@ -76,6 +79,7 @@ export async function sendPreventiveRemindersForClient(clientId) {
           deadlineDate,
           assetCount: group.asset_count,
           requestCount: group.request_count,
+          assetCategory: group.asset_category,
           reminderKind: isToday ? 'day_start' : 'three_days_before'
         }
       });
@@ -99,8 +103,13 @@ export async function sendPreventiveRemindersForClient(clientId) {
          AND type = 'preventivo'
          AND source = 'cronograma'
          AND planned_date = $2
+         AND COALESCE((
+           SELECT s.asset_category
+           FROM maintenance_schedules s
+           WHERE s.id = maintenance_requests.schedule_id
+         ), 'biomedical') = $3
          AND ${reminderField} IS NULL`,
-      [clientId, plannedDate]
+      [clientId, plannedDate, group.asset_category]
     );
   }
 }

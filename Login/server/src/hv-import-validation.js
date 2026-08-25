@@ -1,5 +1,6 @@
 import { canonicalizeCatalogValue } from './equipment-catalog-text.js';
 import { normalizeBiomedicalRiskClassifications } from './biomedical-risk.js';
+import { normalizeAssetCategory } from './asset-category.js';
 
 export const HV_CALIBRATION_FREQUENCIES = Object.freeze([
   'mensual',
@@ -55,12 +56,30 @@ function isValidEmail(value) {
 
 export function validateAndNormalizeHvImportAsset(asset = {}) {
   const errors = [];
+  let assetCategory = 'biomedical';
+  try {
+    assetCategory = normalizeAssetCategory(asset.assetCategory);
+  } catch (error) {
+    errors.push(error.message);
+  }
   const acquisitionDate = normalizeOptionalRecordedValue(asset.acquisitionDate);
   const supplierEmail = normalizeOptionalRecordedValue(asset.supplierEmail);
-  const requiresCalibration = parseBoolean(asset.requiresCalibration);
+  const parsedRequiresCalibration = parseBoolean(asset.requiresCalibration);
+  const requiresCalibration = assetCategory === 'industrial' ? false : parsedRequiresCalibration;
   const calibrationFrequencyRaw = String(asset.calibrationFrequency ?? '').trim();
   const calibrationFrequency = normalizedText(calibrationFrequencyRaw) || null;
-  const risk = normalizeBiomedicalRiskClassifications(asset);
+  const risk = assetCategory === 'industrial'
+    ? {
+        values: {
+          requiresSanitaryClassification: false,
+          riskClass: null,
+          requiresElectricalClassification: false,
+          electricalProtectionClass: null,
+          appliedPartType: null
+        },
+        errors: []
+      }
+    : normalizeBiomedicalRiskClassifications(asset);
 
   if (acquisitionDate && !isValidIsoDate(acquisitionDate)) {
     errors.push('Fecha adquisición debe usar yyyy-mm-dd, quedar vacía o ser NR');
@@ -68,14 +87,16 @@ export function validateAndNormalizeHvImportAsset(asset = {}) {
   if (supplierEmail && !isValidEmail(supplierEmail)) {
     errors.push('Correo proveedor no tiene un formato válido');
   }
-  if (requiresCalibration === null) {
-    errors.push('Requiere calibración debe ser Sí o No');
-  } else if (!requiresCalibration && calibrationFrequencyRaw) {
-    errors.push('Frecuencia de calibración debe estar vacía cuando el equipo no requiere calibración');
-  } else if (requiresCalibration && !calibrationFrequency) {
-    errors.push('Frecuencia de calibración es obligatoria cuando el equipo requiere calibración');
-  } else if (calibrationFrequency && !HV_CALIBRATION_FREQUENCIES.includes(calibrationFrequency)) {
-    errors.push(`Frecuencia de calibración no permitida. Usa: ${HV_CALIBRATION_FREQUENCIES.join(', ')}`);
+  if (assetCategory !== 'industrial') {
+    if (requiresCalibration === null) {
+      errors.push('Requiere calibración debe ser Sí o No');
+    } else if (!requiresCalibration && calibrationFrequencyRaw) {
+      errors.push('Frecuencia de calibración debe estar vacía cuando el equipo no requiere calibración');
+    } else if (requiresCalibration && !calibrationFrequency) {
+      errors.push('Frecuencia de calibración es obligatoria cuando el equipo requiere calibración');
+    } else if (calibrationFrequency && !HV_CALIBRATION_FREQUENCIES.includes(calibrationFrequency)) {
+      errors.push(`Frecuencia de calibración no permitida. Usa: ${HV_CALIBRATION_FREQUENCIES.join(', ')}`);
+    }
   }
   errors.push(...risk.errors);
 
@@ -85,6 +106,7 @@ export function validateAndNormalizeHvImportAsset(asset = {}) {
       name: canonicalizeCatalogValue(asset.name) || asset.name,
       brand: canonicalizeCatalogValue(asset.brand) || asset.brand,
       model: canonicalizeCatalogValue(asset.model) || asset.model,
+      assetCategory,
       acquisitionDate,
       supplierEmail,
       ...risk.values,

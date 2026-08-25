@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { getApiBase } from '../core/api-base';
+import type { AssetCategory } from '../biomed/biomed.service';
 
 export interface MaintenanceRequestDto {
   id: string;
@@ -74,15 +75,21 @@ export class MaintenanceService {
 
   constructor(private readonly http: HttpClient) {}
 
-  async listRequests(clientId: string): Promise<MaintenanceRequestDto[]> {
+  async listRequests(
+    clientId: string,
+    assetCategory: AssetCategory = 'biomedical'
+  ): Promise<MaintenanceRequestDto[]> {
     return firstValueFrom(
-      this.http.get<MaintenanceRequestDto[]>(`${this.apiBase}/maintenance/requests/${clientId}`)
+      this.http.get<MaintenanceRequestDto[]>(
+        `${this.apiBase}/maintenance/requests/${clientId}?category=${assetCategory}`
+      )
     );
   }
 
   async createRequest(payload: {
     clientId: string;
     assetId: string;
+    assetCategory?: AssetCategory;
     type: 'preventivo' | 'correctivo';
     description?: string;
   }): Promise<void> {
@@ -101,9 +108,17 @@ export class MaintenanceService {
 
   async listReports(
     clientId: string,
-    params?: { assetId?: string; from?: string; to?: string; order?: 'asc' | 'desc'; limit?: number; offset?: number }
+    params?: {
+      assetId?: string;
+      assetCategory?: AssetCategory;
+      from?: string;
+      to?: string;
+      order?: 'asc' | 'desc';
+      limit?: number;
+      offset?: number;
+    }
   ): Promise<MaintenanceReportDto[]> {
-    const query = new URLSearchParams();
+    const query = new URLSearchParams({ category: params?.assetCategory ?? 'biomedical' });
     if (params?.assetId) query.set('assetId', params.assetId);
     if (params?.from) query.set('from', params.from);
     if (params?.to) query.set('to', params.to);
@@ -155,6 +170,7 @@ export class MaintenanceService {
     scope: 'selected' | 'all_active';
     assetIds?: string[];
     reason: string;
+    assetCategory?: AssetCategory;
   }): Promise<BlankMaintenanceProtocolResult> {
     const response = await firstValueFrom(
       this.http.post(`${this.apiBase}/maintenance/protocols/blank-pdf`, payload, {

@@ -33,6 +33,7 @@ import {
   allowedClientPermissionsForModules
 } from './permission-policy.js';
 import { validateAndNormalizeHvImportAsset } from './hv-import-validation.js';
+import { assetCategoryLabel, normalizeAssetCategory } from './asset-category.js';
 import {
   createUser,
   getClientRolePermissions,
@@ -521,6 +522,10 @@ const MAINTENANCE_TEST_OPTIONS = [
   'verificacion_accesorios',
   'prueba_con_paciente_simulado',
   'verificacion_parametros',
+  'verificacion_temperatura_presion',
+  'prueba_carga_operativa',
+  'verificacion_consumo_electrico',
+  'verificacion_fugas_drenajes',
   'equipo_operativo_entregado'
 ];
 const SIGNATURE_ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.pdf'];
@@ -739,11 +744,11 @@ function requirePlatformCatalogManager(req, res, next) {
     || !BIOMEDICAL_CATALOG_ADMIN_ROLES.some((role) => hasRole(req.user, role))
   ) {
     return res.status(403).json({
-      message: 'El catálogo biomédico global solo puede administrarse desde una cuenta de plataforma.'
+      message: 'El catálogo global de equipos solo puede administrarse desde una cuenta de plataforma.'
     });
   }
   if (!req.user?.permissions?.includes('platform:biomedical_catalog:manage')) {
-    return res.status(403).json({ message: 'Sin permisos para administrar el catálogo biomédico global.' });
+    return res.status(403).json({ message: 'Sin permisos para administrar el catálogo global de equipos.' });
   }
   return next();
 }
@@ -7123,6 +7128,12 @@ function assetLabel(asset) {
   return `${code}${asset.name || 'Equipo sin nombre'}`;
 }
 
+function maintenanceRouteForAsset(asset) {
+  return asset?.asset_category === 'industrial'
+    ? '/mantenimiento-industrial'
+    : '/mantenimiento';
+}
+
 function isBiomedicalEngineer(user) {
   return user?.roles?.includes('ingeniero_biomedico');
 }
@@ -7174,6 +7185,7 @@ function assetSnapshot(asset) {
   if (!asset) return null;
   return {
     id: asset.id,
+    assetCategory: asset.asset_category ?? 'biomedical',
     code: asset.code ?? null,
     name: asset.name ?? null,
     brand: asset.brand ?? null,
@@ -7196,6 +7208,7 @@ function assetSnapshot(asset) {
 function changedAssetFields(before, after) {
   if (!before || !after) return [];
   const fields = [
+    ['asset_category', 'Categoría'],
     ['code', 'Código'],
     ['name', 'Nombre'],
     ['brand', 'Marca'],
@@ -7838,6 +7851,9 @@ function sendCatalogError(res, error, fallbackMessage) {
   if (code.startsWith('CATALOG_')) {
     return res.status(400).json({ code, message: error.message });
   }
+  if (code === 'INVALID_ASSET_CATEGORY') {
+    return res.status(400).json({ code, message: error.message });
+  }
   console.error(error);
   return res.status(500).json({ message: fallbackMessage });
 }
@@ -7850,7 +7866,7 @@ app.get(
     try {
       return res.json(await listEquipmentCatalogForAdmin());
     } catch (error) {
-      return sendCatalogError(res, error, 'No se pudo cargar el catálogo biomédico global.');
+      return sendCatalogError(res, error, 'No se pudo cargar el catálogo global de equipos.');
     }
   }
 );
@@ -7860,12 +7876,13 @@ app.post(
   requireAuth,
   requirePlatformCatalogManager,
   async (req, res) => {
-    const { type, name, parentId = null } = req.body || {};
+    const { type, name, parentId = null, assetCategory = 'biomedical' } = req.body || {};
     try {
       const node = await createApprovedCatalogNode({
         type,
         name,
         parentId,
+        assetCategory,
         actorUserId: req.user.sub
       });
       await logAudit({
@@ -7873,7 +7890,7 @@ app.post(
         actorUsername: req.user.username,
         action: 'BIOMEDICAL_CATALOG_CREATE',
         targetUserId: node.id,
-        details: { type, name: node.name, parentId }
+        details: { type, name: node.name, parentId, assetCategory: node.asset_category || assetCategory }
       });
       return res.status(201).json({ node });
     } catch (error) {
@@ -8115,7 +8132,7 @@ app.post(
         return res.status(409).json({ message: 'Ya existe una guía rápida para este equipo, marca y modelo en el cliente.' });
       }
       if (String(error?.code || '').startsWith('CATALOG_')) {
-        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo biomédico.');
+        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo de equipos.');
       }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo crear la guía rápida.' });
@@ -8167,7 +8184,7 @@ app.put(
         return res.status(409).json({ message: 'Ya existe una guía rápida para este equipo, marca y modelo en el cliente.' });
       }
       if (String(error?.code || '').startsWith('CATALOG_')) {
-        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo biomédico.');
+        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo de equipos.');
       }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo actualizar la guía rápida.' });
@@ -8272,8 +8289,12 @@ app.get(
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     try {
-      return res.json(await listEquipmentCatalog());
+      const assetCategory = normalizeAssetCategory(req.query.category);
+      return res.json(await listEquipmentCatalog(assetCategory));
     } catch (error) {
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo cargar el catálogo de equipos.' });
     }
@@ -8291,11 +8312,15 @@ app.get(
     }
 
     try {
+      const assetCategory = normalizeAssetCategory(req.query.category);
       const assets = req.user.roles?.includes('lector')
-        ? await listAssetsForReader(clientId, req.user.sub)
-        : await listAssets(clientId);
+        ? await listAssetsForReader(clientId, req.user.sub, { assetCategory })
+        : await listAssets(clientId, { assetCategory });
       return res.json(assets);
     } catch (error) {
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
       console.error(error);
       return res.status(500).json({ message: 'No se pudieron cargar las hojas de vida.' });
     }
@@ -8349,6 +8374,7 @@ app.post(
       maintenanceFrequency,
       requiresCalibration,
       calibrationFrequency,
+      assetCategory,
       accessories,
       cleaning,
       recommendations
@@ -8394,6 +8420,7 @@ app.post(
         maintenanceFrequency,
         requiresCalibration: String(requiresCalibration) === 'true',
         calibrationFrequency,
+        assetCategory,
         hvEngineerUserId,
         catalogCreatedBy: req.user.sub
       });
@@ -8461,9 +8488,12 @@ app.post(
       return res.status(201).json(result);
     } catch (error) {
       if (String(error?.code || '').startsWith('CATALOG_')) {
-        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo biomédico.');
+        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo de equipos.');
       }
       if (error?.code === 'INVALID_RISK_CLASSIFICATION') {
+        return res.status(400).json({ message: error.message });
+      }
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
         return res.status(400).json({ message: error.message });
       }
       console.error(error);
@@ -8490,6 +8520,20 @@ app.post(
       return res.status(400).json({ message: 'Importa máximo 500 equipos por archivo.' });
     }
 
+    let assetCategory;
+    try {
+      assetCategory = normalizeAssetCategory(req.body?.assetCategory ?? assets[0]?.assetCategory);
+      const mixedCategory = assets.some(
+        (asset) => normalizeAssetCategory(asset?.assetCategory ?? assetCategory) !== assetCategory
+      );
+      if (mixedCategory) {
+        return res.status(400).json({ message: 'Todos los equipos del archivo deben pertenecer a la misma categoría.' });
+      }
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+    assets = assets.map((asset) => ({ ...asset, assetCategory }));
+
     const missing = assets.find((asset) =>
       !asset?.code ||
       !asset?.name ||
@@ -8499,7 +8543,7 @@ app.post(
       !asset?.siteId ||
       !asset?.areaId ||
       !asset?.locationId ||
-      !asset?.invimaReg
+      (assetCategory === 'biomedical' && !asset?.invimaReg)
     );
     if (missing) {
       return res.status(400).json({ message: 'Hay equipos con campos obligatorios incompletos.' });
@@ -8597,6 +8641,7 @@ app.post(
           maintenanceFrequency: asset.maintenanceFrequency || 'mensual',
           requiresCalibration: Boolean(asset.requiresCalibration),
           calibrationFrequency: asset.calibrationFrequency,
+          assetCategory,
           hvEngineerUserId,
           catalogCreatedBy: req.user.sub
         });
@@ -8628,9 +8673,12 @@ app.post(
       });
     } catch (error) {
       if (String(error?.code || '').startsWith('CATALOG_')) {
-        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo biomédico.');
+        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo de equipos.');
       }
       if (error?.code === 'INVALID_RISK_CLASSIFICATION') {
+        return res.status(400).json({ message: error.message });
+      }
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
         return res.status(400).json({ message: error.message });
       }
       console.error(error);
@@ -8684,6 +8732,7 @@ app.put(
       maintenanceFrequency,
       requiresCalibration,
       calibrationFrequency,
+      assetCategory,
       accessories,
       cleaning,
       recommendations
@@ -8694,6 +8743,16 @@ app.put(
     try {
       const hvEngineerUserId = await resolveHvEngineerUserId(req);
       const beforeAsset = await getAssetById(clientId, assetId);
+      if (!beforeAsset) {
+        return res.status(404).json({ message: 'Equipo no encontrado.' });
+      }
+      const currentCategory = normalizeAssetCategory(beforeAsset.asset_category);
+      const requestedAssetCategory = normalizeAssetCategory(assetCategory ?? currentCategory);
+      if (currentCategory !== requestedAssetCategory) {
+        return res.status(409).json({
+          message: 'La categoría de la hoja de vida se define al crearla y no puede cambiarse al editar.'
+        });
+      }
       const updateResult = await updateAsset(clientId, assetId, {
         code,
         name,
@@ -8728,6 +8787,7 @@ app.put(
         maintenanceFrequency,
         requiresCalibration: String(requiresCalibration) === 'true',
         calibrationFrequency,
+        assetCategory: currentCategory,
         hvEngineerUserId,
         catalogCreatedBy: req.user.sub
       });
@@ -8795,9 +8855,12 @@ app.put(
       return res.json({ ok: true, catalogReview: updateResult.catalogReview });
     } catch (error) {
       if (String(error?.code || '').startsWith('CATALOG_')) {
-        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo biomédico.');
+        return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo de equipos.');
       }
       if (error?.code === 'INVALID_RISK_CLASSIFICATION') {
+        return res.status(400).json({ message: error.message });
+      }
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
         return res.status(400).json({ message: error.message });
       }
       console.error(error);
@@ -9967,12 +10030,21 @@ app.get(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    await syncDueScheduleRequests(clientId, req.user.sub);
-    await sendPreventiveReminders(clientId);
-    const rows = req.user.roles?.includes('lector')
-      ? await listMaintenanceRequestsForReader(clientId, req.user.sub)
-      : await listMaintenanceRequests(clientId);
-    return res.json(rows);
+    try {
+      const assetCategory = normalizeAssetCategory(req.query.category);
+      await syncDueScheduleRequests(clientId, req.user.sub);
+      await sendPreventiveReminders(clientId);
+      const rows = req.user.roles?.includes('lector')
+        ? await listMaintenanceRequestsForReader(clientId, req.user.sub, { assetCategory })
+        : await listMaintenanceRequests(clientId, { assetCategory });
+      return res.json(rows);
+    } catch (error) {
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudieron cargar las solicitudes de mantenimiento.' });
+    }
   }
 );
 
@@ -9981,7 +10053,13 @@ app.post(
   requireAuth,
   requirePermission('maintenance:request:create'),
   async (req, res) => {
-    const { assetId, type, description, clientId: bodyClientId } = req.body || {};
+    const {
+      assetId,
+      assetCategory: requestedCategory,
+      type,
+      description,
+      clientId: bodyClientId
+    } = req.body || {};
     const clientId = req.user.clientId ?? bodyClientId;
     if (!clientId || !assetId || !type) {
       return res.status(400).json({ message: 'Datos incompletos.' });
@@ -10012,6 +10090,17 @@ app.post(
         message: 'Este equipo está dado de baja y no permite nuevas solicitudes de mantenimiento.'
       });
     }
+    let assetCategory;
+    try {
+      assetCategory = normalizeAssetCategory(requestedCategory);
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+    if (normalizeAssetCategory(requestedAsset.asset_category) !== assetCategory) {
+      return res.status(400).json({
+        message: 'El equipo no pertenece a la categoría de mantenimiento seleccionada.'
+      });
+    }
 
     const result = await createMaintenanceRequest({
       clientId,
@@ -10030,6 +10119,7 @@ app.post(
       details: {
         eventType: 'solicitud_mantenimiento_creada',
         requestId: result.id,
+        assetCategory,
         maintenanceType: type,
         requestDescription: cleanDescription || null
       }
@@ -10044,7 +10134,7 @@ app.post(
         clientId,
         title,
         message,
-        link: '/mantenimiento',
+        link: maintenanceRouteForAsset(requestedAsset),
         type: 'maintenance_request_created',
         priority: 'high',
         data: {
@@ -10124,6 +10214,12 @@ app.post(
       return res.status(400).json({ message: normalized.error });
     }
     const { scope, reason, assetIds } = normalized.value;
+    let assetCategory;
+    try {
+      assetCategory = normalizeAssetCategory(req.body?.assetCategory);
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
 
     try {
       const engineer = await getUserById(req.user.sub);
@@ -10149,6 +10245,7 @@ app.post(
 
       const assets = await listAssetsForBlankMaintenanceProtocols(clientId, {
         assetIds: scope === 'selected' ? assetIds : null,
+        assetCategory,
         limit: MAX_BLANK_MAINTENANCE_PROTOCOLS_PER_BATCH + 1
       });
       if (assets.length > MAX_BLANK_MAINTENANCE_PROTOCOLS_PER_BATCH) {
@@ -10208,6 +10305,7 @@ app.post(
             assetCount: assets.length,
             selectionScope: scope,
             reason,
+            assetCategory,
             engineerSignatureApplied: true,
             temporaryPermissionExpiresAt: req.temporaryPermission.expiresAt
           }
@@ -10249,6 +10347,12 @@ app.get(
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     const { assetId, from, to, order, limit, offset } = req.query;
+    let assetCategory;
+    try {
+      assetCategory = normalizeAssetCategory(req.query.category);
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
     const parsedLimit = limit ? Math.min(Number(limit) || 0, 100) : undefined;
     const parsedOffset = offset ? Math.max(Number(offset) || 0, 0) : undefined;
     if (req.user.roles?.includes('lector') && assetId) {
@@ -10258,8 +10362,24 @@ app.get(
       }
     }
     const rows = req.user.roles?.includes('lector')
-      ? await listMaintenanceReportsForReader(clientId, req.user.sub, { assetId, from, to, order, limit: parsedLimit, offset: parsedOffset })
-      : await listMaintenanceReports(clientId, { assetId, from, to, order, limit: parsedLimit, offset: parsedOffset });
+      ? await listMaintenanceReportsForReader(clientId, req.user.sub, {
+          assetId,
+          assetCategory,
+          from,
+          to,
+          order,
+          limit: parsedLimit,
+          offset: parsedOffset
+        })
+      : await listMaintenanceReports(clientId, {
+          assetId,
+          assetCategory,
+          from,
+          to,
+          order,
+          limit: parsedLimit,
+          offset: parsedOffset
+        });
     const signatures = await listReportSignaturesByReports(rows.map((r) => r.id));
     const byReport = new Map();
     for (const sig of signatures) {
@@ -10466,7 +10586,11 @@ app.post(
         await setScheduleClosedIfDone(request.schedule_id);
       } else {
         const year = new Date().getFullYear();
-        const schedules = await listSchedules(request.client_id, year);
+        const schedules = await listSchedules(
+          request.client_id,
+          year,
+          reportAsset?.asset_category || 'biomedical'
+        );
         if (schedules.length) {
           const schedule = schedules[0];
           const item = await findScheduleItemForAsset(schedule.id, request.asset_id, new Date());
@@ -10491,7 +10615,7 @@ app.post(
         clientId: request.client_id,
         title,
         message,
-        link: '/mantenimiento',
+        link: maintenanceRouteForAsset(reportAsset),
         type: 'maintenance_report_ready',
         priority: 'high',
         data: {
@@ -10524,7 +10648,7 @@ app.post(
           clientId: request.client_id,
           title,
           message,
-          link: '/mantenimiento',
+          link: maintenanceRouteForAsset(reportAsset),
           type: 'maintenance_spare_part_requested',
           priority: 'high',
           data: {
@@ -10674,7 +10798,7 @@ app.post(
         clientId: report.client_id,
         title,
         message,
-        link: '/mantenimiento',
+        link: maintenanceRouteForAsset(asset),
         type: 'maintenance_report_signed',
         priority: 'normal',
         data: {
@@ -10759,7 +10883,7 @@ app.post(
         clientId: report.client_id,
         title,
         message,
-        link: '/mantenimiento',
+        link: maintenanceRouteForAsset(signedAsset),
         type: 'maintenance_report_correction_requested',
         priority: 'high',
         data: {
@@ -11067,9 +11191,18 @@ app.get(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    const year = req.query.year ? Number(req.query.year) : undefined;
-    const rows = await listSchedules(clientId, year);
-    return res.json(rows);
+    try {
+      const year = req.query.year ? Number(req.query.year) : undefined;
+      const assetCategory = normalizeAssetCategory(req.query.category);
+      const rows = await listSchedules(clientId, year, assetCategory);
+      return res.json(rows);
+    } catch (error) {
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudieron cargar los cronogramas de mantenimiento.' });
+    }
   }
 );
 
@@ -11083,9 +11216,14 @@ app.post(
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     let scheduleInput;
+    let assetCategory;
     try {
       scheduleInput = normalizeScheduleStart(req.body || {});
+      assetCategory = normalizeAssetCategory(req.body?.assetCategory);
     } catch (error) {
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
       return respondScheduleError(res, error, 'No se pudo validar el cronograma.');
     }
 
@@ -11098,12 +11236,16 @@ app.post(
       `SELECT id, code, name, brand, model, serial, maintenance_frequency
        FROM "${schema}".assets
        WHERE maintenance_frequency IS NOT NULL
+         AND asset_category = $1
          AND COALESCE(status, 'activo') <> 'dado_de_baja'
-       ORDER BY created_at ASC`
+       ORDER BY created_at ASC`,
+      [assetCategory]
     );
     const assets = assetsResult.rows;
     if (!assets.length) {
-      return res.status(400).json({ message: 'No hay equipos con periodicidad definida.' });
+      return res.status(400).json({
+        message: `No hay equipos ${assetCategory === 'industrial' ? 'industriales' : 'biomédicos'} con periodicidad definida.`
+      });
     }
 
     const items = [];
@@ -11143,10 +11285,13 @@ app.post(
         clientId,
         ...scheduleInput,
         createdBy: req.user.sub,
+        assetCategory,
         items
       });
       if (!schedule) {
-        return res.status(409).json({ message: 'Ya existe un cronograma de mantenimiento para este año.' });
+        return res.status(409).json({
+          message: `Ya existe un cronograma de mantenimiento ${assetCategoryLabel(assetCategory)} para este año.`
+        });
       }
       const scheduleItems = await listScheduleItemsWithSchema(schedule.id, schema);
       await writeSchedulePdf({ client, schedule, items: scheduleItems });
@@ -11161,6 +11306,7 @@ app.post(
           clientId,
           clientName: client.name,
           scheduleId: schedule.id,
+          assetCategory,
           year: scheduleInput.year,
           itemCount: items.length
         }
@@ -11249,6 +11395,7 @@ app.patch(
           clientId: schedule.client_id,
           clientName: client.name,
           scheduleId: schedule.id,
+          assetCategory: schedule.asset_category || 'biomedical',
           year: schedule.year,
           updatedItemCount: changedItems.length,
           programmedItemCount: approvedEdit ? 0 : normalized.length,
@@ -11316,6 +11463,7 @@ app.post(
         clientId: schedule.client_id,
         clientName: client.name,
         scheduleId: schedule.id,
+        assetCategory: schedule.asset_category || 'biomedical',
         year: schedule.year,
         itemCount
       }
@@ -11371,6 +11519,7 @@ app.patch(
           clientId: schedule.client_id,
           clientName: client?.name,
           scheduleId: schedule.id,
+          assetCategory: schedule.asset_category || 'biomedical',
           year: schedule.year,
           enabled
         }
@@ -11451,6 +11600,7 @@ app.delete(
         clientId: schedule.client_id,
         clientName: client?.name,
         scheduleId: schedule.id,
+        assetCategory: schedule.asset_category || 'biomedical',
         year: schedule.year
       }
     });

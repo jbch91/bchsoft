@@ -101,7 +101,13 @@ export const routes: Routes = [
     path: 'hojas-de-vida',
     loadComponent: () => import('./pages/hojas-de-vida/hojas-de-vida.component').then((m) => m.HojasDeVidaComponent),
     canActivate: [accessGuard],
-    data: biomedicalRouteData('hojas_de_vida')
+    data: { ...biomedicalRouteData('hojas_de_vida'), assetCategory: 'biomedical' }
+  },
+  {
+    path: 'hojas-de-vida-industriales',
+    loadComponent: () => import('./pages/hojas-de-vida/hojas-de-vida.component').then((m) => m.HojasDeVidaComponent),
+    canActivate: [accessGuard],
+    data: { ...biomedicalRouteData('hojas_de_vida_industriales'), assetCategory: 'industrial' }
   },
   {
     path: 'inventario',
@@ -128,10 +134,25 @@ export const routes: Routes = [
     data: biomedicalRouteData('reportes_mantenimiento')
   },
   {
+    path: 'mantenimiento-industrial',
+    loadComponent: () => import('./pages/maintenance/maintenance.component').then((m) => m.MaintenanceComponent),
+    canActivate: [accessGuard],
+    data: {
+      ...biomedicalRouteData('reportes_mantenimiento_industrial'),
+      assetCategory: 'industrial'
+    }
+  },
+  {
     path: 'cronogramas',
     loadComponent: () => import('./pages/cronogramas/cronogramas.component').then((m) => m.CronogramasComponent),
     canActivate: [accessGuard],
-    data: biomedicalRouteData('cronogramas')
+    data: { ...biomedicalRouteData('cronogramas'), assetCategory: 'biomedical' }
+  },
+  {
+    path: 'cronogramas-industriales',
+    loadComponent: () => import('./pages/cronogramas/cronogramas.component').then((m) => m.CronogramasComponent),
+    canActivate: [accessGuard],
+    data: { ...biomedicalRouteData('cronogramas_industriales'), assetCategory: 'industrial' }
   },
   {
     path: 'calibraciones',

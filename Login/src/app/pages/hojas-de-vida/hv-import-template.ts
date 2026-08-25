@@ -35,6 +35,7 @@ export interface HvTemplateEquipmentCatalogItem {
 }
 
 interface HvImportTemplateOptions {
+  assetCategory?: 'biomedical' | 'industrial';
   headers: readonly string[];
   sites: readonly HvTemplateSite[];
   areas: readonly HvTemplateArea[];
@@ -103,10 +104,11 @@ export function buildHvImportTemplate(
   workbook: Workbook,
   options: HvImportTemplateOptions
 ): void {
+  const isIndustrial = options.assetCategory === 'industrial';
   workbook.creator = 'INBIHOSPITALARIO';
   workbook.created = new Date();
 
-  const worksheet = workbook.addWorksheet('Hojas de vida', {
+  const worksheet = workbook.addWorksheet(isIndustrial ? 'Hojas industriales' : 'Hojas de vida', {
     views: [{ state: 'frozen', ySplit: 1 }]
   });
   const catalogSheet = workbook.addWorksheet(CATALOG_SHEET_NAME, {
@@ -146,6 +148,14 @@ export function buildHvImportTemplate(
     width: Math.min(Math.max(header.length + 4, 15), 28)
   }));
   styleHeaderRow(worksheet.getRow(1), 'FFA64045');
+  const columnNumber = (...headers: string[]): number => {
+    const normalized = headers.map((header) => header.trim().toLocaleLowerCase('es'));
+    const index = options.headers.findIndex((header) =>
+      normalized.includes(header.trim().toLocaleLowerCase('es'))
+    );
+    return index >= 0 ? index + 1 : 0;
+  };
+  const columnRef = (column: number): string => excelColumnLetter(column);
 
   const exampleArea = options.areas.find((area) =>
     Boolean(area.siteId) && options.locations.some((location) => location.areaId === area.id)
@@ -161,7 +171,7 @@ export function buildHvImportTemplate(
 
   worksheet.addRow({
     'Código*': 'EQ-001',
-    'Nombre*': exampleEquipment?.name ?? 'MONITOR DE SIGNOS VITALES',
+    'Nombre*': exampleEquipment?.name ?? (isIndustrial ? 'AIRE ACONDICIONADO' : 'MONITOR DE SIGNOS VITALES'),
     'Marca*': exampleBrand?.name ?? 'MARCA EJEMPLO',
     'Modelo*': exampleModel?.name ?? 'MODELO EJEMPLO',
     'Serie*': 'SER-001',
@@ -197,10 +207,13 @@ export function buildHvImportTemplate(
       right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
     };
   });
-  worksheet.autoFilter = { from: 'A1', to: 'Z1' };
-  worksheet.getColumn(18).numFmt = 'yyyy-mm-dd';
-  worksheet.getColumn(19).numFmt = '0';
-  worksheet.getColumn(20).numFmt = '0';
+  worksheet.autoFilter = { from: 'A1', to: `${columnRef(options.headers.length)}1` };
+  const acquisitionDateColumn = columnNumber('Fecha adquisición');
+  const usefulLifeColumn = columnNumber('Vida útil años');
+  const warrantyColumn = columnNumber('Garantía años');
+  if (acquisitionDateColumn) worksheet.getColumn(acquisitionDateColumn).numFmt = 'yyyy-mm-dd';
+  if (usefulLifeColumn) worksheet.getColumn(usefulLifeColumn).numFmt = '0';
+  if (warrantyColumn) worksheet.getColumn(warrantyColumn).numFmt = '0';
 
   catalogSheet.columns = [
     { header: 'Sedes', key: 'sites', width: 28 },
@@ -396,9 +409,14 @@ export function buildHvImportTemplate(
     ['Sede, área y ubicación', 'Selecciona primero la sede y el área. La ubicación mostrará únicamente los registros asociados a esa combinación.'],
     ['Fecha de adquisición', 'Usa yyyy-mm-dd. Si el dato no existe, deja la celda vacía o escribe NR (No registra).'],
     ['Correo del proveedor', 'Ingresa un correo válido. Si el dato no existe, deja la celda vacía o escribe NR; se guardará como sin dato.'],
-    ['Riesgo sanitario', 'Selecciona Sí cuando aplique y elige Clase I, Clase IIA, Clase IIB o Clase III. Si seleccionas No, deja la clasificación vacía.'],
-    ['Riesgo eléctrico', 'Selecciona Sí cuando aplique y completa tanto la clase de protección como el tipo de parte aplicada. Usa No aplica cuando el equipo no tenga parte aplicada.'],
-    ['Calibración', 'Si seleccionas No, Frecuencia calibración debe quedar vacía. Si seleccionas Sí, debes elegir una frecuencia.'],
+    ...(!isIndustrial ? [
+      ['Riesgo sanitario', 'Selecciona Sí cuando aplique y elige Clase I, Clase IIA, Clase IIB o Clase III. Si seleccionas No, deja la clasificación vacía.'],
+      ['Riesgo eléctrico', 'Selecciona Sí cuando aplique y completa tanto la clase de protección como el tipo de parte aplicada. Usa No aplica cuando el equipo no tenga parte aplicada.'],
+      ['Calibración', 'Si seleccionas No, Frecuencia calibración debe quedar vacía. Si seleccionas Sí, debes elegir una frecuencia.']
+    ] : [[
+      'Categoría industrial',
+      'Esta plantilla registra únicamente equipos industriales. INVIMA y las clasificaciones clínicas no aplican.'
+    ]]),
     ['Validación final', 'El software vuelve a validar relaciones y formatos antes de guardar la importación.']
   ]);
   styleHeaderRow(guideSheet.getRow(1), 'FF5F1F25');
@@ -421,6 +439,7 @@ export function buildHvImportTemplate(
     prompt: string,
     allowCustomValue = false
   ): void => {
+    if (!columnNumber) return;
     for (let rowNumber = 2; rowNumber <= options.maxRows + 1; rowNumber += 1) {
       worksheet.getCell(rowNumber, columnNumber).dataValidation = {
         type: 'list',
@@ -437,16 +456,33 @@ export function buildHvImportTemplate(
     }
   };
 
-  addListValidation(2, 'HV_EQUIPOS', 'Selecciona un equipo o escribe uno nuevo.', true);
-  addListValidation(6, 'HV_SEDES', 'Selecciona la sede creada para este cliente.');
-  addListValidation(7, 'HV_AREAS', 'Selecciona el área que pertenece a la sede elegida.');
-  addListValidation(10, 'HV_SI_NO', 'Indica si el equipo requiere clasificación de riesgo sanitario.');
-  addListValidation(12, 'HV_SI_NO', 'Indica si el equipo requiere clasificación de riesgo eléctrico.');
-  addListValidation(16, 'HV_TIPO_EQUIPO', 'Selecciona si el equipo es fijo o móvil.');
-  addListValidation(17, 'HV_ADQUISICION', 'Selecciona la forma de adquisición.');
-  addListValidation(20, 'HV_GARANTIA', 'Selecciona los años de garantía si aplica.');
-  addListValidation(24, 'HV_FRECUENCIAS', 'Selecciona la frecuencia de mantenimiento.');
-  addListValidation(25, 'HV_SI_NO', 'Indica si el equipo requiere calibración.');
+  const equipmentColumn = columnNumber('Nombre*');
+  const brandColumn = columnNumber('Marca*');
+  const modelColumn = columnNumber('Modelo*');
+  const siteColumn = columnNumber('Sede*');
+  const areaColumn = columnNumber('Área*');
+  const locationColumn = columnNumber('Ubicación*');
+  const sanitaryRequiredColumn = columnNumber('Requiere riesgo sanitario*');
+  const sanitaryRiskColumn = columnNumber('Clasificación riesgo sanitario');
+  const electricalRequiredColumn = columnNumber('Requiere riesgo eléctrico*');
+  const electricalClassColumn = columnNumber('Clase protección eléctrica');
+  const appliedPartColumn = columnNumber('Tipo parte aplicada');
+  const equipmentTypeColumn = columnNumber('Tipo equipo');
+  const acquisitionTypeColumn = columnNumber('Forma adquisición');
+  const maintenanceFrequencyColumn = columnNumber('Frecuencia mantenimiento');
+  const requiresCalibrationColumn = columnNumber('Requiere calibración');
+  const calibrationFrequencyColumn = columnNumber('Frecuencia calibración');
+
+  addListValidation(equipmentColumn, 'HV_EQUIPOS', 'Selecciona un equipo o escribe uno nuevo.', true);
+  addListValidation(siteColumn, 'HV_SEDES', 'Selecciona la sede creada para este cliente.');
+  addListValidation(areaColumn, 'HV_AREAS', 'Selecciona el área que pertenece a la sede elegida.');
+  addListValidation(sanitaryRequiredColumn, 'HV_SI_NO', 'Indica si el equipo requiere clasificación de riesgo sanitario.');
+  addListValidation(electricalRequiredColumn, 'HV_SI_NO', 'Indica si el equipo requiere clasificación de riesgo eléctrico.');
+  addListValidation(equipmentTypeColumn, 'HV_TIPO_EQUIPO', 'Selecciona si el equipo es fijo o móvil.');
+  addListValidation(acquisitionTypeColumn, 'HV_ADQUISICION', 'Selecciona la forma de adquisición.');
+  addListValidation(warrantyColumn, 'HV_GARANTIA', 'Selecciona los años de garantía si aplica.');
+  addListValidation(maintenanceFrequencyColumn, 'HV_FRECUENCIAS', 'Selecciona la frecuencia de mantenimiento.');
+  addListValidation(requiresCalibrationColumn, 'HV_SI_NO', 'Indica si el equipo requiere calibración.');
 
   const mappingEndRow = Math.max(mappingRow - 1, 2);
   workbook.definedNames.add(
@@ -454,11 +490,11 @@ export function buildHvImportTemplate(
     LOCATION_MAP_NAME
   );
   for (let rowNumber = 2; rowNumber <= options.maxRows + 1; rowNumber += 1) {
-    worksheet.getCell(rowNumber, 3).dataValidation = {
+    worksheet.getCell(rowNumber, brandColumn).dataValidation = {
       type: 'list',
       allowBlank: true,
       formulae: [
-        `INDIRECT(IFERROR(VLOOKUP($B${rowNumber},${EQUIPMENT_BRAND_MAP_NAME},2,FALSE),"${EMPTY_LIST_NAME}"))`
+        `INDIRECT(IFERROR(VLOOKUP($${columnRef(equipmentColumn)}${rowNumber},${EQUIPMENT_BRAND_MAP_NAME},2,FALSE),"${EMPTY_LIST_NAME}"))`
       ],
       showErrorMessage: false,
       showInputMessage: true,
@@ -466,11 +502,11 @@ export function buildHvImportTemplate(
       prompt: 'Selecciona una marca relacionada o escribe una nueva.'
     };
 
-    worksheet.getCell(rowNumber, 4).dataValidation = {
+    worksheet.getCell(rowNumber, modelColumn).dataValidation = {
       type: 'list',
       allowBlank: true,
       formulae: [
-        `INDIRECT(IFERROR(VLOOKUP($B${rowNumber}&"|"&$C${rowNumber},${EQUIPMENT_MODEL_MAP_NAME},2,FALSE),"${EMPTY_LIST_NAME}"))`
+        `INDIRECT(IFERROR(VLOOKUP($${columnRef(equipmentColumn)}${rowNumber}&"|"&$${columnRef(brandColumn)}${rowNumber},${EQUIPMENT_MODEL_MAP_NAME},2,FALSE),"${EMPTY_LIST_NAME}"))`
       ],
       showErrorMessage: false,
       showInputMessage: true,
@@ -478,11 +514,11 @@ export function buildHvImportTemplate(
       prompt: 'Selecciona un modelo relacionado o escribe uno nuevo.'
     };
 
-    worksheet.getCell(rowNumber, 8).dataValidation = {
+    worksheet.getCell(rowNumber, locationColumn).dataValidation = {
       type: 'list',
       allowBlank: true,
       formulae: [
-        `INDIRECT(IFERROR(VLOOKUP($F${rowNumber}&"|"&$G${rowNumber},${LOCATION_MAP_NAME},2,FALSE),"${EMPTY_LIST_NAME}"))`
+        `INDIRECT(IFERROR(VLOOKUP($${columnRef(siteColumn)}${rowNumber}&"|"&$${columnRef(areaColumn)}${rowNumber},${LOCATION_MAP_NAME},2,FALSE),"${EMPTY_LIST_NAME}"))`
       ],
       showErrorMessage: true,
       errorStyle: 'error',
@@ -493,11 +529,11 @@ export function buildHvImportTemplate(
       prompt: 'La lista depende de la sede y del área seleccionadas.'
     };
 
-    worksheet.getCell(rowNumber, 11).dataValidation = {
+    if (sanitaryRiskColumn && sanitaryRequiredColumn) worksheet.getCell(rowNumber, sanitaryRiskColumn).dataValidation = {
       type: 'list',
       allowBlank: true,
       formulae: [
-        `INDIRECT(IF($J${rowNumber}="Sí","HV_RIESGOS_SANITARIOS","${EMPTY_LIST_NAME}"))`
+        `INDIRECT(IF($${columnRef(sanitaryRequiredColumn)}${rowNumber}="Sí","HV_RIESGOS_SANITARIOS","${EMPTY_LIST_NAME}"))`
       ],
       showErrorMessage: true,
       errorStyle: 'error',
@@ -508,11 +544,11 @@ export function buildHvImportTemplate(
       prompt: 'Selecciona una clase únicamente si el equipo requiere clasificación sanitaria.'
     };
 
-    worksheet.getCell(rowNumber, 13).dataValidation = {
+    if (electricalClassColumn && electricalRequiredColumn) worksheet.getCell(rowNumber, electricalClassColumn).dataValidation = {
       type: 'list',
       allowBlank: true,
       formulae: [
-        `INDIRECT(IF($L${rowNumber}="Sí","HV_CLASES_ELECTRICAS","${EMPTY_LIST_NAME}"))`
+        `INDIRECT(IF($${columnRef(electricalRequiredColumn)}${rowNumber}="Sí","HV_CLASES_ELECTRICAS","${EMPTY_LIST_NAME}"))`
       ],
       showErrorMessage: true,
       errorStyle: 'error',
@@ -523,11 +559,11 @@ export function buildHvImportTemplate(
       prompt: 'Selecciona la clase de protección indicada por el fabricante.'
     };
 
-    worksheet.getCell(rowNumber, 14).dataValidation = {
+    if (appliedPartColumn && electricalRequiredColumn) worksheet.getCell(rowNumber, appliedPartColumn).dataValidation = {
       type: 'list',
       allowBlank: true,
       formulae: [
-        `INDIRECT(IF($L${rowNumber}="Sí","HV_TIPOS_PARTE_APLICADA","${EMPTY_LIST_NAME}"))`
+        `INDIRECT(IF($${columnRef(electricalRequiredColumn)}${rowNumber}="Sí","HV_TIPOS_PARTE_APLICADA","${EMPTY_LIST_NAME}"))`
       ],
       showErrorMessage: true,
       errorStyle: 'error',
@@ -538,7 +574,7 @@ export function buildHvImportTemplate(
       prompt: 'Selecciona B, BF, CF o No aplica según la documentación del equipo.'
     };
 
-    worksheet.getCell(rowNumber, 19).dataValidation = {
+    if (usefulLifeColumn) worksheet.getCell(rowNumber, usefulLifeColumn).dataValidation = {
       type: 'whole',
       operator: 'between',
       allowBlank: true,
@@ -548,11 +584,11 @@ export function buildHvImportTemplate(
       error: 'Ingresa un número entre 0 y 50.'
     };
 
-    worksheet.getCell(rowNumber, 26).dataValidation = {
+    if (calibrationFrequencyColumn && requiresCalibrationColumn) worksheet.getCell(rowNumber, calibrationFrequencyColumn).dataValidation = {
       type: 'list',
       allowBlank: true,
       formulae: [
-        `INDIRECT(IF($Y${rowNumber}="Sí","HV_FRECUENCIAS","${EMPTY_LIST_NAME}"))`
+        `INDIRECT(IF($${columnRef(requiresCalibrationColumn)}${rowNumber}="Sí","HV_FRECUENCIAS","${EMPTY_LIST_NAME}"))`
       ],
       showErrorMessage: true,
       errorStyle: 'error',
@@ -564,12 +600,12 @@ export function buildHvImportTemplate(
     };
   }
 
-  worksheet.addConditionalFormatting({
-    ref: `K2:K${options.maxRows + 1}`,
+  if (sanitaryRiskColumn && sanitaryRequiredColumn) worksheet.addConditionalFormatting({
+    ref: `${columnRef(sanitaryRiskColumn)}2:${columnRef(sanitaryRiskColumn)}${options.maxRows + 1}`,
     rules: [{
       type: 'expression',
       priority: 1,
-      formulae: ['$J2<>"Sí"'],
+      formulae: [`$${columnRef(sanitaryRequiredColumn)}2<>"Sí"`],
       style: {
         fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } },
         font: { color: { argb: 'FF6B7280' } }
@@ -577,12 +613,12 @@ export function buildHvImportTemplate(
     }]
   });
 
-  worksheet.addConditionalFormatting({
-    ref: `M2:N${options.maxRows + 1}`,
+  if (electricalClassColumn && appliedPartColumn && electricalRequiredColumn) worksheet.addConditionalFormatting({
+    ref: `${columnRef(electricalClassColumn)}2:${columnRef(appliedPartColumn)}${options.maxRows + 1}`,
     rules: [{
       type: 'expression',
       priority: 1,
-      formulae: ['$L2<>"Sí"'],
+      formulae: [`$${columnRef(electricalRequiredColumn)}2<>"Sí"`],
       style: {
         fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } },
         font: { color: { argb: 'FF6B7280' } }
@@ -590,12 +626,12 @@ export function buildHvImportTemplate(
     }]
   });
 
-  worksheet.addConditionalFormatting({
-    ref: `Z2:Z${options.maxRows + 1}`,
+  if (calibrationFrequencyColumn && requiresCalibrationColumn) worksheet.addConditionalFormatting({
+    ref: `${columnRef(calibrationFrequencyColumn)}2:${columnRef(calibrationFrequencyColumn)}${options.maxRows + 1}`,
     rules: [{
       type: 'expression',
       priority: 1,
-      formulae: ['$Y2<>"Sí"'],
+      formulae: [`$${columnRef(requiresCalibrationColumn)}2<>"Sí"`],
       style: {
         fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } },
         font: { color: { argb: 'FF6B7280' } }

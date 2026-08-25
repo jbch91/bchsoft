@@ -1,6 +1,7 @@
 import { query, withTransaction } from './db.js';
 import { canonicalizeCatalogValue, ensureEquipmentCatalogPath } from './equipment-catalog.js';
 import { assertBiomedicalRiskClassifications } from './biomedical-risk.js';
+import { normalizeAssetCategory } from './asset-category.js';
 import { dateOnlyFromDatabase } from './schedule-workflow.js';
 
 async function getSchemaByClientId(clientId) {
@@ -179,13 +180,16 @@ export async function deleteLocation(clientId, locationId) {
   await query(`DELETE FROM "${schema}".locations WHERE id = $1`, [locationId]);
 }
 
-export async function listAssets(clientId) {
+export async function listAssets(clientId, { assetCategory = null } = {}) {
   const schema = await getSchemaByClientId(clientId);
   if (!schema) {
     throw new Error('Cliente no encontrado');
   }
+  const category = assetCategory ? normalizeAssetCategory(assetCategory) : null;
+  const params = category ? [category] : [];
+  const categoryWhere = category ? 'WHERE a.asset_category = $1' : '';
   const { rows } = await query(
-    `SELECT a.id, a.code, a.name, a.brand, a.model, a.serial, a.location, a.status, a.created_at,
+    `SELECT a.id, a.asset_category, a.code, a.name, a.brand, a.model, a.serial, a.location, a.status, a.created_at,
             a.photo_path, a.invima_reg, a.risk_class, a.requires_sanitary_classification,
             a.requires_electrical_classification, a.electrical_protection_class, a.applied_part_type,
             a.is_mobile, a.manufacturer,
@@ -203,14 +207,16 @@ export async function listAssets(clientId) {
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
      LEFT JOIN public.users hu ON hu.id = a.hv_engineer_user_id
-     ORDER BY created_at DESC`
+     ${categoryWhere}
+     ORDER BY created_at DESC`,
+    params
   );
   return rows;
 }
 
 export async function listAssetsForBlankMaintenanceProtocols(
   clientId,
-  { assetIds = null, limit = 501 } = {}
+  { assetIds = null, assetCategory = null, limit = 501 } = {}
 ) {
   const schema = await getSchemaByClientId(clientId);
   if (!schema) {
@@ -219,13 +225,18 @@ export async function listAssetsForBlankMaintenanceProtocols(
   const selected = Array.isArray(assetIds) ? assetIds : null;
   const params = [];
   let selectedClause = '';
+  let categoryClause = '';
+  if (assetCategory) {
+    params.push(normalizeAssetCategory(assetCategory));
+    categoryClause = `AND a.asset_category = $${params.length}`;
+  }
   if (selected) {
     params.push(selected);
     selectedClause = `AND a.id = ANY($${params.length}::uuid[])`;
   }
   params.push(limit);
   const { rows } = await query(
-    `SELECT a.id, a.code, a.name, a.brand, a.model, a.serial, a.status,
+    `SELECT a.id, a.asset_category, a.code, a.name, a.brand, a.model, a.serial, a.status,
             a.manufacturer, a.maintenance_frequency,
             s.name AS site_name, ar.name AS area_name, lo.name AS location_name
      FROM "${schema}".assets a
@@ -233,6 +244,7 @@ export async function listAssetsForBlankMaintenanceProtocols(
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
      WHERE COALESCE(a.status, 'activo') <> 'dado_de_baja'
+       ${categoryClause}
        ${selectedClause}
      ORDER BY
        COALESCE(s.name, ''),
@@ -246,7 +258,7 @@ export async function listAssetsForBlankMaintenanceProtocols(
   return rows;
 }
 
-export async function listAssetsForReader(clientId, userId) {
+export async function listAssetsForReader(clientId, userId, { assetCategory = null } = {}) {
   const schema = await getSchemaByClientId(clientId);
   if (!schema) {
     throw new Error('Cliente no encontrado');
@@ -273,9 +285,13 @@ export async function listAssetsForReader(clientId, userId) {
     where = 'AND a.area_id = ANY($1)';
     params = [areaIds];
   }
+  if (assetCategory) {
+    params.push(normalizeAssetCategory(assetCategory));
+    where += ` AND a.asset_category = $${params.length}`;
+  }
 
   const { rows } = await query(
-    `SELECT a.id, a.code, a.name, a.brand, a.model, a.serial, a.location, a.status, a.created_at,
+    `SELECT a.id, a.asset_category, a.code, a.name, a.brand, a.model, a.serial, a.location, a.status, a.created_at,
             a.photo_path, a.invima_reg, a.risk_class, a.requires_sanitary_classification,
             a.requires_electrical_classification, a.electrical_protection_class, a.applied_part_type,
             a.is_mobile, a.manufacturer,
@@ -429,23 +445,36 @@ export async function createAsset(clientId, payload) {
     maintenanceFrequency,
     requiresCalibration,
     calibrationFrequency,
+    assetCategory,
     hvEngineerUserId,
     catalogCreatedBy
   } = payload;
   const equipmentName = canonicalizeCatalogValue(name);
   const equipmentBrand = canonicalizeCatalogValue(brand);
   const equipmentModel = canonicalizeCatalogValue(model);
-  const risk = assertBiomedicalRiskClassifications({
-    riskClass,
-    requiresSanitaryClassification,
-    requiresElectricalClassification,
-    electricalProtectionClass,
-    appliedPartType
-  });
+  const category = normalizeAssetCategory(assetCategory);
+  const risk = category === 'industrial'
+    ? {
+        riskClass: null,
+        requiresSanitaryClassification: false,
+        requiresElectricalClassification: false,
+        electricalProtectionClass: null,
+        appliedPartType: null
+      }
+    : assertBiomedicalRiskClassifications({
+        riskClass,
+        requiresSanitaryClassification,
+        requiresElectricalClassification,
+        electricalProtectionClass,
+        appliedPartType
+      });
+  const assetRequiresCalibration = category === 'industrial' ? false : Boolean(requiresCalibration);
+  const assetCalibrationFrequency = assetRequiresCalibration ? calibrationFrequency : null;
   const catalogPath = await ensureEquipmentCatalogPath({
     equipmentName,
     brand: equipmentBrand,
     model: equipmentModel,
+    assetCategory: category,
     submittedBy: catalogCreatedBy,
     submittedClientId: clientId
   });
@@ -457,10 +486,10 @@ export async function createAsset(clientId, payload) {
       acquisition_type, contract_text, acquisition_date, useful_life_years, warranty_years,
       supplier_name, supplier_phone, supplier_email, power_type, voltage, temp_min, temp_max,
       humidity_min, humidity_max, maintenance_frequency, requires_calibration, calibration_frequency,
-      hv_engineer_user_id, hv_engineer_signed_at, equipment_catalog_model_id)
+      asset_category, hv_engineer_user_id, hv_engineer_signed_at, equipment_catalog_model_id)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
              $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
-             $34, CASE WHEN $34::uuid IS NULL THEN NULL ELSE NOW() END, $35)
+             $34,$35, CASE WHEN $35::uuid IS NULL THEN NULL ELSE NOW() END, $36)
      RETURNING id`,
     [
       code,
@@ -494,8 +523,9 @@ export async function createAsset(clientId, payload) {
       humidityMin,
       humidityMax,
       maintenanceFrequency,
-      requiresCalibration,
-      calibrationFrequency,
+      assetRequiresCalibration,
+      assetCalibrationFrequency,
+      category,
       hvEngineerUserId || null,
       catalogPath.modelId
     ]
@@ -559,23 +589,36 @@ export async function updateAsset(clientId, assetId, payload) {
     maintenanceFrequency,
     requiresCalibration,
     calibrationFrequency,
+    assetCategory,
     hvEngineerUserId,
     catalogCreatedBy
   } = payload;
   const equipmentName = canonicalizeCatalogValue(name);
   const equipmentBrand = canonicalizeCatalogValue(brand);
   const equipmentModel = canonicalizeCatalogValue(model);
-  const risk = assertBiomedicalRiskClassifications({
-    riskClass,
-    requiresSanitaryClassification,
-    requiresElectricalClassification,
-    electricalProtectionClass,
-    appliedPartType
-  });
+  const category = normalizeAssetCategory(assetCategory);
+  const risk = category === 'industrial'
+    ? {
+        riskClass: null,
+        requiresSanitaryClassification: false,
+        requiresElectricalClassification: false,
+        electricalProtectionClass: null,
+        appliedPartType: null
+      }
+    : assertBiomedicalRiskClassifications({
+        riskClass,
+        requiresSanitaryClassification,
+        requiresElectricalClassification,
+        electricalProtectionClass,
+        appliedPartType
+      });
+  const assetRequiresCalibration = category === 'industrial' ? false : Boolean(requiresCalibration);
+  const assetCalibrationFrequency = assetRequiresCalibration ? calibrationFrequency : null;
   const catalogPath = await ensureEquipmentCatalogPath({
     equipmentName,
     brand: equipmentBrand,
     model: equipmentModel,
+    assetCategory: category,
     submittedBy: catalogCreatedBy,
     submittedClientId: clientId
   });
@@ -591,10 +634,11 @@ export async function updateAsset(clientId, assetId, payload) {
          supplier_phone = $23, supplier_email = $24, power_type = $25, voltage = $26,
          temp_min = $27, temp_max = $28, humidity_min = $29, humidity_max = $30,
          maintenance_frequency = $31, requires_calibration = $32, calibration_frequency = $33,
-         hv_engineer_user_id = COALESCE($34::uuid, hv_engineer_user_id),
-         hv_engineer_signed_at = CASE WHEN $34::uuid IS NULL THEN hv_engineer_signed_at ELSE NOW() END,
-         equipment_catalog_model_id = $35
-     WHERE id = $36`,
+         asset_category = $34,
+         hv_engineer_user_id = COALESCE($35::uuid, hv_engineer_user_id),
+         hv_engineer_signed_at = CASE WHEN $35::uuid IS NULL THEN hv_engineer_signed_at ELSE NOW() END,
+         equipment_catalog_model_id = $36
+     WHERE id = $37`,
     [
       code,
       equipmentName,
@@ -627,8 +671,9 @@ export async function updateAsset(clientId, assetId, payload) {
       humidityMin,
       humidityMax,
       maintenanceFrequency,
-      requiresCalibration,
-      calibrationFrequency,
+      assetRequiresCalibration,
+      assetCalibrationFrequency,
+      category,
       hvEngineerUserId || null,
       catalogPath.modelId,
       assetId

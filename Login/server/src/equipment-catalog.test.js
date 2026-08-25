@@ -85,6 +85,7 @@ test('construye el árbol equipo, marca y modelo sin duplicar nodos', () => {
     {
       equipment_id: 'equipment-1',
       equipment_name: 'Monitor de signos vitales',
+      asset_category: 'biomedical',
       brand_id: 'brand-1',
       brand_name: 'Mindray',
       model_id: 'model-2',
@@ -93,6 +94,7 @@ test('construye el árbol equipo, marca y modelo sin duplicar nodos', () => {
     {
       equipment_id: 'equipment-1',
       equipment_name: 'Monitor de signos vitales',
+      asset_category: 'biomedical',
       brand_id: 'brand-1',
       brand_name: 'Mindray',
       model_id: 'model-1',
@@ -101,6 +103,7 @@ test('construye el árbol equipo, marca y modelo sin duplicar nodos', () => {
     {
       equipment_id: 'equipment-2',
       equipment_name: 'Desfibrilador',
+      asset_category: 'biomedical',
       brand_id: null,
       brand_name: null,
       model_id: null,
@@ -109,10 +112,16 @@ test('construye el árbol equipo, marca y modelo sin duplicar nodos', () => {
   ]);
 
   assert.deepEqual(tree, [
-    { id: 'equipment-2', name: 'Desfibrilador', brands: [] },
+    {
+      id: 'equipment-2',
+      name: 'Desfibrilador',
+      assetCategory: 'biomedical',
+      brands: []
+    },
     {
       id: 'equipment-1',
       name: 'Monitor de signos vitales',
+      assetCategory: 'biomedical',
       brands: [
         {
           id: 'brand-1',

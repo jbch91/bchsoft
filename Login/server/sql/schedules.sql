@@ -1,6 +1,8 @@
 CREATE TABLE IF NOT EXISTS maintenance_schedules (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  asset_category TEXT NOT NULL DEFAULT 'biomedical'
+    CHECK (asset_category IN ('biomedical', 'industrial')),
   year INT NOT NULL,
   start_date DATE NOT NULL,
   status TEXT NOT NULL DEFAULT 'draft',

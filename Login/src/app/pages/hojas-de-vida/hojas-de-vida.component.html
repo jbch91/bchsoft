@@ -30,11 +30,11 @@
 
   <div class="list-actions">
     <div>
-      <h2>Hojas de vida</h2>
+      <h2>{{ lifeSheetTitle }}</h2>
     </div>
     <div class="list-action-buttons">
       <button type="button" class="primary" *ngIf="canCreateAssets" (click)="openCreateModal()">
-        Crear hoja de vida
+        Crear hoja de vida{{ isIndustrialAssetModule ? ' industrial' : '' }}
       </button>
       <button
         type="button"
@@ -43,7 +43,7 @@
         [class.active-action]="importPanelOpen"
         (click)="toggleImportPanel()"
       >
-        Importar hojas de vida
+        Importar hojas de vida{{ isIndustrialAssetModule ? ' industriales' : '' }}
       </button>
       <button
         type="button"
@@ -67,7 +67,7 @@
     [canMove]="auth.hasPermission('inventory:move')"
     [canUploadHistory]="auth.hasPermission('asset_history:upload')"
     [viewInModal]="true"
-    title="Inventario de hojas de vida"
+    [title]="inventoryTitle"
     (viewItem)="openViewModal($event)"
     (editItem)="startEdit($event)"
     (deleteItem)="deleteAsset($event)"
@@ -78,10 +78,11 @@
     <div class="card full import-card" *ngIf="auth.hasPermission('hb:import')">
       <div class="import-header">
         <div>
-          <h2>Importación masiva</h2>
+          <h2>Importación masiva{{ isIndustrialAssetModule ? ' industrial' : '' }}</h2>
           <p>
             Primero crea las sedes, áreas y ubicaciones. Luego descarga la plantilla,
-            completa los equipos y valida el archivo antes de crear las hojas de vida.
+            completa los equipos y valida el archivo antes de crear las hojas de vida
+            {{ isIndustrialAssetModule ? 'industriales' : 'biomédicas' }}.
           </p>
         </div>
         <span class="import-badge">Excel validado antes de guardar</span>
@@ -154,7 +155,10 @@
       <div class="modal-header">
         <div>
           <span>{{ assetModalMode === 'edit' ? 'Editar' : 'Crear' }}</span>
-          <h2>{{ assetModalMode === 'edit' ? 'Editar hoja de vida' : 'Crear hoja de vida' }}</h2>
+          <h2>
+            {{ assetModalMode === 'edit' ? 'Editar' : 'Crear' }} hoja de vida
+            {{ isIndustrialAssetModule ? 'industrial' : 'biomédica' }}
+          </h2>
         </div>
         <button type="button" class="modal-close" (click)="closeAssetModal()">Cerrar</button>
       </div>
@@ -249,11 +253,11 @@
               <span class="label-line"><span class="label-text">Código</span><span class="required-star">*</span></span>
               <input type="text" name="code" [(ngModel)]="code" required />
             </label>
-            <label class="required">
+            <label class="required" *ngIf="!isIndustrialAssetModule">
               <span class="label-line"><span class="label-text">Registro Invima</span><span class="required-star">*</span></span>
               <input type="text" name="invimaReg" [(ngModel)]="invimaReg" required />
             </label>
-            <div class="risk-classification-grid">
+            <div class="risk-classification-grid" *ngIf="!isIndustrialAssetModule">
               <label class="requirement-toggle">
                 <span>Riesgo sanitario</span>
                 <span class="toggle-control">
@@ -408,7 +412,7 @@
         </div>
 
         <div class="form-section" *ngIf="showSection(2)">
-          <h3>DATOS DE MANTENIMIENTO Y CALIBRACION</h3>
+          <h3>{{ isIndustrialAssetModule ? 'DATOS DE MANTENIMIENTO' : 'DATOS DE MANTENIMIENTO Y CALIBRACION' }}</h3>
           <div class="section-grid">
             <label>
               Frecuencia de mantenimiento
@@ -421,14 +425,14 @@
                 <option>anual</option>
               </select>
             </label>
-            <label>
+            <label *ngIf="!isIndustrialAssetModule">
               Requiere calibración
               <select [(ngModel)]="requiresCalibration" name="requiresCalibration">
                 <option [ngValue]="false">No</option>
                 <option [ngValue]="true">Sí</option>
               </select>
             </label>
-            <label *ngIf="requiresCalibration">
+            <label *ngIf="!isIndustrialAssetModule && requiresCalibration">
               Frecuencia calibración
               <select [(ngModel)]="calibrationFrequency" name="calibrationFrequency">
                 <option>mensual</option>
@@ -517,12 +521,14 @@
               <p><strong>Modelo:</strong> {{ model || '-' }}</p>
               <p><strong>Serie:</strong> {{ serial || '-' }}</p>
               <p><strong>Código:</strong> {{ code || '-' }}</p>
-              <p><strong>Registro Invima:</strong> {{ invimaReg || '-' }}</p>
-              <p><strong>Requiere riesgo sanitario:</strong> {{ requiresSanitaryClassification ? 'Sí' : 'No' }}</p>
-              <p *ngIf="requiresSanitaryClassification"><strong>Riesgo sanitario:</strong> {{ riskClass || '-' }}</p>
-              <p><strong>Requiere riesgo eléctrico:</strong> {{ requiresElectricalClassification ? 'Sí' : 'No' }}</p>
-              <p *ngIf="requiresElectricalClassification"><strong>Clase eléctrica:</strong> {{ electricalProtectionClass || '-' }}</p>
-              <p *ngIf="requiresElectricalClassification"><strong>Parte aplicada:</strong> {{ appliedPartType || '-' }}</p>
+              <ng-container *ngIf="!isIndustrialAssetModule">
+                <p><strong>Registro Invima:</strong> {{ invimaReg || '-' }}</p>
+                <p><strong>Requiere riesgo sanitario:</strong> {{ requiresSanitaryClassification ? 'Sí' : 'No' }}</p>
+                <p *ngIf="requiresSanitaryClassification"><strong>Riesgo sanitario:</strong> {{ riskClass || '-' }}</p>
+                <p><strong>Requiere riesgo eléctrico:</strong> {{ requiresElectricalClassification ? 'Sí' : 'No' }}</p>
+                <p *ngIf="requiresElectricalClassification"><strong>Clase eléctrica:</strong> {{ electricalProtectionClass || '-' }}</p>
+                <p *ngIf="requiresElectricalClassification"><strong>Parte aplicada:</strong> {{ appliedPartType || '-' }}</p>
+              </ng-container>
               <p><strong>Sede:</strong> {{ getSelectedSiteName() }}</p>
               <p><strong>Área:</strong> {{ getSelectedAreaName() }}</p>
               <p><strong>Ubicación:</strong> {{ getSelectedLocationName() }}</p>
@@ -541,8 +547,10 @@
             <div>
               <h4>Mantenimiento</h4>
               <p><strong>Frecuencia:</strong> {{ maintenanceFrequency || '-' }}</p>
-              <p><strong>Requiere calibración:</strong> {{ requiresCalibration ? 'Sí' : 'No' }}</p>
-              <p *ngIf="requiresCalibration"><strong>Frecuencia calibración:</strong> {{ calibrationFrequency || '-' }}</p>
+              <ng-container *ngIf="!isIndustrialAssetModule">
+                <p><strong>Requiere calibración:</strong> {{ requiresCalibration ? 'Sí' : 'No' }}</p>
+                <p *ngIf="requiresCalibration"><strong>Frecuencia calibración:</strong> {{ calibrationFrequency || '-' }}</p>
+              </ng-container>
             </div>
           </div>
           <p class="summary-note">Revisa este resumen antes de crear la hoja de vida.</p>
@@ -580,7 +588,7 @@
     <div class="modal-shell detail-modal" role="dialog" aria-modal="true">
       <div class="modal-header">
         <div>
-          <span>Hoja de vida</span>
+          <span>Hoja de vida {{ isIndustrialAssetModule ? 'industrial' : 'biomédica' }}</span>
           <h2>{{ name || selectedAssetForModal?.name || 'Detalle del equipo' }}</h2>
         </div>
         <button type="button" class="modal-close" (click)="closeAssetModal()">Cerrar</button>
@@ -642,20 +650,24 @@
           </div>
           <div>
             <h4>Datos técnicos</h4>
-            <p><strong>Registro Invima:</strong> {{ invimaReg || '-' }}</p>
-            <p><strong>Requiere riesgo sanitario:</strong> {{ requiresSanitaryClassification ? 'Sí' : 'No' }}</p>
-            <p *ngIf="requiresSanitaryClassification"><strong>Riesgo sanitario:</strong> {{ riskClass || '-' }}</p>
-            <p><strong>Requiere riesgo eléctrico:</strong> {{ requiresElectricalClassification ? 'Sí' : 'No' }}</p>
-            <p *ngIf="requiresElectricalClassification"><strong>Clase eléctrica:</strong> {{ electricalProtectionClass || '-' }}</p>
-            <p *ngIf="requiresElectricalClassification"><strong>Parte aplicada:</strong> {{ appliedPartType || '-' }}</p>
+            <ng-container *ngIf="!isIndustrialAssetModule">
+              <p><strong>Registro Invima:</strong> {{ invimaReg || '-' }}</p>
+              <p><strong>Requiere riesgo sanitario:</strong> {{ requiresSanitaryClassification ? 'Sí' : 'No' }}</p>
+              <p *ngIf="requiresSanitaryClassification"><strong>Riesgo sanitario:</strong> {{ riskClass || '-' }}</p>
+              <p><strong>Requiere riesgo eléctrico:</strong> {{ requiresElectricalClassification ? 'Sí' : 'No' }}</p>
+              <p *ngIf="requiresElectricalClassification"><strong>Clase eléctrica:</strong> {{ electricalProtectionClass || '-' }}</p>
+              <p *ngIf="requiresElectricalClassification"><strong>Parte aplicada:</strong> {{ appliedPartType || '-' }}</p>
+            </ng-container>
             <p><strong>Fabricante:</strong> {{ manufacturer || '-' }}</p>
             <p><strong>Tipo:</strong> {{ isMobile ? 'Móvil' : 'Fijo' }}</p>
           </div>
           <div>
             <h4>Mantenimiento</h4>
             <p><strong>Frecuencia:</strong> {{ maintenanceFrequency || '-' }}</p>
-            <p><strong>Requiere calibración:</strong> {{ requiresCalibration ? 'Sí' : 'No' }}</p>
-            <p *ngIf="requiresCalibration"><strong>Frecuencia calibración:</strong> {{ calibrationFrequency || '-' }}</p>
+            <ng-container *ngIf="!isIndustrialAssetModule">
+              <p><strong>Requiere calibración:</strong> {{ requiresCalibration ? 'Sí' : 'No' }}</p>
+              <p *ngIf="requiresCalibration"><strong>Frecuencia calibración:</strong> {{ calibrationFrequency || '-' }}</p>
+            </ng-container>
           </div>
         </div>
 
@@ -722,7 +734,7 @@
         </div>
 
         <div class="documents-panel" *ngIf="detailModalTab === 'documents'">
-          <div class="document-action">
+          <div class="document-action" *ngIf="!isIndustrialAssetModule">
             <div>
               <strong>PDF principal de hoja de vida</strong>
               <span>Documento maestro del equipo con los datos técnicos y ubicación actual.</span>

@@ -125,4 +125,60 @@ describe('plantilla de importación de hojas de vida', () => {
     expect(reopened.getWorksheet('Instrucciones')?.getCell('B5').value).toContain('MAYÚSCULAS');
     expect(reopened.getWorksheet('Instrucciones')?.getCell('B7').value).toContain('NR');
   });
+
+  it('crea una plantilla industrial sin campos clínicos y con catálogo dependiente', async () => {
+    const workbook = new Workbook();
+    buildHvImportTemplate(workbook, {
+      assetCategory: 'industrial',
+      headers: [
+        'Código*', 'Nombre*', 'Marca*', 'Modelo*', 'Serie*', 'Sede*', 'Área*',
+        'Ubicación*', 'Fabricante', 'Tipo equipo', 'Forma adquisición', 'Fecha adquisición',
+        'Vida útil años', 'Garantía años', 'Proveedor', 'Teléfono proveedor',
+        'Correo proveedor', 'Frecuencia mantenimiento'
+      ],
+      sites: [{ id: 'site-1', name: 'Sede Central' }],
+      areas: [{ id: 'area-1', name: 'Servicios generales', siteId: 'site-1' }],
+      locations: [{ id: 'loc-1', name: 'Cuarto frío', areaId: 'area-1' }],
+      equipmentCatalog: [{
+        id: 'equipment-1',
+        name: 'Nevera industrial',
+        brands: [{
+          id: 'brand-1',
+          name: 'Haceb',
+          models: [{ id: 'model-1', name: 'N420' }]
+        }]
+      }],
+      sanitaryRiskClasses: [],
+      electricalProtectionClasses: [],
+      appliedPartTypes: [],
+      frequencies: ['trimestral', 'semestral', 'anual'],
+      acquisitionTypes: ['COMPRA DIRECTA'],
+      equipmentTypes: ['Fijo'],
+      warrantyOptions: [1, 2, 3],
+      maxRows: 100
+    });
+
+    const sheet = workbook.getWorksheet('Hojas industriales')!;
+    const headers = sheet.getRow(1).values as unknown[];
+
+    expect(workbook.getWorksheet('Hojas de vida')).toBeUndefined();
+    expect(headers).not.toContain('Registro Invima*');
+    expect(headers).not.toContain('Clasificación riesgo sanitario');
+    expect(headers).not.toContain('Requiere calibración');
+    expect(sheet.getCell('B2').value).toBe('NEVERA INDUSTRIAL');
+    expect(sheet.getCell('C2').value).toBe('HACEB');
+    expect(String(sheet.getCell('C2').dataValidation.formulae[0])).toContain('$B2');
+    expect(String(sheet.getCell('D2').dataValidation.formulae[0])).toContain('$B2&"|"&$C2');
+    expect(String(sheet.getCell('H2').dataValidation.formulae[0])).toContain('$F2&"|"&$G2');
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const reopened = new Workbook();
+    await reopened.xlsx.load(buffer);
+    expect(reopened.getWorksheet('Hojas industriales')?.getCell('H2').dataValidation.type)
+      .toBe('list');
+    const instructions = reopened.getWorksheet('Instrucciones')!;
+    const industrialRule = instructions.getRows(1, instructions.rowCount)
+      ?.find((row) => row.getCell(1).value === 'Categoría industrial');
+    expect(industrialRule?.getCell(2).value).toContain('equipos industriales');
+  });
 });

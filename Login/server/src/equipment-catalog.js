@@ -1,5 +1,6 @@
 import { pool, query } from './db.js';
 import { canonicalizeCatalogValue, normalizeCatalogText } from './equipment-catalog-text.js';
+import { normalizeAssetCategory } from './asset-category.js';
 
 export { canonicalizeCatalogValue, normalizeCatalogText } from './equipment-catalog-text.js';
 
@@ -60,7 +61,8 @@ function cleanReviewNotes(value) {
 }
 
 function compareCatalogNodes(left, right) {
-  return left.name.localeCompare(right.name, 'es', { sensitivity: 'base' });
+  const categoryOrder = String(left.assetCategory || '').localeCompare(String(right.assetCategory || ''));
+  return categoryOrder || left.name.localeCompare(right.name, 'es', { sensitivity: 'base' });
 }
 
 function reviewMetadata(row) {
@@ -89,6 +91,7 @@ export function buildEquipmentCatalogTree(rows = []) {
       equipment = {
         id: row.equipment_id,
         name: row.equipment_name,
+        assetCategory: row.asset_category || 'biomedical',
         brands: []
       };
       equipmentById.set(row.equipment_id, equipment);
@@ -126,6 +129,7 @@ export function buildAdminEquipmentCatalogTree({ equipmentRows = [], brandRows =
         id: row.id,
         type: 'equipment',
         name: row.name,
+        assetCategory: row.asset_category || 'biomedical',
         ...reviewMetadata(row),
         brands: []
       }
@@ -164,10 +168,12 @@ export function buildAdminEquipmentCatalogTree({ equipmentRows = [], brandRows =
   return equipment.sort(compareCatalogNodes);
 }
 
-export async function listEquipmentCatalog() {
+export async function listEquipmentCatalog(assetCategory = 'biomedical') {
+  const category = normalizeAssetCategory(assetCategory);
   const { rows } = await query(
     `SELECT e.id AS equipment_id,
             e.name AS equipment_name,
+            e.asset_category,
             b.id AS brand_id,
             b.name AS brand_name,
             m.id AS model_id,
@@ -183,7 +189,9 @@ export async function listEquipmentCatalog() {
       AND m.review_status = 'approved'
      WHERE e.is_active = TRUE
        AND e.review_status = 'approved'
-     ORDER BY e.name, b.name, m.name`
+       AND e.asset_category = $1
+     ORDER BY e.name, b.name, m.name`,
+    [category]
   );
   return buildEquipmentCatalogTree(rows);
 }
@@ -212,9 +220,13 @@ export async function listEquipmentCatalogForAdmin() {
   return buildAdminEquipmentCatalogTree({ equipmentRows, brandRows, modelRows });
 }
 
-async function findSuggestionNode(db, config, parentId, normalizedName, lock = false) {
-  const parentWhere = config.parentColumn ? `${config.parentColumn} = $1 AND normalized_name = $2` : 'normalized_name = $1';
-  const params = config.parentColumn ? [parentId, normalizedName] : [normalizedName];
+async function findSuggestionNode(db, config, parentId, normalizedName, assetCategory, lock = false) {
+  const parentWhere = config.parentColumn
+    ? `${config.parentColumn} = $1 AND normalized_name = $2`
+    : 'asset_category = $1 AND normalized_name = $2';
+  const params = config.parentColumn
+    ? [parentId, normalizedName]
+    : [normalizeAssetCategory(assetCategory), normalizedName];
   const { rows } = await db.query(
     `SELECT id, name, review_status, is_active
      FROM ${config.table}
@@ -229,6 +241,7 @@ async function ensureSuggestionNode(db, {
   type,
   parentId = null,
   name,
+  assetCategory = 'biomedical',
   submittedBy,
   submittedClientId
 }) {
@@ -236,7 +249,8 @@ async function ensureSuggestionNode(db, {
   const label = type === 'equipment' ? 'El nombre del equipo' : type === 'brand' ? 'La marca' : 'El modelo';
   const value = cleanCatalogValue(name, label);
   const normalizedName = normalizeCatalogText(value);
-  let existing = await findSuggestionNode(db, config, parentId, normalizedName, true);
+  const category = normalizeAssetCategory(assetCategory);
+  let existing = await findSuggestionNode(db, config, parentId, normalizedName, category, true);
 
   if (existing?.review_status === 'approved' && existing.is_active) {
     return existing;
@@ -265,16 +279,16 @@ async function ensureSuggestionNode(db, {
 
   const columns = config.parentColumn
     ? `${config.parentColumn}, name, normalized_name, is_active, created_by, review_status, submitted_by, submitted_client_id, submitted_at, last_submitted_at, submission_count`
-    : 'name, normalized_name, is_active, created_by, review_status, submitted_by, submitted_client_id, submitted_at, last_submitted_at, submission_count';
+    : 'asset_category, name, normalized_name, is_active, created_by, review_status, submitted_by, submitted_client_id, submitted_at, last_submitted_at, submission_count';
   const values = config.parentColumn
     ? '$1,$2,$3,TRUE,$4,\'pending\',$4,$5,NOW(),NOW(),1'
-    : '$1,$2,TRUE,$3,\'pending\',$3,$4,NOW(),NOW(),1';
+    : '$1,$2,$3,TRUE,$4,\'pending\',$4,$5,NOW(),NOW(),1';
   const params = config.parentColumn
     ? [parentId, value, normalizedName, submittedBy || null, submittedClientId || null]
-    : [value, normalizedName, submittedBy || null, submittedClientId || null];
+    : [category, value, normalizedName, submittedBy || null, submittedClientId || null];
   const conflict = config.parentColumn
     ? `(${config.parentColumn}, normalized_name)`
-    : '(normalized_name)';
+    : '(asset_category, normalized_name)';
   const { rows } = await db.query(
     `INSERT INTO ${config.table} (${columns})
      VALUES (${values})
@@ -284,7 +298,7 @@ async function ensureSuggestionNode(db, {
   );
   if (rows[0]) return rows[0];
 
-  existing = await findSuggestionNode(db, config, parentId, normalizedName, true);
+  existing = await findSuggestionNode(db, config, parentId, normalizedName, category, true);
   if (!existing) {
     throw catalogError('CATALOG_SUGGESTION_FAILED', `No se pudo registrar la propuesta de ${config.label}.`);
   }
@@ -295,11 +309,13 @@ export async function ensureEquipmentCatalogPath({
   equipmentName,
   brand,
   model,
+  assetCategory = 'biomedical',
   createdBy = null,
   submittedBy = null,
   submittedClientId = null
 } = {}) {
   const equipmentValue = cleanCatalogValue(equipmentName, 'El nombre del equipo');
+  const category = normalizeAssetCategory(assetCategory);
   const brandValue = canonicalizeCatalogValue(brand);
   const modelValue = canonicalizeCatalogValue(model);
   if (modelValue && !brandValue) {
@@ -313,6 +329,7 @@ export async function ensureEquipmentCatalogPath({
     const equipment = await ensureSuggestionNode(db, {
       type: 'equipment',
       name: equipmentValue,
+      assetCategory: category,
       submittedBy: submitterId,
       submittedClientId
     });
@@ -324,6 +341,7 @@ export async function ensureEquipmentCatalogPath({
         type: 'brand',
         parentId: equipment.id,
         name: brandValue,
+        assetCategory: category,
         submittedBy: submitterId,
         submittedClientId
       });
@@ -333,6 +351,7 @@ export async function ensureEquipmentCatalogPath({
         type: 'model',
         parentId: brandNode.id,
         name: modelValue,
+        assetCategory: category,
         submittedBy: submitterId,
         submittedClientId
       });
@@ -351,6 +370,7 @@ export async function ensureEquipmentCatalogPath({
     await db.query('COMMIT');
     return {
       equipmentId: equipment.id,
+      assetCategory: category,
       brandId: brandNode?.id || null,
       modelId: modelNode && fullyApproved ? modelNode.id : null,
       equipmentName: equipmentValue,
@@ -396,6 +416,7 @@ async function catalogPathForNode(db, type, id) {
   nodeConfig(type);
   const select = type === 'equipment'
     ? `SELECT e.name AS equipment_name,
+              e.asset_category,
               e.normalized_name AS equipment_normalized,
               NULL::text AS brand_name,
               NULL::text AS brand_normalized,
@@ -405,6 +426,7 @@ async function catalogPathForNode(db, type, id) {
        WHERE e.id = $1`
     : type === 'brand'
       ? `SELECT e.name AS equipment_name,
+                e.asset_category,
                 e.normalized_name AS equipment_normalized,
                 b.name AS brand_name,
                 b.normalized_name AS brand_normalized,
@@ -414,6 +436,7 @@ async function catalogPathForNode(db, type, id) {
          JOIN biomedical_equipment_catalog e ON e.id = b.equipment_id
          WHERE b.id = $1`
       : `SELECT e.name AS equipment_name,
+                e.asset_category,
                 e.normalized_name AS equipment_normalized,
                 b.name AS brand_name,
                 b.normalized_name AS brand_normalized,
@@ -432,6 +455,7 @@ async function catalogPathForNode(db, type, id) {
 
 async function rewriteUnlinkedCatalogPath(db, fromPath, toPath) {
   const params = [
+    fromPath.asset_category,
     fromPath.equipment_normalized,
     fromPath.brand_normalized,
     fromPath.model_normalized,
@@ -445,30 +469,33 @@ async function rewriteUnlinkedCatalogPath(db, fromPath, toPath) {
   for (const schema of await tenantSchemas(db)) {
     const result = await db.query(
       `UPDATE "${schema}".assets a
-       SET name = $4,
-           brand = CASE WHEN $5::text IS NULL THEN a.brand ELSE $5 END,
-           model = CASE WHEN $6::text IS NULL THEN a.model ELSE $6 END
+       SET name = $5,
+           brand = CASE WHEN $6::text IS NULL THEN a.brand ELSE $6 END,
+           model = CASE WHEN $7::text IS NULL THEN a.model ELSE $7 END
        WHERE a.equipment_catalog_model_id IS NULL
-         AND public.normalize_biomedical_catalog_text(a.name) = $1
-         AND ($2::text IS NULL OR public.normalize_biomedical_catalog_text(a.brand) = $2)
-         AND ($3::text IS NULL OR public.normalize_biomedical_catalog_text(a.model) = $3)`,
+         AND a.asset_category = $1
+         AND public.normalize_biomedical_catalog_text(a.name) = $2
+         AND ($3::text IS NULL OR public.normalize_biomedical_catalog_text(a.brand) = $3)
+         AND ($4::text IS NULL OR public.normalize_biomedical_catalog_text(a.model) = $4)`,
       params
     );
     assets += result.rowCount || 0;
   }
 
-  const guideResult = await db.query(
-    `UPDATE quick_use_guides g
-     SET equipment_name = $4,
-         brand = CASE WHEN $5::text IS NULL THEN g.brand ELSE $5 END,
-         model = CASE WHEN $6::text IS NULL THEN g.model ELSE $6 END
-     WHERE g.equipment_catalog_model_id IS NULL
-       AND g.equipment_name_normalized = $1
-       AND ($2::text IS NULL OR g.brand_normalized = $2)
-       AND ($3::text IS NULL OR g.model_normalized = $3)`,
-    params
-  );
-  guides += guideResult.rowCount || 0;
+  if (fromPath.asset_category === 'biomedical' && toPath.asset_category === 'biomedical') {
+    const guideResult = await db.query(
+      `UPDATE quick_use_guides g
+       SET equipment_name = $5,
+           brand = CASE WHEN $6::text IS NULL THEN g.brand ELSE $6 END,
+           model = CASE WHEN $7::text IS NULL THEN g.model ELSE $7 END
+       WHERE g.equipment_catalog_model_id IS NULL
+         AND g.equipment_name_normalized = $2
+         AND ($3::text IS NULL OR g.brand_normalized = $3)
+         AND ($4::text IS NULL OR g.model_normalized = $4)`,
+      params
+    );
+    guides += guideResult.rowCount || 0;
+  }
   return { assets, guides };
 }
 
@@ -531,7 +558,8 @@ async function syncCatalogModels(db, modelIds, { matchUnlinked = true } = {}) {
              AND public.normalize_biomedical_catalog_text(a.brand) = b.normalized_name
              AND public.normalize_biomedical_catalog_text(a.model) = m.normalized_name
            )
-         )`,
+         )
+         AND a.asset_category = e.asset_category`,
       [ids, matchUnlinked]
     );
     assets += result.rowCount || 0;
@@ -546,6 +574,7 @@ async function syncCatalogModels(db, modelIds, { matchUnlinked = true } = {}) {
      JOIN biomedical_equipment_brands b ON b.id = m.brand_id
      JOIN biomedical_equipment_catalog e ON e.id = b.equipment_id
      WHERE m.id = ANY($1::uuid[])
+       AND e.asset_category = 'biomedical'
        AND (
          g.equipment_catalog_model_id = m.id
          OR (
@@ -568,6 +597,7 @@ async function syncCatalogModels(db, modelIds, { matchUnlinked = true } = {}) {
        JOIN biomedical_equipment_brands b ON b.id = m.brand_id
        JOIN biomedical_equipment_catalog e ON e.id = b.equipment_id
        WHERE m.id = ANY($1::uuid[])
+         AND e.asset_category = 'biomedical'
          AND g.equipment_catalog_model_id IS NULL
          AND g.equipment_name_normalized = e.normalized_name
          AND g.brand_normalized = b.normalized_name
@@ -585,22 +615,29 @@ async function syncCatalogModels(db, modelIds, { matchUnlinked = true } = {}) {
   return { assets, guides };
 }
 
-export async function createApprovedCatalogNode({ type, name, parentId = null, actorUserId }) {
+export async function createApprovedCatalogNode({
+  type,
+  name,
+  parentId = null,
+  assetCategory = 'biomedical',
+  actorUserId
+}) {
   const config = nodeConfig(type);
   const value = cleanCatalogValue(name, type === 'equipment' ? 'El nombre del equipo' : type === 'brand' ? 'La marca' : 'El modelo');
+  const category = normalizeAssetCategory(assetCategory);
   const db = await pool.connect();
   try {
     await db.query('BEGIN');
     await assertApprovedParent(db, type, parentId);
     const columns = config.parentColumn
       ? `${config.parentColumn}, name, normalized_name, is_active, created_by, review_status, reviewed_by, reviewed_at`
-      : 'name, normalized_name, is_active, created_by, review_status, reviewed_by, reviewed_at';
+      : 'asset_category, name, normalized_name, is_active, created_by, review_status, reviewed_by, reviewed_at';
     const values = config.parentColumn
       ? '$1,$2,$3,TRUE,$4,\'approved\',$4,NOW()'
-      : '$1,$2,TRUE,$3,\'approved\',$3,NOW()';
+      : '$1,$2,$3,TRUE,$4,\'approved\',$4,NOW()';
     const params = config.parentColumn
       ? [parentId, value, normalizeCatalogText(value), actorUserId || null]
-      : [value, normalizeCatalogText(value), actorUserId || null];
+      : [category, value, normalizeCatalogText(value), actorUserId || null];
     const { rows } = await db.query(
       `INSERT INTO ${config.table} (${columns}) VALUES (${values}) RETURNING *`,
       params
@@ -814,6 +851,9 @@ async function mergeModels(db, sourceId, targetId) {
   }
   const sourcePath = await catalogPathForNode(db, 'model', sourceId);
   const targetPath = await catalogPathForNode(db, 'model', targetId);
+  if (sourcePath.asset_category !== targetPath.asset_category) {
+    throw catalogError('CATALOG_CATEGORY_MISMATCH', 'Solo puedes fusionar elementos de la misma categoría de equipos.');
+  }
   await rewriteUnlinkedCatalogPath(db, sourcePath, targetPath);
   for (const schema of await tenantSchemas(db)) {
     await db.query(
@@ -848,6 +888,9 @@ async function mergeBrands(db, sourceId, targetId) {
   }
   const sourcePath = await catalogPathForNode(db, 'brand', sourceId);
   const targetPath = await catalogPathForNode(db, 'brand', targetId);
+  if (sourcePath.asset_category !== targetPath.asset_category) {
+    throw catalogError('CATALOG_CATEGORY_MISMATCH', 'Solo puedes fusionar elementos de la misma categoría de equipos.');
+  }
   await rewriteUnlinkedCatalogPath(db, sourcePath, targetPath);
   const { rows: sourceModels } = await db.query(
     'SELECT id, normalized_name FROM biomedical_equipment_models WHERE brand_id = $1 ORDER BY created_at',
@@ -877,6 +920,9 @@ async function mergeEquipment(db, sourceId, targetId) {
   }
   const sourcePath = await catalogPathForNode(db, 'equipment', sourceId);
   const targetPath = await catalogPathForNode(db, 'equipment', targetId);
+  if (sourcePath.asset_category !== targetPath.asset_category) {
+    throw catalogError('CATALOG_CATEGORY_MISMATCH', 'Solo puedes fusionar elementos de la misma categoría de equipos.');
+  }
   await rewriteUnlinkedCatalogPath(db, sourcePath, targetPath);
   const { rows: sourceBrands } = await db.query(
     'SELECT id, normalized_name FROM biomedical_equipment_brands WHERE equipment_id = $1 ORDER BY created_at',

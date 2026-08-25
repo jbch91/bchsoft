@@ -2,10 +2,12 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { getApiBase } from '../core/api-base';
+import type { AssetCategory } from '../biomed/biomed.service';
 
 export interface ScheduleDto {
   id: string;
   client_id: string;
+  asset_category: AssetCategory;
   year: number;
   start_date: string;
   status: string;
@@ -81,18 +83,29 @@ export class SchedulesService {
 
   constructor(private readonly http: HttpClient) {}
 
-  async listSchedules(clientId: string, year?: number): Promise<ScheduleDto[]> {
-    const suffix = year ? `?year=${year}` : '';
+  async listSchedules(
+    clientId: string,
+    year?: number,
+    assetCategory: AssetCategory = 'biomedical'
+  ): Promise<ScheduleDto[]> {
+    const query = new URLSearchParams({ category: assetCategory });
+    if (year) query.set('year', String(year));
     return firstValueFrom(
-      this.http.get<ScheduleDto[]>(`${this.apiBase}/maintenance/schedules/${clientId}${suffix}`)
+      this.http.get<ScheduleDto[]>(`${this.apiBase}/maintenance/schedules/${clientId}?${query}`)
     );
   }
 
-  async generateSchedule(clientId: string, year: number, startDate: string): Promise<string> {
+  async generateSchedule(
+    clientId: string,
+    year: number,
+    startDate: string,
+    assetCategory: AssetCategory = 'biomedical'
+  ): Promise<string> {
     const response = await firstValueFrom(
       this.http.post<{ id: string }>(`${this.apiBase}/maintenance/schedules/${clientId}/generate`, {
         year,
-        startDate
+        startDate,
+        assetCategory
       })
     );
     return response.id;

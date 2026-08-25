@@ -4,6 +4,7 @@ import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import {
   AssetHistoryItemDto,
+  type AssetCategory,
   BiomedService,
   CatalogReviewDto,
   EquipmentCatalogItemDto
@@ -59,6 +60,7 @@ interface LocationOption {
 }
 
 interface AssetImportPayload {
+  assetCategory: AssetCategory;
   code: string;
   name: string;
   brand: string;
@@ -102,6 +104,7 @@ interface ImportPreviewRow {
 
 interface AssetView extends InventoryPanelItem {
   id: string;
+  assetCategory: AssetCategory;
   code: string;
   name: string;
   brand: string | null;
@@ -134,6 +137,7 @@ interface AssetView extends InventoryPanelItem {
   styleUrl: './hojas-de-vida.component.scss'
 })
 export class HojasDeVidaComponent implements OnDestroy {
+  readonly assetCategory: AssetCategory;
   private readonly apiBase = getApiBase();
   private readonly publicBase = getPublicBase();
   private readonly maxImageSizeMb = 5;
@@ -191,7 +195,7 @@ export class HojasDeVidaComponent implements OnDestroy {
     'Recomendaciones',
     'Resumen'
   ];
-  readonly importHeaders = [
+  readonly biomedicalImportHeaders = [
     'Código*',
     'Nombre*',
     'Marca*',
@@ -218,6 +222,26 @@ export class HojasDeVidaComponent implements OnDestroy {
     'Frecuencia mantenimiento',
     'Requiere calibración',
     'Frecuencia calibración'
+  ];
+  readonly industrialImportHeaders = [
+    'Código*',
+    'Nombre*',
+    'Marca*',
+    'Modelo*',
+    'Serie*',
+    'Sede*',
+    'Área*',
+    'Ubicación*',
+    'Fabricante',
+    'Tipo equipo',
+    'Forma adquisición',
+    'Fecha adquisición',
+    'Vida útil años',
+    'Garantía años',
+    'Proveedor',
+    'Teléfono proveedor',
+    'Correo proveedor',
+    'Frecuencia mantenimiento'
   ];
   readonly acquisitionTypes = ['COMPRA DIRECTA', 'DONACION'];
   readonly riskClasses = ['Clase I', 'Clase IIA', 'Clase IIB', 'Clase III'];
@@ -290,6 +314,12 @@ export class HojasDeVidaComponent implements OnDestroy {
     private readonly cdr: ChangeDetectorRef,
     private readonly route: ActivatedRoute
   ) {
+    this.assetCategory = this.route.snapshot.data['assetCategory'] === 'industrial'
+      ? 'industrial'
+      : 'biomedical';
+    if (this.assetCategory === 'industrial') {
+      this.wizardSteps[2] = 'Mantenimiento';
+    }
     void this.init();
     window.addEventListener('focus', this.handleWindowFocus);
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
@@ -300,6 +330,26 @@ export class HojasDeVidaComponent implements OnDestroy {
         void this.openPendingRouteAsset();
       }
     });
+  }
+
+  get isIndustrialAssetModule(): boolean {
+    return this.assetCategory === 'industrial';
+  }
+
+  get importHeaders(): readonly string[] {
+    return this.isIndustrialAssetModule
+      ? this.industrialImportHeaders
+      : this.biomedicalImportHeaders;
+  }
+
+  get lifeSheetTitle(): string {
+    return this.isIndustrialAssetModule ? 'Hojas de vida industriales' : 'Hojas de vida';
+  }
+
+  get inventoryTitle(): string {
+    return this.isIndustrialAssetModule
+      ? 'Inventario de equipos industriales'
+      : 'Inventario de hojas de vida';
   }
 
   ngOnDestroy(): void {
@@ -330,9 +380,9 @@ export class HojasDeVidaComponent implements OnDestroy {
           this.areaId &&
           this.locationId &&
           this.code &&
-          this.invimaReg &&
-          (!this.requiresSanitaryClassification || this.riskClass) &&
-          (!this.requiresElectricalClassification || (this.electricalProtectionClass && this.appliedPartType))
+          (this.isIndustrialAssetModule || this.invimaReg) &&
+          (this.isIndustrialAssetModule || !this.requiresSanitaryClassification || this.riskClass) &&
+          (this.isIndustrialAssetModule || !this.requiresElectricalClassification || (this.electricalProtectionClass && this.appliedPartType))
       );
     }
     return true;
@@ -737,6 +787,7 @@ export class HojasDeVidaComponent implements OnDestroy {
 
       const workbook = this.createExcelWorkbook();
       buildHvImportTemplate(workbook, {
+        assetCategory: this.assetCategory,
         headers: this.importHeaders,
         sites: this.sites,
         areas: this.areas,
@@ -756,7 +807,12 @@ export class HojasDeVidaComponent implements OnDestroy {
       const blob = new Blob([buffer as BlobPart], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       });
-      this.downloadBlob(blob, 'plantilla-hojas-de-vida.xlsx');
+      this.downloadBlob(
+        blob,
+        this.isIndustrialAssetModule
+          ? 'plantilla-hojas-de-vida-industriales.xlsx'
+          : 'plantilla-hojas-de-vida.xlsx'
+      );
       this.setImportMessage('Plantilla generada. Revisa la carpeta de descargas del navegador.', 'success');
     } catch (error) {
       console.error(error);
@@ -852,7 +908,11 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.setImportMessage('', 'info');
     try {
       const validRows = this.importPreviewRows.filter((row) => row.payload && !row.errors.length);
-      const result = await this.biomed.importAssets(this.selectedClientId, validRows.map((row) => row.payload!));
+      const result = await this.biomed.importAssets(
+        this.selectedClientId,
+        validRows.map((row) => row.payload!),
+        this.assetCategory
+      );
       const importSuccess = `Importación completada: ${result.imported} hoja(s) de vida creadas.${this.catalogReviewNotice(result.catalogReview)}`;
       this.setImportMessage(importSuccess, 'success');
       this.successMessage = importSuccess;
@@ -1073,7 +1133,7 @@ export class HojasDeVidaComponent implements OnDestroy {
         ['Sede', siteName],
         ['Área', areaName],
         ['Ubicación', locationName],
-        ['Registro Invima', invimaReg]
+        ...(!this.isIndustrialAssetModule ? [['Registro Invima', invimaReg]] : [])
       ];
       required.forEach(([label, value]) => {
         if (!String(value).trim()) errors.push(`${label} es obligatorio`);
@@ -1105,18 +1165,27 @@ export class HojasDeVidaComponent implements OnDestroy {
       if (areaName && site && !area) errors.push('El área no existe en esa sede');
       if (locationName && area && !location) errors.push('La ubicación no existe en esa área');
 
-      const risk = resolveHvRiskImport({
-        requiresSanitaryValue: requiresSanitaryRaw,
-        sanitaryRiskClassValue: riskClass,
-        requiresElectricalValue: requiresElectricalRaw,
-        electricalProtectionClassValue: electricalProtectionClassRaw,
-        appliedPartTypeValue: appliedPartTypeRaw,
-        sanitaryRequirementColumnPresent,
-        electricalRequirementColumnPresent,
-        sanitaryRiskClasses: this.riskClasses,
-        electricalProtectionClasses: this.electricalProtectionClasses,
-        appliedPartTypes: this.appliedPartTypes
-      });
+      const risk = this.isIndustrialAssetModule
+        ? {
+            requiresSanitaryClassification: false,
+            riskClass: undefined,
+            requiresElectricalClassification: false,
+            electricalProtectionClass: undefined,
+            appliedPartType: undefined,
+            errors: []
+          }
+        : resolveHvRiskImport({
+            requiresSanitaryValue: requiresSanitaryRaw,
+            sanitaryRiskClassValue: riskClass,
+            requiresElectricalValue: requiresElectricalRaw,
+            electricalProtectionClassValue: electricalProtectionClassRaw,
+            appliedPartTypeValue: appliedPartTypeRaw,
+            sanitaryRequirementColumnPresent,
+            electricalRequirementColumnPresent,
+            sanitaryRiskClasses: this.riskClasses,
+            electricalProtectionClasses: this.electricalProtectionClasses,
+            appliedPartTypes: this.appliedPartTypes
+          });
       errors.push(...risk.errors);
 
       const matchedEquipmentType = this.matchAllowedValue(equipmentTypeRaw, this.equipmentTypeOptions);
@@ -1155,21 +1224,24 @@ export class HojasDeVidaComponent implements OnDestroy {
       if (maintenanceFrequency && !this.frequencyOptions.includes(maintenanceFrequency)) {
         errors.push(`Frecuencia de mantenimiento no permitida. Usa: ${this.frequencyOptions.join(', ')}`);
       }
-      const calibration = resolveHvCalibrationImport(
-        requiresCalibrationRaw,
-        calibrationFrequencyRaw,
-        this.frequencyOptions
-      );
+      const calibration = this.isIndustrialAssetModule
+        ? { requiresCalibration: false, calibrationFrequency: undefined, errors: [] }
+        : resolveHvCalibrationImport(
+            requiresCalibrationRaw,
+            calibrationFrequencyRaw,
+            this.frequencyOptions
+          );
       errors.push(...calibration.errors);
 
       const payload = site && area && location && !errors.length
         ? {
+            assetCategory: this.assetCategory,
             code: code.trim(),
             name: this.catalogStorageValue(name),
             brand: this.catalogStorageValue(brand),
             model: this.catalogStorageValue(model),
             serial: serial.trim(),
-            invimaReg: invimaReg.trim(),
+            invimaReg: this.isIndustrialAssetModule ? '' : invimaReg.trim(),
             siteId: site.id,
             areaId: area.id,
             locationId: location.id,
@@ -1420,9 +1492,10 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.loading = true;
     this.errorMessage = '';
     try {
-      const rows = await this.biomed.listAssets(this.selectedClientId);
+      const rows = await this.biomed.listAssets(this.selectedClientId, this.assetCategory);
       this.assets = rows.map((row) => ({
         id: row.id,
+        assetCategory: row.asset_category,
         code: row.code,
         name: row.name,
         brand: row.brand,
@@ -1461,7 +1534,10 @@ export class HojasDeVidaComponent implements OnDestroy {
       return;
     }
     try {
-      this.equipmentCatalog = await this.biomed.listEquipmentCatalog(this.selectedClientId);
+      this.equipmentCatalog = await this.biomed.listEquipmentCatalog(
+        this.selectedClientId,
+        this.assetCategory
+      );
     } catch (error) {
       console.error(error);
       this.equipmentCatalog = [];
@@ -1578,11 +1654,12 @@ export class HojasDeVidaComponent implements OnDestroy {
       this.errorMessage = 'Código y nombre son obligatorios.';
       return;
     }
-    if (this.requiresSanitaryClassification && !this.riskClass) {
+    if (!this.isIndustrialAssetModule && this.requiresSanitaryClassification && !this.riskClass) {
       this.errorMessage = 'Selecciona la clasificación de riesgo sanitario.';
       return;
     }
     if (
+      !this.isIndustrialAssetModule &&
       this.requiresElectricalClassification &&
       (!this.electricalProtectionClass || !this.appliedPartType)
     ) {
@@ -1599,8 +1676,9 @@ export class HojasDeVidaComponent implements OnDestroy {
           name: this.catalogStorageValue(this.name),
           brand: this.catalogStorageValue(this.brand) || undefined,
           model: this.catalogStorageValue(this.model) || undefined,
+          assetCategory: this.assetCategory,
           serial: this.serial.trim() || undefined,
-          invimaReg: this.invimaReg.trim() || undefined,
+          invimaReg: this.isIndustrialAssetModule ? undefined : (this.invimaReg.trim() || undefined),
           acquisitionType: this.acquisitionType,
           contractText: this.contractText.trim() || undefined,
           acquisitionDate: this.acquisitionDate || undefined,
@@ -1616,18 +1694,22 @@ export class HojasDeVidaComponent implements OnDestroy {
           humidityMin: this.humidityMin ?? undefined,
           humidityMax: this.humidityMax ?? undefined,
           maintenanceFrequency: this.maintenanceFrequency,
-          requiresCalibration: this.requiresCalibration,
-          calibrationFrequency: this.requiresCalibration ? this.calibrationFrequency : undefined,
+          requiresCalibration: !this.isIndustrialAssetModule && this.requiresCalibration,
+          calibrationFrequency: !this.isIndustrialAssetModule && this.requiresCalibration
+            ? this.calibrationFrequency
+            : undefined,
           siteId: this.siteId || undefined,
           areaId: this.areaId || undefined,
           locationId: this.locationId || undefined,
-          requiresSanitaryClassification: this.requiresSanitaryClassification,
-          riskClass: this.requiresSanitaryClassification ? this.riskClass : undefined,
-          requiresElectricalClassification: this.requiresElectricalClassification,
-          electricalProtectionClass: this.requiresElectricalClassification
+          requiresSanitaryClassification: !this.isIndustrialAssetModule && this.requiresSanitaryClassification,
+          riskClass: !this.isIndustrialAssetModule && this.requiresSanitaryClassification ? this.riskClass : undefined,
+          requiresElectricalClassification: !this.isIndustrialAssetModule && this.requiresElectricalClassification,
+          electricalProtectionClass: !this.isIndustrialAssetModule && this.requiresElectricalClassification
             ? this.electricalProtectionClass
             : undefined,
-          appliedPartType: this.requiresElectricalClassification ? this.appliedPartType : undefined,
+          appliedPartType: !this.isIndustrialAssetModule && this.requiresElectricalClassification
+            ? this.appliedPartType
+            : undefined,
           isMobile: this.isMobile,
           manufacturer: this.manufacturer.trim() || undefined,
           photo: this.photo,
@@ -1644,8 +1726,9 @@ export class HojasDeVidaComponent implements OnDestroy {
           name: this.catalogStorageValue(this.name),
           brand: this.catalogStorageValue(this.brand) || undefined,
           model: this.catalogStorageValue(this.model) || undefined,
+          assetCategory: this.assetCategory,
           serial: this.serial.trim() || undefined,
-          invimaReg: this.invimaReg.trim() || undefined,
+          invimaReg: this.isIndustrialAssetModule ? undefined : (this.invimaReg.trim() || undefined),
           acquisitionType: this.acquisitionType,
           contractText: this.contractText.trim() || undefined,
           acquisitionDate: this.acquisitionDate || undefined,
@@ -1661,18 +1744,22 @@ export class HojasDeVidaComponent implements OnDestroy {
           humidityMin: this.humidityMin ?? undefined,
           humidityMax: this.humidityMax ?? undefined,
           maintenanceFrequency: this.maintenanceFrequency,
-          requiresCalibration: this.requiresCalibration,
-          calibrationFrequency: this.requiresCalibration ? this.calibrationFrequency : undefined,
+          requiresCalibration: !this.isIndustrialAssetModule && this.requiresCalibration,
+          calibrationFrequency: !this.isIndustrialAssetModule && this.requiresCalibration
+            ? this.calibrationFrequency
+            : undefined,
           siteId: this.siteId || undefined,
           areaId: this.areaId || undefined,
           locationId: this.locationId || undefined,
-          requiresSanitaryClassification: this.requiresSanitaryClassification,
-          riskClass: this.requiresSanitaryClassification ? this.riskClass : undefined,
-          requiresElectricalClassification: this.requiresElectricalClassification,
-          electricalProtectionClass: this.requiresElectricalClassification
+          requiresSanitaryClassification: !this.isIndustrialAssetModule && this.requiresSanitaryClassification,
+          riskClass: !this.isIndustrialAssetModule && this.requiresSanitaryClassification ? this.riskClass : undefined,
+          requiresElectricalClassification: !this.isIndustrialAssetModule && this.requiresElectricalClassification,
+          electricalProtectionClass: !this.isIndustrialAssetModule && this.requiresElectricalClassification
             ? this.electricalProtectionClass
             : undefined,
-          appliedPartType: this.requiresElectricalClassification ? this.appliedPartType : undefined,
+          appliedPartType: !this.isIndustrialAssetModule && this.requiresElectricalClassification
+            ? this.appliedPartType
+            : undefined,
           isMobile: this.isMobile,
           manufacturer: this.manufacturer.trim() || undefined,
           photo: this.photo,
@@ -1731,8 +1818,8 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.maintenanceFrequency = 'mensual';
     this.requiresCalibration = false;
     this.calibrationFrequency = 'anual';
-    this.requiresSanitaryClassification = true;
-    this.riskClass = 'Clase I';
+    this.requiresSanitaryClassification = !this.isIndustrialAssetModule;
+    this.riskClass = this.isIndustrialAssetModule ? '' : 'Clase I';
     this.requiresElectricalClassification = false;
     this.electricalProtectionClass = '';
     this.appliedPartType = '';
@@ -1757,6 +1844,10 @@ export class HojasDeVidaComponent implements OnDestroy {
   async loadAssetDetails(assetId: string): Promise<void> {
     if (!this.selectedClientId) return;
     const data = await this.biomed.getAssetDetails(this.selectedClientId, assetId);
+    const dataCategory: AssetCategory = data.asset_category === 'industrial' ? 'industrial' : 'biomedical';
+    if (dataCategory !== this.assetCategory) {
+      throw new Error('El equipo no pertenece a esta categoría de hojas de vida.');
+    }
     this.editingAssetId = assetId;
     this.code = data.code ?? '';
     this.name = data.name ?? '';
@@ -1781,11 +1872,15 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.humidityMin = data.humidity_min ?? null;
     this.humidityMax = data.humidity_max ?? null;
     this.maintenanceFrequency = data.maintenance_frequency ?? 'mensual';
-    this.requiresCalibration = data.requires_calibration ?? false;
+    this.requiresCalibration = this.isIndustrialAssetModule ? false : (data.requires_calibration ?? false);
     this.calibrationFrequency = data.calibration_frequency ?? 'anual';
-    this.requiresSanitaryClassification = data.requires_sanitary_classification ?? Boolean(data.risk_class);
+    this.requiresSanitaryClassification = this.isIndustrialAssetModule
+      ? false
+      : (data.requires_sanitary_classification ?? Boolean(data.risk_class));
     this.riskClass = this.requiresSanitaryClassification ? (data.risk_class ?? 'Clase I') : '';
-    this.requiresElectricalClassification = data.requires_electrical_classification ?? false;
+    this.requiresElectricalClassification = this.isIndustrialAssetModule
+      ? false
+      : (data.requires_electrical_classification ?? false);
     this.electricalProtectionClass = this.requiresElectricalClassification
       ? (data.electrical_protection_class ?? '')
       : '';

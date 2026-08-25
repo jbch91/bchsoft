@@ -1,4 +1,10 @@
 import { query } from './db.js';
+import { normalizeAssetCategory } from './asset-category.js';
+
+async function clientSchema(clientId) {
+  const { rows } = await query('SELECT schema_name FROM clients WHERE id = $1', [clientId]);
+  return rows[0]?.schema_name || null;
+}
 
 export async function createMaintenanceRequest(payload) {
   const {
@@ -68,22 +74,38 @@ export async function createMaintenanceProtocolPrintBatch(payload) {
   return rows[0];
 }
 
-export async function listMaintenanceRequests(clientId) {
+export async function listMaintenanceRequests(clientId, { assetCategory = null } = {}) {
+  const params = [clientId];
+  let assetJoin = '';
+  let categoryClause = '';
+  if (assetCategory) {
+    const schema = await clientSchema(clientId);
+    if (!schema) return [];
+    params.push(normalizeAssetCategory(assetCategory));
+    assetJoin = `JOIN "${schema}".assets a ON a.id = r.asset_id`;
+    categoryClause = `AND a.asset_category = $${params.length}`;
+  }
   const { rows } = await query(
     `SELECT r.*, u.display_name AS requester_name, u.email AS requester_email,
             assigned.display_name AS assigned_name
      FROM maintenance_requests r
+     ${assetJoin}
      LEFT JOIN users u ON u.id = r.requested_by
      LEFT JOIN users assigned ON assigned.id = r.assigned_to
      WHERE r.client_id = $1
+       ${categoryClause}
        AND r.status NOT IN ('firmado', 'vencido')
      ORDER BY r.created_at DESC`,
-    [clientId]
+    params
   );
   return rows;
 }
 
-export async function listMaintenanceRequestsForReader(clientId, userId) {
+export async function listMaintenanceRequestsForReader(
+  clientId,
+  userId,
+  { assetCategory = null } = {}
+) {
   const { rows: clientRows } = await query('SELECT schema_name FROM clients WHERE id = $1', [
     clientId
   ]);
@@ -112,6 +134,10 @@ export async function listMaintenanceRequestsForReader(clientId, userId) {
   } else {
     where = 'AND a.area_id = ANY($2)';
     params = [clientId, areaIds];
+  }
+  if (assetCategory) {
+    params.push(normalizeAssetCategory(assetCategory));
+    where += ` AND a.asset_category = $${params.length}`;
   }
 
   const { rows } = await query(
@@ -327,9 +353,20 @@ export async function signMaintenanceReport(payload) {
   return rows[0];
 }
 
-export async function listMaintenanceReports(clientId, { assetId, from, to, order = 'desc', limit, offset } = {}) {
+export async function listMaintenanceReports(
+  clientId,
+  { assetId, assetCategory = null, from, to, order = 'desc', limit, offset } = {}
+) {
   const clauses = ['r.client_id = $1'];
   const params = [clientId];
+  let assetJoin = '';
+  if (assetCategory) {
+    const schema = await clientSchema(clientId);
+    if (!schema) return [];
+    params.push(normalizeAssetCategory(assetCategory));
+    clauses.push(`a.asset_category = $${params.length}`);
+    assetJoin = `JOIN "${schema}".assets a ON a.id = r.asset_id`;
+  }
   if (assetId) {
     params.push(assetId);
     clauses.push(`r.asset_id = $${params.length}`);
@@ -358,6 +395,7 @@ export async function listMaintenanceReports(clientId, { assetId, from, to, orde
             lc.created_at AS correction_requested_at,
             lcu.display_name AS correction_requested_by_name
      FROM maintenance_reports r
+     ${assetJoin}
      LEFT JOIN users u ON u.id = r.created_by
      LEFT JOIN maintenance_requests req ON req.id = r.request_id
      LEFT JOIN LATERAL (
@@ -395,7 +433,11 @@ export async function updateMaintenanceReportTracking(reportId, payload) {
   );
 }
 
-export async function listMaintenanceReportsForReader(clientId, userId, { assetId, from, to, order = 'desc', limit, offset } = {}) {
+export async function listMaintenanceReportsForReader(
+  clientId,
+  userId,
+  { assetId, assetCategory = null, from, to, order = 'desc', limit, offset } = {}
+) {
   const { rows: clientRows } = await query('SELECT schema_name FROM clients WHERE id = $1', [
     clientId
   ]);
@@ -415,6 +457,10 @@ export async function listMaintenanceReportsForReader(clientId, userId, { assetI
 
   const clauses = ['r.client_id = $1'];
   const params = [clientId];
+  if (assetCategory) {
+    params.push(normalizeAssetCategory(assetCategory));
+    clauses.push(`a.asset_category = $${params.length}`);
+  }
   if (assetId) {
     params.push(assetId);
     clauses.push(`r.asset_id = $${params.length}`);
@@ -427,13 +473,6 @@ export async function listMaintenanceReportsForReader(clientId, userId, { assetI
     params.push(to);
     clauses.push(`r.created_at <= $${params.length}`);
   }
-  if (limit !== undefined) {
-    params.push(limit);
-  }
-  if (offset !== undefined) {
-    params.push(offset);
-  }
-
   let accessClause = '';
   if (locationIds.length && areaIds.length) {
     params.push(locationIds);
@@ -448,8 +487,16 @@ export async function listMaintenanceReportsForReader(clientId, userId, { assetI
   }
 
   const orderDir = String(order).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
-  const limitClause = limit !== undefined ? `LIMIT $${params.length - (offset !== undefined ? 1 : 0)}` : '';
-  const offsetClause = offset !== undefined ? `OFFSET $${params.length}` : '';
+  let limitClause = '';
+  let offsetClause = '';
+  if (limit !== undefined) {
+    params.push(limit);
+    limitClause = `LIMIT $${params.length}`;
+  }
+  if (offset !== undefined) {
+    params.push(offset);
+    offsetClause = `OFFSET $${params.length}`;
+  }
   const { rows } = await query(
     `SELECT r.*, u.display_name AS engineer_name, req.status AS request_status, req.requested_by,
             (lc.id IS NOT NULL) AS correction_requested,

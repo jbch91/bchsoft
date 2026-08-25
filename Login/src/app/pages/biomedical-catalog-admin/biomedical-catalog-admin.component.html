@@ -4,7 +4,7 @@
   <header class="catalog-toolbar">
     <div>
       <span class="eyebrow">Gobierno de datos</span>
-      <h2>Árbol global de equipos</h2>
+      <h2>Catálogo global de equipos</h2>
     </div>
     <button type="button" class="primary-action" (click)="openCreate('equipment')">
       <span aria-hidden="true">+</span>
@@ -29,6 +29,14 @@
         autocomplete="off"
       />
     </label>
+    <label>
+      <span>Categoría</span>
+      <select [(ngModel)]="categoryFilter">
+        <option value="all">Todas</option>
+        <option value="biomedical">Biomédicos</option>
+        <option value="industrial">Industriales</option>
+      </select>
+    </label>
     <div class="status-filter" role="group" aria-label="Estado de revisión">
       <button type="button" [class.active]="statusFilter === 'all'" (click)="setStatusFilter('all')">Todos</button>
       <button type="button" [class.active]="statusFilter === 'pending'" (click)="setStatusFilter('pending')">Pendientes</button>
@@ -45,7 +53,7 @@
 
   <div class="loading-state" *ngIf="loading">Cargando catálogo...</div>
 
-  <section class="catalog-tree" *ngIf="!loading" aria-label="Catálogo biomédico global">
+  <section class="catalog-tree" *ngIf="!loading" aria-label="Catálogo global de equipos">
     <div class="tree-columns" aria-hidden="true">
       <span>Nombre</span>
       <span>Estado</span>
@@ -67,7 +75,7 @@
             {{ isEquipmentExpanded(equipment.id) ? '−' : '+' }}
           </button>
           <div>
-            <span class="node-kind">Equipo</span>
+            <span class="node-kind">Equipo · {{ categoryLabel(equipment.assetCategory) }}</span>
             <strong>{{ equipment.name }}</strong>
           </div>
         </div>
@@ -252,6 +260,13 @@
           <label>
             Nombre
             <input type="text" name="catalogName" [(ngModel)]="modalName" maxlength="160" required />
+          </label>
+          <label *ngIf="modalType === 'equipment' && modalMode === 'create'">
+            Categoría
+            <select name="catalogCategory" [(ngModel)]="modalAssetCategory" required>
+              <option value="biomedical">Equipo biomédico</option>
+              <option value="industrial">Equipo industrial</option>
+            </select>
           </label>
           <label *ngIf="modalType !== 'equipment'">
             {{ modalType === 'brand' ? 'Equipo' : 'Equipo / marca' }}

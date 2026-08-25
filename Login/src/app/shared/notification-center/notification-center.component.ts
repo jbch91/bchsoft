@@ -65,10 +65,13 @@ export class NotificationCenterComponent implements OnInit, OnDestroy {
       notification.read_at = new Date().toISOString();
     }
     this.open = false;
+    const maintenanceRoute = notification.link?.startsWith('/mantenimiento-industrial')
+      ? '/mantenimiento-industrial'
+      : '/mantenimiento';
     if (notification.type === 'maintenance_request_created' || notification.type === 'maintenance_preventive_generated') {
       const requestId = String(notification.payload?.['requestId'] || '');
       if (requestId) {
-        await this.router.navigate(['/mantenimiento'], {
+        await this.router.navigate([maintenanceRoute], {
           queryParams: { view: 'reportes', requestId, source: 'notification' }
         });
         return;
@@ -76,13 +79,13 @@ export class NotificationCenterComponent implements OnInit, OnDestroy {
     }
     if (notification.type === 'maintenance_spare_part_requested') {
       const requestId = String(notification.payload?.['requestId'] || '');
-      await this.router.navigate(['/mantenimiento'], {
+      await this.router.navigate([maintenanceRoute], {
         queryParams: { view: 'repuestos', requestId: requestId || null, source: 'notification' }
       });
       return;
     }
     if (notification.type === 'maintenance_report_correction_requested') {
-      await this.router.navigate(['/mantenimiento'], {
+      await this.router.navigate([maintenanceRoute], {
         queryParams: { view: 'reportes', source: 'notification' }
       });
       return;

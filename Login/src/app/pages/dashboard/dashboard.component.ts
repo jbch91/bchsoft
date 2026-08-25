@@ -81,7 +81,7 @@ export class DashboardComponent {
     },
     hojas_de_vida: {
       label: 'Hojas de vida',
-      description: 'Registro técnico e historial de equipos biomédicos.'
+      description: 'Registro técnico e historial separado para equipos biomédicos e industriales.'
     },
     inventario: {
       label: 'Inventario',
@@ -97,7 +97,7 @@ export class DashboardComponent {
     },
     cronogramas: {
       label: 'Cronogramas y Capacitaciones',
-      description: 'Plan anual, capacitaciones y control documental.'
+      description: 'Planes anuales independientes por categoría, capacitaciones y control documental.'
     },
     calibraciones: {
       label: 'Calibraciones',
