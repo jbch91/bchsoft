@@ -412,12 +412,19 @@ export class CronogramasComponent implements OnInit {
   private async loadItems(scheduleId: string): Promise<void> {
     this.detailLoading = true;
     try {
-      const rows = await this.schedulesService.listScheduleItems(scheduleId);
+      let rows = await this.schedulesService.listScheduleItems(scheduleId);
+      rows = await this.syncUnprogrammedDraftFrequencies(scheduleId, rows);
       this.items = rows.map((item) => ({
         ...item,
         planned_date: this.dateOnly(item.planned_date),
         deadline_date: this.dateOnly(item.deadline_date)
       }));
+      if (this.selectedSchedule) {
+        this.selectedSchedule.total_items = this.items.length;
+        this.selectedSchedule.programmed_items = this.items.filter(
+          (item) => item.programming_confirmed
+        ).length;
+      }
       this.editing = false;
       this.rangeMap.clear();
       this.maintenanceSnapshot.clear();
@@ -436,6 +443,73 @@ export class CronogramasComponent implements OnInit {
     } finally {
       this.detailLoading = false;
       this.refreshView();
+    }
+  }
+
+  private async syncUnprogrammedDraftFrequencies(
+    scheduleId: string,
+    rows: ScheduleItemDto[]
+  ): Promise<ScheduleItemDto[]> {
+    if (this.selectedSchedule?.status !== 'draft' || !this.canManageMaintenanceSchedules()) {
+      return rows;
+    }
+
+    const itemsByAsset = new Map<string, ScheduleItemDto[]>();
+    for (const item of rows) {
+      const grouped = itemsByAsset.get(item.asset_id) ?? [];
+      grouped.push(item);
+      itemsByAsset.set(item.asset_id, grouped);
+    }
+
+    const candidates: { assetId: string; frequency: string }[] = [];
+    for (const [assetId, assetItems] of itemsByAsset) {
+      const frequency = String(assetItems[0]?.asset_maintenance_frequency || '')
+        .trim()
+        .toLowerCase();
+      const frequencyChanged = assetItems.some(
+        (item) => String(item.frequency || '').trim().toLowerCase() !== frequency
+      );
+      const canSynchronize = assetItems.every(
+        (item) =>
+          item.status === 'pending' &&
+          !item.programming_confirmed &&
+          !item.report_id &&
+          !item.completion_source &&
+          !item.legacy_history_file_id
+      );
+      if (
+        assetId &&
+        this.maintenancePeriodOptions.includes(frequency) &&
+        frequencyChanged &&
+        canSynchronize
+      ) {
+        candidates.push({ assetId, frequency });
+      }
+    }
+    if (!candidates.length) return rows;
+
+    try {
+      for (const candidate of candidates) {
+        await this.schedulesService.rescheduleAsset(
+          scheduleId,
+          candidate.assetId,
+          candidate.frequency
+        );
+      }
+      this.setNotice(
+        'success',
+        candidates.length === 1
+          ? 'Se sincronizó 1 equipo no guardado con su hoja de vida.'
+          : `Se sincronizaron ${candidates.length} equipos no guardados con sus hojas de vida.`
+      );
+      return this.schedulesService.listScheduleItems(scheduleId);
+    } catch (error: any) {
+      console.error(error);
+      this.setNotice(
+        'error',
+        this.errorText(error, 'No se pudo sincronizar la periodicidad del equipo no guardado.')
+      );
+      return rows;
     }
   }
 

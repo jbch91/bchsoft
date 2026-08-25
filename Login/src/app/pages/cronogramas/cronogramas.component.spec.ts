@@ -200,4 +200,123 @@ describe('CronogramasComponent filtros dependientes', () => {
       frequency: 'trimestral'
     });
   });
+
+  it('sincroniza desde la hoja de vida un equipo pendiente sin guardar', async () => {
+    const original = [2, 5, 8, 11].map((month, index) => {
+      const item = maintenanceItem(`old-${index}`, 'VACUNACIÓN', 'CADENA DE FRÍO');
+      item.asset_id = 'asset-congelador';
+      item.frequency = 'trimestral';
+      item.asset_maintenance_frequency = 'mensual';
+      item.planned_date = `2026-${String(month).padStart(2, '0')}-16`;
+      item.deadline_date = `2026-${String(month).padStart(2, '0')}-28`;
+      return item;
+    });
+    const synchronized = Array.from({ length: 12 }, (_, index) => {
+      const month = String(index + 1).padStart(2, '0');
+      const item = maintenanceItem(`new-${index}`, 'VACUNACIÓN', 'CADENA DE FRÍO');
+      item.asset_id = 'asset-congelador';
+      item.frequency = 'mensual';
+      item.asset_maintenance_frequency = 'mensual';
+      item.planned_date = `2026-${month}-16`;
+      item.deadline_date = `2026-${month}-28`;
+      return item;
+    });
+    let listCalls = 0;
+    const rescheduleCalls: unknown[][] = [];
+    const schedulesService = {
+      listScheduleItems: async () => {
+        listCalls += 1;
+        return listCalls === 1 ? original : synchronized;
+      },
+      rescheduleAsset: async (...args: unknown[]) => {
+        rescheduleCalls.push(args);
+        return {
+          oldFrequency: 'trimestral',
+          frequency: 'mensual',
+          oldItemCount: 4,
+          newItemCount: 12
+        };
+      }
+    };
+    const component = new CronogramasComponent(
+      {} as never,
+      schedulesService as never,
+      {} as never,
+      {} as never,
+      { hasPermission: () => true } as never,
+      { markForCheck: () => undefined } as never
+    );
+    component.schedules = [
+      {
+        id: 'maintenance-schedule',
+        client_id: 'client-id',
+        asset_category: 'biomedical',
+        year: 2026,
+        start_date: '2026-02-16',
+        status: 'draft',
+        engineer_edited: false,
+        engineer_edit_enabled: false,
+        created_at: '2026-01-01T00:00:00.000Z',
+        total_items: 4,
+        programmed_items: 0
+      }
+    ];
+    component.selectedScheduleId = 'maintenance-schedule';
+
+    await (component as any).loadItems('maintenance-schedule');
+
+    expect(rescheduleCalls).toEqual([
+      ['maintenance-schedule', 'asset-congelador', 'mensual']
+    ]);
+    expect(listCalls).toBe(2);
+    expect(component.items).toHaveLength(12);
+    expect(component.items.every((item) => item.frequency === 'mensual')).toBe(true);
+    expect(component.selectedSchedule?.total_items).toBe(12);
+    expect(component.selectedSchedule?.programmed_items).toBe(0);
+    expect(component.noticeMessage).toContain('Se sincronizó 1 equipo');
+  });
+
+  it('no sincroniza automáticamente un equipo que ya tiene programación guardada', async () => {
+    const item = maintenanceItem('saved', 'VACUNACIÓN', 'CADENA DE FRÍO');
+    item.asset_id = 'asset-congelador';
+    item.frequency = 'trimestral';
+    item.asset_maintenance_frequency = 'mensual';
+    item.programming_confirmed = true;
+    let rescheduleCalls = 0;
+    const schedulesService = {
+      listScheduleItems: async () => [item],
+      rescheduleAsset: async () => {
+        rescheduleCalls += 1;
+      }
+    };
+    const component = new CronogramasComponent(
+      {} as never,
+      schedulesService as never,
+      {} as never,
+      {} as never,
+      { hasPermission: () => true } as never,
+      { markForCheck: () => undefined } as never
+    );
+    component.schedules = [
+      {
+        id: 'maintenance-schedule',
+        client_id: 'client-id',
+        asset_category: 'biomedical',
+        year: 2026,
+        start_date: '2026-02-16',
+        status: 'draft',
+        engineer_edited: false,
+        engineer_edit_enabled: false,
+        created_at: '2026-01-01T00:00:00.000Z',
+        total_items: 1,
+        programmed_items: 1
+      }
+    ];
+    component.selectedScheduleId = 'maintenance-schedule';
+
+    await (component as any).loadItems('maintenance-schedule');
+
+    expect(rescheduleCalls).toBe(0);
+    expect(component.items).toHaveLength(1);
+  });
 });

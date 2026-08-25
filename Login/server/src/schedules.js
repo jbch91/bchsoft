@@ -143,8 +143,9 @@ export async function listScheduleItemsWithSchema(scheduleId, schema) {
   const { rows } = await query(
     `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date, i.status,
             i.programming_confirmed, i.programmed_at, i.programmed_by,
-            i.completion_source, i.legacy_history_file_id,
+            i.report_id, i.completion_source, i.legacy_history_file_id,
             a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id, a.location_id,
+            a.maintenance_frequency AS asset_maintenance_frequency,
             ar.name AS area_name, s.name AS site_name, lo.name AS location_name
      FROM maintenance_schedule_items i
      JOIN "${schema}".assets a ON a.id = i.asset_id

@@ -27,6 +27,7 @@ export interface ScheduleItemDto {
   schedule_id: string;
   asset_id: string;
   frequency: string;
+  asset_maintenance_frequency?: string | null;
   planned_date: string;
   deadline_date: string;
   status: string;
@@ -44,6 +45,7 @@ export interface ScheduleItemDto {
   programming_confirmed: boolean;
   programmed_at?: string | null;
   programmed_by?: string | null;
+  report_id?: string | null;
   completion_source?: string | null;
   legacy_history_file_id?: string | null;
 }
