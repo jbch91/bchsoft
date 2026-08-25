@@ -42,18 +42,42 @@ test('calcula fechas sin depender de la zona horaria del servidor', () => {
 
 test('genera recurrencias en días hábiles dentro del año', () => {
   assert.deepEqual(buildRecurringDates({ year: 2026, startDate: '2026-01-31', months: 6 }), [
-    '2026-02-02',
-    '2026-08-03'
+    '2026-01-30',
+    '2026-07-31'
   ]);
   assert.deepEqual(buildRecurringDates({ year: 2026, startDate: '2026-02-02', months: 3 }), [
     '2026-02-02',
     '2026-05-04',
-    '2026-08-04',
-    '2026-11-04'
+    '2026-08-03',
+    '2026-11-02'
   ]);
-  assert.equal(
-    buildRecurringDates({ year: 2026, startDate: '2026-02-16', months: 1 }).length,
-    11
+  assert.deepEqual(
+    buildRecurringDates({ year: 2026, startDate: '2026-08-18', months: 3 }),
+    ['2026-02-18', '2026-05-18', '2026-08-18', '2026-11-18']
+  );
+});
+
+test('genera todas las ventanas de una vigencia anual', () => {
+  const expectedCounts = new Map([
+    [1, 12],
+    [2, 6],
+    [3, 4],
+    [4, 3],
+    [6, 2],
+    [12, 1]
+  ]);
+  for (const [months, count] of expectedCounts) {
+    const dates = buildRecurringDates({ year: 2026, startDate: '2026-08-16', months });
+    assert.equal(dates.length, count);
+    assert.ok(dates.every((date) => date.startsWith('2026-')));
+  }
+
+  const monthly = buildRecurringDates({ year: 2026, startDate: '2026-02-16', months: 1 });
+  assert.equal(monthly[0], '2026-01-16');
+  assert.equal(monthly.at(-1), '2026-12-16');
+  assert.deepEqual(
+    monthly.map((date) => date.slice(0, 7)),
+    Array.from({ length: 12 }, (_, index) => `2026-${String(index + 1).padStart(2, '0')}`)
   );
 });
 

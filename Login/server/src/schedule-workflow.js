@@ -102,6 +102,21 @@ export function adjustToWeekdayUtc(value) {
   return date;
 }
 
+export function adjustToWeekdayWithinMonthUtc(value) {
+  const date = new Date(value.getTime());
+  const month = date.getUTCMonth();
+  const day = date.getUTCDay();
+  if (day !== 0 && day !== 6) return date;
+
+  const forwardDays = day === 6 ? 2 : 1;
+  date.setUTCDate(date.getUTCDate() + forwardDays);
+  if (date.getUTCMonth() === month) return date;
+
+  const previousWeekday = new Date(value.getTime());
+  previousWeekday.setUTCDate(previousWeekday.getUTCDate() - (day === 6 ? 1 : 2));
+  return previousWeekday;
+}
+
 export function addBusinessDaysUtc(value, days) {
   const date = new Date(value.getTime());
   let remaining = Math.max(0, Number(days) || 0);
@@ -164,11 +179,20 @@ export function buildRecurringDates({ year, startDate, months }) {
   if (!Number.isInteger(months) || months < 1 || months > 12) {
     throw new ScheduleValidationError('La periodicidad seleccionada no es válida.');
   }
+
+  const anchor = parseDateOnly(normalized.startDate);
+  let offset = 0;
+  while (addMonthsUtc(anchor, offset - months).getUTCFullYear() === normalized.year) {
+    offset -= months;
+  }
+
   const dates = [];
-  let planned = adjustToWeekdayUtc(parseDateOnly(normalized.startDate));
-  while (planned.getUTCFullYear() === normalized.year) {
+  let occurrence = addMonthsUtc(anchor, offset);
+  while (occurrence.getUTCFullYear() === normalized.year) {
+    const planned = adjustToWeekdayWithinMonthUtc(occurrence);
     dates.push(formatDateOnly(planned));
-    planned = adjustToWeekdayUtc(addMonthsUtc(planned, months));
+    offset += months;
+    occurrence = addMonthsUtc(anchor, offset);
   }
   if (!dates.length) {
     throw new ScheduleValidationError('La fecha inicial no permite generar eventos dentro del año seleccionado.');
