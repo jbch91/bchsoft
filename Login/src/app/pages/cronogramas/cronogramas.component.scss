@@ -573,6 +573,14 @@ button:disabled {
   white-space: nowrap;
 }
 
+.filter-result-actions {
+  display: flex;
+  align-self: center;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -1389,6 +1397,11 @@ button:disabled {
   .result-count {
     width: 100%;
     text-align: center;
+  }
+
+  .filter-result-actions,
+  .filter-result-actions button {
+    width: 100%;
   }
 
   .table-wrap {

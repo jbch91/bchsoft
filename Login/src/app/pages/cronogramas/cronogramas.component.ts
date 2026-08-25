@@ -844,6 +844,16 @@ export class CronogramasComponent implements OnInit {
     });
   }
 
+  get maintenanceHasActiveDetailFilter(): boolean {
+    return Boolean(
+      this.maintenanceDetailSearch.trim() ||
+      this.maintenanceAreaFilter ||
+      this.maintenanceLocationFilter ||
+      this.maintenanceFrequencyFilter ||
+      this.maintenanceItemStatusFilter
+    );
+  }
+
   setMaintenanceEditLevel(level: AssetEditLevel): void {
     this.maintenanceEditLevel = level;
   }
@@ -906,19 +916,38 @@ export class CronogramasComponent implements OnInit {
     return Boolean(items.length) && items.every((item) => item.programming_confirmed);
   }
 
-  maintenanceGroupCanReschedule(group: MaintenanceItemGroup): boolean {
+  maintenanceGroupSupportsReschedule(group: MaintenanceItemGroup): boolean {
     return Boolean(
       this.selectedSchedule?.status === 'draft' &&
       this.editing &&
-      this.maintenanceEditLevel === 'equipment' &&
+      group.assetCount === 1 &&
+      (this.maintenanceEditLevel === 'equipment' || this.maintenanceHasActiveDetailFilter)
+    );
+  }
+
+  maintenanceGroupCanReschedule(group: MaintenanceItemGroup): boolean {
+    return Boolean(
+      this.maintenanceGroupSupportsReschedule(group) &&
       group.items.length &&
       group.items.every(
         (item) =>
           item.status === 'pending' &&
+          !item.report_id &&
           !item.completion_source &&
           !item.legacy_history_file_id
       )
     );
+  }
+
+  get maintenanceFilteredAssetGroup(): MaintenanceItemGroup | null {
+    if (!this.maintenanceHasActiveDetailFilter) return null;
+    const assetIds = new Set(this.filteredMaintenanceItems.map((item) => item.asset_id));
+    if (assetIds.size !== 1) return null;
+    const assetId = Array.from(assetIds)[0];
+    const group = this.filteredGroupedItems.find(
+      (candidate) => candidate.assetId === assetId && candidate.assetCount === 1
+    );
+    return group && this.maintenanceGroupCanReschedule(group) ? group : null;
   }
 
   openMaintenanceReschedule(group: MaintenanceItemGroup): void {

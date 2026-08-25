@@ -487,9 +487,21 @@
             <option value="expired">Vencido</option>
           </select>
         </label>
-        <span class="result-count">
-          {{ filteredMaintenanceItems.length }} mantenimiento{{ filteredMaintenanceItems.length === 1 ? '' : 's' }}
-        </span>
+        <div class="filter-result-actions">
+          <span class="result-count">
+            {{ filteredMaintenanceItems.length }} mantenimiento{{ filteredMaintenanceItems.length === 1 ? '' : 's' }}
+          </span>
+          <button
+            *ngIf="maintenanceFilteredAssetGroup as filteredAssetGroup"
+            type="button"
+            class="secondary compact"
+            [disabled]="isBusy()"
+            title="Cambiar la periodicidad del equipo filtrado"
+            (click)="openMaintenanceReschedule(filteredAssetGroup)"
+          >
+            Reprogramar equipo
+          </button>
+        </div>
       </div>
 
       <div
@@ -602,7 +614,7 @@
                     {{ isBusy('save-maintenance-' + group.areaKey) ? 'Guardando...' : sectionProgrammingConfirmed(group.items) ? 'Guardar cambios' : 'Guardar ' + maintenanceSectionLabel().toLowerCase() }}
                   </button>
                   <button
-                    *ngIf="maintenanceEditLevel === 'equipment' && selectedSchedule.status === 'draft'"
+                    *ngIf="maintenanceGroupSupportsReschedule(group)"
                     type="button"
                     class="secondary compact section-save-button"
                     [disabled]="isBusy() || !maintenanceGroupCanReschedule(group)"

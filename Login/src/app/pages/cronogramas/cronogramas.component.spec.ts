@@ -201,6 +201,46 @@ describe('CronogramasComponent filtros dependientes', () => {
     });
   });
 
+  it('habilita reprogramar cuando el filtro identifica un único equipo', () => {
+    const component = createComponent();
+    component.items = Array.from({ length: 4 }, (_, index) => {
+      const item = maintenanceItem(`n7r-${index}`, 'VACUNACIÓN', 'CADENA DE FRÍO');
+      item.asset_id = 'asset-nevera';
+      item.code = 'N7R';
+      item.name = 'NEVERA HORIZONTAL';
+      item.frequency = 'trimestral';
+      item.programming_confirmed = true;
+      return item;
+    });
+    component.schedules = [
+      {
+        id: 'maintenance-schedule',
+        client_id: 'client-id',
+        asset_category: 'biomedical',
+        year: 2026,
+        start_date: '2026-02-16',
+        status: 'draft',
+        engineer_edited: false,
+        engineer_edit_enabled: false,
+        created_at: '2026-01-01T00:00:00.000Z',
+        total_items: 4,
+        programmed_items: 4
+      }
+    ];
+    component.selectedScheduleId = 'maintenance-schedule';
+    component.editing = true;
+    component.maintenanceEditLevel = 'area';
+    component.maintenanceProgrammingView = 'programmed';
+    component.maintenanceDetailSearch = 'N7R';
+
+    const group = component.maintenanceFilteredAssetGroup;
+
+    expect(group?.assetId).toBe('asset-nevera');
+    expect(component.maintenanceGroupCanReschedule(group!)).toBe(true);
+    component.openMaintenanceReschedule(group!);
+    expect(component.maintenanceRescheduleDialog?.assetId).toBe('asset-nevera');
+  });
+
   it('sincroniza desde la hoja de vida un equipo pendiente sin guardar', async () => {
     const original = [2, 5, 8, 11].map((month, index) => {
       const item = maintenanceItem(`old-${index}`, 'VACUNACIÓN', 'CADENA DE FRÍO');
