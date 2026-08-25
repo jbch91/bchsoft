@@ -110,6 +110,18 @@ export class InventoryPanelComponent implements OnDestroy {
   moveSites: MoveSiteOption[] = [];
   moveAreas: MoveAreaOption[] = [];
   moveLocations: MoveLocationOption[] = [];
+
+  requestDelete(item: InventoryPanelItem): void {
+    const label = [item.code, item.name].filter(Boolean).join(' - ');
+    const confirmed = window.confirm(
+      `¿Eliminar definitivamente ${label || 'este equipo'}? ` +
+      'También se eliminarán su hoja de vida, documentos asociados y programaciones del cronograma.'
+    );
+    if (confirmed) {
+      this.deleteItem.emit(item);
+    }
+  }
+
   moveForm = {
     code: '',
     siteId: '',

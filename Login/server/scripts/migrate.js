@@ -109,7 +109,8 @@ const MIGRATIONS = [
   'maintenance_schedule_month_boundaries.sql',
   'schedule_programming_progress.sql',
   'historical_maintenance_reconciliation.sql',
-  'industrial_assets_and_schedules.sql'
+  'industrial_assets_and_schedules.sql',
+  'cleanup_orphaned_asset_schedules.sql'
 ];
 
 async function ensureMigrationsTable() {

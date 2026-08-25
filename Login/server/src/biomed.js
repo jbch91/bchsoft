@@ -700,7 +700,57 @@ export async function deleteAsset(clientId, assetId) {
   if (!schema) {
     throw new Error('Cliente no encontrado');
   }
-  await query(`DELETE FROM "${schema}".assets WHERE id = $1`, [assetId]);
+  return withTransaction(async (client) => {
+    const assetResult = await client.query(
+      `SELECT id FROM "${schema}".assets WHERE id = $1 FOR UPDATE`,
+      [assetId]
+    );
+    if (!assetResult.rows.length) {
+      return {
+        deleted: false,
+        maintenanceScheduleItemsRemoved: 0,
+        calibrationScheduleItemsRemoved: 0
+      };
+    }
+
+    const maintenanceItems = await client.query(
+      `DELETE FROM maintenance_schedule_items AS item
+       USING maintenance_schedules AS schedule
+       WHERE item.schedule_id = schedule.id
+         AND schedule.client_id = $1
+         AND item.asset_id = $2
+       RETURNING item.schedule_id`,
+      [clientId, assetId]
+    );
+    const affectedScheduleIds = Array.from(
+      new Set(maintenanceItems.rows.map((row) => row.schedule_id))
+    );
+    if (affectedScheduleIds.length) {
+      await client.query(
+        `UPDATE maintenance_schedules
+         SET pdf_path = NULL
+         WHERE id = ANY($1::uuid[])`,
+        [affectedScheduleIds]
+      );
+    }
+
+    const calibrationItems = await client.query(
+      `DELETE FROM calibration_schedule_items AS item
+       USING calibration_schedules AS schedule
+       WHERE item.schedule_id = schedule.id
+         AND schedule.client_id = $1
+         AND item.asset_id = $2
+       RETURNING item.id`,
+      [clientId, assetId]
+    );
+
+    await client.query(`DELETE FROM "${schema}".assets WHERE id = $1`, [assetId]);
+    return {
+      deleted: true,
+      maintenanceScheduleItemsRemoved: maintenanceItems.rowCount ?? 0,
+      calibrationScheduleItemsRemoved: calibrationItems.rowCount ?? 0
+    };
+  });
 }
 
 export async function setAssetHvEngineer(clientId, assetId, engineerUserId) {

@@ -147,7 +147,7 @@ export async function listScheduleItemsWithSchema(scheduleId, schema) {
             a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id, a.location_id,
             ar.name AS area_name, s.name AS site_name, lo.name AS location_name
      FROM maintenance_schedule_items i
-     LEFT JOIN "${schema}".assets a ON a.id = i.asset_id
+     JOIN "${schema}".assets a ON a.id = i.asset_id
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
      LEFT JOIN "${schema}".sites s ON s.id = a.site_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id

@@ -92,7 +92,7 @@
           <button type="button" (click)="viewInModal ? viewItem.emit(item) : toggleHistory(item)">Ver hoja de vida</button>
           <button type="button" *ngIf="canMove" (click)="startMove(item)">Mover</button>
           <button type="button" *ngIf="canEdit" (click)="editItem.emit(item)">Editar</button>
-          <button type="button" class="danger" *ngIf="canEdit" (click)="deleteItem.emit(item)">Eliminar</button>
+          <button type="button" class="danger" *ngIf="canEdit" (click)="requestDelete(item)">Eliminar</button>
         </span>
       </div>
 

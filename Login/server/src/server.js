@@ -9293,7 +9293,10 @@ app.delete(
         });
       }
     }
-    await deleteAsset(clientId, assetId);
+    const deletion = await deleteAsset(clientId, assetId);
+    if (!deletion.deleted) {
+      return res.status(404).json({ message: 'Equipo no encontrado.' });
+    }
     await logEquipmentAudit(req, {
       action: 'ASSET_DELETE',
       clientId,
@@ -9302,10 +9305,16 @@ app.delete(
       description: `Eliminación del equipo ${assetLabel(asset)} y su hoja de vida.`,
       details: {
         eventType: 'hoja_vida_eliminada',
-        deletedAsset: assetSnapshot(asset)
+        deletedAsset: assetSnapshot(asset),
+        maintenanceScheduleItemsRemoved: deletion.maintenanceScheduleItemsRemoved,
+        calibrationScheduleItemsRemoved: deletion.calibrationScheduleItemsRemoved
       }
     });
-    return res.json({ ok: true });
+    return res.json({
+      ok: true,
+      maintenanceScheduleItemsRemoved: deletion.maintenanceScheduleItemsRemoved,
+      calibrationScheduleItemsRemoved: deletion.calibrationScheduleItemsRemoved
+    });
   }
 );
 
