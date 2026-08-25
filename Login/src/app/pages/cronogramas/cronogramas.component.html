@@ -601,6 +601,16 @@
                   >
                     {{ isBusy('save-maintenance-' + group.areaKey) ? 'Guardando...' : sectionProgrammingConfirmed(group.items) ? 'Guardar cambios' : 'Guardar ' + maintenanceSectionLabel().toLowerCase() }}
                   </button>
+                  <button
+                    *ngIf="maintenanceEditLevel === 'equipment' && selectedSchedule.status === 'draft'"
+                    type="button"
+                    class="secondary compact section-save-button"
+                    [disabled]="isBusy() || !maintenanceGroupCanReschedule(group)"
+                    title="Cambiar la periodicidad y devolver el equipo a pendientes"
+                    (click)="openMaintenanceReschedule(group)"
+                  >
+                    Reprogramar equipo
+                  </button>
                 </div>
               </td>
             </tr>
@@ -1674,6 +1684,61 @@
         <span>Fecha actual: <strong>{{ formatDate(picker.group.plannedDate) }}</strong></span>
         <button type="button" class="secondary" (click)="closeDatePicker()">Cancelar</button>
       </footer>
+    </section>
+  </div>
+
+  <div
+    *ngIf="maintenanceRescheduleDialog as reschedule"
+    class="modal-backdrop"
+    (click)="closeMaintenanceReschedule()"
+  >
+    <section
+      class="schedule-modal creation-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="maintenance-reschedule-title"
+      (click)="$event.stopPropagation()"
+    >
+      <button
+        type="button"
+        class="modal-close"
+        aria-label="Cerrar"
+        title="Cerrar"
+        [disabled]="isBusy()"
+        (click)="closeMaintenanceReschedule()"
+      >
+        &times;
+      </button>
+      <header class="schedule-modal-header">
+        <p class="eyebrow">{{ reschedule.code }}</p>
+        <h2 id="maintenance-reschedule-title">Reprogramar {{ reschedule.name }}</h2>
+        <p>La periodicidad quedará actualizada también en la hoja de vida del equipo.</p>
+      </header>
+      <div class="annual-rule">
+        Las fechas actuales de este equipo serán reemplazadas y quedarán pendientes de revisión antes de aprobar.
+      </div>
+      <form class="creation-panel modal-form" (submit)="$event.preventDefault(); applyMaintenanceReschedule()">
+        <label>
+          Periodicidad actual
+          <input type="text" [value]="titleCase(reschedule.currentFrequency)" readonly />
+        </label>
+        <label>
+          Nueva periodicidad
+          <select [(ngModel)]="reschedule.frequency" name="maintenanceRescheduleFrequency" required>
+            <option *ngFor="let frequency of maintenancePeriodOptions" [value]="frequency">
+              {{ titleCase(frequency) }}
+            </option>
+          </select>
+        </label>
+        <div class="form-actions">
+          <button type="button" class="secondary" [disabled]="isBusy()" (click)="closeMaintenanceReschedule()">
+            Cancelar
+          </button>
+          <button type="submit" class="primary" [disabled]="isBusy()">
+            {{ isBusy('reschedule-maintenance-' + reschedule.assetId) ? 'Reprogramando...' : 'Aplicar y dejar pendiente' }}
+          </button>
+        </div>
+      </form>
     </section>
   </div>
 

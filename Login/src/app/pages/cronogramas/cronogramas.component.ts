@@ -44,6 +44,7 @@ interface MaintenanceAreaDateGroup {
 
 interface MaintenanceItemGroup {
   areaKey: string;
+  assetId: string;
   areaName: string;
   siteName: string;
   locationName: string;
@@ -108,6 +109,14 @@ interface ConfirmDialog {
   action: () => Promise<void>;
 }
 
+interface MaintenanceRescheduleDialog {
+  assetId: string;
+  code: string;
+  name: string;
+  currentFrequency: string;
+  frequency: string;
+}
+
 type ViewMode = 'maintenance' | 'training' | 'calibration';
 type NoticeKind = 'success' | 'error' | 'info';
 type AssetEditLevel = 'area' | 'location' | 'equipment';
@@ -132,6 +141,7 @@ export class CronogramasComponent implements OnInit {
     'semestral',
     'anual'
   ];
+  readonly maintenancePeriodOptions = [...this.trainingPeriodOptions];
 
   clients: ClientOption[] = [];
   clientSearchTerm = '';
@@ -152,6 +162,7 @@ export class CronogramasComponent implements OnInit {
   noticeKind: NoticeKind = 'info';
   confirmDialog: ConfirmDialog | null = null;
   confirmBusy = false;
+  maintenanceRescheduleDialog: MaintenanceRescheduleDialog | null = null;
   calendarPicker: CalendarPickerState | null = null;
   readonly calendarWeekdays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
@@ -783,6 +794,7 @@ export class CronogramasComponent implements OnInit {
       if (!map.has(key)) {
         map.set(key, {
           areaKey: key,
+          assetId: item.asset_id,
           areaName,
           siteName,
           locationName: groupByLocation || groupByEquipment ? locationName : 'Todas las ubicaciones',
@@ -818,6 +830,66 @@ export class CronogramasComponent implements OnInit {
 
   sectionProgrammingConfirmed(items: { programming_confirmed: boolean }[]): boolean {
     return Boolean(items.length) && items.every((item) => item.programming_confirmed);
+  }
+
+  maintenanceGroupCanReschedule(group: MaintenanceItemGroup): boolean {
+    return Boolean(
+      this.selectedSchedule?.status === 'draft' &&
+      this.editing &&
+      this.maintenanceEditLevel === 'equipment' &&
+      group.items.length &&
+      group.items.every(
+        (item) =>
+          item.status === 'pending' &&
+          !item.completion_source &&
+          !item.legacy_history_file_id
+      )
+    );
+  }
+
+  openMaintenanceReschedule(group: MaintenanceItemGroup): void {
+    if (!this.maintenanceGroupCanReschedule(group)) return;
+    const currentFrequency = group.frequencies[0] || 'anual';
+    this.maintenanceRescheduleDialog = {
+      assetId: group.assetId,
+      code: group.code,
+      name: group.name,
+      currentFrequency,
+      frequency: currentFrequency
+    };
+  }
+
+  closeMaintenanceReschedule(): void {
+    if (!this.isBusy()) {
+      this.maintenanceRescheduleDialog = null;
+    }
+  }
+
+  async applyMaintenanceReschedule(): Promise<void> {
+    const dialog = this.maintenanceRescheduleDialog;
+    if (!dialog || !this.selectedScheduleId) return;
+    if (!this.maintenancePeriodOptions.includes(dialog.frequency)) {
+      this.setNotice('error', 'Selecciona una periodicidad válida.');
+      return;
+    }
+    await this.runAction(
+      `reschedule-maintenance-${dialog.assetId}`,
+      async () => {
+        await this.schedulesService.rescheduleAsset(
+          this.selectedScheduleId,
+          dialog.assetId,
+          dialog.frequency
+        );
+        this.maintenanceRescheduleDialog = null;
+        await this.loadSchedules(true);
+        if (this.selectedSchedule) {
+          this.maintenanceEditLevel = 'equipment';
+          this.startMaintenanceEdit();
+          this.maintenanceProgrammingView = 'pending';
+        }
+      },
+      'Equipo reprogramado. La hoja de vida quedó actualizada y sus fechas volvieron a pendientes.'
+    );
   }
 
   private buildAreaDateGroups(items: ScheduleItemDto[]): MaintenanceAreaDateGroup[] {
@@ -2090,6 +2162,7 @@ export class CronogramasComponent implements OnInit {
 
   private clearActiveDetail(): void {
     this.closeDatePicker();
+    this.maintenanceRescheduleDialog = null;
     if (this.viewMode === 'training') {
       this.selectedTrainingScheduleId = '';
       this.trainingItems = [];

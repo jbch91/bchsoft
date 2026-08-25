@@ -243,6 +243,115 @@ export async function updateScheduleItems(
   });
 }
 
+export async function rescheduleDraftAsset({
+  scheduleId,
+  clientId,
+  schema,
+  assetId,
+  assetCategory = 'biomedical',
+  frequency,
+  items
+}) {
+  const category = normalizeAssetCategory(assetCategory);
+  return withTransaction(async (client) => {
+    const { rows: scheduleRows } = await client.query(
+      `SELECT id, status, asset_category
+       FROM maintenance_schedules
+       WHERE id = $1 AND client_id = $2
+       FOR UPDATE`,
+      [scheduleId, clientId]
+    );
+    const schedule = scheduleRows[0];
+    if (!schedule || normalizeAssetCategory(schedule.asset_category) !== category) {
+      const error = new Error('El cronograma no corresponde al equipo seleccionado.');
+      error.code = 'SCHEDULE_ITEM_MISMATCH';
+      throw error;
+    }
+    if (schedule.status !== 'draft') {
+      const error = new Error('Solo se puede reprogramar un equipo mientras el cronograma está en borrador.');
+      error.code = 'SCHEDULE_EDIT_STATE_CHANGED';
+      throw error;
+    }
+
+    const { rows: assetRows } = await client.query(
+      `SELECT id, asset_category, maintenance_frequency
+       FROM "${schema}".assets
+       WHERE id = $1
+       FOR UPDATE`,
+      [assetId]
+    );
+    const asset = assetRows[0];
+    if (!asset || normalizeAssetCategory(asset.asset_category) !== category) {
+      const error = new Error('El equipo no pertenece a este cronograma.');
+      error.code = 'SCHEDULE_ITEM_MISMATCH';
+      throw error;
+    }
+
+    const { rows: currentItems } = await client.query(
+      `SELECT id, status, report_id, completion_source, legacy_history_file_id
+       FROM maintenance_schedule_items
+       WHERE schedule_id = $1 AND asset_id = $2
+       FOR UPDATE`,
+      [scheduleId, assetId]
+    );
+    if (!currentItems.length) {
+      const error = new Error('El equipo no tiene mantenimientos dentro de este cronograma.');
+      error.code = 'SCHEDULE_ITEM_MISMATCH';
+      throw error;
+    }
+    if (
+      currentItems.some(
+        (item) =>
+          item.status !== 'pending' ||
+          item.report_id ||
+          item.completion_source ||
+          item.legacy_history_file_id
+      )
+    ) {
+      const error = new Error('El equipo ya tiene mantenimientos operativos o históricos y no puede regenerarse.');
+      error.code = 'SCHEDULE_EDIT_LOCKED';
+      throw error;
+    }
+    if (!Array.isArray(items) || !items.length) {
+      const error = new Error('La periodicidad no generó fechas para este cronograma.');
+      error.code = 'SCHEDULE_ITEM_MISMATCH';
+      throw error;
+    }
+
+    await client.query(
+      `UPDATE "${schema}".assets
+       SET maintenance_frequency = $2
+       WHERE id = $1`,
+      [assetId, frequency]
+    );
+    await client.query(
+      'DELETE FROM maintenance_schedule_items WHERE schedule_id = $1 AND asset_id = $2',
+      [scheduleId, assetId]
+    );
+    await client.query(
+      `INSERT INTO maintenance_schedule_items
+         (schedule_id, asset_id, frequency, planned_date, deadline_date)
+       SELECT $1, $2, $3, data.planned_date, data.deadline_date
+       FROM UNNEST($4::date[], $5::date[]) AS data(planned_date, deadline_date)`,
+      [
+        scheduleId,
+        assetId,
+        frequency,
+        items.map((item) => item.plannedDate),
+        items.map((item) => item.deadlineDate)
+      ]
+    );
+    await client.query('UPDATE maintenance_schedules SET pdf_path = NULL WHERE id = $1', [scheduleId]);
+
+    return {
+      oldFrequency: asset.maintenance_frequency,
+      frequency,
+      oldItemCount: currentItems.length,
+      newItemCount: items.length
+    };
+  });
+}
+
 export async function countScheduleItems(scheduleId) {
   const { rows } = await query(
     'SELECT COUNT(*)::int AS count FROM maintenance_schedule_items WHERE schedule_id = $1',

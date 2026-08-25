@@ -159,4 +159,45 @@ describe('CronogramasComponent filtros dependientes', () => {
     expect(component.calendarPickerDays.find((day) => day?.date === '2026-08-19')?.disabled).toBe(true);
     expect(component.calendarPicker).not.toBeNull();
   });
+
+  it('permite reprogramar por equipo un mantenimiento guardado en borrador', () => {
+    const component = createComponent();
+    const item = maintenanceItem('1', 'VACUNACIÓN', 'CADENA DE FRÍO');
+    item.asset_id = 'asset-nevera';
+    item.code = 'N7R';
+    item.name = 'NEVERA HORIZONTAL';
+    item.frequency = 'trimestral';
+    item.programming_confirmed = true;
+    component.items = [item];
+    component.schedules = [
+      {
+        id: 'maintenance-schedule',
+        client_id: 'client-id',
+        asset_category: 'biomedical',
+        year: 2026,
+        start_date: '2026-02-16',
+        status: 'draft',
+        engineer_edited: false,
+        engineer_edit_enabled: false,
+        created_at: '2026-01-01T00:00:00.000Z',
+        total_items: 4,
+        programmed_items: 4
+      }
+    ];
+    component.selectedScheduleId = 'maintenance-schedule';
+    component.editing = true;
+    component.maintenanceEditLevel = 'equipment';
+    component.maintenanceProgrammingView = 'all';
+
+    const group = component.filteredGroupedItems[0];
+    component.openMaintenanceReschedule(group);
+
+    expect(component.maintenanceRescheduleDialog).toEqual({
+      assetId: 'asset-nevera',
+      code: 'N7R',
+      name: 'NEVERA HORIZONTAL',
+      currentFrequency: 'trimestral',
+      frequency: 'trimestral'
+    });
+  });
 });

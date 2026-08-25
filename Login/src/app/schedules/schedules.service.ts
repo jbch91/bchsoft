@@ -48,6 +48,13 @@ export interface ScheduleItemDto {
   legacy_history_file_id?: string | null;
 }
 
+export interface AssetRescheduleResultDto {
+  oldFrequency: string | null;
+  frequency: string;
+  oldItemCount: number;
+  newItemCount: number;
+}
+
 export interface TrainingScheduleDto {
   id: string;
   client_id: string;
@@ -120,6 +127,19 @@ export class SchedulesService {
   async updateScheduleItems(scheduleId: string, items: { id: string; plannedDate: string }[]): Promise<void> {
     await firstValueFrom(
       this.http.patch(`${this.apiBase}/maintenance/schedules/${scheduleId}/items`, { items })
+    );
+  }
+
+  async rescheduleAsset(
+    scheduleId: string,
+    assetId: string,
+    frequency: string
+  ): Promise<AssetRescheduleResultDto> {
+    return firstValueFrom(
+      this.http.post<AssetRescheduleResultDto>(
+        `${this.apiBase}/maintenance/schedules/${scheduleId}/assets/${assetId}/reschedule`,
+        { frequency }
+      )
     );
   }
 

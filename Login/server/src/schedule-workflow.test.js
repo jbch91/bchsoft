@@ -51,6 +51,10 @@ test('genera recurrencias en días hábiles dentro del año', () => {
     '2026-08-04',
     '2026-11-04'
   ]);
+  assert.equal(
+    buildRecurringDates({ year: 2026, startDate: '2026-02-16', months: 1 }).length,
+    11
+  );
 });
 
 test('limita las ventanas de servicio al cierre de la vigencia', () => {

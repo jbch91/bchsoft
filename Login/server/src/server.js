@@ -260,6 +260,7 @@ import {
   setSchedulePdf,
   approveSchedule,
   listScheduleItemsWithSchema,
+  rescheduleDraftAsset,
   updateScheduleItems,
   countScheduleItems,
   countPendingScheduleItems,
@@ -11419,6 +11420,105 @@ app.patch(
       });
     } catch (error) {
       return respondScheduleError(res, error, 'No se pudo actualizar el cronograma de mantenimiento.');
+    }
+  }
+);
+
+app.post(
+  '/maintenance/schedules/:id/assets/:assetId/reschedule',
+  requireAuth,
+  requirePermission('schedules:manage'),
+  async (req, res) => {
+    const schedule = await getScheduleById(req.params.id);
+    if (!schedule) {
+      return res.status(404).json({ message: 'Cronograma no encontrado.' });
+    }
+    if (!req.user.clientId || req.user.clientId !== schedule.client_id) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (schedule.status !== 'draft') {
+      return res.status(409).json({
+        message: 'Solo se puede reprogramar un equipo mientras el cronograma está en borrador.'
+      });
+    }
+
+    try {
+      const frequency = normalizePeriodicity(req.body?.frequency);
+      const months = scheduleFrequencyToMonths(frequency);
+      const client = await getClientById(schedule.client_id);
+      if (!client?.schema_name) {
+        return res.status(404).json({ message: 'Cliente no encontrado.' });
+      }
+      const asset = await getAssetById(schedule.client_id, req.params.assetId);
+      if (!asset) {
+        return res.status(404).json({ message: 'Equipo no encontrado.' });
+      }
+      const scheduleCategory = normalizeAssetCategory(schedule.asset_category);
+      if (normalizeAssetCategory(asset.asset_category) !== scheduleCategory) {
+        return res.status(409).json({ message: 'El equipo no pertenece a este tipo de cronograma.' });
+      }
+
+      const recurringDates = buildRecurringDates({
+        year: schedule.year,
+        startDate: dateOnlyFromDatabase(schedule.start_date, 'La fecha inicial del cronograma'),
+        months
+      });
+      const items = recurringDates.map((plannedDate) => ({
+        plannedDate,
+        deadlineDate: formatScheduleDate(endOfScheduleMonth(parseScheduleDate(plannedDate)))
+      }));
+      const result = await rescheduleDraftAsset({
+        scheduleId: schedule.id,
+        clientId: schedule.client_id,
+        schema: client.schema_name,
+        assetId: asset.id,
+        assetCategory: scheduleCategory,
+        frequency,
+        items
+      });
+      const updatedAsset = await getAssetById(schedule.client_id, asset.id);
+      await logEquipmentAudit(req, {
+        action: 'ASSET_UPDATE',
+        clientId: schedule.client_id,
+        assetId: asset.id,
+        asset: updatedAsset,
+        description: `Actualización de periodicidad desde el cronograma para ${assetLabel(updatedAsset)}.`,
+        details: {
+          eventType: 'periodicidad_mantenimiento_actualizada_desde_cronograma',
+          scheduleId: schedule.id,
+          year: schedule.year,
+          changes: changedAssetFields(asset, updatedAsset),
+          previousFrequency: result.oldFrequency,
+          maintenanceFrequency: result.frequency,
+          previousScheduleItemCount: result.oldItemCount,
+          scheduleItemCount: result.newItemCount
+        }
+      });
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: 'MAINTENANCE_SCHEDULE_ASSET_RESCHEDULE',
+        targetUserId: asset.id,
+        targetUsername: assetLabel(updatedAsset),
+        details: {
+          category: 'schedule',
+          clientId: schedule.client_id,
+          clientName: client.name,
+          scheduleId: schedule.id,
+          assetId: asset.id,
+          assetCode: asset.code,
+          assetName: asset.name,
+          assetCategory: scheduleCategory,
+          year: schedule.year,
+          previousFrequency: result.oldFrequency,
+          frequency: result.frequency,
+          previousItemCount: result.oldItemCount,
+          itemCount: result.newItemCount
+        }
+      });
+      return res.json(result);
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo reprogramar el equipo.');
     }
   }
 );
