@@ -73,10 +73,10 @@
       >
         Protocolos
       </button>
-      <button type="button" role="tab" class="tab" [class.active]="viewMode === 'repuestos'" [attr.aria-selected]="viewMode === 'repuestos'" (click)="switchView('repuestos')">
+      <button *ngIf="!isAreaResponsible" type="button" role="tab" class="tab" [class.active]="viewMode === 'repuestos'" [attr.aria-selected]="viewMode === 'repuestos'" (click)="switchView('repuestos')">
         Repuestos <strong>{{ pendingSpareCount }}</strong>
       </button>
-      <button type="button" role="tab" class="tab" [class.active]="viewMode === 'bajas'" [attr.aria-selected]="viewMode === 'bajas'" (click)="switchView('bajas')">
+      <button *ngIf="!isAreaResponsible" type="button" role="tab" class="tab" [class.active]="viewMode === 'bajas'" [attr.aria-selected]="viewMode === 'bajas'" (click)="switchView('bajas')">
         Bajas <strong>{{ retiredAssets.length }}</strong>
       </button>
       <button type="button" role="tab" class="tab" [class.active]="viewMode === 'equipos'" [attr.aria-selected]="viewMode === 'equipos'" (click)="switchView('equipos')">
@@ -125,14 +125,14 @@
         <div class="card-title">
           <span>Nueva solicitud</span>
           <h2>Reportar falla o necesidad</h2>
-          <p>Los mantenimientos preventivos se generan desde cronograma; lector y almacenista solo solicitan correctivos.</p>
+          <p>Los mantenimientos preventivos se generan desde cronograma; responsables de área, lectores y almacenistas solicitan correctivos.</p>
         </div>
         <form class="request-form" (ngSubmit)="createRequest()">
           <label>
             Tipo
             <select [(ngModel)]="requestType" name="requestType">
               <option value="correctivo">Correctivo</option>
-              <option value="preventivo" *ngIf="!auth.hasRole('lector') && !auth.hasRole('almacenista')">
+              <option value="preventivo" *ngIf="!auth.hasRole('responsable_area') && !auth.hasRole('lector') && !auth.hasRole('almacenista')">
                 Preventivo
               </option>
             </select>
@@ -294,15 +294,103 @@
     <div #preventiveProgrammedCard class="card">
       <div class="list-title report-list-title">
         <div>
-          <h2>Preventivos programados</h2>
-          <p>Equipos dentro de su ventana de mantenimiento.</p>
+          <h2>Seguimiento de preventivos</h2>
+          <p>Consulta cada mantenimiento por fase sin perder el orden operativo.</p>
         </div>
         <span class="report-total-badge">
-          {{ filteredPreventiveRequests.length }} de {{ preventiveProgrammedRequests.length }} equipos
+          {{ filteredPreventiveItems.length }} de {{ activePreventivePhaseTotal }} actividades
         </span>
       </div>
 
-      <div class="report-filter-panel" *ngIf="preventiveProgrammedRequests.length">
+      <section class="preventive-progress-band" *ngIf="preventiveProgress as scheduleProgress">
+        <div class="preventive-progress-heading">
+          <div>
+            <span>Avance operativo</span>
+            <strong>{{ preventiveProgressPeriodLabel }}</strong>
+          </div>
+          <div class="preventive-progress-scope" role="group" aria-label="Periodo del avance preventivo">
+            <button
+              type="button"
+              [class.active]="preventiveProgressScope === 'month'"
+              [attr.aria-pressed]="preventiveProgressScope === 'month'"
+              (click)="setPreventiveProgressScope('month')"
+            >
+              Mes
+            </button>
+            <button
+              type="button"
+              [class.active]="preventiveProgressScope === 'year'"
+              [attr.aria-pressed]="preventiveProgressScope === 'year'"
+              (click)="setPreventiveProgressScope('year')"
+            >
+              Año
+            </button>
+          </div>
+        </div>
+
+        <ng-container *ngIf="scheduleProgress.schedule_id; else noPreventiveSchedule">
+          <ng-container *ngIf="activePreventiveProgress as progress">
+            <div class="preventive-completion-row">
+              <div class="preventive-completion-value">
+                <strong>{{ progress.completion_percent }}%</strong>
+                <span>{{ progress.completed }} de {{ progress.total }} finalizados</span>
+              </div>
+              <div
+                class="preventive-completion-track"
+                role="progressbar"
+                aria-label="Preventivos finalizados"
+                [attr.aria-valuenow]="progress.completion_percent"
+                aria-valuemin="0"
+                aria-valuemax="100"
+              >
+                <span [style.width.%]="progress.completion_percent"></span>
+              </div>
+              <span class="preventive-overdue" *ngIf="progress.overdue">
+                {{ progress.overdue }} vencido{{ progress.overdue === 1 ? '' : 's' }} sin finalizar
+              </span>
+            </div>
+
+            <div class="preventive-status-track" aria-label="Distribución por estado">
+              <span
+                *ngFor="let segment of preventiveProgressSegments"
+                [ngClass]="segment.key"
+                [style.width.%]="segment.percent"
+                [title]="segment.label + ': ' + segment.count"
+              ></span>
+            </div>
+
+            <div class="preventive-progress-legend">
+              <div *ngFor="let segment of preventiveProgressSegments" [ngClass]="segment.key">
+                <span></span>
+                <strong>{{ segment.count }}</strong>
+                <small>{{ segment.label }}</small>
+              </div>
+            </div>
+
+            <div class="preventive-phase-tabs" role="tablist" aria-label="Fases del mantenimiento preventivo">
+              <button
+                *ngFor="let tab of preventivePhaseTabs"
+                type="button"
+                role="tab"
+                [class.active]="preventivePhaseView === tab.value"
+                [attr.aria-selected]="preventivePhaseView === tab.value"
+                (click)="setPreventivePhaseView(tab.value)"
+              >
+                <span>{{ tab.label }}</span>
+                <strong>{{ tab.count }}</strong>
+              </button>
+            </div>
+          </ng-container>
+        </ng-container>
+
+        <ng-template #noPreventiveSchedule>
+          <p class="preventive-progress-empty">
+            Sin cronograma {{ isIndustrialMaintenanceModule ? 'industrial' : 'biomédico' }} aprobado para {{ scheduleProgress.year }}.
+          </p>
+        </ng-template>
+      </section>
+
+      <div class="report-filter-panel" *ngIf="activePreventivePhaseTotal || hasActivePreventiveFilters">
         <div class="list-tools report-filters preventive-filters">
           <label>
             Buscar
@@ -334,12 +422,12 @@
               <option *ngFor="let location of preventiveLocationOptions" [value]="location">{{ location }}</option>
             </select>
           </label>
-          <label>
+          <label *ngIf="preventivePhaseView === 'work'">
             Estado
             <select [(ngModel)]="preventiveStatusFilter" (ngModelChange)="resetPreventivePage()">
               <option value="">Todos</option>
-              <option value="abierto">Pendiente</option>
-              <option value="en_proceso">En proceso</option>
+              <option value="not_started">Por realizar</option>
+              <option value="in_progress">En proceso</option>
             </select>
           </label>
           <button
@@ -353,7 +441,7 @@
         </div>
       </div>
 
-      <div class="table preventive-table compact-preventive-table" *ngIf="filteredPreventiveRequests.length">
+      <div class="table preventive-table compact-preventive-table" *ngIf="filteredPreventiveItems.length">
         <div class="row header">
           <span>Equipo</span>
           <span>Área y ubicación</span>
@@ -361,52 +449,112 @@
           <span>Estado</span>
           <span>Acción</span>
         </div>
-        <div class="row" *ngFor="let request of paginatedPreventiveRequests">
+        <div class="row" *ngFor="let item of paginatedPreventiveItems">
           <span data-label="Equipo">
-            <strong>{{ assetLabel(request.asset_id) }}</strong>
-            <small>Serie {{ assetMap.get(request.asset_id)?.serial || '-' }}</small>
+            <span class="preventive-equipment-copy">
+              <strong>{{ item.asset_code }} - {{ item.asset_name }}</strong>
+              <small>Marca {{ item.asset_brand || '-' }} · Modelo {{ item.asset_model || '-' }}</small>
+              <small>Serie {{ item.asset_serial || '-' }}</small>
+            </span>
           </span>
           <span data-label="Área y ubicación">
-            <strong>{{ assetMap.get(request.asset_id)?.areaName || 'Sin área' }}</strong>
+            <strong>{{ item.area_name || 'Sin área' }}</strong>
             <small>
-              {{ assetMap.get(request.asset_id)?.siteName || 'Sin sede' }} ·
-              {{ assetMap.get(request.asset_id)?.locationName || 'Sin ubicación' }}
+              {{ item.site_name || 'Sin sede' }} · {{ item.location_name || 'Sin ubicación' }}
             </small>
           </span>
           <span data-label="Ventana">
-            <span class="window-indicator" [ngClass]="preventiveWindowClass(request)">
-              {{ preventiveWindowLabel(request) }}
+            <span class="window-indicator" [ngClass]="preventiveWindowClass(item)">
+              {{ preventiveWindowLabel(item) }}
             </span>
-            <small>Asignado: {{ assignedEngineerLabel(request) }}</small>
+            <small *ngIf="item.assigned_name">Asignado: {{ item.assigned_name }}</small>
+            <small class="preventive-overdue-note" *ngIf="item.is_overdue">Vencido sin finalizar</small>
           </span>
           <span data-label="Estado">
-            <span class="status-pill" [ngClass]="statusClass(request.status)">
-              {{ statusLabel(request.status) }}
+            <span class="status-pill preventive-phase-pill" [ngClass]="preventivePhaseClass(item.phase)">
+              {{ preventivePhaseLabel(item.phase) }}
             </span>
           </span>
-          <span class="actions" data-label="Acción">
+          <span class="actions preventive-phase-actions" data-label="Acción">
+            <ng-container *ngIf="item.phase === 'not_started' || item.phase === 'in_progress'">
+              <ng-container *ngIf="preventiveRequestForItem(item) as request; else preventiveNotAvailable">
+                <button
+                  *ngIf="canTakeRequest(request)"
+                  type="button"
+                  [disabled]="reportOpening"
+                  (click)="startPreventiveReport(request)"
+                >
+                  {{
+                    openingReportRequestId === request.id
+                      ? 'Abriendo...'
+                      : request.status === 'en_proceso'
+                        ? 'Continuar'
+                        : 'Realizar'
+                  }}
+                </button>
+                <ng-container *ngIf="preventiveReportForItem(item) as report">
+                  <button
+                    *ngIf="canCorrectReport(report)"
+                    type="button"
+                    (click)="startPreventiveReportCorrection(report)"
+                  >
+                    Corregir reporte
+                  </button>
+                  <button
+                    *ngIf="!canTakeRequest(request) && !canCorrectReport(report)"
+                    type="button"
+                    class="ghost"
+                    (click)="openReportDetail(report)"
+                  >
+                    Ver reporte
+                  </button>
+                </ng-container>
+                <small *ngIf="!canTakeRequest(request) && !item.report_id">
+                  {{ item.assigned_name ? 'Asignado a ' + item.assigned_name : 'Sin acción disponible' }}
+                </small>
+              </ng-container>
+              <ng-template #preventiveNotAvailable>
+                <small>{{ item.is_overdue ? 'Sin solicitud activa' : 'Aún no disponible' }}</small>
+              </ng-template>
+            </ng-container>
+
+            <ng-container *ngIf="item.phase === 'pending_signature'">
+              <ng-container *ngIf="preventiveReportForItem(item) as report">
+                <button type="button" class="ghost" (click)="openReportDetail(report)">Ver reporte</button>
+              </ng-container>
+            </ng-container>
+
+            <ng-container *ngIf="item.phase === 'waiting_spare'">
+              <ng-container *ngIf="preventiveReportForItem(item) as report">
+                <button *ngIf="canContinueSpareCase(report)" type="button" (click)="startSpareInstallation(report)">
+                  Instalar repuesto
+                </button>
+                <button type="button" class="ghost" (click)="openReportDetail(report)">Ver reporte</button>
+              </ng-container>
+            </ng-container>
+
             <button
-              *ngIf="canTakeRequest(request)"
+              *ngIf="item.phase === 'completed'"
               type="button"
-              [disabled]="reportOpening"
-              (click)="startPreventiveReport(request)"
+              [disabled]="!item.pdf_available || preventivePdfLoadingId === item.id"
+              (click)="openPreventiveFinalPdf(item)"
             >
               {{
-                openingReportRequestId === request.id
+                preventivePdfLoadingId === item.id
                   ? 'Abriendo...'
-                  : request.status === 'en_proceso'
-                    ? 'Continuar'
-                    : 'Realizar'
+                  : item.pdf_available
+                    ? 'Abrir PDF'
+                    : 'PDF no disponible'
               }}
             </button>
           </span>
         </div>
       </div>
 
-      <div class="report-pagination" *ngIf="filteredPreventiveRequests.length">
+      <div class="report-pagination" *ngIf="filteredPreventiveItems.length">
         <div class="report-page-summary">
           <span>
-            Mostrando {{ preventivePageStart }}–{{ preventivePageEnd }} de {{ filteredPreventiveRequests.length }}
+            Mostrando {{ preventivePageStart }}–{{ preventivePageEnd }} de {{ filteredPreventiveItems.length }}
           </span>
           <label>
             Por página
@@ -442,11 +590,11 @@
         </div>
       </div>
 
-      <p class="empty" *ngIf="!loading && preventiveProgrammedRequests.length === 0">
-        No hay mantenimientos preventivos activos en la fecha actual. Revisa que el cronograma esté aprobado y que hoy esté dentro del rango del mantenimiento.
+      <p class="empty" *ngIf="!loading && preventiveProgress?.schedule_id && activePreventivePhaseTotal === 0">
+        No hay actividades en la fase seleccionada para este periodo.
       </p>
-      <p class="empty" *ngIf="!loading && preventiveProgrammedRequests.length > 0 && filteredPreventiveRequests.length === 0">
-        No hay equipos que coincidan con los filtros seleccionados.
+      <p class="empty" *ngIf="!loading && activePreventivePhaseTotal > 0 && filteredPreventiveItems.length === 0">
+        No hay actividades que coincidan con los filtros seleccionados.
       </p>
     </div>
   </ng-container>
@@ -520,11 +668,38 @@
             {{ selectedRequestLabel(reportRequestId) }}
           </div>
           <div class="request-context" *ngIf="selectedReportRequest as request">
-            <div class="context-title">
-              <span>Solicitud realizada</span>
-              <strong>{{ assetLabel(request.asset_id) }}</strong>
-              <small>{{ request.created_at | date: 'dd/MM/yyyy, h:mm a' }} · {{ statusLabel(request.status) }}</small>
-            </div>
+            <ng-container *ngIf="selectedReportAsset as asset; else requestContextWithoutAsset">
+              <div class="report-asset-identity">
+                <div class="asset-photo-preview">
+                  <img
+                    *ngIf="assetPhotoAvailable(asset)"
+                    [src]="assetPhotoUrl(asset) || ''"
+                    [alt]="'Fotografía de ' + asset.code + ' - ' + asset.name"
+                    loading="lazy"
+                    decoding="async"
+                    (error)="onAssetPhotoError(asset.id)"
+                  />
+                  <span *ngIf="!assetPhotoAvailable(asset)">Sin fotografía</span>
+                </div>
+                <div class="context-title report-asset-copy">
+                  <span>Solicitud realizada</span>
+                  <strong>{{ asset.code }} - {{ asset.name }}</strong>
+                  <small>{{ request.created_at | date: 'dd/MM/yyyy, h:mm a' }} · {{ statusLabel(request.status) }}</small>
+                  <div class="report-asset-identifiers">
+                    <span>Marca: <b>{{ asset.brand || '-' }}</b></span>
+                    <span>Modelo: <b>{{ asset.model || '-' }}</b></span>
+                    <span>Serie: <b>{{ asset.serial || '-' }}</b></span>
+                  </div>
+                </div>
+              </div>
+            </ng-container>
+            <ng-template #requestContextWithoutAsset>
+              <div class="context-title">
+                <span>Solicitud realizada</span>
+                <strong>{{ assetLabel(request.asset_id) }}</strong>
+                <small>{{ request.created_at | date: 'dd/MM/yyyy, h:mm a' }} · {{ statusLabel(request.status) }}</small>
+              </div>
+            </ng-template>
             <div class="context-grid" *ngIf="selectedReportAsset as asset">
               <div>
                 <span>Sede</span>
@@ -618,18 +793,156 @@
             </div>
           </div>
 
-          <label>
-            Resumen
-            <textarea [(ngModel)]="reportSummary" name="reportSummary" rows="2"></textarea>
-          </label>
-          <label>
-            Hallazgos
-            <textarea [(ngModel)]="reportFindings" name="reportFindings" rows="2"></textarea>
-          </label>
-          <label>
-            Acciones realizadas
-            <textarea [(ngModel)]="reportActions" name="reportActions" rows="2"></textarea>
-          </label>
+          <ng-container
+            *ngIf="selectedReportRequest?.type === 'preventivo' && reportFlowMode === 'normal'; else manualReportNarrative"
+          >
+            <section class="preventive-outcome-panel" aria-labelledby="preventiveOutcomeTitle">
+              <div class="guided-section-heading">
+                <div>
+                  <span>Resultado rápido</span>
+                  <h3 id="preventiveOutcomeTitle">Condición final del equipo</h3>
+                </div>
+              </div>
+              <div class="preventive-outcome-options">
+                <button
+                  *ngFor="let preset of preventiveOutcomePresets"
+                  type="button"
+                  [ngClass]="preset.tone"
+                  [class.active]="preventiveOutcomeSelected(preset)"
+                  [attr.aria-pressed]="preventiveOutcomeSelected(preset)"
+                  (click)="applyPreventiveOutcomePreset(preset.value)"
+                >
+                  <strong>{{ preset.label }}</strong>
+                  <small>{{ preset.description }}</small>
+                </button>
+              </div>
+            </section>
+
+            <section class="guided-narrative-panel" aria-labelledby="guidedNarrativeTitle">
+              <div class="guided-section-heading">
+                <div>
+                  <span>Redacción técnica</span>
+                  <h3 id="guidedNarrativeTitle">Contenido del reporte</h3>
+                </div>
+              </div>
+
+              <div class="narrative-grid">
+                <fieldset class="narrative-field">
+                  <legend>
+                    <span>Resumen</span>
+                    <small>
+                      {{ narrativeSelectedCount('summary', preventiveSummaryOptions) }} seleccionados
+                    </small>
+                  </legend>
+                  <div class="narrative-option-list">
+                    <label
+                      class="narrative-option"
+                      *ngFor="let option of preventiveSummaryOptions"
+                      [class.selected]="narrativeOptionChecked('summary', option.text)"
+                    >
+                      <input
+                        type="checkbox"
+                        [checked]="narrativeOptionChecked('summary', option.text)"
+                        (change)="toggleNarrativeOption('summary', option, $any($event.target).checked)"
+                      />
+                      <span>{{ option.label }}</span>
+                    </label>
+                  </div>
+                  <label class="narrative-editor">
+                    Redacción final
+                    <textarea
+                      [(ngModel)]="reportSummary"
+                      name="reportSummary"
+                      rows="6"
+                      maxlength="2500"
+                      placeholder="Agrega aquí un detalle especial del resumen..."
+                    ></textarea>
+                  </label>
+                </fieldset>
+
+                <fieldset class="narrative-field">
+                  <legend>
+                    <span>Hallazgos</span>
+                    <small>
+                      {{ narrativeSelectedCount('findings', preventiveFindingOptions) }} seleccionados
+                    </small>
+                  </legend>
+                  <div class="narrative-option-list">
+                    <label
+                      class="narrative-option"
+                      *ngFor="let option of preventiveFindingOptions"
+                      [class.selected]="narrativeOptionChecked('findings', option.text)"
+                    >
+                      <input
+                        type="checkbox"
+                        [checked]="narrativeOptionChecked('findings', option.text)"
+                        (change)="toggleNarrativeOption('findings', option, $any($event.target).checked)"
+                      />
+                      <span>{{ option.label }}</span>
+                    </label>
+                  </div>
+                  <label class="narrative-editor">
+                    Redacción final
+                    <textarea
+                      [(ngModel)]="reportFindings"
+                      name="reportFindings"
+                      rows="6"
+                      maxlength="2500"
+                      placeholder="Describe aquí cualquier hallazgo no incluido en la lista..."
+                    ></textarea>
+                  </label>
+                </fieldset>
+
+                <fieldset class="narrative-field">
+                  <legend>
+                    <span>Acciones realizadas</span>
+                    <small>
+                      {{ narrativeSelectedCount('actions', preventiveActionOptions) }} seleccionadas
+                    </small>
+                  </legend>
+                  <div class="narrative-option-list">
+                    <label
+                      class="narrative-option"
+                      *ngFor="let option of preventiveActionOptions"
+                      [class.selected]="narrativeOptionChecked('actions', option.text)"
+                    >
+                      <input
+                        type="checkbox"
+                        [checked]="narrativeOptionChecked('actions', option.text)"
+                        (change)="toggleNarrativeOption('actions', option, $any($event.target).checked)"
+                      />
+                      <span>{{ option.label }}</span>
+                    </label>
+                  </div>
+                  <label class="narrative-editor">
+                    Redacción final
+                    <textarea
+                      [(ngModel)]="reportActions"
+                      name="reportActions"
+                      rows="6"
+                      maxlength="2500"
+                      placeholder="Agrega aquí una acción o procedimiento especial..."
+                    ></textarea>
+                  </label>
+                </fieldset>
+              </div>
+            </section>
+          </ng-container>
+
+          <ng-template #manualReportNarrative>
+            <label>
+              Resumen
+              <textarea [(ngModel)]="reportSummary" name="reportSummary" rows="2"></textarea>
+            </label>
+            <label>
+              Hallazgos
+              <textarea [(ngModel)]="reportFindings" name="reportFindings" rows="2"></textarea>
+            </label>
+            <label>
+              Acciones realizadas
+              <textarea [(ngModel)]="reportActions" name="reportActions" rows="2"></textarea>
+            </label>
+          </ng-template>
 
           <div class="tracking-grid">
             <div class="tracking-stack">
@@ -643,21 +956,46 @@
                   <option *ngFor="let option of assetStatusOptions" [value]="option.value">{{ option.label }}</option>
                 </select>
               </label>
-              <label class="status-observation-field" *ngIf="reportAssetStatus !== 'operativo'">
-                {{ reportAssetStatus === 'operativo_observacion' ? 'Observaciones de operación' : 'Motivo de fuera de servicio' }}
-                <textarea
-                  [(ngModel)]="reportAssetStatusObservations"
-                  name="reportAssetStatusObservations"
-                  rows="2"
-                  maxlength="1000"
-                  [placeholder]="reportAssetStatus === 'operativo_observacion'
-                    ? 'Indica la condición, restricción o seguimiento requerido...'
-                    : 'Indica la falla o condición por la que no debe utilizarse el equipo...'"
-                ></textarea>
-                <small>
-                  Campo obligatorio · {{ reportAssetStatusObservations.trim().length }}/1000
+              <div class="status-observation-field" *ngIf="reportAssetStatus !== 'operativo'">
+                <div class="narrative-inline-heading">
+                  <strong>
+                    {{ reportAssetStatus === 'operativo_observacion' ? 'Observaciones de operación' : 'Motivo de fuera de servicio' }}
+                  </strong>
+                  <small>Campo obligatorio</small>
+                </div>
+                <div
+                  class="narrative-option-list compact"
+                  *ngIf="selectedReportRequest?.type === 'preventivo' && reportFlowMode === 'normal'"
+                >
+                  <label
+                    class="narrative-option"
+                    *ngFor="let option of preventiveStatusObservationOptions"
+                    [class.selected]="narrativeOptionChecked('statusObservations', option.text)"
+                  >
+                    <input
+                      type="checkbox"
+                      [checked]="narrativeOptionChecked('statusObservations', option.text)"
+                      (change)="toggleNarrativeOption('statusObservations', option, $any($event.target).checked)"
+                    />
+                    <span>{{ option.label }}</span>
+                  </label>
+                </div>
+                <label class="narrative-editor">
+                  Detalle adicional o redacción final
+                  <textarea
+                    [(ngModel)]="reportAssetStatusObservations"
+                    name="reportAssetStatusObservations"
+                    rows="3"
+                    maxlength="1000"
+                    [placeholder]="reportAssetStatus === 'operativo_observacion'
+                      ? 'Indica la condición, restricción o seguimiento requerido...'
+                      : 'Indica la falla o condición por la que no debe utilizarse el equipo...'"
+                  ></textarea>
+                </label>
+                <small class="narrative-character-count">
+                  {{ reportAssetStatusObservations.trim().length }}/1000
                 </small>
-              </label>
+              </div>
             </div>
 
             <div class="tracking-stack">
@@ -683,13 +1021,38 @@
               </div>
 
               <div class="spare-box" *ngIf="reportRequiresSpareParts">
+                <div
+                  class="spare-suggestions"
+                  *ngIf="selectedReportRequest?.type === 'preventivo' && reportFlowMode === 'normal'"
+                >
+                  <div class="narrative-inline-heading">
+                    <strong>Tipo de repuesto</strong>
+                    <small>
+                      {{ narrativeSelectedCount('spareParts', preventiveSparePartOptions) }} seleccionados
+                    </small>
+                  </div>
+                  <div class="narrative-option-list compact spare-part-options">
+                    <label
+                      class="narrative-option"
+                      *ngFor="let option of preventiveSparePartOptions"
+                      [class.selected]="narrativeOptionChecked('spareParts', option.text)"
+                    >
+                      <input
+                        type="checkbox"
+                        [checked]="narrativeOptionChecked('spareParts', option.text)"
+                        (change)="toggleNarrativeOption('spareParts', option, $any($event.target).checked)"
+                      />
+                      <span>{{ option.label }}</span>
+                    </label>
+                  </div>
+                </div>
                 <label>
-                  Repuesto requerido
+                  Detalle del repuesto requerido
                   <textarea
                     [(ngModel)]="reportSparePartsNeeded"
                     name="reportSparePartsNeeded"
-                    rows="2"
-                    placeholder="Ej: Tarjeta electrónica, válvula, pieza específica..."
+                    rows="3"
+                    placeholder="Agrega referencia, cantidad, especificación o un repuesto no incluido..."
                   ></textarea>
                 </label>
                 <div
@@ -1228,6 +1591,30 @@
         <button type="button" class="icon-action ghost" aria-label="Cerrar reporte" title="Cerrar" (click)="closeReportDetail()">×</button>
       </div>
 
+      <div class="report-asset-identity report-detail-asset-identity" *ngIf="assetForReport(report) as asset">
+        <div class="asset-photo-preview">
+          <img
+            *ngIf="assetPhotoAvailable(asset)"
+            [src]="assetPhotoUrl(asset) || ''"
+            [alt]="'Fotografía de ' + asset.code + ' - ' + asset.name"
+            loading="lazy"
+            decoding="async"
+            (error)="onAssetPhotoError(asset.id)"
+          />
+          <span *ngIf="!assetPhotoAvailable(asset)">Sin fotografía</span>
+        </div>
+        <div class="context-title report-asset-copy">
+          <span>Identificación del equipo</span>
+          <strong>{{ asset.code }} - {{ asset.name }}</strong>
+          <small>{{ asset.siteName || 'Sin sede' }} · {{ asset.areaName || 'Sin área' }} · {{ asset.locationName || 'Sin ubicación' }}</small>
+          <div class="report-asset-identifiers">
+            <span>Marca: <b>{{ asset.brand || '-' }}</b></span>
+            <span>Modelo: <b>{{ asset.model || '-' }}</b></span>
+            <span>Serie: <b>{{ asset.serial || '-' }}</b></span>
+          </div>
+        </div>
+      </div>
+
       <div class="report-detail-overview">
         <div>
           <span>Fecha</span>
@@ -1251,6 +1638,13 @@
         <span>{{ asset.siteName || 'Sin sede' }}</span>
         <span>{{ asset.areaName || 'Sin área' }}</span>
         <span>{{ asset.locationName || 'Sin ubicación' }}</span>
+      </div>
+
+      <div class="report-detail-callout approval" *ngIf="report.area_responsible_required">
+        <span>Aval operativo</span>
+        <strong>
+          {{ report.is_fully_signed ? 'Avalado por responsable del área' : 'Pendiente de firma del responsable del área' }}
+        </strong>
       </div>
 
       <div
@@ -1347,6 +1741,106 @@
   </div>
 
   <div
+    class="maintenance-modal-backdrop preventive-pdf-backdrop"
+    *ngIf="preventivePdfOpen"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="preventive-pdf-title"
+    (click)="closePreventivePdf()"
+  >
+    <article class="preventive-pdf-modal" (click)="$event.stopPropagation()">
+      <div class="modal-heading">
+        <div class="preventive-pdf-heading">
+          <div
+            class="asset-photo-preview compact"
+            *ngIf="preventivePdfAsset as asset"
+            [class.without-photo]="!assetPhotoAvailable(asset)"
+          >
+            <img
+              *ngIf="assetPhotoAvailable(asset)"
+              [src]="assetPhotoUrl(asset) || ''"
+              [alt]="'Fotografía de ' + asset.code + ' - ' + asset.name"
+              decoding="async"
+              (error)="onAssetPhotoError(asset.id)"
+            />
+            <span *ngIf="!assetPhotoAvailable(asset)">Sin foto</span>
+          </div>
+          <div>
+            <span>Reporte finalizado</span>
+            <h2 id="preventive-pdf-title">{{ preventivePdfTitle }}</h2>
+            <small *ngIf="preventivePdfAsset as asset">
+              Marca {{ asset.brand || '-' }} · Modelo {{ asset.model || '-' }} · Serie {{ asset.serial || '-' }}
+            </small>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="icon-action ghost"
+          aria-label="Cerrar PDF"
+          title="Cerrar"
+          (click)="closePreventivePdf()"
+        >
+          ×
+        </button>
+      </div>
+      <div class="preventive-pdf-viewer">
+        <div class="preventive-pdf-toolbar">
+          <div role="group" aria-label="Navegación del PDF">
+            <button
+              type="button"
+              class="icon-action ghost"
+              aria-label="Página anterior"
+              title="Página anterior"
+              [disabled]="preventivePdfPage <= 1"
+              (click)="changePreventivePdfPage(-1)"
+            >
+              ‹
+            </button>
+            <strong>Página {{ preventivePdfPage }} de {{ preventivePdfPageCount }}</strong>
+            <button
+              type="button"
+              class="icon-action ghost"
+              aria-label="Página siguiente"
+              title="Página siguiente"
+              [disabled]="preventivePdfPage >= preventivePdfPageCount"
+              (click)="changePreventivePdfPage(1)"
+            >
+              ›
+            </button>
+          </div>
+          <div role="group" aria-label="Zoom del PDF">
+            <button
+              type="button"
+              class="icon-action ghost"
+              aria-label="Reducir zoom"
+              title="Reducir zoom"
+              [disabled]="preventivePdfZoom <= 0.7"
+              (click)="changePreventivePdfZoom(-0.1)"
+            >
+              −
+            </button>
+            <strong>{{ preventivePdfZoomLabel }}</strong>
+            <button
+              type="button"
+              class="icon-action ghost"
+              aria-label="Aumentar zoom"
+              title="Aumentar zoom"
+              [disabled]="preventivePdfZoom >= 2"
+              (click)="changePreventivePdfZoom(0.1)"
+            >
+              +
+            </button>
+          </div>
+        </div>
+        <div class="preventive-pdf-canvas-scroll">
+          <canvas #preventivePdfCanvas [attr.aria-label]="'PDF final de ' + preventivePdfTitle"></canvas>
+          <span class="preventive-pdf-loading" *ngIf="preventivePdfRendering">Cargando página...</span>
+        </div>
+      </div>
+    </article>
+  </div>
+
+  <div
     class="maintenance-modal-backdrop"
     *ngIf="signConfirmationReport as report"
     role="dialog"
@@ -1380,7 +1874,7 @@
           <dd>{{ report.summary || 'Sin resumen registrado' }}</dd>
         </div>
       </dl>
-      <p class="modal-notice">La firma quedará registrada con tu usuario, rol, fecha y firma digital configurada.</p>
+      <p class="modal-notice">{{ signConfirmationNotice(report) }}</p>
       <div class="modal-actions">
         <button type="button" class="ghost" [disabled]="signingReport" (click)="closeSignConfirmation()">Cancelar</button>
         <button type="button" [disabled]="signingReport" (click)="confirmSignReport()">

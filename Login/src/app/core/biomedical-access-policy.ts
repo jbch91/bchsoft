@@ -14,14 +14,14 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
     route: '/hojas-de-vida',
     moduleKey: 'hojas_de_vida',
     permissionsAny: ['hb:create', 'hb:view', 'read:all'],
-    excludedRoles: ['lector']
+    excludedRoles: ['lector', 'responsable_area']
   },
   hojas_de_vida_industriales: {
     label: 'Hojas de vida industriales',
     route: '/hojas-de-vida-industriales',
     moduleKey: 'hojas_de_vida',
     permissionsAny: ['hb:create', 'hb:view', 'read:all'],
-    excludedRoles: ['lector']
+    excludedRoles: ['lector', 'responsable_area']
   },
   inventario: {
     label: 'Inventario',

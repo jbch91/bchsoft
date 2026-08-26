@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS maintenance_reports (
   findings TEXT,
   actions_taken TEXT,
   asset_status_observations TEXT,
+  area_responsible_required BOOLEAN NOT NULL DEFAULT FALSE,
   pdf_path TEXT,
   created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

@@ -157,7 +157,7 @@
             </label>
             <label>
               Rol
-              <select name="role" [(ngModel)]="role">
+              <select name="role" [(ngModel)]="role" (change)="onCreateRoleChange()">
                 <option *ngFor="let roleOption of creatableRoles" [value]="roleOption">
                   {{ roleLabel(roleOption) }}
                 </option>
@@ -209,13 +209,48 @@
 
         <label *ngIf="isPlatformAdmin() && isClientScopedRole(role)">
           Cliente asignado
-          <select name="clientId" [(ngModel)]="clientId">
+          <select name="clientId" [(ngModel)]="clientId" (change)="onCreateClientChange()">
             <option *ngFor="let client of clients" [value]="client.id">{{ client.name }}</option>
           </select>
         </label>
         <div class="client-fixed" *ngIf="isTenantAdmin() && isClientScopedRole(role)">
           <strong>Cliente asignado</strong>
           <span>Tu cliente actual</span>
+        </div>
+
+        <div class="reader-access" *ngIf="isAreaScopedRole(role) && clientId">
+          <h4>{{ role === 'responsable_area' ? 'Áreas y ubicaciones bajo responsabilidad' : 'Alcance por áreas y ubicaciones' }}</h4>
+          <p class="muted" *ngIf="createScopeLoading">Cargando áreas y ubicaciones...</p>
+          <div class="reader-grid" *ngIf="!createScopeLoading">
+            <div>
+              <strong>Áreas</strong>
+              <div class="reader-list">
+                <p class="muted" *ngIf="createScopeAreas.length === 0">Sin áreas creadas.</p>
+                <label *ngFor="let area of createScopeAreas">
+                  <input
+                    type="checkbox"
+                    [checked]="createScopeAreaIds.has(area.id)"
+                    (change)="toggleCreateScopeArea(area.id)"
+                  />
+                  {{ area.name }}
+                </label>
+              </div>
+            </div>
+            <div>
+              <strong>Ubicaciones específicas</strong>
+              <div class="reader-list">
+                <p class="muted" *ngIf="createScopeLocations.length === 0">Sin ubicaciones creadas.</p>
+                <label *ngFor="let location of createScopeLocations">
+                  <input
+                    type="checkbox"
+                    [checked]="createScopeLocationIds.has(location.id)"
+                    (change)="toggleCreateScopeLocation(location.id)"
+                  />
+                  {{ location.area_name ? location.area_name + ' · ' : '' }}{{ location.name }}
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="edit-actions">
@@ -302,8 +337,8 @@
           <span>{{ user.clientName || 'Sin cliente' }}</span>
         </div>
 
-        <div class="reader-access" *ngIf="isReader(user) && (user.clientId || editUser.clientId)">
-          <h4>Accesos del lector (áreas y ubicaciones)</h4>
+        <div class="reader-access" *ngIf="isAreaScopedUser(user) && (user.clientId || editUser.clientId)">
+          <h4>{{ isAreaResponsibleUser(user) ? 'Áreas y ubicaciones bajo responsabilidad' : 'Alcance por áreas y ubicaciones' }}</h4>
           <div class="reader-grid">
             <div>
               <strong>Áreas</strong>
@@ -320,7 +355,7 @@
               </div>
             </div>
             <div>
-              <strong>Ubicaciones</strong>
+              <strong>Ubicaciones específicas</strong>
               <div class="reader-list">
                 <p class="muted" *ngIf="readerLocations.length === 0">Sin ubicaciones creadas.</p>
                 <label *ngFor="let location of readerLocations">
@@ -329,7 +364,7 @@
                     [checked]="readerLocationIds.has(location.id)"
                     (change)="toggleReaderLocation(location.id)"
                   />
-                  {{ location.name }}
+                  {{ location.area_name ? location.area_name + ' · ' : '' }}{{ location.name }}
                 </label>
               </div>
             </div>

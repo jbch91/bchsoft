@@ -127,7 +127,7 @@ INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM roles r
 JOIN permissions p ON p.name = 'software:biomedico:access'
-WHERE r.name IN ('superuser', 'almacenista', 'ingeniero_biomedico', 'lector', 'viewer', 'calibracion')
+WHERE r.name IN ('superuser', 'almacenista', 'ingeniero_biomedico', 'responsable_area', 'lector', 'viewer', 'calibracion')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO role_permissions (role_id, permission_id)

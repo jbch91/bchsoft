@@ -26,6 +26,12 @@ export class UserMenuComponent {
   }
 
   roleLabel(): string {
-    return (this.auth.currentUser()?.role ?? 'usuario').replace(/_/g, ' ');
+    const role = this.auth.currentUser()?.role ?? 'usuario';
+    const labels: Record<string, string> = {
+      responsable_area: 'Responsable de área',
+      ingeniero_biomedico: 'Ingeniero biomédico',
+      client_admin: 'Administrador del cliente'
+    };
+    return labels[role] ?? role.replace(/_/g, ' ');
   }
 }

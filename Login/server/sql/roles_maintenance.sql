@@ -3,6 +3,7 @@ VALUES
   ('almacenista', 'Gestión de inventario y mantenimiento'),
   ('ingeniero_biomedico', 'Mantenimiento biomédico'),
   ('calibracion', 'Calibraciones y reportes'),
+  ('responsable_area', 'Jefe o responsable de área o ubicación'),
   ('lector', 'Solo lectura')
 ON CONFLICT (name) DO NOTHING;
 
@@ -59,4 +60,14 @@ SELECT r.id, p.id
 FROM roles r
 JOIN permissions p ON p.name IN ('hb:view','read:all','maintenance:request:create','maintenance:report:sign')
 WHERE r.name = 'lector'
+ON CONFLICT DO NOTHING;
+
+-- responsable de área
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.name IN (
+  'hb:view','maintenance:request:create','maintenance:report:sign'
+)
+WHERE r.name = 'responsable_area'
 ON CONFLICT DO NOTHING;

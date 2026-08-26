@@ -111,7 +111,8 @@ const MIGRATIONS = [
   'schedule_programming_progress.sql',
   'historical_maintenance_reconciliation.sql',
   'industrial_assets_and_schedules.sql',
-  'cleanup_orphaned_asset_schedules.sql'
+  'cleanup_orphaned_asset_schedules.sql',
+  'area_responsible_role.sql'
 ];
 
 async function ensureMigrationsTable() {

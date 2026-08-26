@@ -1,9 +1,211 @@
 import { query } from './db.js';
 import { normalizeAssetCategory } from './asset-category.js';
+import {
+  maintenancePreventiveItemPhase,
+  summarizeMaintenancePreventiveProgress
+} from './maintenance-workflow.js';
 
 async function clientSchema(clientId) {
   const { rows } = await query('SELECT schema_name FROM clients WHERE id = $1', [clientId]);
   return rows[0]?.schema_name || null;
+}
+
+export async function getPreventiveMaintenanceProgress(
+  clientId,
+  { year, month, assetCategory = 'biomedical', scopedUserId = null } = {}
+) {
+  const category = normalizeAssetCategory(assetCategory);
+  const schema = await clientSchema(clientId);
+  const normalizedYear = Number(year);
+  const normalizedMonth = Number(month);
+  const emptySummary = summarizeMaintenancePreventiveProgress([], {
+    year: normalizedYear,
+    month: normalizedMonth
+  });
+  if (!schema) {
+    return {
+      schedule_id: null,
+      schedule_status: null,
+      asset_category: category,
+      year: normalizedYear,
+      month: normalizedMonth,
+      ...emptySummary,
+      items: [],
+      generated_at: new Date().toISOString()
+    };
+  }
+
+  const { rows: scheduleRows } = await query(
+    `SELECT id, status
+     FROM maintenance_schedules
+     WHERE client_id = $1
+       AND asset_category = $2
+       AND year = $3
+       AND status IN ('approved', 'closed')
+     ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END, created_at DESC
+     LIMIT 1`,
+    [clientId, category, normalizedYear]
+  );
+  const schedule = scheduleRows[0];
+  if (!schedule) {
+    return {
+      schedule_id: null,
+      schedule_status: null,
+      asset_category: category,
+      year: normalizedYear,
+      month: normalizedMonth,
+      ...emptySummary,
+      items: [],
+      generated_at: new Date().toISOString()
+    };
+  }
+
+  const params = [schedule.id, category];
+  let accessClause = '';
+  if (scopedUserId) {
+    const { rows: accessRows } = await query(
+      'SELECT area_id, location_id FROM reader_access WHERE user_id = $1 AND client_id = $2',
+      [scopedUserId, clientId]
+    );
+    const locationIds = Array.from(
+      new Set(accessRows.filter((row) => row.location_id).map((row) => row.location_id))
+    );
+    const areaIds = Array.from(
+      new Set(accessRows.filter((row) => row.area_id).map((row) => row.area_id))
+    );
+    params.push(locationIds, areaIds);
+    accessClause = `
+      AND (
+        a.location_id = ANY($3::uuid[])
+        OR a.area_id = ANY($4::uuid[])
+      )`;
+  }
+
+  const { rows: items } = await query(
+    `SELECT item.id AS schedule_item_id,
+            item.asset_id,
+            item.planned_date,
+            item.deadline_date,
+            item.status AS item_status,
+            item.completion_source,
+            item.legacy_history_file_id,
+            a.code AS asset_code,
+            a.name AS asset_name,
+            a.brand AS asset_brand,
+            a.model AS asset_model,
+            a.serial AS asset_serial,
+            site.name AS site_name,
+            area.name AS area_name,
+            location.name AS location_name,
+            request.id AS request_id,
+            request.status AS request_status,
+            request.assigned_to,
+            assigned.display_name AS assigned_name,
+            report.id AS report_id,
+            report.created_at AS report_created_at,
+            report.pdf_path AS report_pdf_path,
+            report.area_responsible_required,
+            report.requires_spare_parts,
+            report.spare_parts_status,
+            EXISTS (
+              SELECT 1
+              FROM maintenance_report_corrections correction
+              WHERE correction.report_id = report.id
+                AND correction.resolved_at IS NULL
+            ) AS correction_requested,
+            COALESCE(signatures.has_engineer_signature, FALSE) AS has_engineer_signature,
+            COALESCE(signatures.has_area_responsible_signature, FALSE) AS has_area_responsible_signature,
+            COALESCE(signatures.has_acceptance_signature, FALSE) AS has_acceptance_signature,
+            item.deadline_date < CURRENT_DATE AS is_overdue
+     FROM maintenance_schedule_items item
+     JOIN "${schema}".assets a ON a.id = item.asset_id
+     LEFT JOIN "${schema}".sites site ON site.id = a.site_id
+     LEFT JOIN "${schema}".areas area ON area.id = a.area_id
+     LEFT JOIN "${schema}".locations location ON location.id = a.location_id
+     LEFT JOIN LATERAL (
+       SELECT maintenance_request.id,
+              maintenance_request.status,
+              maintenance_request.assigned_to
+       FROM maintenance_requests maintenance_request
+       WHERE maintenance_request.schedule_item_id = item.id
+         AND maintenance_request.type = 'preventivo'
+       ORDER BY maintenance_request.created_at DESC
+       LIMIT 1
+     ) request ON TRUE
+     LEFT JOIN users assigned ON assigned.id = request.assigned_to
+     LEFT JOIN LATERAL (
+       SELECT maintenance_report.id,
+              maintenance_report.area_responsible_required,
+              maintenance_report.requires_spare_parts,
+              maintenance_report.spare_parts_status,
+              maintenance_report.pdf_path,
+              maintenance_report.created_at
+       FROM maintenance_reports maintenance_report
+       WHERE maintenance_report.type = 'preventivo'
+         AND (
+           maintenance_report.id = item.report_id
+           OR maintenance_report.request_id = request.id
+         )
+       ORDER BY (maintenance_report.id = item.report_id) DESC, maintenance_report.created_at DESC
+       LIMIT 1
+     ) report ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT BOOL_OR(signature.role = 'ingeniero_biomedico') AS has_engineer_signature,
+              BOOL_OR(signature.role = 'responsable_area') AS has_area_responsible_signature,
+              BOOL_OR(signature.role IN (
+                'almacenista', 'responsable_area', 'lector', 'viewer', 'visor', 'superuser'
+              )) AS has_acceptance_signature
+       FROM report_signatures signature
+       WHERE signature.report_id = report.id
+     ) signatures ON TRUE
+     WHERE item.schedule_id = $1
+       AND a.asset_category = $2
+       ${accessClause}
+     ORDER BY item.planned_date, site.name, area.name, location.name, a.code, item.id`,
+    params
+  );
+  const summary = summarizeMaintenancePreventiveProgress(items, {
+    year: normalizedYear,
+    month: normalizedMonth
+  });
+  const progressItems = items.map((item) => {
+    const phase = maintenancePreventiveItemPhase(item);
+    return {
+      id: item.schedule_item_id,
+      asset_id: item.asset_id,
+      asset_code: item.asset_code,
+      asset_name: item.asset_name,
+      asset_brand: item.asset_brand,
+      asset_model: item.asset_model,
+      asset_serial: item.asset_serial,
+      site_name: item.site_name,
+      area_name: item.area_name,
+      location_name: item.location_name,
+      planned_date: item.planned_date,
+      deadline_date: item.deadline_date,
+      phase,
+      is_overdue: Boolean(item.is_overdue && phase !== 'completed'),
+      request_id: item.request_id,
+      request_status: item.request_status,
+      assigned_to: item.assigned_to,
+      assigned_name: item.assigned_name,
+      report_id: item.report_id,
+      report_created_at: item.report_created_at,
+      pdf_available: Boolean(item.report_pdf_path || item.legacy_history_file_id),
+      legacy_history_file_id: item.legacy_history_file_id,
+      completion_source: item.completion_source
+    };
+  });
+  return {
+    schedule_id: schedule.id,
+    schedule_status: schedule.status,
+    asset_category: category,
+    year: normalizedYear,
+    month: normalizedMonth,
+    ...summary,
+    items: progressItems,
+    generated_at: new Date().toISOString()
+  };
 }
 
 export async function createMaintenanceRequest(payload) {
@@ -203,6 +405,7 @@ export async function createMaintenanceReport(payload) {
     maintenanceTests,
     assetStatusAfter,
     assetStatusObservations,
+    areaResponsibleRequired,
     requiresSpareParts,
     sparePartsNeeded,
     sparePartsStatus,
@@ -213,10 +416,10 @@ export async function createMaintenanceReport(payload) {
     `INSERT INTO maintenance_reports (
        client_id, request_id, asset_id, type, summary, findings, actions_taken,
        failure_cause, maintenance_checks, maintenance_activities, maintenance_tests,
-       asset_status_after, asset_status_observations, requires_spare_parts, spare_parts_needed,
-       spare_parts_status, created_by
+       asset_status_after, asset_status_observations, area_responsible_required,
+       requires_spare_parts, spare_parts_needed, spare_parts_status, created_by
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      RETURNING id`,
     [
       clientId,
@@ -232,6 +435,7 @@ export async function createMaintenanceReport(payload) {
       JSON.stringify(Array.isArray(maintenanceTests) ? maintenanceTests : []),
       assetStatusAfter || 'operativo',
       assetStatusObservations || null,
+      Boolean(areaResponsibleRequired),
       Boolean(requiresSpareParts),
       sparePartsNeeded || null,
       sparePartsStatus || 'no_aplica',
@@ -285,6 +489,7 @@ export async function updateMaintenanceReport(reportId, payload) {
     maintenanceTests,
     assetStatusAfter,
     assetStatusObservations,
+    areaResponsibleRequired,
     requiresSpareParts,
     sparePartsNeeded,
     sparePartsStatus,
@@ -303,10 +508,11 @@ export async function updateMaintenanceReport(reportId, payload) {
          maintenance_tests = $9,
          asset_status_after = $10,
          asset_status_observations = $11,
-         requires_spare_parts = $12,
-         spare_parts_needed = $13,
-         spare_parts_status = $14,
-         created_by = $15,
+         area_responsible_required = $12,
+         requires_spare_parts = $13,
+         spare_parts_needed = $14,
+         spare_parts_status = $15,
+         created_by = $16,
          pdf_path = NULL
      WHERE id = $1`,
     [
@@ -321,6 +527,7 @@ export async function updateMaintenanceReport(reportId, payload) {
       JSON.stringify(Array.isArray(maintenanceTests) ? maintenanceTests : []),
       assetStatusAfter || 'operativo',
       assetStatusObservations || null,
+      Boolean(areaResponsibleRequired),
       Boolean(requiresSpareParts),
       sparePartsNeeded || null,
       sparePartsStatus || 'no_aplica',
@@ -723,6 +930,13 @@ export async function listUsersByClient(clientId) {
      FROM users u
      WHERE u.client_id = $1
        AND u.is_active = TRUE
+       AND NOT EXISTS (
+         SELECT 1
+         FROM user_roles ur
+         JOIN roles r ON r.id = ur.role_id
+         WHERE ur.user_id = u.id
+           AND r.name IN ('lector', 'responsable_area')
+       )
      ORDER BY u.display_name ASC`,
     [clientId]
   );

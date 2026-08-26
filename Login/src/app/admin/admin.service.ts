@@ -202,6 +202,7 @@ interface LocationDto {
   id: string;
   name: string;
   area_id: string | null;
+  area_name?: string | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -268,21 +269,19 @@ export class AdminService {
     email: string;
     role: Role;
     clientId?: string;
-    securityCode?: string;
     signatureFile?: File | null;
     documentType?: string | null;
     documentNumber?: string | null;
     invimaRegistration?: string | null;
-  }): Promise<void> {
+    areaIds?: string[];
+    locationIds?: string[];
+  }): Promise<{ id: string; invitation_sent: boolean }> {
     if (payload.signatureFile) {
       const form = new FormData();
       form.append('username', payload.username);
       form.append('displayName', payload.displayName);
       form.append('email', payload.email);
       form.append('role', payload.role);
-      if (payload.securityCode) {
-        form.append('securityCode', payload.securityCode);
-      }
       if (payload.clientId) {
         form.append('clientId', payload.clientId);
       }
@@ -295,12 +294,17 @@ export class AdminService {
       if (payload.invimaRegistration) {
         form.append('invimaRegistration', payload.invimaRegistration);
       }
+      form.append('areaIds', JSON.stringify(payload.areaIds ?? []));
+      form.append('locationIds', JSON.stringify(payload.locationIds ?? []));
       form.append('signature', payload.signatureFile);
-      await firstValueFrom(this.http.post(`${this.apiBase}/admin/users`, form));
-      return;
+      return firstValueFrom(
+        this.http.post<{ id: string; invitation_sent: boolean }>(`${this.apiBase}/admin/users`, form)
+      );
     }
     const { signatureFile, ...rest } = payload;
-    await firstValueFrom(this.http.post(`${this.apiBase}/admin/users`, rest));
+    return firstValueFrom(
+      this.http.post<{ id: string; invitation_sent: boolean }>(`${this.apiBase}/admin/users`, rest)
+    );
   }
 
   async updateUserRole(userId: string, role: Role, securityCode?: string): Promise<void> {

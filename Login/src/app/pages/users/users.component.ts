@@ -75,10 +75,15 @@ export class UsersComponent implements OnInit {
   };
   editSignatureFile: File | null = null;
   readerAreas: { id: string; name: string }[] = [];
-  readerLocations: { id: string; name: string; area_id: string | null }[] = [];
+  readerLocations: { id: string; name: string; area_id: string | null; area_name?: string | null }[] = [];
   readerAreaIds = new Set<string>();
   readerLocationIds = new Set<string>();
   readerAccessUserId: string | null = null;
+  createScopeAreas: { id: string; name: string }[] = [];
+  createScopeLocations: { id: string; name: string; area_id: string | null; area_name?: string | null }[] = [];
+  createScopeAreaIds = new Set<string>();
+  createScopeLocationIds = new Set<string>();
+  createScopeLoading = false;
   temporaryPermissionLoading = false;
   temporaryPermissionForm = {
     expiresAt: '',
@@ -180,6 +185,7 @@ export class UsersComponent implements OnInit {
     almacenista: 'Almacenista',
     ingeniero_biomedico: 'Ingeniero biomédico',
     calibracion: 'Calibración',
+    responsable_area: 'Jefe / responsable de área',
     lector: 'Lector',
     odontologo: 'Odontólogo',
     auxiliar_odontologia: 'Auxiliar odontología',
@@ -351,6 +357,13 @@ export class UsersComponent implements OnInit {
       'calibration:report:upload',
       'quick_guides:view'
     ],
+    responsable_area: [
+      'software:biomedico:access',
+      'hb:view',
+      'maintenance:request:create',
+      'maintenance:report:sign',
+      'quick_guides:view'
+    ],
     lector: [
       'software:biomedico:access',
       'hb:view',
@@ -431,6 +444,7 @@ export class UsersComponent implements OnInit {
     'almacenista',
     'ingeniero_biomedico',
     'calibracion',
+    'responsable_area',
     'lector',
     'odontologo',
     'auxiliar_odontologia',
@@ -464,7 +478,12 @@ export class UsersComponent implements OnInit {
     'saas:client_admins:reset_password',
     'saas:audit:view'
   ]);
-  private readonly signatureRoles: Role[] = ['almacenista', 'ingeniero_biomedico', 'lector'];
+  private readonly signatureRoles: Role[] = [
+    'almacenista',
+    'ingeniero_biomedico',
+    'responsable_area',
+    'lector'
+  ];
 
   constructor(
     private readonly admin: AdminService,
@@ -582,27 +601,31 @@ export class UsersComponent implements OnInit {
       this.errorMessage = 'Completa el registro INVIMA para el ingeniero biomédico.';
       return;
     }
+    if (
+      this.role === 'responsable_area'
+      && this.createScopeAreaIds.size === 0
+      && this.createScopeLocationIds.size === 0
+    ) {
+      this.errorMessage = 'Asigna al menos un área o una ubicación al jefe o responsable.';
+      return;
+    }
 
     this.creatingUser = true;
     this.errorMessage = '';
     this.successMessage = '';
     try {
-      const securityCode = await this.requestSecurityCode(
-        'USER_CREATE',
-        `Crear usuario ${this.username.trim()} con rol ${this.roleLabel(this.role)} y enviar correo de acceso`
-      );
-      if (!securityCode) return;
-      await this.admin.createUser({
+      const result = await this.admin.createUser({
         username: this.username.trim(),
         displayName: this.displayName.trim(),
         email: this.email.trim(),
         role: this.role,
         clientId: this.isClientScopedRole(this.role) ? this.clientId : undefined,
         signatureFile: this.signatureFile,
-        securityCode,
         documentType: this.documentType,
         documentNumber: this.documentNumber.trim(),
-        invimaRegistration: this.requiresBiomedicalCredentials(this.role) ? this.invimaRegistration.trim() : null
+        invimaRegistration: this.requiresBiomedicalCredentials(this.role) ? this.invimaRegistration.trim() : null,
+        areaIds: this.isAreaScopedRole(this.role) ? Array.from(this.createScopeAreaIds) : [],
+        locationIds: this.isAreaScopedRole(this.role) ? Array.from(this.createScopeLocationIds) : []
       });
       this.username = '';
       this.displayName = '';
@@ -613,7 +636,10 @@ export class UsersComponent implements OnInit {
       this.documentType = 'cedula_ciudadania';
       this.documentNumber = '';
       this.invimaRegistration = '';
-      this.successMessage = 'Usuario creado. Se envió correo para definir contraseña.';
+      this.resetCreateAreaScope();
+      this.successMessage = result.invitation_sent
+        ? 'Usuario creado correctamente. Se envió el código para definir su contraseña.'
+        : 'Usuario creado correctamente, pero no se pudo enviar el código de contraseña. Usa “Enviar correo” desde el listado para reintentarlo.';
       this.createUserModalOpen = false;
       this.activeUserTab = 'list';
       await this.load();
@@ -682,6 +708,9 @@ export class UsersComponent implements OnInit {
     this.cancelEditUser();
     this.cancelTemporaryAccess();
     this.cancelRolePermissionsEdit();
+    if (this.isAreaScopedRole(this.role) && this.clientId) {
+      void this.loadCreateAreaScope(this.clientId);
+    }
   }
 
   closeCreateUserModal(): void {
@@ -726,7 +755,7 @@ export class UsersComponent implements OnInit {
     };
     this.editSignatureFile = null;
     const targetClientId = user.clientId ?? this.editUser.clientId;
-    if (this.isReader(user) && targetClientId) {
+    if (this.isAreaScopedUser(user) && targetClientId) {
       void this.loadReaderAccess(user.id, targetClientId);
     } else {
       this.readerAccessUserId = null;
@@ -740,6 +769,10 @@ export class UsersComponent implements OnInit {
   cancelEditUser(): void {
     this.editingUserId = null;
     this.readerAccessUserId = null;
+    this.readerAreas = [];
+    this.readerLocations = [];
+    this.readerAreaIds.clear();
+    this.readerLocationIds.clear();
     this.editSignatureFile = null;
     this.savingUser = false;
     this.temporaryPermissionLoading = false;
@@ -779,6 +812,14 @@ export class UsersComponent implements OnInit {
       this.errorMessage = 'Completa el registro INVIMA para el ingeniero biomédico.';
       return;
     }
+    if (
+      this.isAreaResponsibleUser(user)
+      && this.readerAreaIds.size === 0
+      && this.readerLocationIds.size === 0
+    ) {
+      this.errorMessage = 'El responsable debe conservar al menos un área o ubicación asignada.';
+      return;
+    }
 
     this.savingUser = true;
     this.errorMessage = '';
@@ -803,8 +844,8 @@ export class UsersComponent implements OnInit {
       if (this.editSignatureFile && this.requiresSignature(user.roles[0] || 'viewer')) {
         await this.admin.updateUserSignature(user.id, this.editSignatureFile);
       }
-      if (this.isReader(user) && user.clientId) {
-        await this.saveReaderAccess(user.id, user.clientId);
+      if (this.isAreaScopedUser(user) && user.clientId) {
+        await this.saveReaderAccess(user, user.clientId);
       }
       this.editingUserId = null;
       this.editSignatureFile = null;
@@ -907,6 +948,18 @@ export class UsersComponent implements OnInit {
     return user.roles.includes('lector');
   }
 
+  isAreaScopedRole(role?: Role | null): boolean {
+    return role === 'lector' || role === 'responsable_area';
+  }
+
+  isAreaScopedUser(user: UserView): boolean {
+    return user.roles.some((role) => this.isAreaScopedRole(role));
+  }
+
+  isAreaResponsibleUser(user: UserView): boolean {
+    return user.roles.includes('responsable_area');
+  }
+
   requiresSignature(role: Role): boolean {
     return this.signatureRoles.includes(role);
   }
@@ -984,6 +1037,7 @@ export class UsersComponent implements OnInit {
       almacenista: 'Solicita correctivos, firma reportes y gestiona movimientos operativos permitidos.',
       ingeniero_biomedico: 'Crea hojas de vida, reportes, cronogramas y documentos biomédicos.',
       calibracion: 'Carga certificados y reportes de calibración.',
+      responsable_area: 'Ve únicamente sus áreas o ubicaciones asignadas, reporta fallas y avala con firma los mantenimientos realizados.',
       lector: 'Consulta información autorizada por área/ubicación y firma cuando aplique.',
       admin_odontologia: 'Administra la operación odontológica del cliente.',
       odontologo: 'Gestiona atención clínica odontológica.',
@@ -1146,6 +1200,66 @@ export class UsersComponent implements OnInit {
     this.documentType = 'cedula_ciudadania';
     this.documentNumber = '';
     this.invimaRegistration = '';
+    this.resetCreateAreaScope();
+  }
+
+  onCreateRoleChange(): void {
+    this.resetCreateAreaScope();
+    if (this.isAreaScopedRole(this.role) && this.clientId) {
+      void this.loadCreateAreaScope(this.clientId);
+    }
+  }
+
+  onCreateClientChange(): void {
+    this.resetCreateAreaScope();
+    if (this.isAreaScopedRole(this.role) && this.clientId) {
+      void this.loadCreateAreaScope(this.clientId);
+    }
+  }
+
+  private resetCreateAreaScope(): void {
+    this.createScopeAreas = [];
+    this.createScopeLocations = [];
+    this.createScopeAreaIds.clear();
+    this.createScopeLocationIds.clear();
+    this.createScopeLoading = false;
+  }
+
+  async loadCreateAreaScope(clientId: string): Promise<void> {
+    if (!clientId || !this.isAreaScopedRole(this.role)) return;
+    this.createScopeLoading = true;
+    this.errorMessage = '';
+    try {
+      const [areas, locations] = await Promise.all([
+        this.admin.listClientAreas(clientId),
+        this.admin.listClientLocations(clientId)
+      ]);
+      this.createScopeAreas = areas;
+      this.createScopeLocations = locations;
+    } catch (error) {
+      console.error(error);
+      this.resetCreateAreaScope();
+      this.errorMessage = 'No se pudieron cargar las áreas del cliente.';
+    } finally {
+      this.createScopeLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  toggleCreateScopeArea(areaId: string): void {
+    if (this.createScopeAreaIds.has(areaId)) {
+      this.createScopeAreaIds.delete(areaId);
+      return;
+    }
+    this.createScopeAreaIds.add(areaId);
+  }
+
+  toggleCreateScopeLocation(locationId: string): void {
+    if (this.createScopeLocationIds.has(locationId)) {
+      this.createScopeLocationIds.delete(locationId);
+      return;
+    }
+    this.createScopeLocationIds.add(locationId);
   }
 
   private toDatetimeLocal(date: Date): string {
@@ -1261,9 +1375,9 @@ export class UsersComponent implements OnInit {
     this.readerLocationIds.add(locationId);
   }
 
-  async saveReaderAccess(userId: string, clientId: string): Promise<void> {
+  async saveReaderAccess(user: UserView, clientId: string): Promise<void> {
     await this.admin.updateReaderAccess(
-      userId,
+      user.id,
       clientId,
       Array.from(this.readerAreaIds),
       Array.from(this.readerLocationIds)
@@ -1308,9 +1422,15 @@ export class UsersComponent implements OnInit {
       if (!securityCode) return;
       await this.admin.updateUserRole(user.id, role, securityCode);
       user.roles = [role];
-    } catch (error) {
+      if (this.isAreaScopedRole(role)) {
+        this.startEditUser(user);
+        this.successMessage = role === 'responsable_area'
+          ? 'Rol actualizado. Asigna ahora las áreas o ubicaciones y carga o confirma la firma digital.'
+          : 'Rol actualizado. Revisa ahora las áreas y ubicaciones permitidas.';
+      }
+    } catch (error: any) {
       console.error(error);
-      this.errorMessage = 'No se pudo actualizar el rol.';
+      this.errorMessage = error?.error?.message ?? 'No se pudo actualizar el rol.';
     } finally {
       this.cdr.detectChanges();
     }

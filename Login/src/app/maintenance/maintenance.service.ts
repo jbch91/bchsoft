@@ -25,6 +25,62 @@ export interface MaintenanceRequestDto {
   updated_at?: string;
 }
 
+export interface PreventiveProgressSummaryDto {
+  total: number;
+  not_started: number;
+  in_progress: number;
+  pending_signature: number;
+  waiting_spare: number;
+  completed: number;
+  overdue: number;
+  completion_percent: number;
+}
+
+export type PreventiveProgressPhase =
+  | 'not_started'
+  | 'in_progress'
+  | 'pending_signature'
+  | 'waiting_spare'
+  | 'completed';
+
+export interface PreventiveProgressItemDto {
+  id: string;
+  asset_id: string;
+  asset_code: string;
+  asset_name: string;
+  asset_brand?: string | null;
+  asset_model?: string | null;
+  asset_serial?: string | null;
+  site_name?: string | null;
+  area_name?: string | null;
+  location_name?: string | null;
+  planned_date: string;
+  deadline_date: string;
+  phase: PreventiveProgressPhase;
+  is_overdue: boolean;
+  request_id?: string | null;
+  request_status?: string | null;
+  assigned_to?: string | null;
+  assigned_name?: string | null;
+  report_id?: string | null;
+  report_created_at?: string | null;
+  pdf_available: boolean;
+  legacy_history_file_id?: string | null;
+  completion_source?: string | null;
+}
+
+export interface PreventiveMaintenanceProgressDto {
+  schedule_id?: string | null;
+  schedule_status?: string | null;
+  asset_category: AssetCategory;
+  year: number;
+  month: number;
+  annual: PreventiveProgressSummaryDto;
+  monthly: PreventiveProgressSummaryDto;
+  items: PreventiveProgressItemDto[];
+  generated_at: string;
+}
+
 export interface MaintenanceReportDto {
   id: string;
   client_id: string;
@@ -40,6 +96,7 @@ export interface MaintenanceReportDto {
   maintenance_tests?: string[];
   asset_status_after?: string | null;
   asset_status_observations?: string | null;
+  area_responsible_required?: boolean;
   requires_spare_parts?: boolean;
   spare_parts_needed?: string | null;
   spare_parts_status?: string | null;
@@ -75,6 +132,24 @@ export class MaintenanceService {
   private readonly apiBase = getApiBase();
 
   constructor(private readonly http: HttpClient) {}
+
+  async getPreventiveProgress(
+    clientId: string,
+    year: number,
+    month: number,
+    assetCategory: AssetCategory = 'biomedical'
+  ): Promise<PreventiveMaintenanceProgressDto> {
+    const query = new URLSearchParams({
+      year: String(year),
+      month: String(month),
+      category: assetCategory
+    });
+    return firstValueFrom(
+      this.http.get<PreventiveMaintenanceProgressDto>(
+        `${this.apiBase}/maintenance/preventive-progress/${clientId}?${query}`
+      )
+    );
+  }
 
   async listRequests(
     clientId: string,

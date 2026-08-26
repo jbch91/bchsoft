@@ -226,9 +226,12 @@ import {
   listAssetMovements,
   readerCanAccessAsset,
   listAreas,
+  listAreasForScopedUser,
   listAssets,
   listLocations,
+  listLocationsForScopedUser,
   listSites,
+  listSitesForScopedUser,
   setAssetHvEngineer,
   setAssetPhoto,
   updateAssetStatus,
@@ -305,6 +308,7 @@ import {
 import {
   createMaintenanceRequest,
   createMaintenanceProtocolPrintBatch,
+  getPreventiveMaintenanceProgress,
   listMaintenanceRequests,
   listMaintenanceRequestsForReader,
   getMaintenanceRequestById,
@@ -339,6 +343,7 @@ import {
   MAINTENANCE_REQUEST_CLAIMABLE_STATUSES,
   MAINTENANCE_REQUEST_REPORTABLE_STATUSES,
   canOperateAssignedMaintenanceRequest,
+  isMaintenanceReportFullySigned,
   maintenanceAssetStatusObservationError,
   maintenanceSpareWorkflowForReport,
   maintenanceRequestDescriptionError,
@@ -487,10 +492,20 @@ const MAINTENANCE_ASSET_STATUSES = [
   'operativo_observacion',
   'fuera_de_servicio'
 ];
-const MAINTENANCE_ACCEPTANCE_SIGNER_ROLES = ['almacenista', 'lector', 'viewer', 'visor', 'superuser'];
+const AREA_RESPONSIBLE_ROLE = 'responsable_area';
+const AREA_SCOPED_OPERATIONAL_ROLES = ['lector', AREA_RESPONSIBLE_ROLE];
+const MAINTENANCE_ACCEPTANCE_SIGNER_ROLES = [
+  'almacenista',
+  AREA_RESPONSIBLE_ROLE,
+  'lector',
+  'viewer',
+  'visor',
+  'superuser'
+];
 const MAINTENANCE_REPORT_ACCESS_ROLES = [
   'almacenista',
   'ingeniero_biomedico',
+  AREA_RESPONSIBLE_ROLE,
   'lector',
   'viewer',
   'visor',
@@ -570,6 +585,7 @@ const CLIENT_ASSIGNABLE_ROLES = [
   'almacenista',
   'ingeniero_biomedico',
   'calibracion',
+  AREA_RESPONSIBLE_ROLE,
   'lector',
   'odontologo',
   'auxiliar_odontologia',
@@ -579,7 +595,12 @@ const CLIENT_ASSIGNABLE_ROLES = [
   'bacteriologo',
   'auxiliar_laboratorio'
 ];
-const BIOMEDICAL_CLIENT_ROLES = ['almacenista', 'ingeniero_biomedico', 'lector'];
+const BIOMEDICAL_CLIENT_ROLES = [
+  'almacenista',
+  'ingeniero_biomedico',
+  AREA_RESPONSIBLE_ROLE,
+  'lector'
+];
 const ODONTOLOGY_CLIENT_ROLES = [
   'odontologo',
   'auxiliar_odontologia',
@@ -712,6 +733,26 @@ async function getRoleNameById(roleId) {
 
 function cleanPermissionList(values) {
   return Array.from(new Set((Array.isArray(values) ? values : []).filter(Boolean).map(String)));
+}
+
+function parseAreaScopeIds(value, label) {
+  if (value === undefined || value === null || value === '') return [];
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      const error = new Error(`${label} no tienen un formato válido.`);
+      error.code = 'INVALID_AREA_SCOPE';
+      throw error;
+    }
+  }
+  if (!Array.isArray(parsed)) {
+    const error = new Error(`${label} no tienen un formato válido.`);
+    error.code = 'INVALID_AREA_SCOPE';
+    throw error;
+  }
+  return parsed;
 }
 
 function isSuperuserAssignableRole(role) {
@@ -906,6 +947,16 @@ function hasAnyRole(user, roles = []) {
   return roles.some((role) => user?.roles?.includes(role));
 }
 
+function isAreaScopedOperationalUser(user) {
+  return hasAnyRole(user, AREA_SCOPED_OPERATIONAL_ROLES);
+}
+
+function maintenanceAcceptanceRoleForUser(user) {
+  return MAINTENANCE_ACCEPTANCE_SIGNER_ROLES.find((role) => hasRole(user, role))
+    || user?.roles?.[0]
+    || 'user';
+}
+
 function requireAnyPermissionOrRole(permissions = [], roles = []) {
   return (req, res, next) => {
     if (hasAnyPermission(req.user, permissions) || hasAnyRole(req.user, roles)) {
@@ -915,19 +966,28 @@ function requireAnyPermissionOrRole(permissions = [], roles = []) {
   };
 }
 
-function isMaintenanceReportFullySigned(report, signatures = []) {
-  const hasEngineer = signatures.some((sig) => sig.role === 'ingeniero_biomedico');
-  if (!hasEngineer) return false;
-  if (report.type === 'preventivo') {
-    return signatures.some((sig) => MAINTENANCE_ACCEPTANCE_SIGNER_ROLES.includes(sig.role));
-  }
-  return signatures.some((sig) =>
-    MAINTENANCE_ACCEPTANCE_SIGNER_ROLES.includes(sig.role) ||
-    (report.requested_by && sig.user_id === report.requested_by)
+async function listAreaResponsibleUsersForAsset(clientId, asset) {
+  if (!asset?.area_id && !asset?.location_id) return [];
+  const { rows } = await query(
+    `SELECT DISTINCT u.id, u.email, u.display_name
+     FROM users u
+     JOIN user_roles ur ON ur.user_id = u.id
+     JOIN roles r ON r.id = ur.role_id
+     JOIN reader_access ra ON ra.user_id = u.id AND ra.client_id = $1
+     WHERE u.client_id = $1
+       AND u.is_active = TRUE
+       AND r.name = $4
+       AND (
+         ($2::uuid IS NOT NULL AND ra.area_id = $2::uuid)
+         OR ($3::uuid IS NOT NULL AND ra.location_id = $3::uuid)
+       )
+     ORDER BY u.display_name`,
+    [clientId, asset.area_id || null, asset.location_id || null, AREA_RESPONSIBLE_ROLE]
   );
+  return rows;
 }
 
-async function listMaintenanceReportSigningUsers(clientId, asset, request) {
+async function listLegacyMaintenanceReportSigningUsers(clientId, asset, request) {
   const storekeepers = await listUsersByRoleAndClient('almacenista', clientId);
   const byId = new Map(storekeepers.map((user) => [user.id, user]));
 
@@ -965,6 +1025,20 @@ async function listMaintenanceReportSigningUsers(clientId, asset, request) {
   }
 
   return Array.from(byId.values());
+}
+
+async function buildMaintenanceReportSigningPlan(clientId, asset, request) {
+  const areaResponsibleUsers = await listAreaResponsibleUsersForAsset(clientId, asset);
+  if (areaResponsibleUsers.length) {
+    return {
+      areaResponsibleRequired: true,
+      users: areaResponsibleUsers
+    };
+  }
+  return {
+    areaResponsibleRequired: false,
+    users: await listLegacyMaintenanceReportSigningUsers(clientId, asset, request)
+  };
 }
 
 function adjustToWeekday(date) {
@@ -6710,6 +6784,16 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
   const cleanDocumentType = documentType?.trim?.() || null;
   const cleanDocumentNumber = documentNumber?.trim?.() || null;
   const cleanInvimaRegistration = invimaRegistration?.trim?.() || null;
+  let scopedAreaIds = [];
+  let scopedLocationIds = [];
+  try {
+    if (AREA_SCOPED_OPERATIONAL_ROLES.includes(role)) {
+      scopedAreaIds = parseAreaScopeIds(req.body?.areaIds, 'Las áreas');
+      scopedLocationIds = parseAreaScopeIds(req.body?.locationIds, 'Las ubicaciones');
+    }
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
+  }
   if (cleanDocumentType && !BIOMED_DOCUMENT_TYPES.includes(cleanDocumentType)) {
     return res.status(400).json({ message: 'Tipo de documento inválido.' });
   }
@@ -6721,6 +6805,16 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       message: 'Registro INVIMA obligatorio para el ingeniero biomédico.'
     });
   }
+  if (role === AREA_RESPONSIBLE_ROLE && !scopedAreaIds.length && !scopedLocationIds.length) {
+    return res.status(400).json({
+      message: 'Asigna al menos un área o una ubicación al responsable antes de crear el usuario.'
+    });
+  }
+  if (role === AREA_RESPONSIBLE_ROLE && !req.file) {
+    return res.status(400).json({
+      message: 'La firma digital es obligatoria para el responsable de área.'
+    });
+  }
   if (req.file && !isAllowedSignatureFile(req.file)) {
     return res.status(400).json({
       message: 'La firma debe ser una imagen PNG/JPG/WEBP o un PDF.'
@@ -6729,8 +6823,6 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
   if (req.file && !isAllowedSignatureSize(req.file)) {
     return res.status(413).json({ message: signatureSizeMessage() });
   }
-  if (!(await requireActionConfirmation(req, res, 'USER_CREATE'))) return;
-
   try {
     const result = await createUser({
       username,
@@ -6755,6 +6847,23 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       return res.status(500).json({
         message: 'No se pudo crear el usuario porque la base de datos no devolvió el identificador.'
       });
+    }
+
+    if (AREA_SCOPED_OPERATIONAL_ROLES.includes(role)) {
+      try {
+        await replaceReaderAccess(
+          result.id,
+          resolvedScope.clientId,
+          scopedAreaIds,
+          scopedLocationIds
+        );
+      } catch (scopeError) {
+        console.error('No se pudo asignar el alcance por áreas o ubicaciones', scopeError);
+        await cleanupPartiallyCreatedUser(result.id, 'alcance por áreas o ubicaciones');
+        return res.status(400).json({
+          message: scopeError.message || 'No se pudo asignar el alcance por áreas o ubicaciones.'
+        });
+      }
     }
 
     if (req.file) {
@@ -6793,6 +6902,8 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
           clientId: resolvedScope.clientId ?? null,
           documentType: documentType ?? null,
           hasInvimaRegistration: Boolean(invimaRegistration),
+          areaIds: scopedAreaIds,
+          locationIds: scopedLocationIds,
           invitationSent
         }
       });
@@ -8030,7 +8141,7 @@ app.get(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -8054,7 +8165,7 @@ app.get(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -8315,7 +8426,7 @@ app.get(
 
     try {
       const assetCategory = normalizeAssetCategory(req.query.category);
-      const assets = req.user.roles?.includes('lector')
+      const assets = isAreaScopedOperationalUser(req.user)
         ? await listAssetsForReader(clientId, req.user.sub, { assetCategory })
         : await listAssets(clientId, { assetCategory });
       return res.json(assets);
@@ -8972,7 +9083,7 @@ app.get(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -8994,7 +9105,7 @@ app.get(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -9185,7 +9296,7 @@ app.get(
     if (!file) {
       return res.status(404).json({ message: 'PDF histórico no encontrado.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, file.asset_id);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -9255,7 +9366,7 @@ app.get(
     if (!movement) {
       return res.status(404).json({ message: 'Movimiento no encontrado.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, movement.asset_id);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -9329,7 +9440,7 @@ app.get(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -9360,7 +9471,7 @@ app.get(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -9413,7 +9524,7 @@ app.get(
     if (req.user.clientId && req.user.clientId !== clientId) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -9437,7 +9548,9 @@ app.get(
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     try {
-      const sites = await listSites(clientId);
+      const sites = isAreaScopedOperationalUser(req.user)
+        ? await listSitesForScopedUser(clientId, req.user.sub)
+        : await listSites(clientId);
       return res.json(sites);
     } catch (error) {
       console.error(error);
@@ -9540,7 +9653,9 @@ app.get(
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     try {
-      const areas = await listAreas(clientId);
+      const areas = isAreaScopedOperationalUser(req.user)
+        ? await listAreasForScopedUser(clientId, req.user.sub)
+        : await listAreas(clientId);
       return res.json(areas);
     } catch (error) {
       console.error(error);
@@ -9636,7 +9751,9 @@ app.get(
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     try {
-      const locations = await listLocations(clientId, areaId);
+      const locations = isAreaScopedOperationalUser(req.user)
+        ? await listLocationsForScopedUser(clientId, req.user.sub, areaId)
+        : await listLocations(clientId, areaId);
       return res.json(locations);
     } catch (error) {
       console.error(error);
@@ -9762,6 +9879,12 @@ app.patch('/admin/users/:id/role', requireAuth, requirePermission('users:manage'
     }
     if (!(await requireActionConfirmation(req, res, 'USER_ROLE_UPDATE'))) return;
     const { before } = await updateUserRole(req.params.id, role);
+    if (!AREA_SCOPED_OPERATIONAL_ROLES.includes(role) && target.client_id) {
+      await query('DELETE FROM reader_access WHERE user_id = $1 AND client_id = $2', [
+        req.params.id,
+        target.client_id
+      ]);
+    }
     await revokeUserActiveSessions(req.params.id);
     await logAudit({
       actorUserId: req.user.sub,
@@ -9861,6 +9984,9 @@ app.get('/admin/users/:id/reader-access', requireAuth, requirePermission('users:
   if (isClientAdmin(req.user) && clientId !== req.user.clientId) {
     return res.status(403).json({ message: 'Sin acceso al cliente.' });
   }
+  if (target.client_id !== clientId || !target.roles?.some((role) => AREA_SCOPED_OPERATIONAL_ROLES.includes(role))) {
+    return res.status(400).json({ message: 'El usuario no utiliza alcance por áreas o ubicaciones en este cliente.' });
+  }
   const rows = await listReaderAccess(req.params.id, clientId);
   return res.json(rows);
 });
@@ -9875,15 +10001,35 @@ app.post('/admin/users/:id/reader-access', requireAuth, requirePermission('users
   if (isClientAdmin(req.user) && clientId !== req.user.clientId) {
     return res.status(403).json({ message: 'Sin acceso al cliente.' });
   }
+  if (target.client_id !== clientId || !target.roles?.some((role) => AREA_SCOPED_OPERATIONAL_ROLES.includes(role))) {
+    return res.status(400).json({ message: 'El usuario no utiliza alcance por áreas o ubicaciones en este cliente.' });
+  }
   const safeAreaIds = Array.isArray(areaIds) ? areaIds : [];
+  const isAreaResponsible = target.roles.includes(AREA_RESPONSIBLE_ROLE);
   const safeLocationIds = Array.isArray(locationIds) ? locationIds : [];
-  await replaceReaderAccess(req.params.id, clientId, safeAreaIds, safeLocationIds);
+  if (isAreaResponsible && !safeAreaIds.length && !safeLocationIds.length) {
+    return res.status(400).json({ message: 'El responsable debe tener al menos un área o ubicación asignada.' });
+  }
+  try {
+    await replaceReaderAccess(req.params.id, clientId, safeAreaIds, safeLocationIds);
+  } catch (error) {
+    if (String(error?.code || '').startsWith('INVALID_AREA_SCOPE')) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo actualizar el alcance por áreas o ubicaciones.' });
+  }
   await logAudit({
     actorUserId: req.user.sub,
     actorUsername: req.user.username,
-    action: 'READER_ACCESS_UPDATE',
+    action: 'AREA_SCOPE_UPDATE',
     targetUserId: req.params.id,
-    details: { clientId, areaIds: safeAreaIds, locationIds: safeLocationIds }
+    details: {
+      clientId,
+      role: target.roles[0] || null,
+      areaIds: safeAreaIds,
+      locationIds: safeLocationIds
+    }
   });
   return res.json({ ok: true });
 });
@@ -10033,6 +10179,48 @@ app.get('/admin/audit', requireAuth, requireAnyPermission(['users:manage', 'audi
 });
 
 app.get(
+  '/maintenance/preventive-progress/:clientId',
+  requireAuth,
+  requireAnyPermissionOrRole(
+    ['maintenance:report:create', 'maintenance:report:sign', 'read:all'],
+    MAINTENANCE_REPORT_ACCESS_ROLES
+  ),
+  async (req, res) => {
+    const { clientId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+
+    const year = req.query.year ? Number(req.query.year) : new Date().getFullYear();
+    const month = req.query.month ? Number(req.query.month) : new Date().getMonth() + 1;
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ message: 'Año inválido.' });
+    }
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      return res.status(400).json({ message: 'Mes inválido.' });
+    }
+
+    try {
+      const assetCategory = normalizeAssetCategory(req.query.category);
+      await syncDueScheduleRequests(clientId, req.user.sub);
+      const progress = await getPreventiveMaintenanceProgress(clientId, {
+        year,
+        month,
+        assetCategory,
+        scopedUserId: isAreaScopedOperationalUser(req.user) ? req.user.sub : null
+      });
+      return res.json(progress);
+    } catch (error) {
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo calcular el avance preventivo.' });
+    }
+  }
+);
+
+app.get(
   '/maintenance/requests/:clientId',
   requireAuth,
   requireAnyPermission(['maintenance:request:create', 'maintenance:report:create', 'read:all']),
@@ -10045,7 +10233,7 @@ app.get(
       const assetCategory = normalizeAssetCategory(req.query.category);
       await syncDueScheduleRequests(clientId, req.user.sub);
       await sendPreventiveReminders(clientId);
-      const rows = req.user.roles?.includes('lector')
+      const rows = isAreaScopedOperationalUser(req.user)
         ? await listMaintenanceRequestsForReader(clientId, req.user.sub, { assetCategory })
         : await listMaintenanceRequests(clientId, { assetCategory });
       return res.json(rows);
@@ -10083,10 +10271,10 @@ app.post(
     if (descriptionError) {
       return res.status(400).json({ message: descriptionError });
     }
-    if (type === 'preventivo' && (req.user.roles?.includes('lector') || req.user.roles?.includes('almacenista'))) {
+    if (type === 'preventivo' && (isAreaScopedOperationalUser(req.user) || req.user.roles?.includes('almacenista'))) {
       return res.status(403).json({ message: 'No puedes solicitar mantenimiento preventivo.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -10366,13 +10554,13 @@ app.get(
     }
     const parsedLimit = limit ? Math.min(Number(limit) || 0, 100) : undefined;
     const parsedOffset = offset ? Math.max(Number(offset) || 0, 0) : undefined;
-    if (req.user.roles?.includes('lector') && assetId) {
+    if (isAreaScopedOperationalUser(req.user) && assetId) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
       if (!allowed) {
         return res.json([]);
       }
     }
-    const rows = req.user.roles?.includes('lector')
+    const rows = isAreaScopedOperationalUser(req.user)
       ? await listMaintenanceReportsForReader(clientId, req.user.sub, {
           assetId,
           assetCategory,
@@ -10540,6 +10728,15 @@ app.post(
     if (cleanAssetStatus !== 'fuera_de_servicio' && !cleanMaintenanceTests.length) {
       return res.status(400).json({ message: 'Selecciona al menos una prueba o verificación realizada.' });
     }
+    const approvalAsset = await getAssetById(request.client_id, request.asset_id);
+    if (!approvalAsset) {
+      return res.status(404).json({ message: 'Equipo no encontrado.' });
+    }
+    const signingPlan = await buildMaintenanceReportSigningPlan(
+      request.client_id,
+      approvalAsset,
+      request
+    );
     const reportType = request.status === 'espera_repuesto' ? 'correctivo' : request.type;
     const reportPayload = {
       clientId: request.client_id,
@@ -10554,6 +10751,7 @@ app.post(
       maintenanceTests: cleanMaintenanceTests,
       assetStatusAfter: cleanAssetStatus,
       assetStatusObservations: cleanAssetStatusObservations,
+      areaResponsibleRequired: signingPlan.areaResponsibleRequired,
       requiresSpareParts: cleanRequiresSpareParts,
       sparePartsNeeded: cleanRequiresSpareParts ? cleanSparePartsNeeded : null,
       sparePartsStatus: cleanSparePartsStatus,
@@ -10595,6 +10793,7 @@ app.post(
         maintenanceTests: cleanMaintenanceTests,
         assetStatusAfter: cleanAssetStatus,
         assetStatusObservations: cleanAssetStatusObservations || null,
+        areaResponsibleRequired: signingPlan.areaResponsibleRequired,
         assetLifecycleAction: cleanLifecycleAction,
         assetStatusPersisted: assetStatusToPersist,
         requiresSpareParts: cleanRequiresSpareParts,
@@ -10640,14 +10839,17 @@ app.post(
       }
     }
 
-    const signingUsers = await listMaintenanceReportSigningUsers(request.client_id, reportAsset, request);
-    for (const signer of signingUsers) {
+    for (const signer of signingPlan.users) {
       const title = reportType === 'preventivo'
-        ? 'Reporte preventivo pendiente de firma'
-        : 'Reporte correctivo pendiente de firma';
+        ? (signingPlan.areaResponsibleRequired
+          ? 'Mantenimiento preventivo pendiente de aval'
+          : 'Reporte preventivo pendiente de firma')
+        : (signingPlan.areaResponsibleRequired
+          ? 'Mantenimiento correctivo pendiente de aval'
+          : 'Reporte correctivo pendiente de firma');
       const message = requestStatusAfter === 'espera_repuesto'
-        ? `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)} y requiere firma. El caso queda en espera del repuesto: ${cleanSparePartsNeeded}.`
-        : `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)}. Debe ser firmado para quedar validado en la hoja de vida.`;
+        ? `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)} y requiere ${signingPlan.areaResponsibleRequired ? 'tu aval como responsable del área' : 'firma'}. El caso queda en espera del repuesto: ${cleanSparePartsNeeded}.`
+        : `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)}. Debe recibir ${signingPlan.areaResponsibleRequired ? 'el aval del responsable del área' : 'la firma de aceptación'} para quedar validado.`;
       await createNotification({
         userId: signer.id,
         clientId: request.client_id,
@@ -10726,7 +10928,12 @@ app.post(
     if (req.user.clientId && req.user.clientId !== report.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (report.area_responsible_required && !hasRole(req.user, AREA_RESPONSIBLE_ROLE)) {
+      return res.status(403).json({
+        message: 'Este reporte requiere el aval de un responsable asignado al área.'
+      });
+    }
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(report.client_id, req.user.sub, report.asset_id);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -10748,7 +10955,7 @@ app.post(
     const result = await signMaintenanceReport({
       reportId: report.id,
       userId: req.user.sub,
-      role: req.user.roles?.[0] ?? 'user',
+      role: maintenanceAcceptanceRoleForUser(req.user),
       signaturePath: user.signature_path
     });
 
@@ -10763,7 +10970,7 @@ app.post(
         eventType: 'reporte_mantenimiento_firmado',
         reportId: report.id,
         requestId: report.request_id,
-        signerRole: req.user.roles?.[0] ?? 'user',
+        signerRole: maintenanceAcceptanceRoleForUser(req.user),
         signatureId: result?.id ?? null
       }
     });
@@ -10871,7 +11078,12 @@ app.post(
     if (req.user.clientId && req.user.clientId !== report.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (report.area_responsible_required && !hasRole(req.user, AREA_RESPONSIBLE_ROLE)) {
+      return res.status(403).json({
+        message: 'Solo un responsable asignado al área puede solicitar corrección de este reporte.'
+      });
+    }
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(report.client_id, req.user.sub, report.asset_id);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -10987,7 +11199,7 @@ app.get(
     if (req.user.clientId && req.user.clientId !== report.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(report.client_id, req.user.sub, report.asset_id);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -12082,7 +12294,7 @@ app.post(
     if (dateOnlyFromDatabase(item.planned_date) > todayInBogota()) {
       return res.status(409).json({ message: 'El acta se habilita a partir de la fecha programada.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessArea(item.client_id, req.user.sub, item.area_id);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al área.' });
@@ -12141,7 +12353,7 @@ app.get(
     if (req.user.clientId && req.user.clientId !== item.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (req.user.roles?.includes('lector')) {
+    if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessArea(item.client_id, req.user.sub, item.area_id);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al área.' });

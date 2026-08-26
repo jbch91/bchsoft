@@ -42,6 +42,17 @@ function sparePartStatusLabel(value) {
   return labels[value] || safeText(value);
 }
 
+function maintenanceSignerRoleLabel(value) {
+  const labels = {
+    ingeniero_biomedico: 'Ingeniero biomédico',
+    responsable_area: 'Responsable de área',
+    almacenista: 'Almacenista',
+    lector: 'Lector',
+    viewer: 'Visor'
+  };
+  return labels[value] || safeText(value);
+}
+
 function listLabels(values, labels) {
   const list = Array.isArray(values) ? values : [];
   if (!list.length) return 'No registrado';
@@ -1664,7 +1675,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
       .font('Helvetica')
       .fontSize(8.5)
       .fillColor(PDF_MUTED)
-      .text(`Rol: ${safeText(sig.role)}`, cursorX, cursorY + signatureHeight + 24, {
+      .text(`Rol: ${maintenanceSignerRoleLabel(sig.role)}`, cursorX, cursorY + signatureHeight + 24, {
         width: signatureWidth,
         align: 'center'
       });

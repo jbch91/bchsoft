@@ -11,6 +11,7 @@ export type Role =
   | 'almacenista'
   | 'ingeniero_biomedico'
   | 'calibracion'
+  | 'responsable_area'
   | 'lector'
   | 'odontologo'
   | 'auxiliar_odontologia'

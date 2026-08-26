@@ -7,7 +7,15 @@ import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
 import { BiomedService } from '../../biomed/biomed.service';
 import type { AssetCategory } from '../../biomed/biomed.service';
-import { MaintenanceService, MaintenanceReportDto, MaintenanceRequestDto } from '../../maintenance/maintenance.service';
+import {
+  MaintenanceService,
+  MaintenanceReportDto,
+  MaintenanceRequestDto,
+  PreventiveMaintenanceProgressDto,
+  PreventiveProgressItemDto,
+  PreventiveProgressPhase,
+  PreventiveProgressSummaryDto
+} from '../../maintenance/maintenance.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 import {
@@ -33,6 +41,7 @@ interface AssetLite {
   brand?: string | null;
   model?: string | null;
   serial?: string | null;
+  photoPath?: string | null;
   status?: string | null;
   siteName?: string | null;
   areaName?: string | null;
@@ -54,6 +63,338 @@ type MaintenanceViewMode =
   | 'bajas'
   | 'equipos';
 
+type PreventivePhaseView = 'work' | 'pending_signature' | 'waiting_spare' | 'completed';
+type ReportAssetStatus = 'operativo' | 'operativo_observacion' | 'fuera_de_servicio';
+type ReportNarrativeField = 'summary' | 'findings' | 'actions' | 'statusObservations' | 'spareParts';
+type PreventiveOutcomeValue = 'conforme' | 'observacion' | 'hallazgo' | 'fuera_de_servicio';
+
+interface ReportNarrativeOption {
+  id: string;
+  label: string;
+  text: string;
+}
+
+interface PreventiveOutcomePreset {
+  value: PreventiveOutcomeValue;
+  label: string;
+  description: string;
+  tone: 'good' | 'regular' | 'warn' | 'danger';
+  assetStatus: ReportAssetStatus;
+  summary: string[];
+  findings: string[];
+  actions: string[];
+}
+
+const PREVENTIVE_SUMMARY_OPTIONS: readonly ReportNarrativeOption[] = [
+  {
+    id: 'protocolo_completo',
+    label: 'Preventivo según protocolo',
+    text: 'Se realizó mantenimiento preventivo de acuerdo con el protocolo establecido.'
+  },
+  {
+    id: 'verificacion_completa',
+    label: 'Verificación completa',
+    text: 'Se completó la inspección general y la verificación funcional del equipo.'
+  },
+  {
+    id: 'equipo_operativo',
+    label: 'Equipo operativo',
+    text: 'El equipo queda operativo y disponible para el servicio.'
+  },
+  {
+    id: 'operativo_observacion',
+    label: 'Operativo con seguimiento',
+    text: 'El equipo queda operativo con observaciones y requiere seguimiento.'
+  },
+  {
+    id: 'accion_correctiva',
+    label: 'Requiere acción correctiva',
+    text: 'La intervención requiere una acción correctiva o seguimiento técnico.'
+  },
+  {
+    id: 'fuera_servicio',
+    label: 'Fuera de servicio',
+    text: 'El equipo queda fuera de servicio para evitar una operación insegura.'
+  }
+];
+
+const PREVENTIVE_FINDING_OPTIONS: readonly ReportNarrativeOption[] = [
+  {
+    id: 'sin_hallazgos',
+    label: 'Sin hallazgos relevantes',
+    text: 'No se identificaron hallazgos que afecten el funcionamiento seguro del equipo.'
+  },
+  {
+    id: 'condicion_menor',
+    label: 'Condición menor',
+    text: 'Se identificó una condición menor que no impide la operación inmediata del equipo.'
+  },
+  {
+    id: 'hallazgo_seguimiento',
+    label: 'Hallazgo para seguimiento',
+    text: 'Se identificó un hallazgo técnico que requiere revisión adicional o acción correctiva.'
+  },
+  {
+    id: 'suciedad',
+    label: 'Suciedad o residuos',
+    text: 'Se evidenció suciedad o acumulación de residuos en el equipo o sus accesorios.'
+  },
+  {
+    id: 'desgaste',
+    label: 'Desgaste por uso',
+    text: 'Se evidenció desgaste normal por uso en uno o más componentes.'
+  },
+  {
+    id: 'electrico',
+    label: 'Cable o alimentación',
+    text: 'Se encontró deterioro en cables, conectores o alimentación eléctrica.'
+  },
+  {
+    id: 'accesorio',
+    label: 'Accesorio incompleto o deteriorado',
+    text: 'Se encontró un accesorio incompleto, deteriorado o no funcional.'
+  },
+  {
+    id: 'bateria',
+    label: 'Batería con bajo desempeño',
+    text: 'La batería presenta autonomía reducida o desempeño irregular.'
+  },
+  {
+    id: 'alarmas',
+    label: 'Alarmas o códigos de error',
+    text: 'Se presentaron alarmas o códigos de error durante la verificación.'
+  },
+  {
+    id: 'parametros',
+    label: 'Parámetros fuera de rango',
+    text: 'Se identificaron parámetros fuera de rango o funcionamiento inestable.'
+  },
+  {
+    id: 'dano_fisico',
+    label: 'Daño físico',
+    text: 'Se observó daño físico en la carcasa, soporte o estructura del equipo.'
+  },
+  {
+    id: 'falla_insegura',
+    label: 'Falla que impide el uso seguro',
+    text: 'Se identificó una falla que impide el funcionamiento seguro del equipo.'
+  }
+];
+
+const PREVENTIVE_ACTION_OPTIONS: readonly ReportNarrativeOption[] = [
+  {
+    id: 'limpieza',
+    label: 'Limpieza del equipo',
+    text: 'Se realizó limpieza del equipo y de sus accesorios.'
+  },
+  {
+    id: 'ajustes',
+    label: 'Ajustes básicos',
+    text: 'Se ajustaron cables, conexiones y elementos de fijación.'
+  },
+  {
+    id: 'alimentacion',
+    label: 'Verificación eléctrica o batería',
+    text: 'Se verificó la alimentación eléctrica y el estado de la batería.'
+  },
+  {
+    id: 'parametros',
+    label: 'Ajuste de parámetros',
+    text: 'Se configuraron o ajustaron los parámetros de operación.'
+  },
+  {
+    id: 'pruebas',
+    label: 'Pruebas funcionales y de seguridad',
+    text: 'Se realizaron pruebas funcionales y de seguridad.'
+  },
+  {
+    id: 'recomendaciones',
+    label: 'Recomendaciones al usuario',
+    text: 'Se brindaron recomendaciones de uso y cuidado al personal del área.'
+  },
+  {
+    id: 'informar_hallazgo',
+    label: 'Hallazgo informado al área',
+    text: 'Se informó el hallazgo al responsable del área y se recomendó seguimiento.'
+  },
+  {
+    id: 'solicitar_correctivo',
+    label: 'Solicitar correctivo',
+    text: 'Se recomendó programar mantenimiento correctivo o revisión especializada.'
+  },
+  {
+    id: 'retirar_servicio',
+    label: 'Identificar y retirar del servicio',
+    text: 'El equipo quedó identificado y retirado temporalmente del servicio.'
+  }
+];
+
+const PREVENTIVE_OBSERVATION_OPTIONS: readonly ReportNarrativeOption[] = [
+  {
+    id: 'uso_con_seguimiento',
+    label: 'Puede continuar con seguimiento',
+    text: 'El equipo puede continuar en uso con seguimiento técnico.'
+  },
+  {
+    id: 'vigilar_hallazgo',
+    label: 'Vigilar evolución del hallazgo',
+    text: 'Se recomienda vigilar la evolución del hallazgo en el próximo mantenimiento.'
+  },
+  {
+    id: 'restriccion_informada',
+    label: 'Uso con restricción informada',
+    text: 'El equipo opera con una restricción que fue informada al responsable del área.'
+  },
+  {
+    id: 'funcion_principal_disponible',
+    label: 'Función principal disponible',
+    text: 'La condición encontrada no afecta actualmente la función principal del equipo.'
+  },
+  {
+    id: 'correctivo_recomendado',
+    label: 'Correctivo recomendado',
+    text: 'Se recomienda programar mantenimiento correctivo para resolver la condición encontrada.'
+  }
+];
+
+const PREVENTIVE_OUT_OF_SERVICE_OPTIONS: readonly ReportNarrativeOption[] = [
+  {
+    id: 'no_enciende',
+    label: 'No enciende o no inicia',
+    text: 'El equipo no enciende o no completa su inicio correctamente.'
+  },
+  {
+    id: 'operacion_insegura',
+    label: 'Operación insegura',
+    text: 'La falla encontrada impide una operación segura.'
+  },
+  {
+    id: 'riesgo_electrico',
+    label: 'Condición eléctrica insegura',
+    text: 'El sistema eléctrico, cable o conexión presenta una condición insegura.'
+  },
+  {
+    id: 'parametros_no_cumplen',
+    label: 'Parámetros o alarmas no cumplen',
+    text: 'Los parámetros o alarmas no cumplen las condiciones de funcionamiento.'
+  },
+  {
+    id: 'repuesto_indispensable',
+    label: 'Repuesto indispensable',
+    text: 'El equipo requiere un repuesto indispensable antes de volver al servicio.'
+  },
+  {
+    id: 'dano_compromete_seguridad',
+    label: 'Daño compromete la seguridad',
+    text: 'El daño físico compromete la seguridad o estabilidad del equipo.'
+  }
+];
+
+const PREVENTIVE_SPARE_PART_OPTIONS: readonly ReportNarrativeOption[] = [
+  { id: 'bateria', label: 'Batería', text: 'Batería' },
+  { id: 'cable_alimentacion', label: 'Cable de alimentación', text: 'Cable de alimentación' },
+  { id: 'fusible', label: 'Fusible', text: 'Fusible' },
+  { id: 'sensor', label: 'Sensor', text: 'Sensor' },
+  { id: 'manguera', label: 'Manguera o tubería', text: 'Manguera o tubería' },
+  { id: 'conector', label: 'Conector o cable', text: 'Conector o cable' },
+  { id: 'accesorio', label: 'Accesorio del equipo', text: 'Accesorio del equipo' },
+  { id: 'tarjeta', label: 'Tarjeta electrónica', text: 'Tarjeta electrónica' },
+  { id: 'panel', label: 'Pantalla o panel de control', text: 'Pantalla o panel de control' },
+  { id: 'mecanico', label: 'Componente mecánico', text: 'Componente mecánico' }
+];
+
+const PREVENTIVE_OUTCOME_PRESETS: readonly PreventiveOutcomePreset[] = [
+  {
+    value: 'conforme',
+    label: 'Bueno / conforme',
+    description: 'Sin hallazgos que afecten la operación.',
+    tone: 'good',
+    assetStatus: 'operativo',
+    summary: [
+      PREVENTIVE_SUMMARY_OPTIONS[0].text,
+      PREVENTIVE_SUMMARY_OPTIONS[1].text,
+      PREVENTIVE_SUMMARY_OPTIONS[2].text
+    ],
+    findings: [PREVENTIVE_FINDING_OPTIONS[0].text],
+    actions: [
+      PREVENTIVE_ACTION_OPTIONS[0].text,
+      PREVENTIVE_ACTION_OPTIONS[1].text,
+      PREVENTIVE_ACTION_OPTIONS[4].text
+    ]
+  },
+  {
+    value: 'observacion',
+    label: 'Regular / observación',
+    description: 'Funciona, pero debe quedar una condición documentada.',
+    tone: 'regular',
+    assetStatus: 'operativo_observacion',
+    summary: [PREVENTIVE_SUMMARY_OPTIONS[0].text, PREVENTIVE_SUMMARY_OPTIONS[3].text],
+    findings: [PREVENTIVE_FINDING_OPTIONS[1].text],
+    actions: [
+      PREVENTIVE_ACTION_OPTIONS[1].text,
+      PREVENTIVE_ACTION_OPTIONS[4].text,
+      PREVENTIVE_ACTION_OPTIONS[6].text
+    ]
+  },
+  {
+    value: 'hallazgo',
+    label: 'Hallazgo por corregir',
+    description: 'Requiere seguimiento técnico o correctivo.',
+    tone: 'warn',
+    assetStatus: 'operativo_observacion',
+    summary: [
+      PREVENTIVE_SUMMARY_OPTIONS[0].text,
+      PREVENTIVE_SUMMARY_OPTIONS[3].text,
+      PREVENTIVE_SUMMARY_OPTIONS[4].text
+    ],
+    findings: [PREVENTIVE_FINDING_OPTIONS[2].text],
+    actions: [PREVENTIVE_ACTION_OPTIONS[6].text, PREVENTIVE_ACTION_OPTIONS[7].text]
+  },
+  {
+    value: 'fuera_de_servicio',
+    label: 'Fuera de servicio',
+    description: 'No debe continuar en operación.',
+    tone: 'danger',
+    assetStatus: 'fuera_de_servicio',
+    summary: [PREVENTIVE_SUMMARY_OPTIONS[0].text, PREVENTIVE_SUMMARY_OPTIONS[5].text],
+    findings: [PREVENTIVE_FINDING_OPTIONS[11].text],
+    actions: [PREVENTIVE_ACTION_OPTIONS[6].text, PREVENTIVE_ACTION_OPTIONS[8].text]
+  }
+];
+
+interface PreventivePdfViewport {
+  width: number;
+  height: number;
+}
+
+interface PreventivePdfRenderTask {
+  promise: Promise<void>;
+  cancel(): void;
+}
+
+interface PreventivePdfPage {
+  getViewport(options: { scale: number }): PreventivePdfViewport;
+  render(options: {
+    canvas: HTMLCanvasElement;
+    viewport: PreventivePdfViewport;
+  }): PreventivePdfRenderTask;
+}
+
+interface PreventivePdfDocument {
+  numPages: number;
+  getPage(pageNumber: number): Promise<PreventivePdfPage>;
+  destroy(): Promise<void>;
+}
+
+interface PreventivePdfJsModule {
+  GlobalWorkerOptions: { workerSrc: string };
+  getDocument(options: { data: Uint8Array }): { promise: Promise<PreventivePdfDocument> };
+}
+
+interface PreventivePdfWindow extends Window {
+  __inbihospitalarioPdfJs?: PreventivePdfJsModule;
+}
+
 @Component({
   selector: 'app-maintenance',
   standalone: true,
@@ -65,6 +406,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   @ViewChild('qrVideo') qrVideo?: ElementRef<HTMLVideoElement>;
   @ViewChild('reportFormCard') reportFormCard?: ElementRef<HTMLElement>;
   @ViewChild('preventiveProgrammedCard') preventiveProgrammedCard?: ElementRef<HTMLElement>;
+  @ViewChild('preventivePdfCanvas') preventivePdfCanvas?: ElementRef<HTMLCanvasElement>;
 
   private readonly publicBase = getPublicBase();
   private qrStream: MediaStream | null = null;
@@ -79,10 +421,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   private preventiveProgrammedCacheRequests: MaintenanceRequestDto[] | null = null;
   private preventiveProgrammedCacheAssets: Map<string, AssetLite> | null = null;
   private preventiveProgrammedCacheItems: MaintenanceRequestDto[] = [];
-  private preventiveFilterCacheSource: MaintenanceRequestDto[] | null = null;
+  private preventiveFilterCacheSource: PreventiveProgressItemDto[] | null = null;
   private preventiveFilterCacheAssets: Map<string, AssetLite> | null = null;
   private preventiveFilterCacheKey = '';
-  private preventiveFilterCacheItems: MaintenanceRequestDto[] = [];
+  private preventiveFilterCacheItems: PreventiveProgressItemDto[] = [];
   readonly assetCategory: AssetCategory;
 
   loading = false;
@@ -121,6 +463,21 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   preventiveStatusFilter = '';
   preventivePage = 1;
   preventivePageSize = 10;
+  preventiveProgress: PreventiveMaintenanceProgressDto | null = null;
+  preventiveProgressScope: 'month' | 'year' = 'month';
+  preventivePhaseView: PreventivePhaseView = 'work';
+  preventivePdfOpen = false;
+  preventivePdfTitle = '';
+  preventivePdfAsset: AssetLite | null = null;
+  preventivePdfLoadingId = '';
+  preventivePdfPage = 1;
+  preventivePdfPageCount = 0;
+  preventivePdfZoom = 1;
+  preventivePdfRendering = false;
+  failedAssetPhotoIds = new Set<string>();
+  private preventivePdfDocument: PreventivePdfDocument | null = null;
+  private preventivePdfRenderTask: PreventivePdfRenderTask | null = null;
+  private preventivePdfJsPromise: Promise<PreventivePdfJsModule> | null = null;
   assetSearchTerm = '';
   protocolSearchTerm = '';
   protocolSiteFilter = '';
@@ -149,7 +506,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportMaintenanceChecks: string[] = [];
   reportMaintenanceActivities: string[] = [];
   reportMaintenanceTests: string[] = [];
-  reportAssetStatus: 'operativo' | 'operativo_observacion' | 'fuera_de_servicio' = 'operativo';
+  reportAssetStatus: ReportAssetStatus = 'operativo';
   reportAssetStatusObservations = '';
   reportRequiresSpareParts = false;
   reportSparePartsNeeded = '';
@@ -182,6 +539,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     { value: 'operativo_observacion', label: 'Operativo con observación' },
     { value: 'fuera_de_servicio', label: 'Fuera de servicio' }
   ];
+  readonly preventiveOutcomePresets = PREVENTIVE_OUTCOME_PRESETS;
+  readonly preventiveSummaryOptions = PREVENTIVE_SUMMARY_OPTIONS;
+  readonly preventiveFindingOptions = PREVENTIVE_FINDING_OPTIONS;
+  readonly preventiveActionOptions = PREVENTIVE_ACTION_OPTIONS;
+  readonly preventiveSparePartOptions = PREVENTIVE_SPARE_PART_OPTIONS;
   readonly maintenanceCheckOptions = [
     { value: 'revision_visual', label: 'Revisión visual externa' },
     { value: 'revision_cables_conexiones', label: 'Revisión de cables y conexiones' },
@@ -261,6 +623,16 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       : this.maintenanceTestOptions;
   }
 
+  get preventiveStatusObservationOptions(): readonly ReportNarrativeOption[] {
+    return this.reportAssetStatus === 'fuera_de_servicio'
+      ? PREVENTIVE_OUT_OF_SERVICE_OPTIONS
+      : PREVENTIVE_OBSERVATION_OPTIONS;
+  }
+
+  get isAreaResponsible(): boolean {
+    return this.auth.hasRole('responsable_area');
+  }
+
   async ngOnInit(): Promise<void> {
     if (this.canRefreshMaintenanceTemporaryPermissions) {
       await this.refreshCurrentPermissions(false);
@@ -280,6 +652,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.destroyed = true;
     this.stopQrScan();
+    this.closePreventivePdf();
     this.routeSub?.unsubscribe();
   }
 
@@ -351,6 +724,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   async applyRouteIntent(params: ParamMap): Promise<void> {
     const view = params.get('view');
     const requestId = params.get('requestId');
+    const reportId = params.get('reportId');
     const assetId = params.get('assetId');
     const assetCode = params.get('code');
     const clientId = params.get('clientId');
@@ -370,6 +744,20 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         this.requestType = 'correctivo';
         this.scrollToTop();
       }
+    }
+
+    if (view === 'reportes' && reportId) {
+      this.viewMode = 'reportes';
+      if (!this.reports.length && this.selectedClientId) {
+        await this.loadData();
+      }
+      const report = this.reports.find((item) => item.id === reportId);
+      if (report) {
+        this.openReportDetail(report);
+      } else {
+        this.errorMessage = 'El reporte ya no está disponible o no corresponde a tus áreas asignadas.';
+      }
+      return;
     }
 
     if (view === 'reportes' && requestId) {
@@ -409,19 +797,21 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.reports = [];
       this.assets = [];
       this.assetMap = new Map();
+      this.preventiveProgress = null;
       this.refreshViewSoon();
       return;
     }
     this.loading = true;
     this.errorMessage = '';
     try {
-      const [assets, requests, reports] = await Promise.all([
+      const [assets, requests, reports, preventiveProgress] = await Promise.all([
         this.biomed.listAssets(this.selectedClientId, this.assetCategory),
         this.maintenance.listRequests(this.selectedClientId, this.assetCategory),
         this.maintenance.listReports(this.selectedClientId, {
           assetCategory: this.assetCategory,
           order: 'desc'
-        })
+        }),
+        this.loadPreventiveProgress()
       ]);
       this.assets = assets.map((asset) => ({
         id: asset.id,
@@ -430,6 +820,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         brand: asset.brand,
         model: asset.model,
         serial: asset.serial,
+        photoPath: asset.photo_path,
         status: asset.status,
         siteName: asset.site_name,
         areaName: asset.area_name,
@@ -442,6 +833,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       );
       this.requests = requests;
       this.reports = reports;
+      this.preventiveProgress = preventiveProgress;
       this.clampReportPage();
       if (!this.activeAssets.some((asset) => asset.id === this.requestAssetId)) {
         this.requestAssetId = '';
@@ -457,6 +849,28 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     } finally {
       this.loading = false;
       this.refreshViewSoon();
+    }
+  }
+
+  private async loadPreventiveProgress(): Promise<PreventiveMaintenanceProgressDto | null> {
+    if (
+      !this.auth.hasPermission('maintenance:report:create')
+      && !this.auth.hasPermission('maintenance:report:sign')
+      && !this.auth.hasPermission('read:all')
+    ) {
+      return null;
+    }
+    const now = new Date();
+    try {
+      return await this.maintenance.getPreventiveProgress(
+        this.selectedClientId,
+        now.getFullYear(),
+        now.getMonth() + 1,
+        this.assetCategory
+      );
+    } catch (error) {
+      console.error('No se pudo cargar el avance preventivo.', error);
+      return null;
     }
   }
 
@@ -805,13 +1219,27 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.scrollToReportForm();
   }
 
+  startPreventiveReportCorrection(report: MaintenanceReportDto): void {
+    this.startReportCorrection(report);
+    this.viewMode = 'preventivos';
+  }
+
   async downloadReport(reportId: string): Promise<void> {
+    const previewWindow = window.open('', '_blank');
     try {
       const blob = await this.maintenance.downloadReportPdf(reportId);
       const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      if (previewWindow) {
+        previewWindow.location.href = url;
+      } else {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `reporte-${reportId}.pdf`;
+        link.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error: any) {
+      previewWindow?.close();
       console.error(error);
       this.errorMessage = error?.error?.message ?? 'No se pudo abrir el PDF.';
     }
@@ -957,6 +1385,20 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return asset ? `${asset.code} - ${asset.name}` : assetId;
   }
 
+  assetPhotoUrl(asset: AssetLite | null): string | null {
+    if (!asset?.photoPath) return null;
+    if (/^https?:\/\//i.test(asset.photoPath)) return asset.photoPath;
+    return joinBase(this.publicBase, asset.photoPath);
+  }
+
+  assetPhotoAvailable(asset: AssetLite | null): boolean {
+    return Boolean(asset?.photoPath && !this.failedAssetPhotoIds.has(asset.id));
+  }
+
+  onAssetPhotoError(assetId: string): void {
+    this.failedAssetPhotoIds = new Set(this.failedAssetPhotoIds).add(assetId);
+  }
+
   get activeAssets(): AssetLite[] {
     return this.assets.filter((asset) => asset.status !== 'dado_de_baja');
   }
@@ -1099,6 +1541,71 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return this.requests.filter((request) => !this.isScheduledPreventive(request));
   }
 
+  get activePreventiveProgress(): PreventiveProgressSummaryDto | null {
+    if (!this.preventiveProgress) return null;
+    return this.preventiveProgressScope === 'month'
+      ? this.preventiveProgress.monthly
+      : this.preventiveProgress.annual;
+  }
+
+  get preventiveProgressPeriodLabel(): string {
+    const progress = this.preventiveProgress;
+    if (!progress) return '';
+    if (this.preventiveProgressScope === 'year') {
+      return `Vigencia ${progress.year}`;
+    }
+    const date = new Date(Date.UTC(progress.year, progress.month - 1, 1));
+    const label = new Intl.DateTimeFormat('es-CO', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC'
+    }).format(date);
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
+  get preventiveProgressSegments(): Array<{
+    key: string;
+    label: string;
+    count: number;
+    percent: number;
+  }> {
+    const progress = this.activePreventiveProgress;
+    if (!progress) return [];
+    const percent = (count: number) => progress.total ? (count / progress.total) * 100 : 0;
+    return [
+      {
+        key: 'not-started',
+        label: 'Por realizar',
+        count: progress.not_started,
+        percent: percent(progress.not_started)
+      },
+      {
+        key: 'in-progress',
+        label: 'En proceso',
+        count: progress.in_progress,
+        percent: percent(progress.in_progress)
+      },
+      {
+        key: 'pending-signature',
+        label: 'Pendientes de aval/firma',
+        count: progress.pending_signature,
+        percent: percent(progress.pending_signature)
+      },
+      {
+        key: 'waiting-spare',
+        label: 'Esperando repuesto',
+        count: progress.waiting_spare,
+        percent: percent(progress.waiting_spare)
+      },
+      {
+        key: 'completed',
+        label: 'Finalizados',
+        count: progress.completed,
+        percent: percent(progress.completed)
+      }
+    ];
+  }
+
   get preventiveProgrammedRequests(): MaintenanceRequestDto[] {
     if (
       this.preventiveProgrammedCacheRequests === this.requests
@@ -1122,10 +1629,42 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return items;
   }
 
-  get filteredPreventiveRequests(): MaintenanceRequestDto[] {
-    const source = this.preventiveProgrammedRequests;
+  get preventivePhaseTabs(): Array<{ value: PreventivePhaseView; label: string; count: number }> {
+    const progress = this.activePreventiveProgress;
+    return [
+      {
+        value: 'work',
+        label: 'Por atender',
+        count: (progress?.not_started ?? 0) + (progress?.in_progress ?? 0)
+      },
+      {
+        value: 'pending_signature',
+        label: 'Pendientes de aval/firma',
+        count: progress?.pending_signature ?? 0
+      },
+      {
+        value: 'waiting_spare',
+        label: 'Esperando repuesto',
+        count: progress?.waiting_spare ?? 0
+      },
+      {
+        value: 'completed',
+        label: 'Finalizados',
+        count: progress?.completed ?? 0
+      }
+    ];
+  }
+
+  get activePreventivePhaseTotal(): number {
+    return this.preventivePhaseTabs.find((tab) => tab.value === this.preventivePhaseView)?.count ?? 0;
+  }
+
+  get filteredPreventiveItems(): PreventiveProgressItemDto[] {
+    const source = this.preventiveProgress?.items ?? [];
     const term = this.normalize(this.preventiveSearchTerm);
     const filterKey = [
+      this.preventiveProgressScope,
+      this.preventivePhaseView,
       term,
       this.preventiveSiteFilter,
       this.preventiveAreaFilter,
@@ -1140,21 +1679,29 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       return this.preventiveFilterCacheItems;
     }
 
-    const items = source.filter((request) => {
-      const asset = this.assetMap.get(request.asset_id);
-      if (this.preventiveSiteFilter && asset?.siteName !== this.preventiveSiteFilter) return false;
-      if (this.preventiveAreaFilter && asset?.areaName !== this.preventiveAreaFilter) return false;
-      if (this.preventiveLocationFilter && asset?.locationName !== this.preventiveLocationFilter) return false;
-      if (this.preventiveStatusFilter && request.status !== this.preventiveStatusFilter) return false;
+    const items = source.filter((item) => {
+      if (!this.preventiveItemInActiveScope(item) || !this.preventiveItemMatchesActivePhase(item)) {
+        return false;
+      }
+      if (this.preventiveSiteFilter && item.site_name !== this.preventiveSiteFilter) return false;
+      if (this.preventiveAreaFilter && item.area_name !== this.preventiveAreaFilter) return false;
+      if (this.preventiveLocationFilter && item.location_name !== this.preventiveLocationFilter) return false;
+      if (this.preventiveStatusFilter && item.phase !== this.preventiveStatusFilter) return false;
       if (!term) return true;
 
       const haystack = [
-        asset ? this.assetHaystack(asset) : '',
-        request.description,
-        request.assigned_name,
-        request.requester_name,
-        request.planned_date,
-        request.deadline_date
+        item.asset_code,
+        item.asset_name,
+        item.asset_brand,
+        item.asset_model,
+        item.asset_serial,
+        item.site_name,
+        item.area_name,
+        item.location_name,
+        item.assigned_name,
+        item.planned_date,
+        item.deadline_date,
+        this.preventivePhaseLabel(item.phase)
       ]
         .map((value) => this.normalize(value))
         .join(' ');
@@ -1168,40 +1715,40 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   get preventiveSiteOptions(): string[] {
-    return this.preventiveAssetOptions('siteName');
+    return this.preventiveItemOptions('site_name');
   }
 
   get preventiveAreaOptions(): string[] {
-    return this.preventiveAssetOptions('areaName', (asset) =>
-      !this.preventiveSiteFilter || asset.siteName === this.preventiveSiteFilter
+    return this.preventiveItemOptions('area_name', (item) =>
+      !this.preventiveSiteFilter || item.site_name === this.preventiveSiteFilter
     );
   }
 
   get preventiveLocationOptions(): string[] {
-    return this.preventiveAssetOptions('locationName', (asset) =>
-      (!this.preventiveSiteFilter || asset.siteName === this.preventiveSiteFilter)
-      && (!this.preventiveAreaFilter || asset.areaName === this.preventiveAreaFilter)
+    return this.preventiveItemOptions('location_name', (item) =>
+      (!this.preventiveSiteFilter || item.site_name === this.preventiveSiteFilter)
+      && (!this.preventiveAreaFilter || item.area_name === this.preventiveAreaFilter)
     );
   }
 
-  get paginatedPreventiveRequests(): MaintenanceRequestDto[] {
-    return paginateMaintenanceItems(this.filteredPreventiveRequests, this.preventivePage, this.preventivePageSize).items;
+  get paginatedPreventiveItems(): PreventiveProgressItemDto[] {
+    return paginateMaintenanceItems(this.filteredPreventiveItems, this.preventivePage, this.preventivePageSize).items;
   }
 
   get preventiveEffectivePage(): number {
-    return paginateMaintenanceItems(this.filteredPreventiveRequests, this.preventivePage, this.preventivePageSize).page;
+    return paginateMaintenanceItems(this.filteredPreventiveItems, this.preventivePage, this.preventivePageSize).page;
   }
 
   get preventivePageCount(): number {
-    return paginateMaintenanceItems(this.filteredPreventiveRequests, this.preventivePage, this.preventivePageSize).totalPages;
+    return paginateMaintenanceItems(this.filteredPreventiveItems, this.preventivePage, this.preventivePageSize).totalPages;
   }
 
   get preventivePageStart(): number {
-    return paginateMaintenanceItems(this.filteredPreventiveRequests, this.preventivePage, this.preventivePageSize).start;
+    return paginateMaintenanceItems(this.filteredPreventiveItems, this.preventivePage, this.preventivePageSize).start;
   }
 
   get preventivePageEnd(): number {
-    return paginateMaintenanceItems(this.filteredPreventiveRequests, this.preventivePage, this.preventivePageSize).end;
+    return paginateMaintenanceItems(this.filteredPreventiveItems, this.preventivePage, this.preventivePageSize).end;
   }
 
   get hasActivePreventiveFilters(): boolean {
@@ -1216,6 +1763,19 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   resetPreventivePage(): void {
     this.preventivePage = 1;
+  }
+
+  setPreventiveProgressScope(scope: 'month' | 'year'): void {
+    if (this.preventiveProgressScope === scope) return;
+    this.preventiveProgressScope = scope;
+    this.clearPreventiveFilters();
+  }
+
+  setPreventivePhaseView(view: PreventivePhaseView): void {
+    if (this.preventivePhaseView === view) return;
+    this.preventivePhaseView = view;
+    this.preventiveStatusFilter = '';
+    this.resetPreventivePage();
   }
 
   onPreventiveSiteFilterChange(): void {
@@ -1252,11 +1812,199 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.resetPreventivePage();
   }
 
-  preventiveWindowLabel(request: MaintenanceRequestDto): string {
-    if (!request.planned_date && !request.deadline_date) return 'Ventana no registrada';
-    const planned = request.planned_date ? new Date(request.planned_date).toLocaleDateString('es-CO') : '-';
-    const deadline = request.deadline_date ? new Date(request.deadline_date).toLocaleDateString('es-CO') : '-';
+  preventiveWindowLabel(item: MaintenanceRequestDto | PreventiveProgressItemDto): string {
+    if (!item.planned_date && !item.deadline_date) return 'Ventana no registrada';
+    const planned = item.planned_date ? new Date(item.planned_date).toLocaleDateString('es-CO') : '-';
+    const deadline = item.deadline_date ? new Date(item.deadline_date).toLocaleDateString('es-CO') : '-';
     return `${planned} - ${deadline}`;
+  }
+
+  preventivePhaseLabel(phase: PreventiveProgressPhase): string {
+    const labels: Record<PreventiveProgressPhase, string> = {
+      not_started: 'Por realizar',
+      in_progress: 'En proceso',
+      pending_signature: 'Pendiente de aval/firma',
+      waiting_spare: 'Esperando repuesto',
+      completed: 'Finalizado'
+    };
+    return labels[phase];
+  }
+
+  preventivePhaseClass(phase: PreventiveProgressPhase): string {
+    return phase.replaceAll('_', '-');
+  }
+
+  preventiveRequestForItem(item: PreventiveProgressItemDto): MaintenanceRequestDto | null {
+    if (!item.request_id) return null;
+    return this.requests.find((request) => request.id === item.request_id) ?? null;
+  }
+
+  preventiveReportForItem(item: PreventiveProgressItemDto): MaintenanceReportDto | null {
+    if (!item.report_id) return null;
+    return this.reports.find((report) => report.id === item.report_id) ?? null;
+  }
+
+  async openPreventiveFinalPdf(item: PreventiveProgressItemDto): Promise<void> {
+    if (!item.report_id && (!item.legacy_history_file_id || !this.selectedClientId)) {
+      this.errorMessage = 'Este mantenimiento finalizado no tiene un PDF disponible.';
+      return;
+    }
+    this.preventivePdfLoadingId = item.id;
+    this.errorMessage = '';
+    try {
+      const blob = item.report_id
+        ? await this.maintenance.downloadReportPdf(item.report_id)
+        : await this.biomed.downloadAssetHistoryFilePdf(
+            this.selectedClientId,
+            item.legacy_history_file_id as string
+          );
+      this.closePreventivePdf();
+      const pdfjs = await this.loadPreventivePdfJs();
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+        'assets/pdf.worker.min.mjs',
+        document.baseURI
+      ).href;
+      const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) });
+      this.preventivePdfDocument = await loadingTask.promise;
+      this.preventivePdfOpen = true;
+      this.preventivePdfTitle = `${item.asset_code} - ${item.asset_name}`;
+      this.preventivePdfAsset = this.assetMap.get(item.asset_id) ?? null;
+      this.preventivePdfPage = 1;
+      this.preventivePdfPageCount = this.preventivePdfDocument.numPages;
+      this.preventivePdfZoom = 1;
+      this.refreshViewSoon();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await this.renderPreventivePdfPage();
+    } catch (error: any) {
+      console.error(error);
+      this.errorMessage = error?.error?.message ?? 'No se pudo abrir el PDF del mantenimiento.';
+    } finally {
+      this.preventivePdfLoadingId = '';
+      this.refreshViewSoon();
+    }
+  }
+
+  closePreventivePdf(): void {
+    this.preventivePdfRenderTask?.cancel();
+    this.preventivePdfRenderTask = null;
+    void this.preventivePdfDocument?.destroy();
+    this.preventivePdfDocument = null;
+    this.preventivePdfOpen = false;
+    this.preventivePdfTitle = '';
+    this.preventivePdfAsset = null;
+    this.preventivePdfPage = 1;
+    this.preventivePdfPageCount = 0;
+    this.preventivePdfZoom = 1;
+    this.preventivePdfRendering = false;
+  }
+
+  async changePreventivePdfPage(delta: number): Promise<void> {
+    const nextPage = Math.min(
+      this.preventivePdfPageCount,
+      Math.max(1, this.preventivePdfPage + delta)
+    );
+    if (nextPage === this.preventivePdfPage) return;
+    this.preventivePdfPage = nextPage;
+    await this.renderPreventivePdfPage();
+  }
+
+  async changePreventivePdfZoom(delta: number): Promise<void> {
+    const nextZoom = Math.min(2, Math.max(0.7, Number((this.preventivePdfZoom + delta).toFixed(1))));
+    if (nextZoom === this.preventivePdfZoom) return;
+    this.preventivePdfZoom = nextZoom;
+    await this.renderPreventivePdfPage();
+  }
+
+  get preventivePdfZoomLabel(): string {
+    return `${Math.round(this.preventivePdfZoom * 100)}%`;
+  }
+
+  private loadPreventivePdfJs(): Promise<PreventivePdfJsModule> {
+    const pdfWindow = window as PreventivePdfWindow;
+    if (pdfWindow.__inbihospitalarioPdfJs) {
+      return Promise.resolve(pdfWindow.__inbihospitalarioPdfJs);
+    }
+    if (this.preventivePdfJsPromise) return this.preventivePdfJsPromise;
+
+    this.preventivePdfJsPromise = new Promise<PreventivePdfJsModule>((resolve, reject) => {
+      const finish = () => {
+        if (pdfWindow.__inbihospitalarioPdfJs) {
+          resolve(pdfWindow.__inbihospitalarioPdfJs);
+        } else {
+          reject(new Error('El visor PDF no quedó disponible.'));
+        }
+      };
+      const fail = (event: Event) => {
+        (event.currentTarget as HTMLScriptElement | null)?.remove();
+        reject(new Error('No se pudo cargar el visor PDF.'));
+      };
+      const existing = document.querySelector<HTMLScriptElement>('script[data-pdfjs-loader]');
+      if (existing) {
+        existing.addEventListener('load', finish, { once: true });
+        existing.addEventListener('error', fail, { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.type = 'module';
+      script.src = new URL('pdfjs-loader.mjs', document.baseURI).href;
+      script.dataset['pdfjsLoader'] = 'true';
+      script.addEventListener('load', finish, { once: true });
+      script.addEventListener('error', fail, { once: true });
+      document.head.appendChild(script);
+    }).catch((error) => {
+      this.preventivePdfJsPromise = null;
+      throw error;
+    });
+    return this.preventivePdfJsPromise;
+  }
+
+  private async renderPreventivePdfPage(): Promise<void> {
+    const pdf = this.preventivePdfDocument;
+    const canvas = this.preventivePdfCanvas?.nativeElement;
+    if (!pdf || !canvas) return;
+
+    this.preventivePdfRenderTask?.cancel();
+    this.preventivePdfRendering = true;
+    this.refreshViewSoon();
+    try {
+      const page = await pdf.getPage(this.preventivePdfPage);
+      const baseViewport = page.getViewport({ scale: 1 });
+      const availableWidth = Math.max(280, (canvas.parentElement?.clientWidth ?? 800) - 32);
+      const fitScale = availableWidth / baseViewport.width;
+      const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
+      const viewport = page.getViewport({ scale: fitScale * this.preventivePdfZoom * pixelRatio });
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      canvas.style.width = `${Math.floor(viewport.width / pixelRatio)}px`;
+      canvas.style.height = `${Math.floor(viewport.height / pixelRatio)}px`;
+      this.preventivePdfRenderTask = page.render({ canvas, viewport });
+      await this.preventivePdfRenderTask.promise;
+    } catch (error: any) {
+      if (error?.name !== 'RenderingCancelledException') {
+        console.error(error);
+        this.errorMessage = 'No se pudo dibujar esta página del PDF.';
+      }
+    } finally {
+      this.preventivePdfRenderTask = null;
+      this.preventivePdfRendering = false;
+      this.refreshViewSoon();
+    }
+  }
+
+  private preventiveItemInActiveScope(item: PreventiveProgressItemDto): boolean {
+    if (this.preventiveProgressScope === 'year') return true;
+    const progress = this.preventiveProgress;
+    if (!progress) return false;
+    const monthPrefix = `${progress.year}-${String(progress.month).padStart(2, '0')}`;
+    return String(item.planned_date || '').startsWith(monthPrefix);
+  }
+
+  private preventiveItemMatchesActivePhase(item: PreventiveProgressItemDto): boolean {
+    if (this.preventivePhaseView === 'work') {
+      return item.phase === 'not_started' || item.phase === 'in_progress';
+    }
+    return item.phase === this.preventivePhaseView;
   }
 
   get reportableRequests(): MaintenanceRequestDto[] {
@@ -1526,11 +2274,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return 'neutral';
   }
 
-  preventiveWindowClass(request: MaintenanceRequestDto): string {
-    if (!request.deadline_date) return 'neutral';
+  preventiveWindowClass(item: MaintenanceRequestDto | PreventiveProgressItemDto): string {
+    if (!item.deadline_date) return 'neutral';
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const deadline = new Date(`${request.deadline_date.slice(0, 10)}T23:59:59`);
+    const deadline = new Date(`${item.deadline_date.slice(0, 10)}T23:59:59`);
     if (deadline.getTime() < today.getTime()) return 'danger';
     const remainingDays = Math.ceil((deadline.getTime() - today.getTime()) / 86_400_000);
     return remainingDays <= 2 ? 'warn' : 'neutral';
@@ -1611,6 +2359,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (this.isWaitingSpareReport(report)) {
       return report.is_fully_signed ? 'Firmado / En espera de repuesto' : 'Pendiente firma / espera repuesto';
     }
+    if (report.area_responsible_required && !report.is_fully_signed) {
+      return 'Pendiente aval del área';
+    }
     return report.is_fully_signed ? 'Firmado' : 'Pendiente firma';
   }
 
@@ -1652,7 +2403,29 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   onReportAssetStatusChange(): void {
-    if (this.reportAssetStatus === 'operativo') this.reportAssetStatusObservations = '';
+    if (this.reportAssetStatus === 'operativo') {
+      this.reportAssetStatusObservations = '';
+    } else {
+      const incompatibleOptions = this.reportAssetStatus === 'fuera_de_servicio'
+        ? PREVENTIVE_OBSERVATION_OPTIONS
+        : PREVENTIVE_OUT_OF_SERVICE_OPTIONS;
+      const incompatibleTexts = new Set(incompatibleOptions.map((option) => option.text));
+      this.reportAssetStatusObservations = this.narrativeLines(this.reportAssetStatusObservations)
+        .filter((line) => !incompatibleTexts.has(line))
+        .join('\n');
+    }
+    if (this.reportAssetStatus === 'fuera_de_servicio') {
+      this.reportMaintenanceTests = this.reportMaintenanceTests.filter(
+        (test) => test !== 'equipo_operativo_entregado'
+      );
+      return;
+    }
+    if (
+      this.selectedReportRequest?.type === 'preventivo'
+      && !this.reportMaintenanceTests.includes('equipo_operativo_entregado')
+    ) {
+      this.reportMaintenanceTests = [...this.reportMaintenanceTests, 'equipo_operativo_entregado'];
+    }
   }
 
   reportSpareStateLabel(): string {
@@ -1705,6 +2478,71 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (kind === 'checks') this.reportMaintenanceChecks = next;
     if (kind === 'activities') this.reportMaintenanceActivities = next;
     if (kind === 'tests') this.reportMaintenanceTests = next;
+  }
+
+  preventiveOutcomeSelected(preset: PreventiveOutcomePreset): boolean {
+    return this.reportAssetStatus === preset.assetStatus
+      && preset.summary.every((text) => this.narrativeOptionChecked('summary', text))
+      && preset.findings.every((text) => this.narrativeOptionChecked('findings', text))
+      && preset.actions.every((text) => this.narrativeOptionChecked('actions', text));
+  }
+
+  applyPreventiveOutcomePreset(value: PreventiveOutcomeValue): void {
+    const preset = this.preventiveOutcomePresets.find((item) => item.value === value);
+    if (!preset) return;
+    const statusChanged = this.reportAssetStatus !== preset.assetStatus;
+    this.replacePreventiveNarrativeOptions('summary', this.preventiveSummaryOptions, preset.summary);
+    this.replacePreventiveNarrativeOptions('findings', this.preventiveFindingOptions, preset.findings);
+    this.replacePreventiveNarrativeOptions('actions', this.preventiveActionOptions, preset.actions);
+    this.reportAssetStatus = preset.assetStatus;
+    if (statusChanged) this.reportAssetStatusObservations = '';
+    this.onReportAssetStatusChange();
+  }
+
+  narrativeOptionChecked(field: ReportNarrativeField, text: string): boolean {
+    return this.narrativeLines(this.reportNarrativeValue(field)).includes(text);
+  }
+
+  narrativeSelectedCount(
+    field: ReportNarrativeField,
+    options: readonly ReportNarrativeOption[]
+  ): number {
+    return options.filter((option) => this.narrativeOptionChecked(field, option.text)).length;
+  }
+
+  toggleNarrativeOption(
+    field: ReportNarrativeField,
+    option: ReportNarrativeOption,
+    checked: boolean
+  ): void {
+    let lines = this.narrativeLines(this.reportNarrativeValue(field))
+      .filter((line) => line !== option.text);
+
+    if (field === 'findings' && checked) {
+      if (option.id === 'sin_hallazgos') {
+        const otherFindings = new Set(
+          this.preventiveFindingOptions
+            .filter((item) => item.id !== 'sin_hallazgos')
+            .map((item) => item.text)
+        );
+        lines = lines.filter((line) => !otherFindings.has(line));
+      } else {
+        const noFindings = this.preventiveFindingOptions.find((item) => item.id === 'sin_hallazgos');
+        if (noFindings) lines = lines.filter((line) => line !== noFindings.text);
+      }
+    }
+
+    if (checked) lines.push(option.text);
+    this.setReportNarrativeValue(field, lines.join('\n'));
+    if (
+      field === 'statusObservations'
+      && option.id === 'repuesto_indispensable'
+      && checked
+      && !this.reportRequiresSpareParts
+    ) {
+      this.reportRequiresSpareParts = true;
+      this.onSparePartsToggle();
+    }
   }
 
   startSpareInstallation(report: MaintenanceReportDto): void {
@@ -1909,15 +2747,17 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       .join(' ');
   }
 
-  private preventiveAssetOptions(
-    field: 'siteName' | 'areaName' | 'locationName',
-    matches: (asset: AssetLite) => boolean = () => true
+  private preventiveItemOptions(
+    field: 'site_name' | 'area_name' | 'location_name',
+    matches: (item: PreventiveProgressItemDto) => boolean = () => true
   ): string[] {
     const values = new Set<string>();
-    for (const request of this.preventiveProgrammedRequests) {
-      const asset = this.assetMap.get(request.asset_id);
-      if (!asset || !matches(asset)) continue;
-      const value = asset[field];
+    for (const item of this.preventiveProgress?.items ?? []) {
+      if (!this.preventiveItemInActiveScope(item) || !this.preventiveItemMatchesActivePhase(item)) {
+        continue;
+      }
+      if (!matches(item)) continue;
+      const value = item[field];
       if (value) values.add(value);
     }
     return Array.from(values).sort((a, b) => a.localeCompare(b));
@@ -1997,6 +2837,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (report.signed_by_me) {
       return false;
     }
+    if (report.area_responsible_required && !this.isAreaResponsible) {
+      return false;
+    }
     return report.request_status !== 'firmado';
   }
 
@@ -2005,6 +2848,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       return false;
     }
     if (report.is_fully_signed || report.signed_by_me || report.correction_requested) {
+      return false;
+    }
+    if (report.area_responsible_required && !this.isAreaResponsible) {
       return false;
     }
     return report.request_status !== 'firmado';
@@ -2023,7 +2869,14 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   private canSignMaintenanceReport(): boolean {
     return this.auth.hasPermission('maintenance:report:sign') ||
-      this.auth.hasRole(['almacenista', 'lector', 'viewer', 'superuser']);
+      this.auth.hasRole(['almacenista', 'responsable_area', 'lector', 'viewer', 'superuser']);
+  }
+
+  signConfirmationNotice(report: MaintenanceReportDto): string {
+    if (report.area_responsible_required && this.isAreaResponsible) {
+      return 'Al confirmar, avalas que el mantenimiento fue recibido en el área. La firma quedará registrada con tu usuario, rol y fecha.';
+    }
+    return 'La firma quedará registrada con tu usuario, rol, fecha y firma digital configurada.';
   }
 
   private reportWorkflowStatus(report: MaintenanceReportDto): string {
@@ -2088,7 +2941,41 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [];
   }
 
-  private isAssetStatus(value?: string | null): value is 'operativo' | 'operativo_observacion' | 'fuera_de_servicio' {
+  private reportNarrativeValue(field: ReportNarrativeField): string {
+    if (field === 'summary') return this.reportSummary;
+    if (field === 'findings') return this.reportFindings;
+    if (field === 'actions') return this.reportActions;
+    if (field === 'statusObservations') return this.reportAssetStatusObservations;
+    return this.reportSparePartsNeeded;
+  }
+
+  private setReportNarrativeValue(field: ReportNarrativeField, value: string): void {
+    if (field === 'summary') this.reportSummary = value;
+    if (field === 'findings') this.reportFindings = value;
+    if (field === 'actions') this.reportActions = value;
+    if (field === 'statusObservations') this.reportAssetStatusObservations = value;
+    if (field === 'spareParts') this.reportSparePartsNeeded = value;
+  }
+
+  private narrativeLines(value: string): string[] {
+    return String(value || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  private replacePreventiveNarrativeOptions(
+    field: ReportNarrativeField,
+    options: readonly ReportNarrativeOption[],
+    replacement: readonly string[]
+  ): void {
+    const knownOptions = new Set(options.map((option) => option.text));
+    const customLines = this.narrativeLines(this.reportNarrativeValue(field))
+      .filter((line) => !knownOptions.has(line));
+    this.setReportNarrativeValue(field, [...customLines, ...replacement].join('\n'));
+  }
+
+  private isAssetStatus(value?: string | null): value is ReportAssetStatus {
     return ['operativo', 'operativo_observacion', 'fuera_de_servicio'].includes(value || '');
   }
 

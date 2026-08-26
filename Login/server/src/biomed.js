@@ -34,6 +34,31 @@ export async function listSites(clientId) {
   return rows;
 }
 
+export async function listSitesForScopedUser(clientId, userId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { rows } = await query(
+    `SELECT DISTINCT s.id, s.name, s.address
+     FROM "${schema}".sites s
+     JOIN "${schema}".areas ar ON ar.site_id = s.id
+     WHERE ar.id IN (
+       SELECT ra.area_id
+       FROM reader_access ra
+       WHERE ra.user_id = $1 AND ra.client_id = $2 AND ra.area_id IS NOT NULL
+       UNION
+       SELECT lo.area_id
+       FROM reader_access ra
+       JOIN "${schema}".locations lo ON lo.id = ra.location_id
+       WHERE ra.user_id = $1 AND ra.client_id = $2 AND ra.location_id IS NOT NULL
+     )
+     ORDER BY s.name`,
+    [userId, clientId]
+  );
+  return rows;
+}
+
 export async function createSite(clientId, name, address) {
   const schema = await getSchemaByClientId(clientId);
   if (!schema) {
@@ -108,7 +133,7 @@ export async function listLocations(clientId, areaId) {
   }
   if (areaId) {
     const { rows } = await query(
-      `SELECT lo.id, lo.name, lo.area_id, ar.site_id, s.name AS site_name
+      `SELECT lo.id, lo.name, lo.area_id, ar.name AS area_name, ar.site_id, s.name AS site_name
        FROM "${schema}".locations lo
        LEFT JOIN "${schema}".areas ar ON ar.id = lo.area_id
        LEFT JOIN "${schema}".sites s ON s.id = ar.site_id
@@ -119,11 +144,65 @@ export async function listLocations(clientId, areaId) {
     return rows;
   }
   const { rows } = await query(
-    `SELECT lo.id, lo.name, lo.area_id, ar.site_id, s.name AS site_name
+    `SELECT lo.id, lo.name, lo.area_id, ar.name AS area_name, ar.site_id, s.name AS site_name
      FROM "${schema}".locations lo
      LEFT JOIN "${schema}".areas ar ON ar.id = lo.area_id
      LEFT JOIN "${schema}".sites s ON s.id = ar.site_id
      ORDER BY s.name NULLS FIRST, ar.name NULLS FIRST, lo.name`
+  );
+  return rows;
+}
+
+export async function listAreasForScopedUser(clientId, userId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { rows } = await query(
+    `SELECT DISTINCT ar.id, ar.name, ar.site_id, s.name AS site_name
+     FROM "${schema}".areas ar
+     LEFT JOIN "${schema}".sites s ON s.id = ar.site_id
+     WHERE ar.id IN (
+       SELECT ra.area_id
+       FROM reader_access ra
+       WHERE ra.user_id = $1 AND ra.client_id = $2 AND ra.area_id IS NOT NULL
+       UNION
+       SELECT lo.area_id
+       FROM reader_access ra
+       JOIN "${schema}".locations lo ON lo.id = ra.location_id
+       WHERE ra.user_id = $1 AND ra.client_id = $2 AND ra.location_id IS NOT NULL
+     )
+     ORDER BY s.name NULLS FIRST, ar.name`,
+    [userId, clientId]
+  );
+  return rows;
+}
+
+export async function listLocationsForScopedUser(clientId, userId, areaId) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const { rows } = await query(
+    `SELECT DISTINCT lo.id, lo.name, lo.area_id, ar.name AS area_name, ar.site_id, s.name AS site_name
+     FROM "${schema}".locations lo
+     LEFT JOIN "${schema}".areas ar ON ar.id = lo.area_id
+     LEFT JOIN "${schema}".sites s ON s.id = ar.site_id
+     WHERE (
+       lo.area_id IN (
+         SELECT ra.area_id
+         FROM reader_access ra
+         WHERE ra.user_id = $1 AND ra.client_id = $2 AND ra.area_id IS NOT NULL
+       )
+       OR lo.id IN (
+         SELECT ra.location_id
+         FROM reader_access ra
+         WHERE ra.user_id = $1 AND ra.client_id = $2 AND ra.location_id IS NOT NULL
+       )
+     )
+       AND ($3::uuid IS NULL OR lo.area_id = $3::uuid)
+     ORDER BY s.name NULLS FIRST, ar.name NULLS FIRST, lo.name`,
+    [userId, clientId, areaId || null]
   );
   return rows;
 }

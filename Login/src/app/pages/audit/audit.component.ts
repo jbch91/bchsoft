@@ -68,6 +68,7 @@ export class AuditComponent {
     USER_PASSWORD_RESET: 'Correo de contraseña',
     USER_SIGNATURE_UPDATE: 'Firma de usuario',
     READER_ACCESS_UPDATE: 'Accesos lector',
+    AREA_SCOPE_UPDATE: 'Alcance por áreas',
     CLIENT_ROLE_PERMISSIONS_UPDATE: 'Permisos de rol del cliente',
     AREA_CREATE: 'Creación de área',
     AREA_UPDATE: 'Edición de área',
@@ -432,7 +433,12 @@ export class AuditComponent {
     ) {
       return 'Biomédico';
     }
-    if (action.startsWith('CLIENT_') || action.startsWith('USER_') || action.startsWith('READER_')) return 'Administración';
+    if (
+      action.startsWith('CLIENT_')
+      || action.startsWith('USER_')
+      || action.startsWith('READER_')
+      || action === 'AREA_SCOPE_UPDATE'
+    ) return 'Administración';
     return 'Sistema';
   }
 
@@ -442,6 +448,7 @@ export class AuditComponent {
       ingeniero_biomedico: 'Ingeniero biomédico',
       calibracion: 'Calibración',
       lector: 'Lector',
+      responsable_area: 'Responsable de área',
       odontologo: 'Odontólogo',
       auxiliar_odontologia: 'Auxiliar odontología',
       recepcion_odontologia: 'Recepción odontología',

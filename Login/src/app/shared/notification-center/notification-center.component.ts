@@ -77,6 +77,13 @@ export class NotificationCenterComponent implements OnInit, OnDestroy {
         return;
       }
     }
+    if (notification.type === 'maintenance_report_ready') {
+      const reportId = String(notification.payload?.['reportId'] || '');
+      await this.router.navigate([maintenanceRoute], {
+        queryParams: { view: 'reportes', reportId: reportId || null, source: 'notification' }
+      });
+      return;
+    }
     if (notification.type === 'maintenance_spare_part_requested') {
       const requestId = String(notification.payload?.['requestId'] || '');
       await this.router.navigate([maintenanceRoute], {
@@ -99,6 +106,7 @@ export class NotificationCenterComponent implements OnInit, OnDestroy {
     return [
       'maintenance_request_created',
       'maintenance_preventive_generated',
+      'maintenance_report_ready',
       'maintenance_spare_part_requested'
     ].includes(notification.type || '');
   }

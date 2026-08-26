@@ -39,6 +39,23 @@ describe('biomedical access policy', () => {
       .toBe('/sedes-areas-ubicaciones');
   });
 
+  it('limita al responsable de área a inventario y mantenimiento operativo', () => {
+    const context = {
+      permissions: [
+        'hb:view',
+        'maintenance:request:create',
+        'maintenance:report:sign'
+      ] as const,
+      roles: ['responsable_area'] as const,
+      enabledModules: new Set(['hojas_de_vida', 'inventario', 'reportes_mantenimiento'])
+    };
+
+    expect(canOpenBiomedicalFeature('hojas_de_vida', context)).toBe(false);
+    expect(canOpenBiomedicalFeature('inventario', context)).toBe(true);
+    expect(canOpenBiomedicalFeature('reportes_mantenimiento', context)).toBe(true);
+    expect(canOpenBiomedicalFeature('cronogramas', context)).toBe(false);
+  });
+
   it('mantiene separados los accesos a hojas de vida y cronogramas industriales', () => {
     const context = {
       permissions: ['hb:view', 'maintenance:report:create', 'schedules:manage'] as const,
