@@ -47,36 +47,38 @@
     </div>
   </div>
 
-  <div class="maintenance-toolbar">
-    <div>
+  <div class="maintenance-command-bar">
+    <div class="maintenance-command-title">
       <strong>{{ maintenanceModuleTitle }}</strong>
       <span *ngIf="lastUpdatedAt">Actualizado {{ lastUpdatedAt | date: 'dd/MM/yyyy, h:mm a' }}</span>
       <span *ngIf="!lastUpdatedAt">Pendiente de actualización</span>
     </div>
-    <button
-      type="button"
-      class="icon-action ghost"
-      title="Actualizar datos"
-      aria-label="Actualizar información de mantenimiento"
-      [disabled]="loading"
-      (click)="refreshMaintenanceData()"
-    >
-      ↻
-    </button>
-  </div>
-
-  <div class="temporary-permission-bar" *ngIf="canRefreshMaintenanceTemporaryPermissions">
-    <span [class.active]="canPrintBlankProtocols">
-      Protocolos físicos: {{ canPrintBlankProtocols ? 'permiso temporal activo' : 'sin permiso activo' }}
-    </span>
-    <button
-      type="button"
-      class="ghost"
-      [disabled]="permissionsRefreshLoading"
-      (click)="refreshCurrentPermissions()"
-    >
-      {{ permissionsRefreshLoading ? 'Actualizando...' : 'Actualizar permisos' }}
-    </button>
+    <div class="maintenance-command-actions">
+      <ng-container *ngIf="canRefreshMaintenanceTemporaryPermissions">
+        <span class="permission-state" [class.active]="canPrintBlankProtocols">
+          Protocolos: {{ canPrintBlankProtocols ? 'activo' : 'inactivo' }}
+        </span>
+        <button
+          type="button"
+          class="ghost compact-action"
+          title="Consultar nuevamente los permisos temporales"
+          [disabled]="permissionsRefreshLoading"
+          (click)="refreshCurrentPermissions()"
+        >
+          {{ permissionsRefreshLoading ? 'Actualizando...' : 'Actualizar permisos' }}
+        </button>
+      </ng-container>
+      <button
+        type="button"
+        class="icon-action ghost"
+        title="Actualizar datos"
+        aria-label="Actualizar información de mantenimiento"
+        [disabled]="loading"
+        (click)="refreshMaintenanceData()"
+      >
+        ↻
+      </button>
+    </div>
   </div>
 
   <div class="tab-bar" role="tablist" aria-label="Secciones de mantenimiento">
@@ -396,16 +398,39 @@
   </ng-container>
 
   <ng-container *ngIf="viewMode === 'reportes'">
-    <div class="grid">
-      <div #reportFormCard class="card form-card" *ngIf="auth.hasPermission('maintenance:report:create') && reportFormActive">
-        <div class="card-title">
-          <span>Reporte técnico</span>
-          <h2>{{ reportCorrectionMode ? 'Corregir reporte' : 'Crear reporte' }}</h2>
-          <p *ngIf="!reportCorrectionMode">Registra la intervención, el estado final del equipo y si requiere repuestos.</p>
-          <p *ngIf="reportCorrectionMode">
-            Ajusta el protocolo según la observación recibida. Al guardar, el reporte volverá a quedar pendiente de firma.
-          </p>
+    <div
+      class="maintenance-modal-backdrop report-editor-backdrop"
+      *ngIf="auth.hasPermission('maintenance:report:create') && reportFormActive"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="report-editor-title"
+    >
+      <article
+        #reportFormCard
+        class="maintenance-modal report-editor-modal card form-card"
+        tabindex="-1"
+        (click)="$event.stopPropagation()"
+      >
+        <div class="modal-heading report-editor-heading">
+          <div class="card-title">
+            <span>Reporte técnico</span>
+            <h2 id="report-editor-title">{{ reportCorrectionMode ? 'Corregir reporte' : 'Crear reporte' }}</h2>
+            <p *ngIf="!reportCorrectionMode">Registra la intervención, el estado final del equipo y si requiere repuestos.</p>
+            <p *ngIf="reportCorrectionMode">
+              Ajusta el protocolo según la observación recibida. Al guardar, el reporte volverá a quedar pendiente de firma.
+            </p>
+          </div>
+          <button
+            type="button"
+            class="icon-action ghost"
+            aria-label="Cerrar formulario de reporte"
+            title="Cerrar"
+            (click)="cancelReportWorkflow()"
+          >
+            ×
+          </button>
         </div>
+        <div class="message error modal-message" *ngIf="errorMessage" role="alert">{{ errorMessage }}</div>
         <div class="workflow-note" *ngIf="reportFlowMode !== 'normal'">
           <div>
             <span>{{ reportWorkflowTitle() }}</span>
@@ -602,40 +627,52 @@
             </button>
           </div>
         </form>
-      </div>
-      <div class="card form-card report-empty" *ngIf="auth.hasPermission('maintenance:report:create') && !reportFormActive">
-        <div class="card-title">
-          <span>Reporte técnico</span>
-          <h2>Sin solicitud tomada</h2>
-          <p>
-            Para crear un reporte, primero toma una solicitud desde el listado o abre la notificación de mantenimiento.
-            Así evitamos registrar reportes sobre solicitudes equivocadas.
-          </p>
-        </div>
-        <button type="button" class="ghost" (click)="switchView('solicitudes')">Ir a solicitudes</button>
-      </div>
+      </article>
     </div>
 
-    <div class="card">
-      <div class="list-title">
+    <div class="card report-list-card">
+      <div class="list-title report-list-title">
         <div>
           <h2>Reportes</h2>
-          <p>Separamos los reportes listos para firma de la trazabilidad histórica del caso.</p>
+          <p>Consulta primero el listado y abre únicamente el reporte que necesitas revisar o gestionar.</p>
         </div>
+        <span class="report-total-badge">{{ filteredReports.length }} resultado{{ filteredReports.length === 1 ? '' : 's' }}</span>
+      </div>
+
+      <div class="report-filter-panel">
         <div class="list-tools report-filters">
           <label>
             Buscar
-            <input type="text" [(ngModel)]="reportSearchTerm" placeholder="Equipo, serial, hallazgo..." />
+            <input
+              type="search"
+              [(ngModel)]="reportSearchTerm"
+              (ngModelChange)="resetReportPage()"
+              placeholder="Equipo, serial, ingeniero, hallazgo..."
+            />
+          </label>
+          <label>
+            Sede
+            <select [(ngModel)]="reportSiteFilter" (ngModelChange)="onReportSiteFilterChange()">
+              <option value="">Todas</option>
+              <option *ngFor="let site of reportSiteOptions" [value]="site">{{ site }}</option>
+            </select>
+          </label>
+          <label>
+            Área
+            <select [(ngModel)]="reportAreaFilter" (ngModelChange)="resetReportPage()">
+              <option value="">Todas</option>
+              <option *ngFor="let area of reportAreaOptions" [value]="area">{{ area }}</option>
+            </select>
           </label>
           <label>
             Estado
-            <select [(ngModel)]="reportStatusFilter">
+            <select [(ngModel)]="reportStatusFilter" (ngModelChange)="resetReportPage()">
               <option *ngFor="let option of reportStatusOptions" [value]="option.value">{{ option.label }}</option>
             </select>
           </label>
           <label>
             Tipo
-            <select [(ngModel)]="reportTypeFilter">
+            <select [(ngModel)]="reportTypeFilter" (ngModelChange)="resetReportPage()">
               <option value="">Todos</option>
               <option value="correctivo">Correctivo</option>
               <option value="preventivo">Preventivo</option>
@@ -643,12 +680,38 @@
           </label>
           <label>
             Repuestos
-            <select [(ngModel)]="reportSpareFilter">
+            <select [(ngModel)]="reportSpareFilter" (ngModelChange)="resetReportPage()">
               <option value="">Todos</option>
               <option value="con_repuesto">Con repuesto</option>
               <option value="sin_repuesto">Sin repuesto</option>
             </select>
           </label>
+          <label>
+            Desde
+            <input
+              type="date"
+              [(ngModel)]="reportDateFrom"
+              [attr.max]="reportDateTo || null"
+              (ngModelChange)="resetReportPage()"
+            />
+          </label>
+          <label>
+            Hasta
+            <input
+              type="date"
+              [(ngModel)]="reportDateTo"
+              [attr.min]="reportDateFrom || null"
+              (ngModelChange)="resetReportPage()"
+            />
+          </label>
+          <button
+            type="button"
+            class="ghost clear-report-filters"
+            [disabled]="!hasActiveReportFilters"
+            (click)="clearReportFilters()"
+          >
+            Limpiar
+          </button>
         </div>
       </div>
 
@@ -671,62 +734,37 @@
         </button>
       </div>
 
-      <div class="table reports-table">
+      <div class="table reports-table compact-reports-table">
         <div class="row header">
+          <span>Fecha</span>
           <span>Equipo</span>
+          <span>Tipo</span>
+          <span>Estado</span>
           <span>Reporte</span>
-          <span>Estado equipo</span>
-          <span>Firma</span>
-          <span>Acciones</span>
         </div>
-        <div class="row" *ngFor="let report of filteredReports">
+        <div class="row" *ngFor="let report of paginatedReports">
+          <span data-label="Fecha">
+            <strong>{{ report.created_at | date: 'dd/MM/yyyy' }}</strong>
+            <small>{{ report.created_at | date: 'h:mm a' }}</small>
+          </span>
           <span data-label="Equipo">
             <strong>{{ assetLabel(report.asset_id) }}</strong>
-            <small>Ing: {{ report.engineer_name || '-' }}</small>
+            <small *ngIf="assetForReport(report) as asset">{{ asset.siteName || '-' }} / {{ asset.areaName || '-' }}</small>
           </span>
-          <span data-label="Reporte">
-            {{ report.type }}
-            <small>{{ report.summary || 'Sin resumen' }}</small>
-            <small>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</small>
+          <span data-label="Tipo">
+            <strong>{{ report.type === 'preventivo' ? 'Preventivo' : 'Correctivo' }}</strong>
+            <small>{{ report.engineer_name || 'Ingeniero no registrado' }}</small>
           </span>
-          <span data-label="Estado equipo">
+          <span data-label="Estado">
             <span class="status-pill" [ngClass]="statusClass(report.asset_status_after)">
               {{ statusLabel(report.asset_status_after || 'operativo') }}
             </span>
-            <small *ngIf="report.requires_spare_parts">
-              Repuesto: {{ report.spare_parts_needed || '-' }} · {{ statusLabel(report.spare_parts_status) }}
-            </small>
-            <small class="correction-note" *ngIf="report.correction_requested">
-              Corrección: {{ report.correction_reason || 'Sin detalle registrado' }}
-            </small>
-          </span>
-          <span data-label="Firma">
             <span class="status-pill" [ngClass]="reportSignatureClass(report)">
               {{ reportSignedDate(report) }}
             </span>
           </span>
-          <span class="actions" data-label="Acciones">
-            <button type="button" class="ghost" (click)="downloadReport(report.id)">Abrir PDF</button>
-            <button *ngIf="canSignReport(report)" type="button" (click)="openSignConfirmation(report)">Firmar</button>
-            <button
-              *ngIf="canRequestReportCorrection(report)"
-              type="button"
-              class="warning"
-              (click)="openCorrectionDialog(report)"
-            >
-              Solicitar corrección
-            </button>
-            <button
-              *ngIf="canCorrectReport(report)"
-              type="button"
-              class="warning"
-              (click)="startReportCorrection(report)"
-            >
-              Corregir
-            </button>
-            <button *ngIf="auth.hasRole('superuser')" type="button" class="danger" (click)="deleteReport(report.id)">
-              Eliminar
-            </button>
+          <span class="actions" data-label="Reporte">
+            <button type="button" class="ghost view-report-button" (click)="openReportDetail(report)">Ver reporte</button>
           </span>
         </div>
         <p class="empty" *ngIf="filteredReports.length === 0 && reportSubView === 'pendientes_firma'">
@@ -735,6 +773,43 @@
         <p class="empty" *ngIf="filteredReports.length === 0 && reportSubView === 'historial'">
           No hay reportes en el historial o trazabilidad con esos filtros.
         </p>
+      </div>
+
+      <div class="report-pagination" *ngIf="filteredReports.length > 0">
+        <div class="report-page-summary">
+          <span>Mostrando {{ reportPageStart }}–{{ reportPageEnd }} de {{ filteredReports.length }}</span>
+          <label>
+            Por página
+            <select [(ngModel)]="reportPageSize" (ngModelChange)="onReportPageSizeChange()">
+              <option [ngValue]="10">10</option>
+              <option [ngValue]="20">20</option>
+              <option [ngValue]="50">50</option>
+            </select>
+          </label>
+        </div>
+        <div class="report-page-actions" aria-label="Paginación de reportes">
+          <button
+            type="button"
+            class="icon-action ghost"
+            title="Página anterior"
+            aria-label="Página anterior"
+            [disabled]="reportPage <= 1"
+            (click)="goToReportPage(reportPage - 1)"
+          >
+            ‹
+          </button>
+          <span>Página {{ reportPage }} de {{ reportPageCount }}</span>
+          <button
+            type="button"
+            class="icon-action ghost"
+            title="Página siguiente"
+            aria-label="Página siguiente"
+            [disabled]="reportPage >= reportPageCount"
+            (click)="goToReportPage(reportPage + 1)"
+          >
+            ›
+          </button>
+        </div>
       </div>
     </div>
   </ng-container>
@@ -1010,6 +1085,133 @@
       </div>
     </div>
   </ng-container>
+
+  <div
+    class="maintenance-modal-backdrop"
+    *ngIf="reportDetail as report"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="report-detail-title"
+    (click)="closeReportDetail()"
+  >
+    <article class="maintenance-modal report-detail-modal" (click)="$event.stopPropagation()">
+      <div class="modal-heading">
+        <div>
+          <span>{{ report.type === 'preventivo' ? 'Mantenimiento preventivo' : 'Mantenimiento correctivo' }}</span>
+          <h2 id="report-detail-title">{{ assetLabel(report.asset_id) }}</h2>
+        </div>
+        <button type="button" class="icon-action ghost" aria-label="Cerrar reporte" title="Cerrar" (click)="closeReportDetail()">×</button>
+      </div>
+
+      <div class="report-detail-overview">
+        <div>
+          <span>Fecha</span>
+          <strong>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</strong>
+        </div>
+        <div>
+          <span>Ingeniero</span>
+          <strong>{{ report.engineer_name || '-' }}</strong>
+        </div>
+        <div>
+          <span>Estado del equipo</span>
+          <strong>{{ statusLabel(report.asset_status_after || 'operativo') }}</strong>
+        </div>
+        <div>
+          <span>Firma</span>
+          <strong>{{ reportSignedDate(report) }}</strong>
+        </div>
+      </div>
+
+      <div class="report-location" *ngIf="assetForReport(report) as asset">
+        <span>{{ asset.siteName || 'Sin sede' }}</span>
+        <span>{{ asset.areaName || 'Sin área' }}</span>
+        <span>{{ asset.locationName || 'Sin ubicación' }}</span>
+      </div>
+
+      <div class="report-detail-section">
+        <h3>Intervención registrada</h3>
+        <dl class="report-narrative">
+          <div>
+            <dt>Resumen</dt>
+            <dd>{{ report.summary || 'Sin resumen registrado.' }}</dd>
+          </div>
+          <div>
+            <dt>Hallazgos</dt>
+            <dd>{{ report.findings || 'Sin hallazgos registrados.' }}</dd>
+          </div>
+          <div>
+            <dt>Acciones</dt>
+            <dd>{{ report.actions_taken || 'Sin acciones registradas.' }}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div class="report-detail-section">
+        <h3>Protocolo técnico</h3>
+        <div class="report-protocol-grid">
+          <div>
+            <strong>Revisiones</strong>
+            <ul *ngIf="report.maintenance_checks?.length; else noChecks">
+              <li *ngFor="let label of reportOptionLabels(report.maintenance_checks, maintenanceCheckOptions)">{{ label }}</li>
+            </ul>
+            <ng-template #noChecks><small>Sin revisiones registradas.</small></ng-template>
+          </div>
+          <div>
+            <strong>Actividades</strong>
+            <ul *ngIf="report.maintenance_activities?.length; else noActivities">
+              <li *ngFor="let label of reportOptionLabels(report.maintenance_activities, maintenanceActivityOptions)">{{ label }}</li>
+            </ul>
+            <ng-template #noActivities><small>Sin actividades registradas.</small></ng-template>
+          </div>
+          <div>
+            <strong>Pruebas</strong>
+            <ul *ngIf="report.maintenance_tests?.length; else noTests">
+              <li *ngFor="let label of reportOptionLabels(report.maintenance_tests, maintenanceTestOptionsForCategory)">{{ label }}</li>
+            </ul>
+            <ng-template #noTests><small>Sin pruebas registradas.</small></ng-template>
+          </div>
+        </div>
+      </div>
+
+      <div class="report-detail-callout spare" *ngIf="report.requires_spare_parts">
+        <span>Repuesto</span>
+        <strong>{{ report.spare_parts_needed || 'Sin detalle registrado' }}</strong>
+        <small>{{ statusLabel(report.spare_parts_status) }}</small>
+      </div>
+
+      <div class="report-detail-callout correction" *ngIf="report.correction_requested">
+        <span>Corrección solicitada</span>
+        <strong>{{ report.correction_reason || 'Sin detalle registrado' }}</strong>
+        <small *ngIf="report.correction_requested_by_name">
+          Por {{ report.correction_requested_by_name }}
+          <ng-container *ngIf="report.correction_requested_at"> · {{ report.correction_requested_at | date: 'dd/MM/yyyy, h:mm a' }}</ng-container>
+        </small>
+      </div>
+
+      <div class="modal-actions report-detail-actions">
+        <button type="button" class="ghost" (click)="closeReportDetail()">Cerrar</button>
+        <button type="button" class="ghost" (click)="downloadReport(report.id)">Abrir PDF</button>
+        <button *ngIf="canSignReport(report)" type="button" (click)="openSignConfirmation(report)">Firmar</button>
+        <button
+          *ngIf="canRequestReportCorrection(report)"
+          type="button"
+          class="warning"
+          (click)="openCorrectionDialog(report)"
+        >
+          Solicitar corrección
+        </button>
+        <button
+          *ngIf="canCorrectReport(report)"
+          type="button"
+          class="warning"
+          (click)="startReportCorrection(report)"
+        >
+          Corregir reporte
+        </button>
+        <button *ngIf="auth.hasRole('superuser')" type="button" class="danger" (click)="deleteReport(report.id)">Eliminar</button>
+      </div>
+    </article>
+  </div>
 
   <div
     class="maintenance-modal-backdrop"

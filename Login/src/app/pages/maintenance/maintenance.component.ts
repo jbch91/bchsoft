@@ -10,7 +10,7 @@ import type { AssetCategory } from '../../biomed/biomed.service';
 import { MaintenanceService, MaintenanceReportDto, MaintenanceRequestDto } from '../../maintenance/maintenance.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
-import { maintenanceAssetMatchesLookup } from './maintenance-view.utils';
+import { maintenanceAssetMatchesLookup, paginateMaintenanceItems } from './maintenance-view.utils';
 
 interface ClientLite {
   id: string;
@@ -74,6 +74,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   private qrDetector: any = null;
   private routeSub: Subscription | null = null;
   private destroyed = false;
+  private reportFilterCacheReports: MaintenanceReportDto[] | null = null;
+  private reportFilterCacheAssets: Map<string, AssetLite> | null = null;
+  private reportFilterCacheKey = '';
+  private reportFilterCacheItems: MaintenanceReportDto[] = [];
   readonly assetCategory: AssetCategory;
 
   loading = false;
@@ -99,6 +103,12 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportStatusFilter = '';
   reportSpareFilter = '';
   reportTypeFilter = '';
+  reportSiteFilter = '';
+  reportAreaFilter = '';
+  reportDateFrom = '';
+  reportDateTo = '';
+  reportPage = 1;
+  reportPageSize = 10;
   assetSearchTerm = '';
   protocolSearchTerm = '';
   protocolSiteFilter = '';
@@ -137,6 +147,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportFormActive = false;
   reportSubView: 'pendientes_firma' | 'historial' = 'pendientes_firma';
   viewMode: MaintenanceViewMode = 'crear_solicitud';
+  reportDetail: MaintenanceReportDto | null = null;
   signConfirmationReport: MaintenanceReportDto | null = null;
   signingReport = false;
   correctionDialogReport: MaintenanceReportDto | null = null;
@@ -230,8 +241,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   get maintenanceModuleTitle(): string {
     return this.isIndustrialMaintenanceModule
-      ? 'Mantenimiento de equipos industriales'
-      : 'Operación de mantenimiento';
+      ? 'Mantenimiento industrial'
+      : 'Mantenimiento biomédico';
   }
 
   get maintenanceTestOptionsForCategory(): readonly { value: string; label: string }[] {
@@ -420,6 +431,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       );
       this.requests = requests;
       this.reports = reports;
+      this.clampReportPage();
       if (!this.activeAssets.some((asset) => asset.id === this.requestAssetId)) {
         this.requestAssetId = '';
       }
@@ -464,6 +476,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportRequestId = request.id;
     this.reportFormActive = true;
     this.viewMode = 'reportes';
+    this.errorMessage = '';
     this.resetReportFields();
     this.applyReportDefaults(request);
     if (message) this.successMessage = message;
@@ -656,6 +669,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   openSignConfirmation(report: MaintenanceReportDto): void {
     if (!this.canSignReport(report)) return;
+    this.reportDetail = null;
     this.signConfirmationReport = report;
   }
 
@@ -684,6 +698,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   openCorrectionDialog(report: MaintenanceReportDto): void {
     if (!this.canRequestReportCorrection(report)) return;
+    this.reportDetail = null;
     this.correctionDialogReport = report;
     this.correctionReason = '';
   }
@@ -720,6 +735,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   startReportCorrection(report: MaintenanceReportDto): void {
     if (!this.canCorrectReport(report)) return;
+    this.reportDetail = null;
     this.reportRequestId = report.request_id;
     this.reportFormActive = true;
     this.reportCorrectionMode = true;
@@ -879,6 +895,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     }
     try {
       await this.maintenance.deleteReport(reportId);
+      if (this.reportDetail?.id === reportId) this.reportDetail = null;
       await this.loadData();
     } catch (error: any) {
       console.error(error);
@@ -1075,6 +1092,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   setReportSubView(view: 'pendientes_firma' | 'historial'): void {
     this.reportSubView = view;
+    this.reportDetail = null;
+    this.reportPage = 1;
     const validStatuses = this.reportStatusOptions.map((option) => option.value);
     if (!validStatuses.includes(this.reportStatusFilter)) {
       this.reportStatusFilter = '';
@@ -1099,26 +1118,52 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   get filteredReports(): MaintenanceReportDto[] {
     const term = this.normalize(this.reportSearchTerm);
+    const filterKey = [
+      this.reportSubView,
+      term,
+      this.reportStatusFilter,
+      this.reportSpareFilter,
+      this.reportTypeFilter,
+      this.reportSiteFilter,
+      this.reportAreaFilter,
+      this.reportDateFrom,
+      this.reportDateTo
+    ].join('|');
+    if (
+      this.reportFilterCacheReports === this.reports
+      && this.reportFilterCacheAssets === this.assetMap
+      && this.reportFilterCacheKey === filterKey
+    ) {
+      return this.reportFilterCacheItems;
+    }
+
     const source = this.reportSubView === 'pendientes_firma'
       ? this.pendingSignatureReports
       : this.reportHistory;
 
-    return source.filter((report) => {
+    const filtered = source.filter((report) => {
       const reportState = this.reportWorkflowStatus(report);
       if (this.reportStatusFilter && reportState !== this.reportStatusFilter) return false;
       if (this.reportSpareFilter === 'con_repuesto' && !report.requires_spare_parts) return false;
       if (this.reportSpareFilter === 'sin_repuesto' && report.requires_spare_parts) return false;
       if (this.reportTypeFilter && report.type !== this.reportTypeFilter) return false;
-      if (!term) return true;
       const asset = this.assetMap.get(report.asset_id);
+      if (this.reportSiteFilter && asset?.siteName !== this.reportSiteFilter) return false;
+      if (this.reportAreaFilter && asset?.areaName !== this.reportAreaFilter) return false;
+      const reportDate = report.created_at.slice(0, 10);
+      if (this.reportDateFrom && reportDate < this.reportDateFrom) return false;
+      if (this.reportDateTo && reportDate > this.reportDateTo) return false;
+      if (!term) return true;
       const haystack = [
         report.type,
         reportState,
+        report.engineer_name,
         report.summary,
         report.findings,
         report.actions_taken,
         report.asset_status_after,
         report.spare_parts_needed,
+        report.correction_reason,
         asset?.code,
         asset?.name,
         asset?.brand,
@@ -1132,6 +1177,114 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         .join(' ');
       return haystack.includes(term);
     });
+    this.reportFilterCacheReports = this.reports;
+    this.reportFilterCacheAssets = this.assetMap;
+    this.reportFilterCacheKey = filterKey;
+    this.reportFilterCacheItems = filtered;
+    return filtered;
+  }
+
+  get reportSiteOptions(): string[] {
+    return Array.from(
+      new Set(
+        this.reports
+          .map((report) => this.assetMap.get(report.asset_id)?.siteName)
+          .filter(Boolean) as string[]
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }
+
+  get reportAreaOptions(): string[] {
+    const source = this.reportSiteFilter
+      ? this.reports.filter((report) => this.assetMap.get(report.asset_id)?.siteName === this.reportSiteFilter)
+      : this.reports;
+    return Array.from(
+      new Set(
+        source
+          .map((report) => this.assetMap.get(report.asset_id)?.areaName)
+          .filter(Boolean) as string[]
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }
+
+  get paginatedReports(): MaintenanceReportDto[] {
+    return paginateMaintenanceItems(this.filteredReports, this.reportPage, this.reportPageSize).items;
+  }
+
+  get reportPageCount(): number {
+    return paginateMaintenanceItems(this.filteredReports, this.reportPage, this.reportPageSize).totalPages;
+  }
+
+  get reportPageStart(): number {
+    return paginateMaintenanceItems(this.filteredReports, this.reportPage, this.reportPageSize).start;
+  }
+
+  get reportPageEnd(): number {
+    return paginateMaintenanceItems(this.filteredReports, this.reportPage, this.reportPageSize).end;
+  }
+
+  get hasActiveReportFilters(): boolean {
+    return Boolean(
+      this.reportSearchTerm.trim()
+      || this.reportStatusFilter
+      || this.reportTypeFilter
+      || this.reportSpareFilter
+      || this.reportSiteFilter
+      || this.reportAreaFilter
+      || this.reportDateFrom
+      || this.reportDateTo
+    );
+  }
+
+  resetReportPage(): void {
+    this.reportPage = 1;
+  }
+
+  onReportSiteFilterChange(): void {
+    if (this.reportAreaFilter && !this.reportAreaOptions.includes(this.reportAreaFilter)) {
+      this.reportAreaFilter = '';
+    }
+    this.resetReportPage();
+  }
+
+  clearReportFilters(): void {
+    this.reportSearchTerm = '';
+    this.reportStatusFilter = '';
+    this.reportSpareFilter = '';
+    this.reportTypeFilter = '';
+    this.reportSiteFilter = '';
+    this.reportAreaFilter = '';
+    this.reportDateFrom = '';
+    this.reportDateTo = '';
+    this.resetReportPage();
+  }
+
+  goToReportPage(page: number): void {
+    this.reportPage = Math.min(this.reportPageCount, Math.max(1, page));
+  }
+
+  onReportPageSizeChange(): void {
+    this.resetReportPage();
+  }
+
+  openReportDetail(report: MaintenanceReportDto): void {
+    this.reportDetail = report;
+  }
+
+  closeReportDetail(): void {
+    this.reportDetail = null;
+  }
+
+  assetForReport(report: MaintenanceReportDto): AssetLite | null {
+    return this.assetMap.get(report.asset_id) ?? null;
+  }
+
+  reportOptionLabels(
+    values: string[] | null | undefined,
+    options: readonly { value: string; label: string }[]
+  ): string[] {
+    const labels = new Map(options.map((option) => [option.value, option.label]));
+    return this.asStringArray(values).map((value) => labels.get(value) ?? value);
   }
 
   get reportListCount(): number {
@@ -1404,6 +1557,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.resetReportWorkflow();
     this.reportRequestId = '';
     this.reportFormActive = false;
+    this.errorMessage = '';
   }
 
   reportWorkflowTitle(): string {
@@ -1760,11 +1914,15 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     setTimeout(() => {
       const element = this.reportFormCard?.nativeElement;
       if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        element.scrollTo({ top: 0, behavior: 'smooth' });
+        element.focus({ preventScroll: true });
         return;
       }
-      this.scrollToTop();
     }, 80);
+  }
+
+  private clampReportPage(): void {
+    this.reportPage = paginateMaintenanceItems(this.filteredReports, this.reportPage, this.reportPageSize).page;
   }
 
   private scrollToPreventiveProgrammed(): void {

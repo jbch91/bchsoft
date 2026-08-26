@@ -4,6 +4,16 @@ export interface MaintenanceAssetLookup {
   serial?: string | null;
 }
 
+export interface MaintenancePage<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  start: number;
+  end: number;
+}
+
 const IGNORED_LOOKUP_VALUES = new Set([
   'nr',
   'n/a',
@@ -44,4 +54,23 @@ export function maintenanceAssetMatchesLookup(asset: MaintenanceAssetLookup, raw
     .some((candidate) =>
       lookupTokens.has(candidate) || (candidate.length >= 4 && normalizedRaw.includes(candidate))
     );
+}
+
+export function paginateMaintenanceItems<T>(items: T[], requestedPage: number, requestedPageSize: number): MaintenancePage<T> {
+  const pageSize = Math.max(1, Math.floor(requestedPageSize) || 1);
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(totalPages, Math.max(1, Math.floor(requestedPage) || 1));
+  const offset = (page - 1) * pageSize;
+  const pageItems = items.slice(offset, offset + pageSize);
+
+  return {
+    items: pageItems,
+    page,
+    pageSize,
+    total,
+    totalPages,
+    start: total ? offset + 1 : 0,
+    end: total ? offset + pageItems.length : 0
+  };
 }

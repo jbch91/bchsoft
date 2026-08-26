@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { maintenanceAssetMatchesLookup, normalizeMaintenanceLookup } from './maintenance-view.utils';
+import {
+  maintenanceAssetMatchesLookup,
+  normalizeMaintenanceLookup,
+  paginateMaintenanceItems
+} from './maintenance-view.utils';
 
 describe('maintenance view utilities', () => {
   it('normaliza acentos y mayúsculas para búsquedas', () => {
@@ -19,5 +23,25 @@ describe('maintenance view utilities', () => {
     const asset = { id: 'asset-1', code: 'EQ-101', serial: 'NR' };
     expect(maintenanceAssetMatchesLookup(asset, 'NR')).toBe(false);
     expect(maintenanceAssetMatchesLookup(asset, 'https://localhost/inventario?code=NR')).toBe(false);
+  });
+
+  it('pagina reportes y ajusta una página que ya no existe', () => {
+    const result = paginateMaintenanceItems(['a', 'b', 'c', 'd', 'e'], 8, 2);
+
+    expect(result.page).toBe(3);
+    expect(result.totalPages).toBe(3);
+    expect(result.items).toEqual(['e']);
+    expect(result.start).toBe(5);
+    expect(result.end).toBe(5);
+  });
+
+  it('mantiene una página vacía con contadores legibles', () => {
+    const result = paginateMaintenanceItems([], 1, 10);
+
+    expect(result.items).toEqual([]);
+    expect(result.page).toBe(1);
+    expect(result.totalPages).toBe(1);
+    expect(result.start).toBe(0);
+    expect(result.end).toBe(0);
   });
 });
