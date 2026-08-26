@@ -28,46 +28,75 @@
     </div>
   </div>
 
-  <div class="maintenance-summary">
-    <div>
-      <span>Solicitudes activas</span>
-      <strong>{{ manualRequests.length }}</strong>
+  <div class="maintenance-workspace-bar">
+    <div class="maintenance-workspace-title" [title]="maintenanceModuleTitle">
+      <strong>{{ isIndustrialMaintenanceModule ? 'Industrial' : 'Biomédico' }}</strong>
     </div>
-    <div>
-      <span>Reportes</span>
-      <strong>{{ reportListCount }}</strong>
-    </div>
-    <div>
-      <span>Pendientes repuesto</span>
-      <strong>{{ pendingSpareCount }}</strong>
-    </div>
-    <div>
-      <span>Dados de baja</span>
-      <strong>{{ retiredAssets.length }}</strong>
-    </div>
-  </div>
 
-  <div class="maintenance-command-bar">
-    <div class="maintenance-command-title">
-      <strong>{{ maintenanceModuleTitle }}</strong>
-      <span *ngIf="lastUpdatedAt">Actualizado {{ lastUpdatedAt | date: 'dd/MM/yyyy, h:mm a' }}</span>
-      <span *ngIf="!lastUpdatedAt">Pendiente de actualización</span>
+    <div class="tab-bar" role="tablist" aria-label="Secciones de mantenimiento">
+      <button
+        type="button"
+        class="tab"
+        role="tab"
+        *ngIf="auth.hasPermission('maintenance:request:create')"
+        [class.active]="viewMode === 'crear_solicitud'"
+        [attr.aria-selected]="viewMode === 'crear_solicitud'"
+        (click)="switchView('crear_solicitud')"
+      >
+        Nueva solicitud
+      </button>
+      <button type="button" role="tab" class="tab" [class.active]="viewMode === 'solicitudes'" [attr.aria-selected]="viewMode === 'solicitudes'" (click)="switchView('solicitudes')">
+        Solicitudes <strong>{{ manualRequests.length }}</strong>
+      </button>
+      <button
+        type="button"
+        class="tab"
+        role="tab"
+        *ngIf="auth.hasPermission('maintenance:report:create')"
+        [class.active]="viewMode === 'preventivos'"
+        [attr.aria-selected]="viewMode === 'preventivos'"
+        (click)="switchView('preventivos')"
+      >
+        Preventivos <strong>{{ preventiveProgrammedRequests.length }}</strong>
+      </button>
+      <button type="button" role="tab" class="tab" [class.active]="viewMode === 'reportes'" [attr.aria-selected]="viewMode === 'reportes'" (click)="switchView('reportes')">
+        Reportes <strong>{{ pendingSignatureReports.length }}</strong>
+      </button>
+      <button
+        type="button"
+        class="tab"
+        role="tab"
+        *ngIf="canPrintBlankProtocols"
+        [class.active]="viewMode === 'protocolos_fisicos'"
+        [attr.aria-selected]="viewMode === 'protocolos_fisicos'"
+        (click)="switchView('protocolos_fisicos')"
+      >
+        Protocolos
+      </button>
+      <button type="button" role="tab" class="tab" [class.active]="viewMode === 'repuestos'" [attr.aria-selected]="viewMode === 'repuestos'" (click)="switchView('repuestos')">
+        Repuestos <strong>{{ pendingSpareCount }}</strong>
+      </button>
+      <button type="button" role="tab" class="tab" [class.active]="viewMode === 'bajas'" [attr.aria-selected]="viewMode === 'bajas'" (click)="switchView('bajas')">
+        Bajas <strong>{{ retiredAssets.length }}</strong>
+      </button>
+      <button type="button" role="tab" class="tab" [class.active]="viewMode === 'equipos'" [attr.aria-selected]="viewMode === 'equipos'" (click)="switchView('equipos')">
+        Equipos <strong>{{ activeAssets.length }}</strong>
+      </button>
     </div>
-    <div class="maintenance-command-actions">
-      <ng-container *ngIf="canRefreshMaintenanceTemporaryPermissions">
-        <span class="permission-state" [class.active]="canPrintBlankProtocols">
-          Protocolos: {{ canPrintBlankProtocols ? 'activo' : 'inactivo' }}
-        </span>
-        <button
-          type="button"
-          class="ghost compact-action"
-          title="Consultar nuevamente los permisos temporales"
-          [disabled]="permissionsRefreshLoading"
-          (click)="refreshCurrentPermissions()"
-        >
-          {{ permissionsRefreshLoading ? 'Actualizando...' : 'Actualizar permisos' }}
-        </button>
-      </ng-container>
+
+    <div class="maintenance-workspace-actions">
+      <button
+        *ngIf="canRefreshMaintenanceTemporaryPermissions"
+        type="button"
+        class="ghost permission-refresh"
+        [class.active]="canPrintBlankProtocols"
+        [title]="canPrintBlankProtocols ? 'Permisos temporales actualizados; protocolos activos' : 'Actualizar permisos temporales'"
+        [attr.aria-label]="canPrintBlankProtocols ? 'Actualizar permisos temporales; protocolos activos' : 'Actualizar permisos temporales'"
+        [disabled]="permissionsRefreshLoading"
+        (click)="refreshCurrentPermissions()"
+      >
+        {{ permissionsRefreshLoading ? '...' : 'Permisos' }}
+      </button>
       <button
         type="button"
         class="icon-action ghost"
@@ -79,57 +108,6 @@
         ↻
       </button>
     </div>
-  </div>
-
-  <div class="tab-bar" role="tablist" aria-label="Secciones de mantenimiento">
-    <button
-      type="button"
-      class="tab"
-      role="tab"
-      *ngIf="auth.hasPermission('maintenance:request:create')"
-      [class.active]="viewMode === 'crear_solicitud'"
-      [attr.aria-selected]="viewMode === 'crear_solicitud'"
-      (click)="switchView('crear_solicitud')"
-    >
-      Crear solicitud
-    </button>
-    <button type="button" role="tab" class="tab" [class.active]="viewMode === 'solicitudes'" [attr.aria-selected]="viewMode === 'solicitudes'" (click)="switchView('solicitudes')">
-      Solicitudes <strong>{{ manualRequests.length }}</strong>
-    </button>
-    <button
-      type="button"
-      class="tab"
-      role="tab"
-      *ngIf="auth.hasPermission('maintenance:report:create')"
-      [class.active]="viewMode === 'preventivos'"
-      [attr.aria-selected]="viewMode === 'preventivos'"
-      (click)="switchView('preventivos')"
-    >
-      Preventivos <strong>{{ preventiveProgrammedRequests.length }}</strong>
-    </button>
-    <button type="button" role="tab" class="tab" [class.active]="viewMode === 'reportes'" [attr.aria-selected]="viewMode === 'reportes'" (click)="switchView('reportes')">
-      Reportes <strong>{{ pendingSignatureReports.length }}</strong>
-    </button>
-    <button
-      type="button"
-      class="tab"
-      role="tab"
-      *ngIf="canPrintBlankProtocols"
-      [class.active]="viewMode === 'protocolos_fisicos'"
-      [attr.aria-selected]="viewMode === 'protocolos_fisicos'"
-      (click)="switchView('protocolos_fisicos')"
-    >
-      Protocolos físicos
-    </button>
-    <button type="button" role="tab" class="tab" [class.active]="viewMode === 'repuestos'" [attr.aria-selected]="viewMode === 'repuestos'" (click)="switchView('repuestos')">
-      Repuestos <strong>{{ pendingSpareCount }}</strong>
-    </button>
-    <button type="button" role="tab" class="tab" [class.active]="viewMode === 'bajas'" [attr.aria-selected]="viewMode === 'bajas'" (click)="switchView('bajas')">
-      Bajas <strong>{{ retiredAssets.length }}</strong>
-    </button>
-    <button type="button" role="tab" class="tab" [class.active]="viewMode === 'equipos'" [attr.aria-selected]="viewMode === 'equipos'" (click)="switchView('equipos')">
-      Equipos <strong>{{ activeAssets.length }}</strong>
-    </button>
   </div>
 
   <div class="loading-strip" *ngIf="loading" role="status" aria-live="polite">Actualizando información...</div>
@@ -314,85 +292,161 @@
 
   <ng-container *ngIf="viewMode === 'preventivos'">
     <div #preventiveProgrammedCard class="card">
-      <div class="inline-alert success" *ngIf="successMessage">
-        <strong>Listo</strong>
-        <span>{{ successMessage }}</span>
-      </div>
-      <div class="list-title">
+      <div class="list-title report-list-title">
         <div>
-          <h2>Preventivos programados activos</h2>
-          <p>
-            Aquí aparecen los equipos cuyo mantenimiento preventivo ya está dentro de la ventana del cronograma.
-            Si pusiste la fecha de hoy para probar, deben mostrarse en esta lista.
-          </p>
+          <h2>Preventivos programados</h2>
+          <p>Equipos dentro de su ventana de mantenimiento.</p>
         </div>
-        <div class="preventive-summary">
-          <span>Áreas activas</span>
-          <strong>{{ preventiveAreaGroups.length }}</strong>
-          <span>Equipos activos</span>
-          <strong>{{ preventiveProgrammedRequests.length }}</strong>
+        <span class="report-total-badge">
+          {{ filteredPreventiveRequests.length }} de {{ preventiveProgrammedRequests.length }} equipos
+        </span>
+      </div>
+
+      <div class="report-filter-panel" *ngIf="preventiveProgrammedRequests.length">
+        <div class="list-tools report-filters preventive-filters">
+          <label>
+            Buscar
+            <input
+              type="search"
+              [(ngModel)]="preventiveSearchTerm"
+              (ngModelChange)="resetPreventivePage()"
+              placeholder="Código, equipo, serial..."
+            />
+          </label>
+          <label>
+            Sede
+            <select [(ngModel)]="preventiveSiteFilter" (ngModelChange)="onPreventiveSiteFilterChange()">
+              <option value="">Todas</option>
+              <option *ngFor="let site of preventiveSiteOptions" [value]="site">{{ site }}</option>
+            </select>
+          </label>
+          <label>
+            Área
+            <select [(ngModel)]="preventiveAreaFilter" (ngModelChange)="onPreventiveAreaFilterChange()">
+              <option value="">Todas</option>
+              <option *ngFor="let area of preventiveAreaOptions" [value]="area">{{ area }}</option>
+            </select>
+          </label>
+          <label>
+            Ubicación
+            <select [(ngModel)]="preventiveLocationFilter" (ngModelChange)="resetPreventivePage()">
+              <option value="">Todas</option>
+              <option *ngFor="let location of preventiveLocationOptions" [value]="location">{{ location }}</option>
+            </select>
+          </label>
+          <label>
+            Estado
+            <select [(ngModel)]="preventiveStatusFilter" (ngModelChange)="resetPreventivePage()">
+              <option value="">Todos</option>
+              <option value="abierto">Pendiente</option>
+              <option value="en_proceso">En proceso</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            class="ghost clear-report-filters"
+            [disabled]="!hasActivePreventiveFilters"
+            (click)="clearPreventiveFilters()"
+          >
+            Limpiar
+          </button>
         </div>
       </div>
 
-      <div class="preventive-area-list" *ngIf="preventiveAreaGroups.length">
-        <div class="preventive-area-card" *ngFor="let group of preventiveAreaGroups">
-          <div class="preventive-area-head">
-            <div>
-              <span>Área programada</span>
-              <strong>{{ group.areaName }}</strong>
-              <small>{{ group.siteName }} · {{ group.requests.length }} equipo{{ group.requests.length === 1 ? '' : 's' }}</small>
-            </div>
-          </div>
-
-          <div class="table preventive-table">
-            <div class="row header">
-              <span>Equipo</span>
-              <span>Ventana</span>
-              <span>Estado</span>
-              <span>Acciones</span>
-            </div>
-            <div class="row" *ngFor="let request of group.requests">
-              <span data-label="Equipo">
-                <strong>{{ assetLabel(request.asset_id) }}</strong>
-                <small>
-                  {{ assetMap.get(request.asset_id)?.locationName || '-' }}
-                  · Serie {{ assetMap.get(request.asset_id)?.serial || '-' }}
-                </small>
-              </span>
-              <span data-label="Ventana">
-                <span class="window-indicator" [ngClass]="preventiveWindowClass(request)">
-                  {{ preventiveWindowLabel(request) }}
-                </span>
-                <small>Asignado: {{ assignedEngineerLabel(request) }}</small>
-              </span>
-              <span data-label="Estado">
-                <span class="status-pill" [ngClass]="statusClass(request.status)">
-                  {{ statusLabel(request.status) }}
-                </span>
-              </span>
-              <span class="actions" data-label="Acciones">
-                <button
-                  *ngIf="canTakeRequest(request)"
-                  type="button"
-                  [disabled]="reportOpening"
-                  (click)="startPreventiveReport(request)"
-                >
-                  {{
-                    openingReportRequestId === request.id
-                      ? 'Abriendo...'
-                      : request.status === 'en_proceso'
-                        ? 'Continuar reporte'
-                        : 'Realizar reporte'
-                  }}
-                </button>
-              </span>
-            </div>
-          </div>
+      <div class="table preventive-table compact-preventive-table" *ngIf="filteredPreventiveRequests.length">
+        <div class="row header">
+          <span>Equipo</span>
+          <span>Área y ubicación</span>
+          <span>Ventana</span>
+          <span>Estado</span>
+          <span>Acción</span>
+        </div>
+        <div class="row" *ngFor="let request of paginatedPreventiveRequests">
+          <span data-label="Equipo">
+            <strong>{{ assetLabel(request.asset_id) }}</strong>
+            <small>Serie {{ assetMap.get(request.asset_id)?.serial || '-' }}</small>
+          </span>
+          <span data-label="Área y ubicación">
+            <strong>{{ assetMap.get(request.asset_id)?.areaName || 'Sin área' }}</strong>
+            <small>
+              {{ assetMap.get(request.asset_id)?.siteName || 'Sin sede' }} ·
+              {{ assetMap.get(request.asset_id)?.locationName || 'Sin ubicación' }}
+            </small>
+          </span>
+          <span data-label="Ventana">
+            <span class="window-indicator" [ngClass]="preventiveWindowClass(request)">
+              {{ preventiveWindowLabel(request) }}
+            </span>
+            <small>Asignado: {{ assignedEngineerLabel(request) }}</small>
+          </span>
+          <span data-label="Estado">
+            <span class="status-pill" [ngClass]="statusClass(request.status)">
+              {{ statusLabel(request.status) }}
+            </span>
+          </span>
+          <span class="actions" data-label="Acción">
+            <button
+              *ngIf="canTakeRequest(request)"
+              type="button"
+              [disabled]="reportOpening"
+              (click)="startPreventiveReport(request)"
+            >
+              {{
+                openingReportRequestId === request.id
+                  ? 'Abriendo...'
+                  : request.status === 'en_proceso'
+                    ? 'Continuar'
+                    : 'Realizar'
+              }}
+            </button>
+          </span>
         </div>
       </div>
 
-      <p class="empty" *ngIf="!loading && preventiveAreaGroups.length === 0">
+      <div class="report-pagination" *ngIf="filteredPreventiveRequests.length">
+        <div class="report-page-summary">
+          <span>
+            Mostrando {{ preventivePageStart }}–{{ preventivePageEnd }} de {{ filteredPreventiveRequests.length }}
+          </span>
+          <label>
+            Por página
+            <select [(ngModel)]="preventivePageSize" (ngModelChange)="onPreventivePageSizeChange()">
+              <option [ngValue]="10">10</option>
+              <option [ngValue]="20">20</option>
+              <option [ngValue]="50">50</option>
+            </select>
+          </label>
+        </div>
+        <div class="report-page-actions" aria-label="Paginación de preventivos">
+          <button
+            type="button"
+            class="icon-action ghost"
+            title="Página anterior"
+            aria-label="Página anterior"
+            [disabled]="preventiveEffectivePage <= 1"
+            (click)="goToPreventivePage(preventiveEffectivePage - 1)"
+          >
+            ‹
+          </button>
+          <span>Página {{ preventiveEffectivePage }} de {{ preventivePageCount }}</span>
+          <button
+            type="button"
+            class="icon-action ghost"
+            title="Página siguiente"
+            aria-label="Página siguiente"
+            [disabled]="preventiveEffectivePage >= preventivePageCount"
+            (click)="goToPreventivePage(preventiveEffectivePage + 1)"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+
+      <p class="empty" *ngIf="!loading && preventiveProgrammedRequests.length === 0">
         No hay mantenimientos preventivos activos en la fecha actual. Revisa que el cronograma esté aprobado y que hoy esté dentro del rango del mantenimiento.
+      </p>
+      <p class="empty" *ngIf="!loading && preventiveProgrammedRequests.length > 0 && filteredPreventiveRequests.length === 0">
+        No hay equipos que coincidan con los filtros seleccionados.
       </p>
     </div>
   </ng-container>

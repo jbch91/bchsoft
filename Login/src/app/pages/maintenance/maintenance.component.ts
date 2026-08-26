@@ -35,12 +35,6 @@ interface AssetLite {
   locationName?: string | null;
 }
 
-interface PreventiveAreaGroup {
-  areaName: string;
-  siteName: string;
-  requests: MaintenanceRequestDto[];
-}
-
 interface PendingSpareCase {
   asset: AssetLite;
   report: MaintenanceReportDto | null;
@@ -78,6 +72,13 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   private reportFilterCacheAssets: Map<string, AssetLite> | null = null;
   private reportFilterCacheKey = '';
   private reportFilterCacheItems: MaintenanceReportDto[] = [];
+  private preventiveProgrammedCacheRequests: MaintenanceRequestDto[] | null = null;
+  private preventiveProgrammedCacheAssets: Map<string, AssetLite> | null = null;
+  private preventiveProgrammedCacheItems: MaintenanceRequestDto[] = [];
+  private preventiveFilterCacheSource: MaintenanceRequestDto[] | null = null;
+  private preventiveFilterCacheAssets: Map<string, AssetLite> | null = null;
+  private preventiveFilterCacheKey = '';
+  private preventiveFilterCacheItems: MaintenanceRequestDto[] = [];
   readonly assetCategory: AssetCategory;
 
   loading = false;
@@ -109,6 +110,13 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportDateTo = '';
   reportPage = 1;
   reportPageSize = 10;
+  preventiveSearchTerm = '';
+  preventiveSiteFilter = '';
+  preventiveAreaFilter = '';
+  preventiveLocationFilter = '';
+  preventiveStatusFilter = '';
+  preventivePage = 1;
+  preventivePageSize = 10;
   assetSearchTerm = '';
   protocolSearchTerm = '';
   protocolSiteFilter = '';
@@ -1051,30 +1059,156 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   get preventiveProgrammedRequests(): MaintenanceRequestDto[] {
-    return this.requests
+    if (
+      this.preventiveProgrammedCacheRequests === this.requests
+      && this.preventiveProgrammedCacheAssets === this.assetMap
+    ) {
+      return this.preventiveProgrammedCacheItems;
+    }
+
+    const items = this.requests
       .filter((request) => this.isScheduledPreventive(request) && ['abierto', 'en_proceso'].includes(request.status))
       .sort((a, b) => {
         const assetA = this.assetMap.get(a.asset_id);
         const assetB = this.assetMap.get(b.asset_id);
-        return `${assetA?.areaName ?? ''} ${assetA?.code ?? ''}`.localeCompare(
-          `${assetB?.areaName ?? ''} ${assetB?.code ?? ''}`
+        return `${assetA?.siteName ?? ''} ${assetA?.areaName ?? ''} ${assetA?.locationName ?? ''} ${assetA?.code ?? ''}`.localeCompare(
+          `${assetB?.siteName ?? ''} ${assetB?.areaName ?? ''} ${assetB?.locationName ?? ''} ${assetB?.code ?? ''}`
         );
       });
+    this.preventiveProgrammedCacheRequests = this.requests;
+    this.preventiveProgrammedCacheAssets = this.assetMap;
+    this.preventiveProgrammedCacheItems = items;
+    return items;
   }
 
-  get preventiveAreaGroups(): PreventiveAreaGroup[] {
-    const groups = new Map<string, PreventiveAreaGroup>();
-    for (const request of this.preventiveProgrammedRequests) {
-      const asset = this.assetMap.get(request.asset_id);
-      const areaName = asset?.areaName || 'Sin área';
-      const siteName = asset?.siteName || 'Sin sede';
-      const key = `${siteName}:${areaName}`;
-      if (!groups.has(key)) {
-        groups.set(key, { areaName, siteName, requests: [] });
-      }
-      groups.get(key)!.requests.push(request);
+  get filteredPreventiveRequests(): MaintenanceRequestDto[] {
+    const source = this.preventiveProgrammedRequests;
+    const term = this.normalize(this.preventiveSearchTerm);
+    const filterKey = [
+      term,
+      this.preventiveSiteFilter,
+      this.preventiveAreaFilter,
+      this.preventiveLocationFilter,
+      this.preventiveStatusFilter
+    ].join('|');
+    if (
+      this.preventiveFilterCacheSource === source
+      && this.preventiveFilterCacheAssets === this.assetMap
+      && this.preventiveFilterCacheKey === filterKey
+    ) {
+      return this.preventiveFilterCacheItems;
     }
-    return Array.from(groups.values()).sort((a, b) => `${a.siteName} ${a.areaName}`.localeCompare(`${b.siteName} ${b.areaName}`));
+
+    const items = source.filter((request) => {
+      const asset = this.assetMap.get(request.asset_id);
+      if (this.preventiveSiteFilter && asset?.siteName !== this.preventiveSiteFilter) return false;
+      if (this.preventiveAreaFilter && asset?.areaName !== this.preventiveAreaFilter) return false;
+      if (this.preventiveLocationFilter && asset?.locationName !== this.preventiveLocationFilter) return false;
+      if (this.preventiveStatusFilter && request.status !== this.preventiveStatusFilter) return false;
+      if (!term) return true;
+
+      const haystack = [
+        asset ? this.assetHaystack(asset) : '',
+        request.description,
+        request.assigned_name,
+        request.requester_name,
+        request.planned_date,
+        request.deadline_date
+      ]
+        .map((value) => this.normalize(value))
+        .join(' ');
+      return haystack.includes(term);
+    });
+    this.preventiveFilterCacheSource = source;
+    this.preventiveFilterCacheAssets = this.assetMap;
+    this.preventiveFilterCacheKey = filterKey;
+    this.preventiveFilterCacheItems = items;
+    return items;
+  }
+
+  get preventiveSiteOptions(): string[] {
+    return this.preventiveAssetOptions('siteName');
+  }
+
+  get preventiveAreaOptions(): string[] {
+    return this.preventiveAssetOptions('areaName', (asset) =>
+      !this.preventiveSiteFilter || asset.siteName === this.preventiveSiteFilter
+    );
+  }
+
+  get preventiveLocationOptions(): string[] {
+    return this.preventiveAssetOptions('locationName', (asset) =>
+      (!this.preventiveSiteFilter || asset.siteName === this.preventiveSiteFilter)
+      && (!this.preventiveAreaFilter || asset.areaName === this.preventiveAreaFilter)
+    );
+  }
+
+  get paginatedPreventiveRequests(): MaintenanceRequestDto[] {
+    return paginateMaintenanceItems(this.filteredPreventiveRequests, this.preventivePage, this.preventivePageSize).items;
+  }
+
+  get preventiveEffectivePage(): number {
+    return paginateMaintenanceItems(this.filteredPreventiveRequests, this.preventivePage, this.preventivePageSize).page;
+  }
+
+  get preventivePageCount(): number {
+    return paginateMaintenanceItems(this.filteredPreventiveRequests, this.preventivePage, this.preventivePageSize).totalPages;
+  }
+
+  get preventivePageStart(): number {
+    return paginateMaintenanceItems(this.filteredPreventiveRequests, this.preventivePage, this.preventivePageSize).start;
+  }
+
+  get preventivePageEnd(): number {
+    return paginateMaintenanceItems(this.filteredPreventiveRequests, this.preventivePage, this.preventivePageSize).end;
+  }
+
+  get hasActivePreventiveFilters(): boolean {
+    return Boolean(
+      this.preventiveSearchTerm.trim()
+      || this.preventiveSiteFilter
+      || this.preventiveAreaFilter
+      || this.preventiveLocationFilter
+      || this.preventiveStatusFilter
+    );
+  }
+
+  resetPreventivePage(): void {
+    this.preventivePage = 1;
+  }
+
+  onPreventiveSiteFilterChange(): void {
+    if (this.preventiveAreaFilter && !this.preventiveAreaOptions.includes(this.preventiveAreaFilter)) {
+      this.preventiveAreaFilter = '';
+    }
+    if (this.preventiveLocationFilter && !this.preventiveLocationOptions.includes(this.preventiveLocationFilter)) {
+      this.preventiveLocationFilter = '';
+    }
+    this.resetPreventivePage();
+  }
+
+  onPreventiveAreaFilterChange(): void {
+    if (this.preventiveLocationFilter && !this.preventiveLocationOptions.includes(this.preventiveLocationFilter)) {
+      this.preventiveLocationFilter = '';
+    }
+    this.resetPreventivePage();
+  }
+
+  clearPreventiveFilters(): void {
+    this.preventiveSearchTerm = '';
+    this.preventiveSiteFilter = '';
+    this.preventiveAreaFilter = '';
+    this.preventiveLocationFilter = '';
+    this.preventiveStatusFilter = '';
+    this.resetPreventivePage();
+  }
+
+  goToPreventivePage(page: number): void {
+    this.preventivePage = Math.min(this.preventivePageCount, Math.max(1, page));
+  }
+
+  onPreventivePageSizeChange(): void {
+    this.resetPreventivePage();
   }
 
   preventiveWindowLabel(request: MaintenanceRequestDto): string {
@@ -1285,10 +1419,6 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   ): string[] {
     const labels = new Map(options.map((option) => [option.value, option.label]));
     return this.asStringArray(values).map((value) => labels.get(value) ?? value);
-  }
-
-  get reportListCount(): number {
-    return this.pendingSignatureReports.length + this.reportHistory.length;
   }
 
   get pendingSignatureReports(): MaintenanceReportDto[] {
@@ -1700,6 +1830,20 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     ]
       .map((value) => this.normalize(value))
       .join(' ');
+  }
+
+  private preventiveAssetOptions(
+    field: 'siteName' | 'areaName' | 'locationName',
+    matches: (asset: AssetLite) => boolean = () => true
+  ): string[] {
+    const values = new Set<string>();
+    for (const request of this.preventiveProgrammedRequests) {
+      const asset = this.assetMap.get(request.asset_id);
+      if (!asset || !matches(asset)) continue;
+      const value = asset[field];
+      if (value) values.add(value);
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
   }
 
   private async blankProtocolErrorMessage(error: any): Promise<string> {
