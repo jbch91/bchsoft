@@ -62,6 +62,7 @@
 
 <p *ngIf="loading">Cargando...</p>
 <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+<p class="success movement-feedback" *ngIf="moveSuccess && !movingAssetId">{{ moveSuccess }}</p>
 
 <div class="card table-card" *ngIf="!loading">
   <h2>{{ title }}</h2>
@@ -100,7 +101,10 @@
         <div class="move-inline-header">
           <div>
             <strong>Mover equipo</strong>
-            <p class="muted">Actualiza sede, área, ubicación o código. Se generará un PDF en el historial del equipo.</p>
+            <p class="muted">
+              Actualiza sede, área, ubicación o código. Se generará un PDF y las fechas no iniciadas
+              del cronograma se alinearán con el área y ubicación de destino.
+            </p>
           </div>
           <button type="button" class="hide-btn" (click)="cancelMove()">Cancelar</button>
         </div>
@@ -190,6 +194,12 @@
           <div>
             <strong>Migrar PDF físico al historial</strong>
             <p class="muted">Documento escaneado con fecha real y trazabilidad.</p>
+          </div>
+          <div class="historical-evidence-progress" *ngIf="historicalEvidencePendingLabels.length">
+            <strong>{{ historicalEvidencePendingLabels.length }} mantenimiento(s) por conciliar</strong>
+            <div>
+              <span *ngFor="let date of historicalEvidencePendingLabels">{{ date }}</span>
+            </div>
           </div>
           <div class="history-upload-grid">
             <label>

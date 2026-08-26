@@ -314,6 +314,45 @@ export function buildAssetMaintenanceOccurrences({
   return occurrences;
 }
 
+export function nextBusinessDateInWindow(value, maxDate) {
+  const date = parseDateOnly(value, 'La fecha disponible');
+  const limit = parseDateOnly(maxDate, 'La fecha límite');
+  while (date <= limit && (date.getUTCDay() === 0 || date.getUTCDay() === 6)) {
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+  return date <= limit ? formatDateOnly(date) : null;
+}
+
+export function buildOperationalMaintenanceOccurrences({
+  year,
+  startDate,
+  frequency,
+  availableFrom,
+  referenceItems = [],
+  locationId = null
+}) {
+  const normalizedAvailableFrom = normalizeDateOnly(
+    availableFrom,
+    'La fecha disponible para mantenimiento'
+  );
+  const occurrences = buildAssetMaintenanceOccurrences({
+    year,
+    startDate,
+    frequency,
+    referenceItems,
+    locationId
+  });
+
+  return occurrences.flatMap((occurrence) => {
+    if (occurrence.deadlineDate < normalizedAvailableFrom) return [];
+    const candidate = occurrence.plannedDate < normalizedAvailableFrom
+      ? normalizedAvailableFrom
+      : occurrence.plannedDate;
+    const plannedDate = nextBusinessDateInWindow(candidate, occurrence.deadlineDate);
+    return plannedDate ? [{ ...occurrence, plannedDate }] : [];
+  });
+}
+
 export function normalizeUuidList(values, label = 'Los identificadores') {
   if (!Array.isArray(values) || !values.length) {
     throw new ScheduleValidationError(`${label} son requeridos.`);
@@ -389,6 +428,80 @@ export function normalizeMaintenanceItemUpdates(items, existingItems, year) {
       );
     }
     return { id: String(current.id), plannedDate, deadlineDate };
+  });
+}
+
+export function normalizeAssetScheduleProgrammingSelection(selection, expectedSchedules) {
+  const expected = Array.isArray(expectedSchedules) ? expectedSchedules : [];
+  const submitted = Array.isArray(selection?.schedules) ? selection.schedules : [];
+  if (submitted.length !== expected.length) {
+    throw new ScheduleValidationError(
+      'Confirma las fechas de todos los cronogramas aprobados afectados.'
+    );
+  }
+
+  const submittedBySchedule = new Map();
+  for (const schedule of submitted) {
+    const scheduleId = String(schedule?.scheduleId || '').trim();
+    if (!UUID_PATTERN.test(scheduleId) || submittedBySchedule.has(scheduleId)) {
+      throw new ScheduleValidationError('La selección contiene un cronograma inválido o repetido.');
+    }
+    submittedBySchedule.set(scheduleId, schedule);
+  }
+
+  return expected.map((schedule) => {
+    const scheduleId = String(schedule.scheduleId || '').trim();
+    const current = submittedBySchedule.get(scheduleId);
+    if (!current) {
+      throw new ScheduleValidationError('Faltan fechas de un cronograma aprobado.');
+    }
+    const expectedItems = Array.isArray(schedule.items) ? schedule.items : [];
+    const selectedItems = Array.isArray(current.items) ? current.items : [];
+    if (selectedItems.length !== expectedItems.length) {
+      throw new ScheduleValidationError(
+        `El cronograma ${schedule.year} debe conservar ${expectedItems.length} ventana(s) de mantenimiento.`
+      );
+    }
+
+    const selectedByMonth = new Map();
+    for (const item of selectedItems) {
+      const month = String(item?.month || '').trim();
+      if (!/^\d{4}-\d{2}$/.test(month) || selectedByMonth.has(month)) {
+        throw new ScheduleValidationError('Cada ventana mensual debe aparecer una sola vez.');
+      }
+      selectedByMonth.set(month, item);
+    }
+
+    const items = expectedItems.map((expectedItem) => {
+      const month = String(expectedItem.month || '').trim();
+      const selectedItem = selectedByMonth.get(month);
+      if (!selectedItem) {
+        throw new ScheduleValidationError(`Falta seleccionar la fecha correspondiente a ${month}.`);
+      }
+      const plannedDate = normalizeDateOnly(
+        selectedItem.plannedDate,
+        'La fecha programada'
+      );
+      assertWeekdayAndYear(plannedDate, schedule.year);
+      const minDate = normalizeDateOnly(expectedItem.minDate, 'La fecha mínima');
+      const maxDate = normalizeDateOnly(expectedItem.maxDate, 'La fecha máxima');
+      if (
+        plannedDate.slice(0, 7) !== month
+        || plannedDate < minDate
+        || plannedDate > maxDate
+      ) {
+        throw new ScheduleValidationError(
+          `La fecha de ${month} debe estar entre ${minDate} y ${maxDate}.`
+        );
+      }
+      return {
+        month,
+        plannedDate,
+        deadlineDate: normalizeDateOnly(expectedItem.deadlineDate, 'La fecha límite')
+      };
+    });
+
+    return { scheduleId, items };
   });
 }
 

@@ -7,6 +7,7 @@ import {
   addYearsUtc,
   assetWarrantyReleaseDate,
   buildAssetMaintenanceOccurrences,
+  buildOperationalMaintenanceOccurrences,
   buildRecurringDates,
   canEditMaintenanceSchedule,
   capDateAtMonthEndUtc,
@@ -15,6 +16,7 @@ import {
   endOfMonthUtc,
   formatDateOnly,
   normalizeCalibrationItemUpdates,
+  normalizeAssetScheduleProgrammingSelection,
   normalizeMaintenanceItemUpdates,
   normalizeScheduleStart,
   normalizeTrainingItemUpdates,
@@ -119,6 +121,25 @@ test('incorpora un equipo nuevo desde la próxima fecha de su ubicación y área
   ]);
 });
 
+test('activa la ventana mensual vigente aunque la fecha del área ya haya pasado', () => {
+  const occurrences = buildOperationalMaintenanceOccurrences({
+    year: 2026,
+    startDate: '2026-01-12',
+    frequency: 'mensual',
+    availableFrom: '2026-08-26',
+    referenceItems: [
+      { planned_date: '2026-08-10', location_id: 'location-a' },
+      { planned_date: '2026-09-10', location_id: 'location-a' }
+    ],
+    locationId: 'location-a'
+  });
+
+  assert.deepEqual(occurrences.slice(0, 2), [
+    { plannedDate: '2026-08-26', deadlineDate: '2026-08-31' },
+    { plannedDate: '2026-09-10', deadlineDate: '2026-09-30' }
+  ]);
+});
+
 test('omite mantenimientos anteriores al vencimiento de la garantía', () => {
   const occurrences = buildAssetMaintenanceOccurrences({
     year: 2026,
@@ -210,6 +231,74 @@ test('impide mover una fecha programada dentro del periodo de garantía', () => 
       2026
     ),
     [{ id, plannedDate: '2026-09-10', deadlineDate: '2026-09-30' }]
+  );
+});
+
+test('valida todas las fechas elegidas al cambiar la periodicidad de una hoja de vida', () => {
+  const scheduleId = '11111111-1111-4111-8111-111111111111';
+  const expected = [{
+    scheduleId,
+    year: 2026,
+    items: [
+      {
+        month: '2026-09',
+        plannedDate: '2026-09-18',
+        minDate: '2026-09-01',
+        maxDate: '2026-09-30',
+        deadlineDate: '2026-09-30'
+      },
+      {
+        month: '2026-10',
+        plannedDate: '2026-10-19',
+        minDate: '2026-10-01',
+        maxDate: '2026-10-31',
+        deadlineDate: '2026-10-31'
+      }
+    ]
+  }];
+
+  assert.deepEqual(
+    normalizeAssetScheduleProgrammingSelection({
+      schedules: [{
+        scheduleId,
+        items: [
+          { month: '2026-09', plannedDate: '2026-09-21' },
+          { month: '2026-10', plannedDate: '2026-10-20' }
+        ]
+      }]
+    }, expected),
+    [{
+      scheduleId,
+      items: [
+        { month: '2026-09', plannedDate: '2026-09-21', deadlineDate: '2026-09-30' },
+        { month: '2026-10', plannedDate: '2026-10-20', deadlineDate: '2026-10-31' }
+      ]
+    }]
+  );
+
+  assert.throws(
+    () => normalizeAssetScheduleProgrammingSelection({
+      schedules: [{
+        scheduleId,
+        items: [
+          { month: '2026-09', plannedDate: '2026-10-01' },
+          { month: '2026-10', plannedDate: '2026-10-20' }
+        ]
+      }]
+    }, expected),
+    /debe estar entre/
+  );
+  assert.throws(
+    () => normalizeAssetScheduleProgrammingSelection({
+      schedules: [{
+        scheduleId,
+        items: [
+          { month: '2026-09', plannedDate: '2026-09-19' },
+          { month: '2026-10', plannedDate: '2026-10-20' }
+        ]
+      }]
+    }, expected),
+    /día hábil/
   );
 });
 

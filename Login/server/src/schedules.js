@@ -2,9 +2,12 @@ import { query, withTransaction } from './db.js';
 import { normalizeAssetCategory } from './asset-category.js';
 import {
   assetWarrantyReleaseDate,
-  buildAssetMaintenanceOccurrences,
+  buildOperationalMaintenanceOccurrences,
   dateOnlyFromDatabase,
-  normalizeDateOnly
+  nextBusinessDateInWindow,
+  normalizeAssetScheduleProgrammingSelection,
+  normalizeDateOnly,
+  normalizePeriodicity
 } from './schedule-workflow.js';
 
 function minimumDate(...values) {
@@ -36,9 +39,497 @@ function emptyAssetScheduleSync(asset) {
     scheduleIds: [],
     itemsAdded: 0,
     itemsRemoved: 0,
+    activeItemsAdded: 0,
+    requestsCreated: 0,
+    historicalEvidenceRequired: [],
     firstPlannedDate: null,
     latestScheduleYear: null
   };
+}
+
+function configurationValue(configuration, key, fallback) {
+  return Object.prototype.hasOwnProperty.call(configuration || {}, key)
+    ? configuration[key]
+    : fallback;
+}
+
+function normalizeProgrammingAsset(asset, configuration = {}) {
+  const warrantyValue = configurationValue(configuration, 'warrantyYears', asset.warranty_years);
+  return {
+    ...asset,
+    area_id: configurationValue(configuration, 'areaId', asset.area_id) || null,
+    location_id: configurationValue(configuration, 'locationId', asset.location_id) || null,
+    acquisition_date: configurationValue(
+      configuration,
+      'acquisitionDate',
+      asset.acquisition_date
+    ) || null,
+    warranty_years:
+      warrantyValue === null || warrantyValue === undefined || warrantyValue === ''
+        ? null
+        : Number(warrantyValue),
+    maintenance_frequency: normalizePeriodicity(
+      configurationValue(
+        configuration,
+        'maintenanceFrequency',
+        asset.maintenance_frequency
+      )
+    )
+  };
+}
+
+function replaceableProgrammingItem(item) {
+  return (
+    ['pending', 'active', 'expired'].includes(String(item.status || '').toLowerCase())
+    && !item.report_id
+    && !item.completion_source
+    && !item.legacy_history_file_id
+    && !item.has_blocking_request
+  );
+}
+
+function maintenanceOccurrencePhase(item, today) {
+  if (item.deadlineDate < today) return 'historical';
+  if (item.plannedDate <= today) return 'current';
+  return 'future';
+}
+
+function maintenanceItemStatus(item, today, scheduleStatus) {
+  if (item.deadlineDate < today) return 'expired';
+  if (scheduleStatus === 'approved' && item.plannedDate <= today) return 'active';
+  return 'pending';
+}
+
+async function removeReplaceableScheduleItems(client, scheduleId, itemIds) {
+  if (!itemIds.length) return { itemsRemoved: 0, requestsRemoved: 0 };
+  const requests = await client.query(
+    `DELETE FROM maintenance_requests
+     WHERE schedule_item_id = ANY($1::uuid[])
+       AND source = 'cronograma'
+       AND status IN ('abierto', 'vencido')
+     RETURNING id`,
+    [itemIds]
+  );
+  const deleted = await client.query(
+    `DELETE FROM maintenance_schedule_items
+     WHERE schedule_id = $1 AND id = ANY($2::uuid[])
+     RETURNING id`,
+    [scheduleId, itemIds]
+  );
+  if (deleted.rows.length !== itemIds.length) {
+    const error = new Error('El cronograma cambió mientras se confirmaban las fechas.');
+    error.code = 'SCHEDULE_EDIT_STATE_CHANGED';
+    throw error;
+  }
+  return {
+    itemsRemoved: deleted.rows.length,
+    requestsRemoved: requests.rows.length
+  };
+}
+
+async function createActivePreventiveRequest(client, {
+  clientId,
+  scheduleId,
+  scheduleItemId,
+  assetId,
+  plannedDate,
+  deadlineDate,
+  requestedBy
+}) {
+  const result = await client.query(
+    `INSERT INTO maintenance_requests (
+       client_id, asset_id, type, description, planned_date, deadline_date, source,
+       requested_by, schedule_id, schedule_item_id
+     )
+     SELECT $1, $2, 'preventivo', 'Mantenimiento preventivo programado',
+            $3, $4, 'cronograma', $5, $6, $7
+     WHERE NOT EXISTS (
+       SELECT 1 FROM maintenance_requests
+       WHERE client_id = $1 AND schedule_item_id = $7
+     )
+     RETURNING id`,
+    [
+      clientId,
+      assetId,
+      plannedDate,
+      deadlineDate,
+      requestedBy,
+      scheduleId,
+      scheduleItemId
+    ]
+  );
+  return result.rows.length;
+}
+
+function publicProgrammingSchedule(plan) {
+  return {
+    scheduleId: plan.scheduleId,
+    year: plan.year,
+    status: plan.status,
+    itemsToReplace: plan.replaceableItemIds.length,
+    preservedItems: plan.preservedItems,
+    historicalItems: plan.items.filter((item) => item.phase === 'historical').length,
+    currentItems: plan.items.filter((item) => item.phase === 'current').length,
+    futureItems: plan.items.filter((item) => item.phase === 'future').length,
+    items: plan.items
+  };
+}
+
+async function buildAssetScheduleProgrammingPlans(client, {
+  clientId,
+  schema,
+  assetId,
+  today,
+  configuration = {},
+  lock = false
+}) {
+  const tenantResult = await client.query(
+    'SELECT schema_name FROM clients WHERE id = $1',
+    [clientId]
+  );
+  const tenantSchema = tenantResult.rows[0]?.schema_name;
+  if (!tenantSchema || (schema && schema !== tenantSchema)) {
+    const error = new Error('El cliente del cronograma no es válido.');
+    error.code = 'SCHEDULE_CLIENT_MISMATCH';
+    throw error;
+  }
+
+  const assetResult = await client.query(
+    `SELECT id, area_id, location_id, acquisition_date, warranty_years, created_at,
+            maintenance_frequency, asset_category, status
+     FROM "${tenantSchema}".assets
+     WHERE id = $1
+     ${lock ? 'FOR UPDATE' : ''}`,
+    [assetId]
+  );
+  const storedAsset = assetResult.rows[0];
+  if (!storedAsset || String(storedAsset.status || 'activo') === 'dado_de_baja') {
+    const error = new Error('El equipo no está disponible para programar mantenimiento.');
+    error.code = 'SCHEDULE_ITEM_MISMATCH';
+    throw error;
+  }
+  const asset = normalizeProgrammingAsset(storedAsset, configuration);
+  const warrantyReleaseDate = assetWarrantyReleaseDate({
+    acquisitionDate: asset.acquisition_date,
+    warrantyYears: asset.warranty_years
+  });
+  const category = normalizeAssetCategory(asset.asset_category);
+  const currentYear = Number(today.slice(0, 4));
+  const scheduleResult = await client.query(
+    `SELECT id, client_id, asset_category, year, start_date, status, created_by
+     FROM maintenance_schedules
+     WHERE client_id = $1
+       AND asset_category = $2
+       AND year >= $3
+       AND status IN ('draft', 'approved')
+     ORDER BY year ASC, created_at ASC
+     ${lock ? 'FOR UPDATE' : ''}`,
+    [clientId, category, currentYear]
+  );
+
+  const plans = [];
+  for (const schedule of scheduleResult.rows) {
+    const targetItemsResult = await client.query(
+      `SELECT item.id, item.frequency, item.planned_date, item.deadline_date, item.status,
+              item.report_id, item.completion_source, item.legacy_history_file_id,
+              EXISTS (
+                SELECT 1 FROM maintenance_requests request
+                WHERE request.schedule_item_id = item.id
+                  AND request.status NOT IN ('abierto', 'vencido')
+              ) AS has_blocking_request
+       FROM maintenance_schedule_items item
+       WHERE item.schedule_id = $1 AND item.asset_id = $2
+       ${lock ? 'FOR UPDATE OF item' : ''}`,
+      [schedule.id, asset.id]
+    );
+    const replaceableItems = targetItemsResult.rows.filter(replaceableProgrammingItem);
+    const replaceableIds = new Set(replaceableItems.map((item) => item.id));
+    const preservedItems = targetItemsResult.rows.filter((item) => !replaceableIds.has(item.id));
+
+    let referenceItems = [];
+    if (asset.area_id) {
+      const referencesResult = await client.query(
+        `SELECT item.planned_date, reference_asset.area_id, reference_asset.location_id
+         FROM maintenance_schedule_items AS item
+         JOIN "${tenantSchema}".assets AS reference_asset ON reference_asset.id = item.asset_id
+         WHERE item.schedule_id = $1
+           AND reference_asset.area_id = $2
+           AND item.asset_id <> $3`,
+        [schedule.id, asset.area_id, asset.id]
+      );
+      referenceItems = referencesResult.rows;
+    }
+
+    const scheduleStart = dateOnlyFromDatabase(
+      schedule.start_date,
+      'La fecha inicial del cronograma'
+    );
+    const scheduleYearStart = `${schedule.year}-01-01`;
+    const firstExistingDate = targetItemsResult.rows
+      .map((item) => dateOnlyFromDatabase(item.planned_date))
+      .sort()[0] || null;
+    const participationDate = minimumDate(
+      firstExistingDate,
+      dateOnlyFromDatabase(asset.created_at, 'La fecha de creación de la hoja de vida')
+    );
+    const eligibleFrom = maximumDate(
+      scheduleYearStart,
+      warrantyReleaseDate,
+      schedule.year === currentYear ? participationDate : scheduleYearStart
+    );
+    const desired = buildOperationalMaintenanceOccurrences({
+      year: schedule.year,
+      startDate: scheduleStart,
+      frequency: asset.maintenance_frequency,
+      availableFrom: eligibleFrom,
+      referenceItems,
+      locationId: asset.location_id
+    });
+    const occupiedMonths = new Set(
+      preservedItems.map((item) => dateOnlyFromDatabase(item.planned_date).slice(0, 7))
+    );
+    const items = [];
+    for (const occurrence of desired) {
+      const month = occurrence.plannedDate.slice(0, 7);
+      if (occupiedMonths.has(month)) continue;
+      occupiedMonths.add(month);
+      let plannedDate = occurrence.plannedDate;
+      if (
+        schedule.year === currentYear
+        && occurrence.deadlineDate >= today
+        && plannedDate < today
+      ) {
+        plannedDate = nextBusinessDateInWindow(today, occurrence.deadlineDate) || plannedDate;
+      }
+      const item = {
+        month,
+        plannedDate,
+        minDate: maximumDate(`${month}-01`, eligibleFrom),
+        maxDate: occurrence.deadlineDate,
+        deadlineDate: occurrence.deadlineDate
+      };
+      items.push({
+        ...item,
+        phase: maintenanceOccurrencePhase(item, today)
+      });
+    }
+    const preservedOperationalDates = preservedItems
+      .filter((item) => dateOnlyFromDatabase(item.deadline_date) >= today)
+      .map((item) => dateOnlyFromDatabase(item.planned_date));
+    plans.push({
+      scheduleId: schedule.id,
+      year: schedule.year,
+      status: schedule.status,
+      createdBy: schedule.created_by,
+      replaceableItemIds: replaceableItems.map((item) => item.id),
+      preservedItems: preservedItems.length,
+      preservedOperationalDates,
+      items,
+      changed: replaceableItems.length > 0 || items.length > 0
+    });
+  }
+
+  return { asset, storedAsset, warrantyReleaseDate, plans };
+}
+
+export async function previewApprovedAssetScheduleProgramming({
+  clientId,
+  schema,
+  assetId,
+  today,
+  configuration
+}) {
+  const normalizedToday = normalizeDateOnly(today, 'La fecha actual');
+  return withTransaction(async (client) => {
+    const result = await buildAssetScheduleProgrammingPlans(client, {
+      clientId,
+      schema,
+      assetId,
+      today: normalizedToday,
+      configuration
+    });
+    const schedules = result.plans
+      .filter((plan) => plan.status === 'approved' && plan.changed)
+      .map(publicProgrammingSchedule);
+    return {
+      assetId: result.asset.id,
+      previousFrequency: result.storedAsset.maintenance_frequency,
+      frequency: result.asset.maintenance_frequency,
+      effectiveToday: normalizedToday,
+      warrantyReleaseDate: result.warrantyReleaseDate,
+      requiresConfirmation: schedules.length > 0,
+      schedules
+    };
+  });
+}
+
+export async function applyAssetScheduleProgramming({
+  clientId,
+  schema,
+  assetId,
+  today,
+  actorUserId = null,
+  selection
+}) {
+  const normalizedToday = normalizeDateOnly(today, 'La fecha actual');
+  return withTransaction(async (client) => {
+    const result = await buildAssetScheduleProgrammingPlans(client, {
+      clientId,
+      schema,
+      assetId,
+      today: normalizedToday,
+      lock: true
+    });
+    const approvedPlans = result.plans.filter(
+      (plan) => plan.status === 'approved' && plan.changed
+    );
+    const normalizedSelection = normalizeAssetScheduleProgrammingSelection(
+      selection,
+      approvedPlans.map(publicProgrammingSchedule)
+    );
+    const selectionBySchedule = new Map(
+      normalizedSelection.map((schedule) => [schedule.scheduleId, schedule.items])
+    );
+    const updatedScheduleIds = new Set();
+    let itemsAdded = 0;
+    let itemsRemoved = 0;
+    let requestsRemoved = 0;
+    let activeItemsAdded = 0;
+    let requestsCreated = 0;
+    let firstPlannedDate = null;
+    const historicalEvidenceRequired = [];
+
+    for (const plan of result.plans) {
+      const selectedItems = plan.status === 'approved'
+        ? selectionBySchedule.get(plan.scheduleId) || []
+        : plan.items;
+      for (const plannedDate of plan.preservedOperationalDates) {
+        firstPlannedDate = minimumDate(firstPlannedDate, plannedDate);
+      }
+      for (const item of selectedItems) {
+        if (item.deadlineDate >= normalizedToday) {
+          firstPlannedDate = minimumDate(firstPlannedDate, item.plannedDate);
+        }
+      }
+      if (!plan.changed) continue;
+
+      if (plan.replaceableItemIds.length) {
+        const removed = await removeReplaceableScheduleItems(
+          client,
+          plan.scheduleId,
+          plan.replaceableItemIds
+        );
+        itemsRemoved += removed.itemsRemoved;
+        requestsRemoved += removed.requestsRemoved;
+      }
+      if (selectedItems.length) {
+        const programmingConfirmed = plan.status === 'approved';
+        const itemStatuses = selectedItems.map((item) =>
+          maintenanceItemStatus(item, normalizedToday, plan.status)
+        );
+        const inserted = await client.query(
+          `INSERT INTO maintenance_schedule_items
+             (schedule_id, asset_id, frequency, planned_date, deadline_date, status,
+              programming_confirmed, programmed_at, programmed_by)
+           SELECT $1, $2, $3, data.planned_date, data.deadline_date, data.item_status,
+                  $7,
+                  CASE WHEN $7 THEN NOW() ELSE NULL END,
+                  CASE WHEN $7 THEN $8::uuid ELSE NULL END
+           FROM UNNEST($4::date[], $5::date[], $6::text[])
+             AS data(planned_date, deadline_date, item_status)
+           RETURNING id, planned_date, deadline_date, status`,
+          [
+            plan.scheduleId,
+            result.asset.id,
+            result.asset.maintenance_frequency,
+            selectedItems.map((item) => item.plannedDate),
+            selectedItems.map((item) => item.deadlineDate),
+            itemStatuses,
+            programmingConfirmed,
+            actorUserId || plan.createdBy
+          ]
+        );
+        itemsAdded += inserted.rows.length;
+        for (const item of inserted.rows) {
+          const plannedDate = dateOnlyFromDatabase(item.planned_date);
+          const deadlineDate = dateOnlyFromDatabase(item.deadline_date);
+          if (item.status === 'expired') {
+            historicalEvidenceRequired.push({
+              scheduleId: plan.scheduleId,
+              scheduleItemId: item.id,
+              scheduleYear: plan.year,
+              plannedDate,
+              deadlineDate
+            });
+          }
+          if (item.status === 'active') {
+            activeItemsAdded += 1;
+            requestsCreated += await createActivePreventiveRequest(client, {
+              clientId,
+              scheduleId: plan.scheduleId,
+              scheduleItemId: item.id,
+              assetId: result.asset.id,
+              plannedDate,
+              deadlineDate,
+              requestedBy: actorUserId || plan.createdBy
+            });
+          }
+        }
+      }
+      updatedScheduleIds.add(plan.scheduleId);
+    }
+
+    if (updatedScheduleIds.size) {
+      await client.query(
+        'UPDATE maintenance_schedules SET pdf_path = NULL WHERE id = ANY($1::uuid[])',
+        [Array.from(updatedScheduleIds)]
+      );
+    }
+
+    const latestScheduleYear = result.plans.reduce(
+      (latest, plan) => Math.max(latest, plan.year),
+      0
+    ) || null;
+    let status = 'awaiting_schedule';
+    if (firstPlannedDate) {
+      status = 'scheduled';
+    } else if (
+      result.warrantyReleaseDate
+      && latestScheduleYear
+      && result.warrantyReleaseDate > `${latestScheduleYear}-12-31`
+    ) {
+      status = 'warranty';
+    } else if (result.plans.length) {
+      status = 'next_cycle';
+    }
+    const assetResult = {
+      assetId: result.asset.id,
+      status,
+      warrantyReleaseDate: result.warrantyReleaseDate,
+      warrantyError: null,
+      schedulesFound: result.plans.length,
+      schedulesUpdated: updatedScheduleIds.size,
+      scheduleIds: Array.from(updatedScheduleIds),
+      itemsAdded,
+      itemsRemoved,
+      requestsRemoved,
+      activeItemsAdded,
+      requestsCreated,
+      historicalEvidenceRequired,
+      firstPlannedDate,
+      latestScheduleYear
+    };
+    return {
+      schedulesUpdated: updatedScheduleIds.size,
+      itemsAdded,
+      itemsRemoved,
+      requestsRemoved,
+      activeItemsAdded,
+      requestsCreated,
+      historicalEvidenceRequired,
+      assets: [assetResult]
+    };
+  });
 }
 
 export async function createSchedule({
@@ -136,7 +627,8 @@ export async function syncAssetsIntoMaintenanceSchedules({
   assetIds,
   today,
   actorUserId = null,
-  replaceFuturePending = false
+  replaceFuturePending = false,
+  replaceOpenCurrent = false
 }) {
   const ids = Array.from(new Set((assetIds || []).map((value) => String(value || '').trim()).filter(Boolean)));
   if (!ids.length) {
@@ -191,6 +683,9 @@ export async function syncAssetsIntoMaintenanceSchedules({
 
     let totalAdded = 0;
     let totalRemoved = 0;
+    let totalRequestsRemoved = 0;
+    let totalActiveAdded = 0;
+    let totalRequestsCreated = 0;
     const updatedScheduleIds = new Set();
 
     for (const schedule of scheduleResult.rows) {
@@ -209,13 +704,20 @@ export async function syncAssetsIntoMaintenanceSchedules({
         detail.latestScheduleYear = Math.max(detail.latestScheduleYear || 0, schedule.year);
       }
 
-      if (replaceFuturePending) {
-        const deleted = await client.query(
-          `DELETE FROM maintenance_schedule_items AS item
+      if (replaceFuturePending || replaceOpenCurrent) {
+        const replaceable = await client.query(
+          `SELECT item.id, item.asset_id
+           FROM maintenance_schedule_items AS item
            WHERE item.schedule_id = $1
              AND item.asset_id = ANY($2::uuid[])
-             AND item.status = 'pending'
-             AND item.planned_date >= $3::date
+             AND (
+               ($4::boolean AND item.status = 'pending' AND item.planned_date >= $3::date)
+               OR (
+                 $5::boolean
+                 AND item.status IN ('pending', 'active')
+                 AND item.deadline_date >= $3::date
+               )
+             )
              AND item.report_id IS NULL
              AND item.completion_source IS NULL
              AND item.legacy_history_file_id IS NULL
@@ -223,14 +725,27 @@ export async function syncAssetsIntoMaintenanceSchedules({
                SELECT 1
                FROM maintenance_requests AS request
                WHERE request.schedule_item_id = item.id
+                 AND request.status NOT IN ('abierto', 'vencido')
              )
-           RETURNING item.asset_id`,
-          [schedule.id, scheduleAssetIds, normalizedToday]
+           FOR UPDATE OF item`,
+          [
+            schedule.id,
+            scheduleAssetIds,
+            normalizedToday,
+            replaceFuturePending,
+            replaceOpenCurrent
+          ]
         );
-        if (deleted.rows.length) {
-          totalRemoved += deleted.rows.length;
+        if (replaceable.rows.length) {
+          const removed = await removeReplaceableScheduleItems(
+            client,
+            schedule.id,
+            replaceable.rows.map((item) => item.id)
+          );
+          totalRemoved += removed.itemsRemoved;
+          totalRequestsRemoved += removed.requestsRemoved;
           updatedScheduleIds.add(schedule.id);
-          for (const row of deleted.rows) {
+          for (const row of replaceable.rows) {
             detailsByAsset.get(row.asset_id).itemsRemoved += 1;
             changedAssetIds.add(row.asset_id);
           }
@@ -238,7 +753,7 @@ export async function syncAssetsIntoMaintenanceSchedules({
       }
 
       const existingResult = await client.query(
-        `SELECT asset_id, planned_date, status
+        `SELECT asset_id, planned_date, deadline_date, status
          FROM maintenance_schedule_items
          WHERE schedule_id = $1 AND asset_id = ANY($2::uuid[])`,
         [schedule.id, scheduleAssetIds]
@@ -270,18 +785,18 @@ export async function syncAssetsIntoMaintenanceSchedules({
       const scheduleYearStart = `${schedule.year}-01-01`;
       for (const asset of scheduleAssets) {
         const detail = detailsByAsset.get(asset.id);
-        const notBeforeDate = maximumDate(
+        const availableFrom = maximumDate(
           schedule.year === currentYear ? normalizedToday : scheduleYearStart,
           detail.warrantyReleaseDate
         );
         const assetReferences = asset.area_id
           ? referenceItems.filter((item) => item.area_id === asset.area_id)
           : [];
-        const desired = buildAssetMaintenanceOccurrences({
+        const desired = buildOperationalMaintenanceOccurrences({
           year: schedule.year,
           startDate: scheduleStart,
           frequency: asset.maintenance_frequency,
-          notBeforeDate,
+          availableFrom,
           referenceItems: assetReferences,
           locationId: asset.location_id
         });
@@ -291,7 +806,7 @@ export async function syncAssetsIntoMaintenanceSchedules({
         );
         for (const item of existing) {
           const plannedDate = dateOnlyFromDatabase(item.planned_date);
-          if (plannedDate >= notBeforeDate) {
+          if (dateOnlyFromDatabase(item.deadline_date) >= availableFrom) {
             detail.firstPlannedDate = minimumDate(detail.firstPlannedDate, plannedDate);
           }
         }
@@ -301,7 +816,8 @@ export async function syncAssetsIntoMaintenanceSchedules({
           additions.push({
             assetId: asset.id,
             frequency: asset.maintenance_frequency,
-            ...occurrence
+            ...occurrence,
+            status: maintenanceItemStatus(occurrence, normalizedToday, schedule.status)
           });
           detail.itemsAdded += 1;
           changedAssetIds.add(asset.id);
@@ -314,27 +830,46 @@ export async function syncAssetsIntoMaintenanceSchedules({
 
       if (additions.length) {
         const programmingConfirmed = schedule.status === 'approved';
-        await client.query(
+        const inserted = await client.query(
           `INSERT INTO maintenance_schedule_items
-             (schedule_id, asset_id, frequency, planned_date, deadline_date,
+             (schedule_id, asset_id, frequency, planned_date, deadline_date, status,
               programming_confirmed, programmed_at, programmed_by)
            SELECT $1, data.asset_id, data.frequency, data.planned_date, data.deadline_date,
-                  $6,
-                  CASE WHEN $6 THEN NOW() ELSE NULL END,
-                  CASE WHEN $6 THEN $7::uuid ELSE NULL END
-           FROM UNNEST($2::uuid[], $3::text[], $4::date[], $5::date[])
-             AS data(asset_id, frequency, planned_date, deadline_date)`,
+                  data.item_status, $7,
+                  CASE WHEN $7 THEN NOW() ELSE NULL END,
+                  CASE WHEN $7 THEN $8::uuid ELSE NULL END
+           FROM UNNEST($2::uuid[], $3::text[], $4::date[], $5::date[], $6::text[])
+             AS data(asset_id, frequency, planned_date, deadline_date, item_status)
+           RETURNING id, asset_id, planned_date, deadline_date, status`,
           [
             schedule.id,
             additions.map((item) => item.assetId),
             additions.map((item) => item.frequency),
             additions.map((item) => item.plannedDate),
             additions.map((item) => item.deadlineDate),
+            additions.map((item) => item.status),
             programmingConfirmed,
             actorUserId || schedule.created_by
           ]
         );
-        totalAdded += additions.length;
+        totalAdded += inserted.rows.length;
+        for (const item of inserted.rows) {
+          if (item.status !== 'active') continue;
+          totalActiveAdded += 1;
+          const detail = detailsByAsset.get(item.asset_id);
+          if (detail) detail.activeItemsAdded += 1;
+          const created = await createActivePreventiveRequest(client, {
+            clientId,
+            scheduleId: schedule.id,
+            scheduleItemId: item.id,
+            assetId: item.asset_id,
+            plannedDate: dateOnlyFromDatabase(item.planned_date),
+            deadlineDate: dateOnlyFromDatabase(item.deadline_date),
+            requestedBy: actorUserId || schedule.created_by
+          });
+          totalRequestsCreated += created;
+          if (detail) detail.requestsCreated += created;
+        }
         updatedScheduleIds.add(schedule.id);
       }
 
@@ -375,6 +910,10 @@ export async function syncAssetsIntoMaintenanceSchedules({
       schedulesUpdated: updatedScheduleIds.size,
       itemsAdded: totalAdded,
       itemsRemoved: totalRemoved,
+      requestsRemoved: totalRequestsRemoved,
+      activeItemsAdded: totalActiveAdded,
+      requestsCreated: totalRequestsCreated,
+      historicalEvidenceRequired: [],
       assets: details
     };
   });

@@ -273,7 +273,9 @@ import {
   findScheduleItemForAsset,
   deleteDraftSchedule,
   setScheduleEngineerEditAccess,
-  syncAssetsIntoMaintenanceSchedules
+  syncAssetsIntoMaintenanceSchedules,
+  previewApprovedAssetScheduleProgramming,
+  applyAssetScheduleProgramming
 } from './schedules.js';
 import {
   createTrainingScheduleWithItems,
@@ -364,6 +366,7 @@ import {
   formatDateOnly as formatScheduleDate,
   frequencyToMonths as scheduleFrequencyToMonths,
   normalizeCalibrationItemUpdates,
+  normalizeAssetScheduleProgrammingSelection,
   normalizeDateOnly,
   normalizeMaintenanceItemUpdates,
   normalizePeriodicity,
@@ -7238,6 +7241,17 @@ function parseJsonArray(value) {
   }
 }
 
+function parseJsonObject(value, label) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch {
+    // The validation message below is intentionally consistent for malformed JSON and wrong shapes.
+  }
+  throw new ScheduleValidationError(`${label} no tiene un formato válido.`);
+}
+
 function assetLabel(asset) {
   if (!asset) return 'Equipo';
   const code = asset.code ? `${asset.code} - ` : '';
@@ -7367,6 +7381,11 @@ function assetScheduleConfigurationChanged(before, after) {
     'maintenance_frequency'
   ]);
   return changedAssetFields(before, after).some((change) => scheduleFields.has(change.field));
+}
+
+function assetSchedulePlacementChanged(before, after) {
+  const placementFields = new Set(['site_id', 'area_id', 'location_id']);
+  return changedAssetFields(before, after).some((change) => placementFields.has(change.field));
 }
 
 async function logEquipmentAudit(req, {
@@ -8845,6 +8864,51 @@ app.post(
   }
 );
 
+app.post(
+  '/biomed/:clientId/assets/:assetId/maintenance-schedule-preview',
+  requireAuth,
+  requirePermission('hb:create'),
+  async (req, res) => {
+    const { clientId, assetId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    try {
+      const client = await getClientById(clientId);
+      if (!client?.schema_name) {
+        return res.status(404).json({ message: 'Cliente no encontrado.' });
+      }
+      const maintenanceFrequency = normalizePeriodicity(req.body?.maintenanceFrequency);
+      const preview = await previewApprovedAssetScheduleProgramming({
+        clientId,
+        schema: client.schema_name,
+        assetId,
+        today: todayInBogota(),
+        configuration: {
+          maintenanceFrequency,
+          areaId: req.body?.areaId || null,
+          locationId: req.body?.locationId || null,
+          acquisitionDate: req.body?.acquisitionDate || null,
+          warrantyYears: req.body?.warrantyYears ?? null
+        }
+      });
+      const frequencyChanged =
+        String(preview.previousFrequency || '').trim().toLowerCase() !== preview.frequency;
+      return res.json({
+        ...preview,
+        requiresConfirmation: frequencyChanged && preview.requiresConfirmation,
+        schedules: frequencyChanged ? preview.schedules : []
+      });
+    } catch (error) {
+      return respondScheduleError(
+        res,
+        error,
+        'No se pudieron preparar las fechas del cronograma aprobado.'
+      );
+    }
+  }
+);
+
 app.put(
   '/biomed/:clientId/assets/:assetId',
   requireAuth,
@@ -8893,7 +8957,8 @@ app.put(
       assetCategory,
       accessories,
       cleaning,
-      recommendations
+      recommendations,
+      maintenanceScheduleProgramming
     } = body;
     if (!code || !name) {
       return res.status(400).json({ message: 'Código y nombre son requeridos.' });
@@ -8909,6 +8974,54 @@ app.put(
       if (currentCategory !== requestedAssetCategory) {
         return res.status(409).json({
           message: 'La categoría de la hoja de vida se define al crearla y no puede cambiarse al editar.'
+        });
+      }
+      const requestedMaintenanceFrequency = normalizePeriodicity(maintenanceFrequency);
+      const requestedWarrantyYears = warrantyYears ? Number(warrantyYears) : null;
+      const requestedAcquisitionDate = acquisitionDate || null;
+      const frequencyChanged =
+        String(beforeAsset.maintenance_frequency || '').trim().toLowerCase()
+        !== requestedMaintenanceFrequency;
+      const assetClient = await getClientById(clientId);
+      if (!assetClient?.schema_name) {
+        return res.status(404).json({ message: 'Cliente no encontrado.' });
+      }
+      let scheduleProgrammingPreview = null;
+      let scheduleProgrammingSelection = null;
+      if (frequencyChanged) {
+        scheduleProgrammingPreview = await previewApprovedAssetScheduleProgramming({
+          clientId,
+          schema: assetClient.schema_name,
+          assetId,
+          today: todayInBogota(),
+          configuration: {
+            maintenanceFrequency: requestedMaintenanceFrequency,
+            areaId: areaId || null,
+            locationId: locationId || null,
+            acquisitionDate: requestedAcquisitionDate,
+            warrantyYears: requestedWarrantyYears
+          }
+        });
+        if (scheduleProgrammingPreview.requiresConfirmation) {
+          scheduleProgrammingSelection = parseJsonObject(
+            maintenanceScheduleProgramming,
+            'La programación del mantenimiento'
+          );
+          if (!scheduleProgrammingSelection) {
+            return res.status(409).json({
+              message: 'Selecciona las fechas de mantenimiento antes de guardar la nueva periodicidad.',
+              code: 'MAINTENANCE_SCHEDULE_DATES_REQUIRED'
+            });
+          }
+          normalizeAssetScheduleProgrammingSelection(
+            scheduleProgrammingSelection,
+            scheduleProgrammingPreview.schedules
+          );
+        }
+      }
+      if (maintenanceScheduleProgramming && !scheduleProgrammingPreview?.requiresConfirmation) {
+        return res.status(409).json({
+          message: 'La programación enviada ya no corresponde a un cambio de periodicidad pendiente.'
         });
       }
       const updateResult = await updateAsset(clientId, assetId, {
@@ -8932,7 +9045,7 @@ app.put(
         contractText,
         acquisitionDate,
         usefulLifeYears: usefulLifeYears ? Number(usefulLifeYears) : null,
-        warrantyYears: warrantyYears ? Number(warrantyYears) : null,
+        warrantyYears: requestedWarrantyYears,
         supplierName,
         supplierPhone,
         supplierEmail,
@@ -8942,7 +9055,7 @@ app.put(
         tempMax: tempMax ? Number(tempMax) : null,
         humidityMin: humidityMin ? Number(humidityMin) : null,
         humidityMax: humidityMax ? Number(humidityMax) : null,
-        maintenanceFrequency,
+        maintenanceFrequency: requestedMaintenanceFrequency,
         requiresCalibration: String(requiresCalibration) === 'true',
         calibrationFrequency,
         assetCategory: currentCategory,
@@ -8994,15 +9107,24 @@ app.put(
       await replaceRecommendations(clientId, assetId, recommendationsList);
 
       const updatedAsset = await getAssetById(clientId, assetId);
-      const assetClient = await getClientById(clientId);
-      const scheduleSyncResult = await syncAssetsIntoMaintenanceSchedules({
-        clientId,
-        schema: assetClient.schema_name,
-        assetIds: [assetId],
-        today: todayInBogota(),
-        actorUserId: req.user.sub,
-        replaceFuturePending: assetScheduleConfigurationChanged(beforeAsset, updatedAsset)
-      });
+      const scheduleSyncResult = scheduleProgrammingPreview?.requiresConfirmation
+        ? await applyAssetScheduleProgramming({
+            clientId,
+            schema: assetClient.schema_name,
+            assetId,
+            today: todayInBogota(),
+            actorUserId: req.user.sub,
+            selection: scheduleProgrammingSelection
+          })
+        : await syncAssetsIntoMaintenanceSchedules({
+            clientId,
+            schema: assetClient.schema_name,
+            assetIds: [assetId],
+            today: todayInBogota(),
+            actorUserId: req.user.sub,
+            replaceFuturePending: assetScheduleConfigurationChanged(beforeAsset, updatedAsset),
+            replaceOpenCurrent: assetSchedulePlacementChanged(beforeAsset, updatedAsset)
+          });
       const scheduleSync = scheduleSyncResult.assets[0] || null;
       await logEquipmentAudit(req, {
         action: 'ASSET_UPDATE',
@@ -9092,7 +9214,8 @@ app.post(
         assetIds: [assetId],
         today: todayInBogota(),
         actorUserId: req.user.sub,
-        replaceFuturePending: true
+        replaceFuturePending: true,
+        replaceOpenCurrent: true
       });
       const scheduleSync = scheduleSyncResult.assets[0] || null;
       const dir = await ensureClientLogoDir(clientId);
@@ -9142,6 +9265,9 @@ app.post(
         scheduleSync
       });
     } catch (error) {
+      if (error instanceof ScheduleValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo mover el equipo.' });
     }

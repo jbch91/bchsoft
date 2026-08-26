@@ -573,13 +573,156 @@
           </div>
         </div>
 
-        <button type="submit" *ngIf="formMode === 'full' || isLastStep()">
-          {{ editingAssetId ? 'Guardar cambios' : 'Crear' }}
+        <button
+          type="submit"
+          *ngIf="formMode === 'full' || isLastStep()"
+          [disabled]="assetSaving || scheduleProgrammingLoading"
+        >
+          {{ scheduleProgrammingLoading
+            ? 'Preparando fechas...'
+            : assetSaving
+              ? 'Guardando...'
+              : editingAssetId ? 'Guardar cambios' : 'Crear' }}
         </button>
-        <button type="button" class="ghost" (click)="cancelEdit()">Cancelar</button>
+        <button type="button" class="ghost" (click)="cancelEdit()" [disabled]="assetSaving">
+          Cancelar
+        </button>
         </form>
         <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
         <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="modal-backdrop schedule-programming-backdrop"
+    *ngIf="scheduleProgrammingPreview as programming"
+  >
+    <div class="modal-shell schedule-programming-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div>
+          <span>Cambio de periodicidad</span>
+          <h2>Confirmar fechas de mantenimiento</h2>
+        </div>
+        <button
+          type="button"
+          class="modal-close"
+          (click)="cancelScheduleProgramming()"
+          [disabled]="assetSaving"
+        >
+          Volver
+        </button>
+      </div>
+
+      <div class="schedule-programming-summary">
+        <div>
+          <span>Equipo</span>
+          <strong>{{ code }} · {{ name }}</strong>
+        </div>
+        <div>
+          <span>Periodicidad</span>
+          <strong>{{ programming.previousFrequency || 'Sin definir' }} → {{ programming.frequency }}</strong>
+        </div>
+        <div>
+          <span>Ventanas reconstruidas</span>
+          <strong>{{ scheduleProgrammingWindowCount }}</strong>
+        </div>
+      </div>
+
+      <div class="schedule-programming-notices">
+        <p class="schedule-programming-notice">
+          Se conservarán los mantenimientos realizados, firmados, históricos o con una operación iniciada.
+          Solo se reemplazarán registros sin evidencia ni trabajo en curso.
+        </p>
+
+        <p class="schedule-programming-history-notice" *ngIf="scheduleProgrammingHistoricalCount">
+          <strong>{{ scheduleProgrammingHistoricalCount }} evidencia(s) histórica(s) pendiente(s).</strong>
+          Los periodos anteriores quedarán vencidos y, después de guardar, se abrirá “Migrar PDF físico”
+          para cargar cada mantenimiento escaneado.
+          <span *ngIf="!auth.hasPermission('asset_history:upload')">
+            Necesitarás el permiso temporal para migrar PDFs históricos.
+          </span>
+        </p>
+
+        <p class="schedule-programming-current-notice" *ngIf="scheduleProgrammingCurrentCount">
+          <strong>{{ scheduleProgrammingCurrentCount }} ventana(s) vigente(s).</strong>
+          La fecha propuesta permite activar el mantenimiento actual y crear su solicitud preventiva.
+        </p>
+      </div>
+
+      <div class="schedule-programming-content">
+        <section class="schedule-programming-year" *ngFor="let schedule of programming.schedules">
+          <div class="schedule-programming-year-header">
+            <div>
+              <span>Cronograma aprobado</span>
+              <h3>Mantenimiento {{ schedule.year }}</h3>
+            </div>
+            <small>
+              {{ schedule.itemsToReplace }} pendiente(s) por reemplazar ·
+              {{ schedule.preservedItems }} registro(s) conservado(s) ·
+              {{ schedule.historicalItems }} histórico(s) ·
+              {{ schedule.currentItems }} vigente(s) ·
+              {{ schedule.futureItems }} futuro(s)
+            </small>
+          </div>
+
+          <div class="schedule-date-list" *ngIf="schedule.items.length; else noFutureWindows">
+            <label class="schedule-date-row" *ngFor="let item of schedule.items">
+              <span class="schedule-date-heading">
+                <span class="schedule-date-month">{{ formatScheduleMonth(item.month) }}</span>
+                <small class="schedule-date-phase" [ngClass]="item.phase">
+                  {{ scheduleProgrammingPhaseLabel(item) }}
+                </small>
+              </span>
+              <span class="schedule-date-input">
+                <small>{{ scheduleProgrammingDateLabel(item) }}</small>
+              <input
+                type="date"
+                [(ngModel)]="item.plannedDate"
+                [min]="item.minDate"
+                [max]="item.maxDate"
+                [disabled]="assetSaving"
+              />
+              </span>
+              <span class="schedule-date-deadline">
+                Fecha límite: {{ formatIsoDateForDisplay(item.deadlineDate) }}
+              </span>
+              <small class="schedule-date-error" *ngIf="scheduleProgrammingDateError(item) as dateError">
+                {{ dateError }}
+              </small>
+            </label>
+          </div>
+          <ng-template #noFutureWindows>
+            <p class="schedule-no-windows">
+              La nueva periodicidad no deja otra ventana aplicable en {{ schedule.year }}.
+              Al confirmar se retirarán únicamente los pendientes futuros anteriores.
+            </p>
+          </ng-template>
+        </section>
+      </div>
+
+      <p class="error" *ngIf="scheduleProgrammingError">{{ scheduleProgrammingError }}</p>
+
+      <div class="schedule-programming-actions">
+        <button
+          type="button"
+          class="ghost"
+          (click)="cancelScheduleProgramming()"
+          [disabled]="assetSaving"
+        >
+          Revisar hoja de vida
+        </button>
+        <button
+          type="button"
+          class="primary"
+          (click)="confirmScheduleProgramming()"
+          [disabled]="!scheduleProgrammingValid || assetSaving"
+        >
+          {{ assetSaving ? 'Guardando...' : 'Guardar hoja de vida y cronograma' }}
+          <ng-container *ngIf="!assetSaving && scheduleProgrammingHistoricalCount">
+            y continuar con PDFs
+          </ng-container>
+        </button>
       </div>
     </div>
   </div>

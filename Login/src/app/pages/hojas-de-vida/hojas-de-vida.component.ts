@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnDestroy } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -8,6 +8,9 @@ import {
   BiomedService,
   CatalogReviewDto,
   EquipmentCatalogItemDto,
+  MaintenanceScheduleProgrammingItemDto,
+  MaintenanceScheduleProgrammingPreviewDto,
+  MaintenanceScheduleProgrammingSelectionDto,
   MaintenanceScheduleSyncBatchDto,
   MaintenanceScheduleSyncDto
 } from '../../biomed/biomed.service';
@@ -139,6 +142,8 @@ interface AssetView extends InventoryPanelItem {
   styleUrl: './hojas-de-vida.component.scss'
 })
 export class HojasDeVidaComponent implements OnDestroy {
+  @ViewChild(InventoryPanelComponent) private inventoryPanel?: InventoryPanelComponent;
+
   readonly assetCategory: AssetCategory;
   private readonly apiBase = getApiBase();
   private readonly publicBase = getPublicBase();
@@ -161,6 +166,11 @@ export class HojasDeVidaComponent implements OnDestroy {
   successMessage = '';
   importPanelOpen = false;
   permissionsRefreshLoading = false;
+  assetSaving = false;
+  scheduleProgrammingLoading = false;
+  scheduleProgrammingPreview: MaintenanceScheduleProgrammingPreviewDto | null = null;
+  scheduleProgrammingError = '';
+  private originalMaintenanceFrequency = '';
   assetModalMode: 'create' | 'edit' | 'view' | null = null;
   selectedAssetForModal: AssetView | null = null;
   assetDetailsLoading = false;
@@ -1423,25 +1433,49 @@ export class HojasDeVidaComponent implements OnDestroy {
   private scheduleSyncNotice(sync?: MaintenanceScheduleSyncDto | null): string {
     if (!sync) return '';
     const firstDate = sync.firstPlannedDate ? this.formatIsoDateForDisplay(sync.firstPlannedDate) : '';
-    if (sync.status === 'scheduled') {
+    const notes: string[] = [];
+    if (sync.itemsRemoved) {
       if (sync.itemsAdded) {
-        return ` Se incorporó al cronograma con ${sync.itemsAdded} mantenimiento(s)${firstDate ? ` desde el ${firstDate}` : ''}.`;
+        notes.push(
+          `El cronograma quedó reprogramado: ${sync.itemsRemoved} registro(s) sin ejecutar reemplazado(s) por ${sync.itemsAdded} ventana(s) correcta(s)${firstDate ? ` desde el ${firstDate}` : ''}.`
+        );
+      } else {
+        notes.push(
+          `Se retiraron ${sync.itemsRemoved} mantenimiento(s) sin ejecutar que ya no corresponden a la nueva periodicidad.`
+        );
       }
-      return ` El equipo ya está incorporado en el cronograma${firstDate ? ` desde el ${firstDate}` : ''}.`;
-    }
-    if (sync.status === 'warranty') {
+    } else if (sync.status === 'scheduled') {
+      if (sync.itemsAdded) {
+        notes.push(
+          `Se incorporó al cronograma con ${sync.itemsAdded} mantenimiento(s)${firstDate ? ` desde el ${firstDate}` : ''}.`
+        );
+      } else {
+        notes.push(
+          `El equipo ya está incorporado en el cronograma${firstDate ? ` desde el ${firstDate}` : ''}.`
+        );
+      }
+    } else if (sync.status === 'warranty') {
       const releaseDate = sync.warrantyReleaseDate
         ? this.formatIsoDateForDisplay(sync.warrantyReleaseDate)
         : '';
-      return ` Quedó en espera por garantía${releaseDate ? ` hasta el ${releaseDate}` : ''} y entrará en la siguiente vigencia aplicable.`;
+      notes.push(
+        `Quedó en espera por garantía${releaseDate ? ` hasta el ${releaseDate}` : ''} y entrará en la siguiente vigencia aplicable.`
+      );
+    } else if (sync.status === 'next_cycle') {
+      notes.push('No quedan ventanas operativas en la vigencia actual; se incluirá en el siguiente cronograma.');
+    } else if (sync.status === 'warranty_data_required') {
+      notes.push(`El cronograma quedó pendiente: ${sync.warrantyError || 'revisa la fecha de adquisición y la garantía.'}`);
+    } else if (!sync.itemsRemoved) {
+      notes.push('Se incluirá automáticamente cuando exista un cronograma para esta vigencia.');
     }
-    if (sync.status === 'next_cycle') {
-      return ' No quedan ventanas aplicables en la vigencia actual; se incluirá en el siguiente cronograma.';
+    if (sync.activeItemsAdded) {
+      notes.push(`${sync.activeItemsAdded} mantenimiento(s) vigente(s) quedó(aron) activo(s) para realizar.`);
     }
-    if (sync.status === 'warranty_data_required') {
-      return ` El cronograma quedó pendiente: ${sync.warrantyError || 'revisa la fecha de adquisición y la garantía.'}`;
+    const evidenceCount = sync.historicalEvidenceRequired?.length ?? 0;
+    if (evidenceCount) {
+      notes.push(`${evidenceCount} periodo(s) anterior(es) requieren conciliar su PDF escaneado.`);
     }
-    return ' Se incluirá automáticamente cuando exista un cronograma para esta vigencia.';
+    return notes.length ? ` ${notes.join(' ')}` : '';
   }
 
   private scheduleSyncBatchNotice(sync?: MaintenanceScheduleSyncBatchDto | null): string {
@@ -1458,7 +1492,7 @@ export class HojasDeVidaComponent implements OnDestroy {
     return parts.length ? ` Programación: ${parts.join(', ')}.` : '';
   }
 
-  private formatIsoDateForDisplay(value: string): string {
+  formatIsoDateForDisplay(value: string): string {
     const [year, month, day] = value.slice(0, 10).split('-');
     return year && month && day ? `${day}/${month}/${year}` : value;
   }
@@ -1697,7 +1731,107 @@ export class HojasDeVidaComponent implements OnDestroy {
     }
   }
 
-  async onCreateAsset(): Promise<void> {
+  private maintenanceFrequencyChanged(): boolean {
+    return Boolean(
+      this.editingAssetId
+      && this.normalizeFrequency(this.maintenanceFrequency) !== this.originalMaintenanceFrequency
+    );
+  }
+
+  private scheduleProgrammingSelection(): MaintenanceScheduleProgrammingSelectionDto | undefined {
+    if (!this.scheduleProgrammingPreview?.requiresConfirmation) return undefined;
+    return {
+      schedules: this.scheduleProgrammingPreview.schedules.map((schedule) => ({
+        scheduleId: schedule.scheduleId,
+        items: schedule.items.map((item) => ({
+          month: item.month,
+          plannedDate: item.plannedDate
+        }))
+      }))
+    };
+  }
+
+  scheduleProgrammingDateError(item: MaintenanceScheduleProgrammingItemDto): string {
+    if (!item.plannedDate) return 'Selecciona una fecha.';
+    if (item.plannedDate < item.minDate || item.plannedDate > item.maxDate) {
+      return `Debe estar entre ${this.formatIsoDateForDisplay(item.minDate)} y ${this.formatIsoDateForDisplay(item.maxDate)}.`;
+    }
+    const date = new Date(`${item.plannedDate}T00:00:00Z`);
+    if (Number.isNaN(date.getTime())) return 'La fecha no es válida.';
+    if (date.getUTCDay() === 0 || date.getUTCDay() === 6) {
+      return 'Selecciona un día hábil.';
+    }
+    return '';
+  }
+
+  get scheduleProgrammingValid(): boolean {
+    return Boolean(
+      this.scheduleProgrammingPreview?.schedules.every((schedule) =>
+        schedule.items.every((item) => !this.scheduleProgrammingDateError(item))
+      )
+    );
+  }
+
+  get scheduleProgrammingWindowCount(): number {
+    return this.scheduleProgrammingPreview?.schedules.reduce(
+      (total, schedule) => total + schedule.items.length,
+      0
+    ) ?? 0;
+  }
+
+  get scheduleProgrammingHistoricalCount(): number {
+    return this.scheduleProgrammingPreview?.schedules.reduce(
+      (total, schedule) => total + schedule.historicalItems,
+      0
+    ) ?? 0;
+  }
+
+  get scheduleProgrammingCurrentCount(): number {
+    return this.scheduleProgrammingPreview?.schedules.reduce(
+      (total, schedule) => total + schedule.currentItems,
+      0
+    ) ?? 0;
+  }
+
+  scheduleProgrammingPhaseLabel(item: MaintenanceScheduleProgrammingItemDto): string {
+    return {
+      historical: 'PDF histórico requerido',
+      current: 'Ventana vigente',
+      future: 'Próximo mantenimiento'
+    }[item.phase];
+  }
+
+  scheduleProgrammingDateLabel(item: MaintenanceScheduleProgrammingItemDto): string {
+    if (item.phase === 'historical') return 'Fecha del mantenimiento físico';
+    if (item.phase === 'current') return 'Fecha para activar o realizar';
+    return 'Fecha programada';
+  }
+
+  formatScheduleMonth(value: string): string {
+    const [year, month] = value.split('-').map(Number);
+    if (!year || !month) return value;
+    const formatted = new Intl.DateTimeFormat('es-CO', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC'
+    }).format(new Date(Date.UTC(year, month - 1, 1)));
+    return formatted.charAt(0).toLocaleUpperCase('es-CO') + formatted.slice(1);
+  }
+
+  cancelScheduleProgramming(): void {
+    if (this.assetSaving) return;
+    this.scheduleProgrammingPreview = null;
+    this.scheduleProgrammingError = '';
+  }
+
+  async confirmScheduleProgramming(): Promise<void> {
+    if (!this.scheduleProgrammingValid || this.assetSaving) return;
+    this.scheduleProgrammingError = '';
+    await this.onCreateAsset(true);
+  }
+
+  async onCreateAsset(skipScheduleProgrammingPreview = false): Promise<void> {
+    if (this.assetSaving || this.scheduleProgrammingLoading) return;
     if (!this.selectedClientId || !this.code || !this.name) {
       this.errorMessage = 'Código y nombre son obligatorios.';
       return;
@@ -1721,8 +1855,42 @@ export class HojasDeVidaComponent implements OnDestroy {
 
     this.errorMessage = '';
     this.successMessage = '';
+    if (this.editingAssetId && this.maintenanceFrequencyChanged() && !skipScheduleProgrammingPreview) {
+      this.scheduleProgrammingLoading = true;
+      try {
+        const preview = await this.biomed.previewAssetMaintenanceSchedule(
+          this.selectedClientId,
+          this.editingAssetId,
+          {
+            maintenanceFrequency: this.maintenanceFrequency,
+            areaId: this.areaId || null,
+            locationId: this.locationId || null,
+            acquisitionDate: this.acquisitionDate || null,
+            warrantyYears: this.warrantyYears
+          }
+        );
+        if (preview.requiresConfirmation) {
+          this.scheduleProgrammingPreview = preview;
+          this.scheduleProgrammingError = '';
+          return;
+        }
+      } catch (error) {
+        console.error(error);
+        this.errorMessage = this.extractErrorMessage(error)
+          || 'No se pudieron preparar las fechas del cronograma aprobado.';
+        return;
+      } finally {
+        this.scheduleProgrammingLoading = false;
+        this.cdr.detectChanges();
+      }
+    }
+    this.assetSaving = true;
+    let historicalFollowUpAssetId = '';
+    let historicalFollowUpDates: string[] = [];
+    let historicalFollowUpCount = 0;
     try {
       if (this.editingAssetId) {
+        const editedAssetId = this.editingAssetId;
         const result = await this.biomed.updateAsset(this.selectedClientId, this.editingAssetId, {
           code: this.code.trim(),
           name: this.catalogStorageValue(this.name),
@@ -1768,9 +1936,16 @@ export class HojasDeVidaComponent implements OnDestroy {
           accessories: this.accessories,
           cleaning: this.cleaning,
           recommendations: this.recommendations,
+          maintenanceScheduleProgramming: this.scheduleProgrammingSelection(),
           manualOperacion: this.manualOperacion,
           manualServicio: this.manualServicio
         });
+        const evidence = result.scheduleSync?.historicalEvidenceRequired ?? [];
+        if (evidence.length) {
+          historicalFollowUpAssetId = editedAssetId;
+          historicalFollowUpDates = evidence.map((item) => item.plannedDate);
+          historicalFollowUpCount = evidence.length;
+        }
         this.successMessage = `Hoja de vida actualizada.${this.catalogReviewNotice(result.catalogReview)}${this.scheduleSyncNotice(result.scheduleSync)}`;
       } else {
         const result = await this.biomed.createAsset(this.selectedClientId, {
@@ -1828,9 +2003,27 @@ export class HojasDeVidaComponent implements OnDestroy {
       this.assetModalMode = null;
       this.selectedAssetForModal = null;
       await Promise.all([this.loadAssets(), this.loadEquipmentCatalog()]);
+      if (historicalFollowUpAssetId && historicalFollowUpDates.length) {
+        if (this.auth.hasPermission('asset_history:upload')) {
+          const asset = this.assets.find((item) => item.id === historicalFollowUpAssetId);
+          if (asset && this.inventoryPanel) {
+            await this.inventoryPanel.openHistoricalUpload(asset, historicalFollowUpDates);
+          }
+        } else {
+          this.successMessage += ` Solicita el permiso temporal “Migrar PDFs históricos de equipos” para cargar ${historicalFollowUpCount} evidencia(s) pendiente(s).`;
+        }
+      }
     } catch (error) {
       console.error(error);
-      this.errorMessage = this.extractErrorMessage(error) || 'No se pudo guardar la hoja de vida.';
+      const message = this.extractErrorMessage(error) || 'No se pudo guardar la hoja de vida.';
+      if (this.scheduleProgrammingPreview) {
+        this.scheduleProgrammingError = message;
+      } else {
+        this.errorMessage = message;
+      }
+    } finally {
+      this.assetSaving = false;
+      this.cdr.detectChanges();
     }
   }
 
@@ -1868,6 +2061,11 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.humidityMin = null;
     this.humidityMax = null;
     this.maintenanceFrequency = 'mensual';
+    this.originalMaintenanceFrequency = '';
+    this.scheduleProgrammingPreview = null;
+    this.scheduleProgrammingError = '';
+    this.scheduleProgrammingLoading = false;
+    this.assetSaving = false;
     this.requiresCalibration = false;
     this.calibrationFrequency = 'anual';
     this.requiresSanitaryClassification = !this.isIndustrialAssetModule;
@@ -1923,6 +2121,7 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.tempMax = data.temp_max ?? null;
     this.humidityMin = data.humidity_min ?? null;
     this.humidityMax = data.humidity_max ?? null;
+    this.originalMaintenanceFrequency = this.normalizeFrequency(data.maintenance_frequency ?? '');
     this.maintenanceFrequency = data.maintenance_frequency ?? 'mensual';
     this.requiresCalibration = this.isIndustrialAssetModule ? false : (data.requires_calibration ?? false);
     this.calibrationFrequency = data.calibration_frequency ?? 'anual';

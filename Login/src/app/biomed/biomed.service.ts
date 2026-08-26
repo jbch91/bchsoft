@@ -96,6 +96,10 @@ export interface MaintenanceScheduleSyncDto {
   scheduleIds: string[];
   itemsAdded: number;
   itemsRemoved: number;
+  requestsRemoved?: number;
+  activeItemsAdded?: number;
+  requestsCreated?: number;
+  historicalEvidenceRequired?: MaintenanceHistoricalEvidenceDto[];
   firstPlannedDate: string | null;
   latestScheduleYear: number | null;
 }
@@ -104,7 +108,57 @@ export interface MaintenanceScheduleSyncBatchDto {
   schedulesUpdated: number;
   itemsAdded: number;
   itemsRemoved: number;
+  requestsRemoved?: number;
+  activeItemsAdded?: number;
+  requestsCreated?: number;
+  historicalEvidenceRequired?: MaintenanceHistoricalEvidenceDto[];
   assets: MaintenanceScheduleSyncDto[];
+}
+
+export interface MaintenanceHistoricalEvidenceDto {
+  scheduleId: string;
+  scheduleItemId: string;
+  scheduleYear: number;
+  plannedDate: string;
+  deadlineDate: string;
+}
+
+export interface MaintenanceScheduleProgrammingItemDto {
+  month: string;
+  plannedDate: string;
+  minDate: string;
+  maxDate: string;
+  deadlineDate: string;
+  phase: 'historical' | 'current' | 'future';
+}
+
+export interface MaintenanceScheduleProgrammingScheduleDto {
+  scheduleId: string;
+  year: number;
+  status: 'approved';
+  itemsToReplace: number;
+  preservedItems: number;
+  historicalItems: number;
+  currentItems: number;
+  futureItems: number;
+  items: MaintenanceScheduleProgrammingItemDto[];
+}
+
+export interface MaintenanceScheduleProgrammingPreviewDto {
+  assetId: string;
+  previousFrequency: string | null;
+  frequency: string;
+  effectiveToday: string;
+  warrantyReleaseDate: string | null;
+  requiresConfirmation: boolean;
+  schedules: MaintenanceScheduleProgrammingScheduleDto[];
+}
+
+export interface MaintenanceScheduleProgrammingSelectionDto {
+  schedules: Array<{
+    scheduleId: string;
+    items: Array<{ month: string; plannedDate: string }>;
+  }>;
 }
 
 export interface CatalogMutationResultDto {
@@ -413,9 +467,19 @@ export class BiomedService {
     areaId: string;
     locationId: string;
     notes?: string;
-  }): Promise<{ ok: boolean; movementId: string; pdfPath: string }> {
+  }): Promise<{
+    ok: boolean;
+    movementId: string;
+    pdfPath: string;
+    scheduleSync?: MaintenanceScheduleSyncDto | null;
+  }> {
     return firstValueFrom(
-      this.http.post<{ ok: boolean; movementId: string; pdfPath: string }>(
+      this.http.post<{
+        ok: boolean;
+        movementId: string;
+        pdfPath: string;
+        scheduleSync?: MaintenanceScheduleSyncDto | null;
+      }>(
         `${this.apiBase}/biomed/${clientId}/assets/${assetId}/move`,
         payload
       )
@@ -544,6 +608,7 @@ export class BiomedService {
     accessories?: any[];
     cleaning?: any[];
     recommendations?: any[];
+    maintenanceScheduleProgramming?: MaintenanceScheduleProgrammingSelectionDto;
     manualOperacion?: File | null;
     manualServicio?: File | null;
   }): Promise<CatalogMutationResultDto> {
@@ -592,6 +657,12 @@ export class BiomedService {
     if (payload.accessories) form.append('accessories', JSON.stringify(payload.accessories));
     if (payload.cleaning) form.append('cleaning', JSON.stringify(payload.cleaning));
     if (payload.recommendations) form.append('recommendations', JSON.stringify(payload.recommendations));
+    if (payload.maintenanceScheduleProgramming) {
+      form.append(
+        'maintenanceScheduleProgramming',
+        JSON.stringify(payload.maintenanceScheduleProgramming)
+      );
+    }
     if (payload.manualOperacion) form.append('manualOperacion', payload.manualOperacion);
     if (payload.manualServicio) form.append('manualServicio', payload.manualServicio);
 
@@ -599,6 +670,25 @@ export class BiomedService {
       this.http.put<CatalogMutationResultDto>(
         `${this.apiBase}/biomed/${clientId}/assets/${assetId}`,
         form
+      )
+    );
+  }
+
+  async previewAssetMaintenanceSchedule(
+    clientId: string,
+    assetId: string,
+    payload: {
+      maintenanceFrequency: string;
+      areaId?: string | null;
+      locationId?: string | null;
+      acquisitionDate?: string | null;
+      warrantyYears?: number | null;
+    }
+  ): Promise<MaintenanceScheduleProgrammingPreviewDto> {
+    return firstValueFrom(
+      this.http.post<MaintenanceScheduleProgrammingPreviewDto>(
+        `${this.apiBase}/biomed/${clientId}/assets/${assetId}/maintenance-schedule-preview`,
+        payload
       )
     );
   }

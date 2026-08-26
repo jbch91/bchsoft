@@ -4,7 +4,8 @@ import { FormsModule } from '@angular/forms';
 import {
   AssetHistoryItemDto,
   BiomedService,
-  HistoricalMaintenanceOccurrenceDto
+  HistoricalMaintenanceOccurrenceDto,
+  MaintenanceScheduleSyncDto
 } from '../../biomed/biomed.service';
 import { CalibrationService } from '../../calibration/calibration.service';
 import { MaintenanceService } from '../../maintenance/maintenance.service';
@@ -98,6 +99,7 @@ export class InventoryPanelComponent implements OnDestroy {
   historyUploadTitle = 'Mantenimiento preventivo histórico';
   historyUploadDescription = '';
   historicalMaintenanceOccurrences: HistoricalMaintenanceOccurrenceDto[] = [];
+  historicalEvidenceDates: string[] = [];
   selectedHistoricalMaintenanceOccurrenceId = '';
   historicalOccurrencesLoading = false;
   historyUploadLoading = false;
@@ -219,6 +221,10 @@ export class InventoryPanelComponent implements OnDestroy {
 
   get canUploadHistoryFile(): boolean {
     return this.canUploadHistory;
+  }
+
+  get historicalEvidencePendingLabels(): string[] {
+    return this.historicalEvidenceDates.map((date) => this.formatHistoryDate(date));
   }
 
   get activeFilters(): { key: string; label: string }[] {
@@ -528,11 +534,36 @@ export class InventoryPanelComponent implements OnDestroy {
     this.historyFrom = '';
     this.historyTo = '';
     this.historyOrder = 'asc';
+    this.historicalEvidenceDates = [];
     this.resetHistoryUpload();
     await this.loadHistory(true);
     setTimeout(() => {
       const el = document.getElementById(`history-${item.id}`);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 0);
+  }
+
+  async openHistoricalUpload(item: InventoryPanelItem, plannedDates: string[]): Promise<void> {
+    this.expandedAssetId = item.id;
+    this.historyAssetId = item.id;
+    this.movingAssetId = null;
+    this.historyFrom = '';
+    this.historyTo = '';
+    this.historyOrder = 'asc';
+    this.historicalEvidenceDates = Array.from(
+      new Set(plannedDates.map((date) => date.slice(0, 10)).filter(Boolean))
+    ).sort();
+    this.resetHistoryUpload();
+    this.historyUploadDate = this.historicalEvidenceDates[0] || '';
+    await Promise.all([
+      this.loadHistory(true),
+      this.loadHistoricalMaintenanceOccurrences()
+    ]);
+    setTimeout(() => {
+      document.getElementById(`history-${item.id}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
     }, 0);
   }
 
@@ -590,8 +621,24 @@ export class InventoryPanelComponent implements OnDestroy {
       this.historyUploadSuccess = result.reconciliation
         ? 'Mantenimiento histórico conciliado con el cronograma.'
         : 'PDF histórico archivado correctamente.';
+      if (result.reconciliation) {
+        const reconciledMonth = result.reconciliation.plannedDate.slice(0, 7);
+        const matchingIndex = this.historicalEvidenceDates.findIndex(
+          (date) => date.startsWith(reconciledMonth)
+        );
+        if (matchingIndex >= 0) this.historicalEvidenceDates.splice(matchingIndex, 1);
+      }
       this.resetHistoryUpload(true);
-      await this.loadHistory(true);
+      this.historyUploadDate = this.historicalEvidenceDates[0] || '';
+      if (this.historyUploadDate) {
+        await Promise.all([
+          this.loadHistory(true),
+          this.loadHistoricalMaintenanceOccurrences()
+        ]);
+        this.historyUploadSuccess += ` Continúa con ${this.historicalEvidenceDates.length} evidencia(s) pendiente(s).`;
+      } else {
+        await this.loadHistory(true);
+      }
     } catch (error: any) {
       console.error(error);
       this.historyUploadError = error?.error?.message || 'No se pudo cargar el PDF histórico.';
@@ -676,23 +723,39 @@ export class InventoryPanelComponent implements OnDestroy {
     this.moveError = '';
     this.moveSuccess = '';
     try {
-      await this.biomed.moveAsset(this.selectedClientId, this.movingAssetId, {
+      const result = await this.biomed.moveAsset(this.selectedClientId, this.movingAssetId, {
         code: this.moveForm.code.trim(),
         siteId: this.moveForm.siteId,
         areaId: this.moveForm.areaId,
         locationId: this.moveForm.locationId,
         notes: this.moveForm.notes.trim()
       });
-      this.moveSuccess = 'Movimiento guardado y reporte PDF generado.';
+      this.moveSuccess = `Movimiento guardado y reporte PDF generado.${this.moveScheduleSyncNotice(result.scheduleSync)}`;
       this.movedItem.emit();
       this.movingAssetId = null;
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      this.moveError = 'No se pudo guardar el movimiento.';
+      this.moveError = error?.error?.message || 'No se pudo guardar el movimiento.';
     } finally {
       this.moveLoading = false;
       this.refreshViewSoon();
     }
+  }
+
+  private moveScheduleSyncNotice(sync?: MaintenanceScheduleSyncDto | null): string {
+    if (!sync?.schedulesFound) {
+      return ' No existe un cronograma vigente para reajustar.';
+    }
+    if (!sync.itemsRemoved && !sync.itemsAdded) {
+      return ' Las fechas ejecutadas o ya iniciadas se conservaron sin cambios.';
+    }
+    const firstDate = sync.firstPlannedDate
+      ? this.formatHistoryDate(sync.firstPlannedDate)
+      : '';
+    const active = sync.activeItemsAdded
+      ? ` ${sync.activeItemsAdded} mantenimiento(s) quedó(aron) activo(s).`
+      : '';
+    return ` El cronograma aprobado se alineó con el área y ubicación de destino: ${sync.itemsRemoved} fecha(s) anterior(es) reemplazada(s) por ${sync.itemsAdded} fecha(s)${firstDate ? ` desde el ${firstDate}` : ''}.${active}`;
   }
 
   private toCsv(headers: string[], rows: string[][]): string {
