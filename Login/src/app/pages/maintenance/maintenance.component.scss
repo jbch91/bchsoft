@@ -438,6 +438,13 @@ button:disabled {
   gap: 10px;
 }
 
+.tracking-stack {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
 .selected-asset-card {
   display: grid;
   grid-template-columns: minmax(220px, 1.3fr) repeat(3, minmax(120px, 0.8fr)) auto;
@@ -501,6 +508,104 @@ button:disabled {
   border: 1px solid color-mix(in srgb, var(--brand-100) 75%, var(--border));
   border-radius: 8px;
   padding: 12px;
+}
+
+.spare-flow-summary {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-height: 58px;
+  padding: 8px 12px;
+  border-left: 4px solid #16a34a;
+  background: #f0fdf4;
+}
+
+.spare-flow-summary.retired {
+  border-left-color: #dc2626;
+  background: #fff1f2;
+}
+
+.spare-flow-summary span,
+.spare-status-summary span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.spare-flow-summary strong,
+.spare-status-summary strong {
+  color: var(--ink);
+}
+
+.spare-flow-summary small,
+.spare-status-summary small {
+  color: var(--muted);
+}
+
+.spare-status-summary {
+  display: grid;
+  gap: 3px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--brand-100) 70%, var(--border));
+}
+
+.spare-status-summary strong {
+  color: #b45309;
+}
+
+.spare-status-summary.installed strong {
+  color: #15803d;
+}
+
+.status-observation-field {
+  padding: 10px 12px;
+  border-left: 4px solid #d97706;
+  background: #fffbeb;
+}
+
+.status-observation-field small {
+  color: #92400e;
+}
+
+.spare-resolution {
+  display: grid;
+  gap: 6px;
+}
+
+.spare-resolution > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.spare-resolution-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--brand-100) 72%, var(--border));
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.spare-resolution-options button {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #475569;
+}
+
+.spare-resolution-options button:hover {
+  background: var(--brand-50);
+  color: var(--brand-800);
+}
+
+.spare-resolution-options button.active {
+  border-color: color-mix(in srgb, var(--brand-500) 35%, var(--brand-100));
+  background: var(--brand-100);
+  color: var(--brand-800);
 }
 
 .request-context {
@@ -1660,6 +1765,12 @@ button:disabled {
   color: #7f1d1d;
 }
 
+.report-detail-callout.status-observation {
+  border-left-color: #d97706;
+  background: #fffbeb;
+  color: #78350f;
+}
+
 .report-detail-callout strong {
   font-size: 12px;
 }
@@ -1938,6 +2049,10 @@ button:disabled {
   .modal-actions,
   .form-actions {
     display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .spare-resolution-options {
     grid-template-columns: 1fr;
   }
 }

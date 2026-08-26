@@ -202,6 +202,7 @@ export async function createMaintenanceReport(payload) {
     maintenanceActivities,
     maintenanceTests,
     assetStatusAfter,
+    assetStatusObservations,
     requiresSpareParts,
     sparePartsNeeded,
     sparePartsStatus,
@@ -212,9 +213,10 @@ export async function createMaintenanceReport(payload) {
     `INSERT INTO maintenance_reports (
        client_id, request_id, asset_id, type, summary, findings, actions_taken,
        failure_cause, maintenance_checks, maintenance_activities, maintenance_tests,
-       asset_status_after, requires_spare_parts, spare_parts_needed, spare_parts_status, created_by
+       asset_status_after, asset_status_observations, requires_spare_parts, spare_parts_needed,
+       spare_parts_status, created_by
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      RETURNING id`,
     [
       clientId,
@@ -229,6 +231,7 @@ export async function createMaintenanceReport(payload) {
       JSON.stringify(Array.isArray(maintenanceActivities) ? maintenanceActivities : []),
       JSON.stringify(Array.isArray(maintenanceTests) ? maintenanceTests : []),
       assetStatusAfter || 'operativo',
+      assetStatusObservations || null,
       Boolean(requiresSpareParts),
       sparePartsNeeded || null,
       sparePartsStatus || 'no_aplica',
@@ -281,6 +284,7 @@ export async function updateMaintenanceReport(reportId, payload) {
     maintenanceActivities,
     maintenanceTests,
     assetStatusAfter,
+    assetStatusObservations,
     requiresSpareParts,
     sparePartsNeeded,
     sparePartsStatus,
@@ -298,10 +302,11 @@ export async function updateMaintenanceReport(reportId, payload) {
          maintenance_activities = $8,
          maintenance_tests = $9,
          asset_status_after = $10,
-         requires_spare_parts = $11,
-         spare_parts_needed = $12,
-         spare_parts_status = $13,
-         created_by = $14,
+         asset_status_observations = $11,
+         requires_spare_parts = $12,
+         spare_parts_needed = $13,
+         spare_parts_status = $14,
+         created_by = $15,
          pdf_path = NULL
      WHERE id = $1`,
     [
@@ -315,6 +320,7 @@ export async function updateMaintenanceReport(reportId, payload) {
       JSON.stringify(Array.isArray(maintenanceActivities) ? maintenanceActivities : []),
       JSON.stringify(Array.isArray(maintenanceTests) ? maintenanceTests : []),
       assetStatusAfter || 'operativo',
+      assetStatusObservations || null,
       Boolean(requiresSpareParts),
       sparePartsNeeded || null,
       sparePartsStatus || 'no_aplica',
@@ -415,16 +421,24 @@ export async function listMaintenanceReports(
 }
 
 export async function updateMaintenanceReportTracking(reportId, payload) {
-  const { assetStatusAfter, requiresSpareParts, sparePartsNeeded, sparePartsStatus } = payload;
+  const {
+    assetStatusAfter,
+    assetStatusObservations,
+    requiresSpareParts,
+    sparePartsNeeded,
+    sparePartsStatus
+  } = payload;
   await query(
     `UPDATE maintenance_reports
      SET asset_status_after = $1,
-         requires_spare_parts = $2,
-         spare_parts_needed = $3,
-         spare_parts_status = $4
-     WHERE id = $5`,
+         asset_status_observations = $2,
+         requires_spare_parts = $3,
+         spare_parts_needed = $4,
+         spare_parts_status = $5
+     WHERE id = $6`,
     [
       assetStatusAfter || 'operativo',
+      assetStatusObservations || null,
       Boolean(requiresSpareParts),
       sparePartsNeeded || null,
       sparePartsStatus || 'no_aplica',

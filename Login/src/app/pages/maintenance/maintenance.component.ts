@@ -10,7 +10,11 @@ import type { AssetCategory } from '../../biomed/biomed.service';
 import { MaintenanceService, MaintenanceReportDto, MaintenanceRequestDto } from '../../maintenance/maintenance.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
-import { maintenanceAssetMatchesLookup, paginateMaintenanceItems } from './maintenance-view.utils';
+import {
+  maintenanceAssetMatchesLookup,
+  maintenanceSpareStatusForReport,
+  paginateMaintenanceItems
+} from './maintenance-view.utils';
 
 interface ClientLite {
   id: string;
@@ -146,9 +150,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportMaintenanceActivities: string[] = [];
   reportMaintenanceTests: string[] = [];
   reportAssetStatus: 'operativo' | 'operativo_observacion' | 'fuera_de_servicio' = 'operativo';
+  reportAssetStatusObservations = '';
   reportRequiresSpareParts = false;
   reportSparePartsNeeded = '';
   reportSparePartsStatus: 'no_aplica' | 'solicitado' | 'recibido' = 'no_aplica';
+  reportSparePartResolution: 'request_later' | 'installed_now' = 'request_later';
   reportFlowMode: 'normal' | 'install_spare' | 'retire_asset' = 'normal';
   reportFlowSource: MaintenanceReportDto | null = null;
   reportCorrectionMode = false;
@@ -175,10 +181,6 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     { value: 'operativo', label: 'Operativo' },
     { value: 'operativo_observacion', label: 'Operativo con observación' },
     { value: 'fuera_de_servicio', label: 'Fuera de servicio' }
-  ];
-  readonly spareStatusOptions = [
-    { value: 'solicitado', label: 'Solicitar repuesto' },
-    { value: 'recibido', label: 'Recibido' }
   ];
   readonly maintenanceCheckOptions = [
     { value: 'revision_visual', label: 'Revisión visual externa' },
@@ -371,6 +373,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     }
 
     if (view === 'reportes' && requestId) {
+      this.viewMode = 'reportes';
       if (!this.requests.length && this.selectedClientId) {
         await this.loadData();
       }
@@ -462,7 +465,6 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (!request) {
       this.reportFormActive = false;
       this.reportRequestId = '';
-      this.viewMode = 'reportes';
       this.errorMessage = 'Esta solicitud ya no está disponible para crear reporte.';
       return;
     }
@@ -473,7 +475,6 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (['reportado', 'firmado', 'vencido'].includes(request.status)) {
       this.reportFormActive = false;
       this.reportRequestId = '';
-      this.viewMode = 'reportes';
       this.errorMessage = 'Esta solicitud ya no está disponible para crear reporte.';
       return;
     }
@@ -483,7 +484,6 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     }
     this.reportRequestId = request.id;
     this.reportFormActive = true;
-    this.viewMode = 'reportes';
     this.errorMessage = '';
     this.resetReportFields();
     this.applyReportDefaults(request);
@@ -608,8 +608,25 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.errorMessage = 'Selecciona al menos una prueba o verificación realizada.';
       return;
     }
+    const assetStatusObservations = this.reportAssetStatusObservations.replace(/\s+/g, ' ').trim();
+    if (this.reportAssetStatus !== 'operativo' && assetStatusObservations.length < 5) {
+      this.errorMessage = this.reportAssetStatus === 'operativo_observacion'
+        ? 'Describe la observación con la que queda operativo el equipo.'
+        : 'Describe por qué el equipo queda fuera de servicio.';
+      this.showAlert(this.errorMessage, 'error');
+      return;
+    }
     if (this.reportRequiresSpareParts && !this.reportSparePartsNeeded.trim()) {
       this.errorMessage = 'Describe el repuesto requerido antes de guardar el reporte.';
+      this.showAlert(this.errorMessage, 'error');
+      return;
+    }
+    if (
+      this.reportRequiresSpareParts
+      && this.reportSparePartResolution === 'installed_now'
+      && !this.reportMaintenanceActivities.includes('instalacion_repuesto')
+    ) {
+      this.errorMessage = 'Marca la actividad de instalación o reemplazo del repuesto.';
       this.showAlert(this.errorMessage, 'error');
       return;
     }
@@ -619,14 +636,23 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     try {
       const requestBeforeSave = this.selectedReportRequest;
       const savedAssetLabel = requestBeforeSave ? this.assetLabel(requestBeforeSave.asset_id) : '';
-      const wasPreventive = requestBeforeSave?.type === 'preventivo';
-      const hadPendingSparePartRequest = Boolean(
-        this.reportRequiresSpareParts && this.reportSparePartsStatus !== 'recibido'
-      );
       const flowMode = this.reportFlowMode;
-      const isInstallingSpare = flowMode === 'install_spare';
-      const requiresSparePartsForPayload = isInstallingSpare || this.reportRequiresSpareParts;
-      const sparePartsNeededForPayload = isInstallingSpare
+      const wasCorrection = this.reportCorrectionMode;
+      const isStandardPreventiveReport = Boolean(
+        requestBeforeSave?.type === 'preventivo' && flowMode === 'normal' && !wasCorrection
+      );
+      const sparePartsStatusForPayload = maintenanceSpareStatusForReport(
+        flowMode,
+        this.reportRequiresSpareParts,
+        wasCorrection ? this.reportSparePartsStatus : null,
+        this.reportSparePartResolution === 'installed_now'
+      );
+      const requiresSparePartsForPayload = sparePartsStatusForPayload !== 'no_aplica';
+      const hadPendingSparePartRequest = sparePartsStatusForPayload === 'solicitado';
+      const installedSpareDuringService = Boolean(
+        flowMode === 'normal' && !wasCorrection && sparePartsStatusForPayload === 'recibido'
+      );
+      const sparePartsNeededForPayload = flowMode === 'install_spare'
         ? (this.reportSparePartsNeeded.trim() || 'Repuesto instalado')
         : this.reportSparePartsNeeded.trim();
       await this.maintenance.createReport({
@@ -638,31 +664,38 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         maintenanceActivities: this.reportMaintenanceActivities,
         maintenanceTests: this.reportMaintenanceTests,
         assetStatusAfter: this.reportAssetStatus,
-        assetLifecycleAction: this.reportFlowMode === 'retire_asset' ? 'retire' : null,
+        assetStatusObservations: this.reportAssetStatus === 'operativo' ? '' : assetStatusObservations,
+        assetLifecycleAction: flowMode === 'retire_asset' ? 'retire' : null,
         requiresSpareParts: requiresSparePartsForPayload,
         sparePartsNeeded: requiresSparePartsForPayload ? sparePartsNeededForPayload : '',
-        sparePartsStatus: isInstallingSpare ? 'recibido' : (this.reportRequiresSpareParts ? this.reportSparePartsStatus : 'no_aplica')
+        sparePartsStatus: sparePartsStatusForPayload,
+        sparePartsInstalledNow: installedSpareDuringService
       });
       this.reportRequestId = '';
       this.resetReportFields();
       this.reportFormActive = false;
       await this.loadData();
-      if (wasPreventive) {
-        this.viewMode = 'preventivos';
-        const message = hadPendingSparePartRequest
+      if (isStandardPreventiveReport) {
+        const message = installedSpareDuringService
+          ? `Reporte preventivo guardado${savedAssetLabel ? ` para ${savedAssetLabel}` : ''} con el repuesto instalado. Puedes continuar con el siguiente equipo.`
+          : hadPendingSparePartRequest
           ? `Reporte preventivo guardado${savedAssetLabel ? ` para ${savedAssetLabel}` : ''}. El equipo quedó en Pendientes repuestos y se notificó al almacenista. Puedes continuar con el siguiente preventivo.`
           : `Reporte preventivo guardado${savedAssetLabel ? ` para ${savedAssetLabel}` : ''}. Puedes continuar con el siguiente equipo.`;
         this.showAlert(
           message,
           'success'
         );
-        this.scrollToPreventiveProgrammed();
+        if (this.viewMode === 'preventivos') this.scrollToPreventiveProgrammed();
         return;
       }
-      const message = flowMode === 'install_spare'
+      const message = wasCorrection
+        ? 'Corrección guardada. El reporte volvió a quedar pendiente de firma.'
+        : flowMode === 'install_spare'
         ? 'Reporte de instalación de repuesto creado. El caso salió de pendientes de repuesto.'
         : flowMode === 'retire_asset'
           ? 'Reporte de baja técnica creado. El caso salió de pendientes de repuesto.'
+          : installedSpareDuringService
+            ? 'Reporte creado con el repuesto instalado durante la intervención.'
           : 'Reporte creado.';
       this.showAlert(message, 'success');
     } catch (error: any) {
@@ -755,9 +788,17 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportMaintenanceActivities = this.asStringArray(report.maintenance_activities);
     this.reportMaintenanceTests = this.asStringArray(report.maintenance_tests);
     this.reportAssetStatus = this.isAssetStatus(report.asset_status_after) ? report.asset_status_after : 'operativo';
+    this.reportAssetStatusObservations = report.asset_status_observations || '';
     this.reportRequiresSpareParts = Boolean(report.requires_spare_parts);
     this.reportSparePartsNeeded = report.spare_parts_needed || '';
     this.reportSparePartsStatus = this.isSpareStatus(report.spare_parts_status) ? report.spare_parts_status : 'no_aplica';
+    this.reportSparePartResolution = this.reportSparePartsStatus === 'recibido' ? 'installed_now' : 'request_later';
+    if (
+      this.reportSparePartsStatus === 'recibido'
+      && !this.reportMaintenanceActivities.includes('instalacion_repuesto')
+    ) {
+      this.reportMaintenanceActivities = [...this.reportMaintenanceActivities, 'instalacion_repuesto'];
+    }
     this.reportFlowMode = 'normal';
     this.reportFlowSource = null;
     this.successMessage = `Corrección cargada. Motivo: ${report.correction_reason || 'Sin detalle registrado'}`;
@@ -1296,6 +1337,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         report.findings,
         report.actions_taken,
         report.asset_status_after,
+        report.asset_status_observations,
         report.spare_parts_needed,
         report.correction_reason,
         asset?.code,
@@ -1547,7 +1589,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       dado_de_baja: 'Dado de baja',
       pendiente: 'Pendiente',
       solicitado: 'Repuesto solicitado',
-      recibido: 'Recibido',
+      recibido: 'Repuesto instalado',
       no_aplica: 'No aplica'
     };
     return labels[status || ''] ?? (status || '-');
@@ -1585,10 +1627,41 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   onSparePartsToggle(): void {
     if (this.reportRequiresSpareParts) {
       this.reportSparePartsStatus = 'solicitado';
+      this.reportSparePartResolution = 'request_later';
       return;
     }
     this.reportSparePartsNeeded = '';
     this.reportSparePartsStatus = 'no_aplica';
+    this.reportSparePartResolution = 'request_later';
+  }
+
+  setReportSparePartResolution(resolution: 'request_later' | 'installed_now'): void {
+    if (!this.reportRequiresSpareParts || this.reportFlowMode !== 'normal' || this.reportCorrectionMode) return;
+    this.reportSparePartResolution = resolution;
+    this.reportSparePartsStatus = resolution === 'installed_now' ? 'recibido' : 'solicitado';
+    if (resolution === 'installed_now') {
+      this.reportMaintenanceActivities = Array.from(new Set([
+        ...this.reportMaintenanceActivities,
+        'instalacion_repuesto'
+      ]));
+      return;
+    }
+    this.reportMaintenanceActivities = this.reportMaintenanceActivities.filter(
+      (activity) => activity !== 'instalacion_repuesto'
+    );
+  }
+
+  onReportAssetStatusChange(): void {
+    if (this.reportAssetStatus === 'operativo') this.reportAssetStatusObservations = '';
+  }
+
+  reportSpareStateLabel(): string {
+    return this.statusLabel(maintenanceSpareStatusForReport(
+      this.reportFlowMode,
+      this.reportRequiresSpareParts,
+      this.reportCorrectionMode ? this.reportSparePartsStatus : null,
+      this.reportSparePartResolution === 'installed_now'
+    ));
   }
 
   reportTypeLabel(): string {
@@ -1642,15 +1715,16 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportFindings = this.previousReportSummary(report);
     this.reportActions = `Se instala el repuesto solicitado: ${report.spare_parts_needed || 'repuesto pendiente de especificar'}.`;
     this.reportAssetStatus = 'operativo';
+    this.reportAssetStatusObservations = '';
     this.reportRequiresSpareParts = true;
     this.reportSparePartsNeeded = report.spare_parts_needed || '';
     this.reportSparePartsStatus = 'recibido';
+    this.reportSparePartResolution = 'installed_now';
     this.reportMaintenanceChecks = ['revision_visual', 'revision_cables_conexiones'];
     this.reportMaintenanceActivities = ['instalacion_repuesto', 'prueba_funcional_final'];
     this.reportMaintenanceTests = ['encendido_apagado', 'prueba_modos_operacion', 'equipo_operativo_entregado'];
     this.reportFlowMode = 'install_spare';
     this.reportFlowSource = report;
-    this.viewMode = 'reportes';
     this.successMessage = 'Cargué la falla anterior. Completa el estado final y guarda el reporte de instalación.';
     this.scrollToReportForm();
   }
@@ -1663,15 +1737,16 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportFindings = this.previousReportSummary(report);
     this.reportActions = `Se determina baja técnica del equipo. Motivo sugerido: repuesto no disponible, no viable o costo no conveniente. Repuesto solicitado: ${report.spare_parts_needed || '-'}.`;
     this.reportAssetStatus = 'fuera_de_servicio';
+    this.reportAssetStatusObservations = `Equipo fuera de servicio por inviabilidad técnica o económica del repuesto solicitado: ${report.spare_parts_needed || 'sin detalle'}.`;
     this.reportRequiresSpareParts = false;
     this.reportSparePartsNeeded = '';
     this.reportSparePartsStatus = 'no_aplica';
+    this.reportSparePartResolution = 'request_later';
     this.reportMaintenanceChecks = ['revision_visual', 'revision_cables_conexiones'];
     this.reportMaintenanceActivities = ['reparacion_componente'];
     this.reportMaintenanceTests = [];
     this.reportFlowMode = 'retire_asset';
     this.reportFlowSource = report;
-    this.viewMode = 'reportes';
     this.successMessage = 'Cargué la falla anterior. Revisa la justificación y guarda el reporte de baja técnica.';
     this.scrollToReportForm();
   }
@@ -1681,9 +1756,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportFindings = '';
     this.reportActions = '';
     this.reportAssetStatus = 'operativo';
+    this.reportAssetStatusObservations = '';
     this.reportRequiresSpareParts = false;
     this.reportSparePartsNeeded = '';
     this.reportSparePartsStatus = 'no_aplica';
+    this.reportSparePartResolution = 'request_later';
     this.resetReportWorkflow();
     this.reportRequestId = '';
     this.reportFormActive = false;
@@ -2044,9 +2121,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportMaintenanceActivities = [];
     this.reportMaintenanceTests = [];
     this.reportAssetStatus = 'operativo';
+    this.reportAssetStatusObservations = '';
     this.reportRequiresSpareParts = false;
     this.reportSparePartsNeeded = '';
     this.reportSparePartsStatus = 'no_aplica';
+    this.reportSparePartResolution = 'request_later';
     this.resetReportWorkflow();
   }
 

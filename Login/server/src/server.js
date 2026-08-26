@@ -339,6 +339,8 @@ import {
   MAINTENANCE_REQUEST_CLAIMABLE_STATUSES,
   MAINTENANCE_REQUEST_REPORTABLE_STATUSES,
   canOperateAssignedMaintenanceRequest,
+  maintenanceAssetStatusObservationError,
+  maintenanceSpareWorkflowForReport,
   maintenanceRequestDescriptionError,
   normalizeMaintenanceRequestDescription
 } from './maintenance-workflow.js';
@@ -485,7 +487,6 @@ const MAINTENANCE_ASSET_STATUSES = [
   'operativo_observacion',
   'fuera_de_servicio'
 ];
-const MAINTENANCE_SPARE_STATUSES = ['no_aplica', 'solicitado', 'recibido'];
 const MAINTENANCE_ACCEPTANCE_SIGNER_ROLES = ['almacenista', 'lector', 'viewer', 'visor', 'superuser'];
 const MAINTENANCE_REPORT_ACCESS_ROLES = [
   'almacenista',
@@ -10423,10 +10424,11 @@ app.post(
       maintenanceActivities,
       maintenanceTests,
       assetStatusAfter,
+      assetStatusObservations,
       assetLifecycleAction,
       requiresSpareParts,
       sparePartsNeeded,
-      sparePartsStatus
+      sparePartsInstalledNow
     } = req.body || {};
     if (!requestId) {
       return res.status(400).json({ message: 'Solicitud requerida.' });
@@ -10439,12 +10441,13 @@ app.post(
     const cleanMaintenanceActivities = sanitizeList(maintenanceActivities, MAINTENANCE_ACTIVITY_OPTIONS);
     const cleanMaintenanceTests = sanitizeList(maintenanceTests, MAINTENANCE_TEST_OPTIONS);
     let cleanRequiresSpareParts = Boolean(requiresSpareParts);
-    let cleanSparePartsStatus = cleanRequiresSpareParts
-      ? (MAINTENANCE_SPARE_STATUSES.includes(sparePartsStatus) ? sparePartsStatus : 'solicitado')
-      : 'no_aplica';
+    let cleanSparePartsStatus = 'no_aplica';
     const cleanSummary = String(summary || '').trim();
     const cleanFindings = String(findings || '').trim();
     const cleanActionsTaken = String(actionsTaken || '').trim();
+    const cleanAssetStatusObservations = cleanAssetStatus === 'operativo'
+      ? ''
+      : String(assetStatusObservations || '').replace(/\s+/g, ' ').trim();
     let cleanSparePartsNeeded = String(sparePartsNeeded || '').trim();
     const request = await getMaintenanceRequestById(requestId);
     if (!request) {
@@ -10482,17 +10485,45 @@ app.post(
       request.assigned_to = ownership.assigned_to;
       request.status = ownership.status;
     }
+    const correctionReport = request.status === 'correccion'
+      ? await getMaintenanceReportWithOpenCorrectionByRequest(requestId)
+      : null;
+    if (correctionReport && !platformSuperuser && correctionReport.created_by !== req.user.sub) {
+      return res.status(409).json({
+        message: 'Solo el ingeniero que elaboró el reporte puede atender esta corrección.'
+      });
+    }
+    const spareWorkflow = maintenanceSpareWorkflowForReport({
+      requestStatus: request.status,
+      requiresSpareParts: cleanRequiresSpareParts,
+      lifecycleAction: cleanLifecycleAction,
+      correctionSpareStatus: correctionReport?.spare_parts_status,
+      installedDuringService: Boolean(sparePartsInstalledNow)
+    });
+    cleanRequiresSpareParts = spareWorkflow.requiresSpareParts;
+    cleanSparePartsStatus = spareWorkflow.sparePartsStatus;
     if (request.status === 'espera_repuesto' && cleanLifecycleAction !== 'retire') {
       const waitingSpareReport = await getLatestWaitingSpareReportByRequest(requestId);
-      cleanRequiresSpareParts = true;
-      cleanSparePartsStatus = 'recibido';
       cleanSparePartsNeeded = cleanSparePartsNeeded || waitingSpareReport?.spare_parts_needed || 'Repuesto instalado';
-    }
-    if (request.status === 'espera_repuesto' && cleanSparePartsStatus !== 'recibido' && cleanLifecycleAction !== 'retire') {
-      return res.status(400).json({ message: 'Para cerrar un caso en espera de repuesto debes registrar instalación o baja técnica.' });
     }
     if (cleanRequiresSpareParts && !cleanSparePartsNeeded) {
       return res.status(400).json({ message: 'Describe el repuesto requerido.' });
+    }
+    if (
+      cleanRequiresSpareParts
+      && cleanSparePartsStatus === 'recibido'
+      && !cleanMaintenanceActivities.includes('instalacion_repuesto')
+    ) {
+      return res.status(400).json({
+        message: 'Para registrar un repuesto instalado debes incluir la actividad de instalación o reemplazo.'
+      });
+    }
+    const assetStatusObservationError = maintenanceAssetStatusObservationError(
+      cleanAssetStatus,
+      cleanAssetStatusObservations
+    );
+    if (assetStatusObservationError) {
+      return res.status(400).json({ message: assetStatusObservationError });
     }
     const requestStatusAfter = cleanRequiresSpareParts && cleanSparePartsStatus !== 'recibido'
       ? 'espera_repuesto'
@@ -10522,20 +10553,13 @@ app.post(
       maintenanceActivities: cleanMaintenanceActivities,
       maintenanceTests: cleanMaintenanceTests,
       assetStatusAfter: cleanAssetStatus,
+      assetStatusObservations: cleanAssetStatusObservations,
       requiresSpareParts: cleanRequiresSpareParts,
       sparePartsNeeded: cleanRequiresSpareParts ? cleanSparePartsNeeded : null,
       sparePartsStatus: cleanSparePartsStatus,
       requestStatusAfter,
       createdBy: req.user.sub
     };
-    const correctionReport = request.status === 'correccion'
-      ? await getMaintenanceReportWithOpenCorrectionByRequest(requestId)
-      : null;
-    if (correctionReport && !platformSuperuser && correctionReport.created_by !== req.user.sub) {
-      return res.status(409).json({
-        message: 'Solo el ingeniero que elaboró el reporte puede atender esta corrección.'
-      });
-    }
     const result = correctionReport
       ? await updateMaintenanceReport(correctionReport.id, reportPayload)
       : await createMaintenanceReport(reportPayload);
@@ -10570,11 +10594,15 @@ app.post(
         maintenanceActivities: cleanMaintenanceActivities,
         maintenanceTests: cleanMaintenanceTests,
         assetStatusAfter: cleanAssetStatus,
+        assetStatusObservations: cleanAssetStatusObservations || null,
         assetLifecycleAction: cleanLifecycleAction,
         assetStatusPersisted: assetStatusToPersist,
         requiresSpareParts: cleanRequiresSpareParts,
         sparePartsNeeded: cleanRequiresSpareParts ? cleanSparePartsNeeded : null,
-        sparePartsStatus: cleanSparePartsStatus
+        sparePartsStatus: cleanSparePartsStatus,
+        sparePartsInstalledDuringService: Boolean(
+          sparePartsInstalledNow && request.status !== 'espera_repuesto'
+        )
       }
     });
 

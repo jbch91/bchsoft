@@ -14,6 +14,9 @@ export interface MaintenancePage<T> {
   end: number;
 }
 
+export type MaintenanceReportFlowMode = 'normal' | 'install_spare' | 'retire_asset';
+export type MaintenanceSpareStatus = 'no_aplica' | 'solicitado' | 'recibido';
+
 const IGNORED_LOOKUP_VALUES = new Set([
   'nr',
   'n/a',
@@ -73,4 +76,17 @@ export function paginateMaintenanceItems<T>(items: T[], requestedPage: number, r
     start: total ? offset + 1 : 0,
     end: total ? offset + pageItems.length : 0
   };
+}
+
+export function maintenanceSpareStatusForReport(
+  flowMode: MaintenanceReportFlowMode,
+  requiresSpareParts: boolean,
+  correctionStatus?: string | null,
+  installedDuringService = false
+): MaintenanceSpareStatus {
+  if (flowMode === 'install_spare') return 'recibido';
+  if (flowMode === 'retire_asset') return 'no_aplica';
+  if (correctionStatus === 'recibido') return 'recibido';
+  if (requiresSpareParts && installedDuringService) return 'recibido';
+  return requiresSpareParts ? 'solicitado' : 'no_aplica';
 }

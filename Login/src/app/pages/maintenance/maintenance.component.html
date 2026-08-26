@@ -451,14 +451,13 @@
     </div>
   </ng-container>
 
-  <ng-container *ngIf="viewMode === 'reportes'">
-    <div
-      class="maintenance-modal-backdrop report-editor-backdrop"
-      *ngIf="auth.hasPermission('maintenance:report:create') && reportFormActive"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="report-editor-title"
-    >
+  <div
+    class="maintenance-modal-backdrop report-editor-backdrop"
+    *ngIf="auth.hasPermission('maintenance:report:create') && reportFormActive"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="report-editor-title"
+  >
       <article
         #reportFormCard
         class="maintenance-modal report-editor-modal card form-card"
@@ -633,43 +632,113 @@
           </label>
 
           <div class="tracking-grid">
-            <label>
-              Estado final del equipo
-              <select [(ngModel)]="reportAssetStatus" name="reportAssetStatus">
-                <option *ngFor="let option of assetStatusOptions" [value]="option.value">{{ option.label }}</option>
-              </select>
-            </label>
-            <label class="check-row">
-              <input
-                type="checkbox"
-                [(ngModel)]="reportRequiresSpareParts"
-                name="reportRequiresSpareParts"
-                (change)="onSparePartsToggle()"
-              />
-              Requiere repuesto
-            </label>
-          </div>
+            <div class="tracking-stack">
+              <label>
+                Estado final del equipo
+                <select
+                  [(ngModel)]="reportAssetStatus"
+                  name="reportAssetStatus"
+                  (change)="onReportAssetStatusChange()"
+                >
+                  <option *ngFor="let option of assetStatusOptions" [value]="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+              <label class="status-observation-field" *ngIf="reportAssetStatus !== 'operativo'">
+                {{ reportAssetStatus === 'operativo_observacion' ? 'Observaciones de operación' : 'Motivo de fuera de servicio' }}
+                <textarea
+                  [(ngModel)]="reportAssetStatusObservations"
+                  name="reportAssetStatusObservations"
+                  rows="2"
+                  maxlength="1000"
+                  [placeholder]="reportAssetStatus === 'operativo_observacion'
+                    ? 'Indica la condición, restricción o seguimiento requerido...'
+                    : 'Indica la falla o condición por la que no debe utilizarse el equipo...'"
+                ></textarea>
+                <small>
+                  Campo obligatorio · {{ reportAssetStatusObservations.trim().length }}/1000
+                </small>
+              </label>
+            </div>
 
-          <div class="spare-box" *ngIf="reportRequiresSpareParts">
-            <label>
-              Repuesto requerido
-              <textarea
-                [(ngModel)]="reportSparePartsNeeded"
-                name="reportSparePartsNeeded"
-                rows="2"
-                placeholder="Ej: Tarjeta electrónica, válvula, pieza específica..."
-              ></textarea>
-            </label>
-            <label>
-              Estado del repuesto
-              <select [(ngModel)]="reportSparePartsStatus" name="reportSparePartsStatus">
-                <option *ngFor="let option of spareStatusOptions" [value]="option.value">{{ option.label }}</option>
-              </select>
-            </label>
-            <p class="spare-help">
-              Si seleccionas “Solicitar repuesto”, el caso queda abierto en espera de repuesto y se notifica al almacenista.
-              Cuando el repuesto llegue, crea otro reporte con estado “Recibido” para registrar la instalación y continuar con la firma.
-            </p>
+            <div class="tracking-stack">
+              <label class="check-row" *ngIf="reportFlowMode === 'normal'">
+                <input
+                  type="checkbox"
+                  [(ngModel)]="reportRequiresSpareParts"
+                  name="reportRequiresSpareParts"
+                  [disabled]="reportCorrectionMode && reportSparePartsStatus === 'recibido'"
+                  (change)="onSparePartsToggle()"
+                />
+                Requiere repuesto
+              </label>
+              <div class="spare-flow-summary installed" *ngIf="reportFlowMode === 'install_spare'">
+                <span>Flujo actual</span>
+                <strong>Instalación de repuesto</strong>
+                <small>El repuesto solicitado se registrará como instalado al guardar.</small>
+              </div>
+              <div class="spare-flow-summary retired" *ngIf="reportFlowMode === 'retire_asset'">
+                <span>Flujo actual</span>
+                <strong>Baja técnica</strong>
+                <small>El caso se cerrará sin registrar una instalación.</small>
+              </div>
+
+              <div class="spare-box" *ngIf="reportRequiresSpareParts">
+                <label>
+                  Repuesto requerido
+                  <textarea
+                    [(ngModel)]="reportSparePartsNeeded"
+                    name="reportSparePartsNeeded"
+                    rows="2"
+                    placeholder="Ej: Tarjeta electrónica, válvula, pieza específica..."
+                  ></textarea>
+                </label>
+                <div
+                  class="spare-resolution"
+                  *ngIf="reportFlowMode === 'normal' && !reportCorrectionMode"
+                >
+                  <span>Resultado del repuesto</span>
+                  <div class="spare-resolution-options" role="group" aria-label="Resultado del repuesto">
+                    <button
+                      type="button"
+                      [class.active]="reportSparePartResolution === 'request_later'"
+                      (click)="setReportSparePartResolution('request_later')"
+                    >
+                      Solicitar para después
+                    </button>
+                    <button
+                      type="button"
+                      [class.active]="reportSparePartResolution === 'installed_now'"
+                      (click)="setReportSparePartResolution('installed_now')"
+                    >
+                      Instalado en esta intervención
+                    </button>
+                  </div>
+                </div>
+                <div
+                  class="spare-status-summary"
+                  [class.installed]="reportSpareStateLabel() === 'Repuesto instalado'"
+                >
+                  <span>Estado al guardar</span>
+                  <strong>{{ reportSpareStateLabel() }}</strong>
+                  <small *ngIf="reportSpareStateLabel() === 'Repuesto solicitado'">
+                    El equipo quedará en Pendientes repuestos y se notificará al almacenista.
+                  </small>
+                  <small
+                    *ngIf="reportSpareStateLabel() === 'Repuesto instalado'
+                      && reportFlowMode === 'normal'
+                      && !reportCorrectionMode"
+                  >
+                    El reporte continuará a firma y no ingresará a Pendientes repuestos.
+                  </small>
+                  <small
+                    *ngIf="reportSpareStateLabel() === 'Repuesto instalado'
+                      && (reportFlowMode !== 'normal' || reportCorrectionMode)"
+                  >
+                    Esta intervención cerrará la espera del repuesto y continuará con el flujo de firma.
+                  </small>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="form-actions">
@@ -683,6 +752,8 @@
         </form>
       </article>
     </div>
+
+  <ng-container *ngIf="viewMode === 'reportes'">
 
     <div class="card report-list-card">
       <div class="list-title report-list-title">
@@ -1180,6 +1251,14 @@
         <span>{{ asset.siteName || 'Sin sede' }}</span>
         <span>{{ asset.areaName || 'Sin área' }}</span>
         <span>{{ asset.locationName || 'Sin ubicación' }}</span>
+      </div>
+
+      <div
+        class="report-detail-callout status-observation"
+        *ngIf="report.asset_status_after !== 'operativo' && report.asset_status_observations"
+      >
+        <span>Observaciones del estado final</span>
+        <strong>{{ report.asset_status_observations }}</strong>
       </div>
 
       <div class="report-detail-section">

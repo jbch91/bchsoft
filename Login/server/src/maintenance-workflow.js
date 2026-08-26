@@ -25,7 +25,46 @@ export function maintenanceRequestDescriptionError(type, description) {
   return '';
 }
 
+export function maintenanceAssetStatusObservationError(status, observation) {
+  if (status === 'operativo') return '';
+  const cleanObservation = String(observation || '').replace(/\s+/g, ' ').trim();
+  if (cleanObservation.length < 5) {
+    return status === 'operativo_observacion'
+      ? 'Describe la observación con la que queda operativo el equipo.'
+      : 'Describe por qué el equipo queda fuera de servicio.';
+  }
+  if (cleanObservation.length > 1000) {
+    return 'Las observaciones del estado final admiten máximo 1000 caracteres.';
+  }
+  return '';
+}
+
 export function canOperateAssignedMaintenanceRequest(request, userId, isPlatformSuperuser = false) {
   if (isPlatformSuperuser) return true;
   return !request?.assigned_to || request.assigned_to === userId;
+}
+
+export function maintenanceSpareWorkflowForReport({
+  requestStatus,
+  requiresSpareParts,
+  lifecycleAction,
+  correctionSpareStatus,
+  installedDuringService
+}) {
+  if (lifecycleAction === 'retire') {
+    return { requiresSpareParts: false, sparePartsStatus: 'no_aplica' };
+  }
+  if (requestStatus === 'espera_repuesto') {
+    return { requiresSpareParts: true, sparePartsStatus: 'recibido' };
+  }
+  if (requestStatus === 'correccion' && correctionSpareStatus === 'recibido') {
+    return { requiresSpareParts: true, sparePartsStatus: 'recibido' };
+  }
+  if (!requiresSpareParts) {
+    return { requiresSpareParts: false, sparePartsStatus: 'no_aplica' };
+  }
+  if (installedDuringService) {
+    return { requiresSpareParts: true, sparePartsStatus: 'recibido' };
+  }
+  return { requiresSpareParts: true, sparePartsStatus: 'solicitado' };
 }

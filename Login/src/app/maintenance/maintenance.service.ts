@@ -39,6 +39,7 @@ export interface MaintenanceReportDto {
   maintenance_activities?: string[];
   maintenance_tests?: string[];
   asset_status_after?: string | null;
+  asset_status_observations?: string | null;
   requires_spare_parts?: boolean;
   spare_parts_needed?: string | null;
   spare_parts_status?: string | null;
@@ -140,10 +141,12 @@ export class MaintenanceService {
     maintenanceActivities?: string[];
     maintenanceTests?: string[];
     assetStatusAfter?: string;
+    assetStatusObservations?: string;
     assetLifecycleAction?: 'retire' | null;
     requiresSpareParts?: boolean;
     sparePartsNeeded?: string;
     sparePartsStatus?: string;
+    sparePartsInstalledNow?: boolean;
   }): Promise<void> {
     await firstValueFrom(this.http.post(`${this.apiBase}/maintenance/reports`, payload));
   }

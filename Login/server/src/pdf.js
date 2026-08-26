@@ -37,7 +37,7 @@ function sparePartStatusLabel(value) {
     no_aplica: 'No aplica',
     pendiente: 'Pendiente',
     solicitado: 'Repuesto solicitado',
-    recibido: 'Recibido'
+    recibido: 'Repuesto instalado'
   };
   return labels[value] || safeText(value);
 }
@@ -1601,6 +1601,12 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     ['Actividades técnicas', listLabels(report.maintenance_activities, MAINTENANCE_ACTIVITY_LABELS)],
     ['Pruebas y verificaciones', listLabels(report.maintenance_tests, MAINTENANCE_TEST_LABELS)],
     ['Estado final del equipo', maintenanceAssetStatusLabel(report.asset_status_after)],
+    [
+      'Observaciones del estado final',
+      report.asset_status_after === 'operativo'
+        ? 'No aplica'
+        : safeText(report.asset_status_observations)
+    ],
     ['Requiere repuesto', report.requires_spare_parts ? 'Sí' : 'No'],
     ['Repuesto requerido', report.requires_spare_parts ? safeText(report.spare_parts_needed) : 'No aplica'],
     ['Estado del repuesto', report.requires_spare_parts ? sparePartStatusLabel(report.spare_parts_status) : 'No aplica']
