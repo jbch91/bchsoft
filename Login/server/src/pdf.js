@@ -510,7 +510,7 @@ export function buildAssetPdf(doc, { client, asset }) {
     ['Contrato', safeText(asset.contract_text)],
     ['Fecha de adquisición', formatDate(asset.acquisition_date)],
     ['Vida útil (años)', safeText(asset.useful_life_years)],
-    ['Garantía (años)', safeText(asset.warranty_years)],
+    ['Garantía', asset.warranty_years ? `${asset.warranty_years} año(s)` : 'SIN GARANTÍA'],
     ['Proveedor', safeText(asset.supplier_name)],
     ['Teléfono proveedor', safeText(asset.supplier_phone)],
     ['Correo proveedor', safeText(asset.supplier_email)],

@@ -81,10 +81,37 @@ export interface CatalogReviewDto {
   pendingNodes: CatalogReviewNodeDto[];
 }
 
+export interface MaintenanceScheduleSyncDto {
+  assetId: string;
+  status:
+    | 'scheduled'
+    | 'warranty'
+    | 'next_cycle'
+    | 'awaiting_schedule'
+    | 'warranty_data_required';
+  warrantyReleaseDate: string | null;
+  warrantyError?: string | null;
+  schedulesFound: number;
+  schedulesUpdated: number;
+  scheduleIds: string[];
+  itemsAdded: number;
+  itemsRemoved: number;
+  firstPlannedDate: string | null;
+  latestScheduleYear: number | null;
+}
+
+export interface MaintenanceScheduleSyncBatchDto {
+  schedulesUpdated: number;
+  itemsAdded: number;
+  itemsRemoved: number;
+  assets: MaintenanceScheduleSyncDto[];
+}
+
 export interface CatalogMutationResultDto {
   id?: string;
   ok?: boolean;
   catalogReview: CatalogReviewDto;
+  scheduleSync?: MaintenanceScheduleSyncDto | null;
 }
 
 interface AreaDto {
@@ -361,9 +388,19 @@ export class BiomedService {
     clientId: string,
     assets: any[],
     assetCategory: AssetCategory = 'biomedical'
-  ): Promise<{ imported: number; ids: string[]; catalogReview: CatalogReviewDto }> {
+  ): Promise<{
+    imported: number;
+    ids: string[];
+    catalogReview: CatalogReviewDto;
+    scheduleSync: MaintenanceScheduleSyncBatchDto;
+  }> {
     return firstValueFrom(
-      this.http.post<{ imported: number; ids: string[]; catalogReview: CatalogReviewDto }>(
+      this.http.post<{
+        imported: number;
+        ids: string[];
+        catalogReview: CatalogReviewDto;
+        scheduleSync: MaintenanceScheduleSyncBatchDto;
+      }>(
         `${this.apiBase}/biomed/${clientId}/assets/import`,
         { assets, assetCategory }
       )

@@ -136,6 +136,40 @@ export function addMonthsUtc(value, months) {
   return new Date(Date.UTC(targetYear, targetMonth, Math.min(source.getUTCDate(), lastDay)));
 }
 
+export function addYearsUtc(value, years) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new ScheduleValidationError('La fecha de adquisición no es válida.');
+  }
+  const normalizedYears = Number(years);
+  if (!Number.isInteger(normalizedYears) || normalizedYears < 1 || normalizedYears > 50) {
+    throw new ScheduleValidationError('Los años de garantía no son válidos.');
+  }
+  const targetYear = value.getUTCFullYear() + normalizedYears;
+  const targetMonth = value.getUTCMonth();
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(targetYear, targetMonth, Math.min(value.getUTCDate(), lastDay)));
+}
+
+export function assetWarrantyReleaseDate({ acquisitionDate, warrantyYears }) {
+  if (warrantyYears === null || warrantyYears === undefined || warrantyYears === '') {
+    return null;
+  }
+  const years = Number(warrantyYears);
+  if (!Number.isInteger(years) || years < 1 || years > 50) {
+    throw new ScheduleValidationError('Los años de garantía no son válidos.');
+  }
+  if (!acquisitionDate) {
+    throw new ScheduleValidationError(
+      'La fecha de adquisición es obligatoria cuando el equipo tiene garantía.'
+    );
+  }
+  const acquiredOn = parseDateOnly(
+    dateOnlyFromDatabase(acquisitionDate, 'La fecha de adquisición'),
+    'La fecha de adquisición'
+  );
+  return formatDateOnly(addYearsUtc(acquiredOn, years));
+}
+
 export function capDateAtScheduleYearEndUtc(value, year) {
   const normalizedYear = normalizeScheduleYear(year);
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
@@ -200,6 +234,86 @@ export function buildRecurringDates({ year, startDate, months }) {
   return dates;
 }
 
+function mostFrequentValue(values, compareValues) {
+  const counts = new Map();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1] || compareValues(left[0], right[0]))
+    .map(([value]) => value)[0];
+}
+
+function referenceDatesForLocation(referenceItems, locationId) {
+  const normalizedLocationId = String(locationId || '').trim();
+  if (!normalizedLocationId) return referenceItems;
+  const locationItems = referenceItems.filter(
+    (item) => String(item.locationId || item.location_id || '').trim() === normalizedLocationId
+  );
+  return locationItems.length ? locationItems : referenceItems;
+}
+
+function plannedDateFromReference(item) {
+  return dateOnlyFromDatabase(
+    item.plannedDate ?? item.planned_date,
+    'La fecha programada de referencia'
+  );
+}
+
+export function buildAssetMaintenanceOccurrences({
+  year,
+  startDate,
+  frequency,
+  notBeforeDate = null,
+  referenceItems = [],
+  locationId = null
+}) {
+  const periodicity = normalizePeriodicity(frequency);
+  const months = frequencyToMonths(periodicity);
+  const baseDates = buildRecurringDates({ year, startDate, months });
+  const normalizedNotBefore = notBeforeDate
+    ? normalizeDateOnly(notBeforeDate, 'La fecha de inicio del mantenimiento')
+    : null;
+  const normalizedReferences = referenceDatesForLocation(
+    Array.isArray(referenceItems) ? referenceItems : [],
+    locationId
+  ).map((item) => plannedDateFromReference(item));
+  const preferredDay = normalizedReferences.length
+    ? mostFrequentValue(
+        normalizedReferences.map((date) => Number(date.slice(8, 10))),
+        (left, right) => left - right
+      )
+    : null;
+
+  const occurrences = [];
+  for (const baseDate of baseDates) {
+    const monthKey = baseDate.slice(0, 7);
+    const datesInMonth = normalizedReferences.filter((date) => date.startsWith(monthKey));
+    let plannedDate;
+    if (datesInMonth.length) {
+      plannedDate = mostFrequentValue(datesInMonth, (left, right) => left.localeCompare(right));
+    } else if (preferredDay) {
+      const base = parseDateOnly(baseDate);
+      const lastDay = new Date(
+        Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 0)
+      ).getUTCDate();
+      const aligned = new Date(
+        Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), Math.min(preferredDay, lastDay))
+      );
+      plannedDate = formatDateOnly(adjustToWeekdayWithinMonthUtc(aligned));
+    } else {
+      plannedDate = baseDate;
+    }
+
+    if (normalizedNotBefore && plannedDate < normalizedNotBefore) continue;
+    occurrences.push({
+      plannedDate,
+      deadlineDate: formatDateOnly(endOfMonthUtc(parseDateOnly(plannedDate)))
+    });
+  }
+  return occurrences;
+}
+
 export function normalizeUuidList(values, label = 'Los identificadores') {
   if (!Array.isArray(values) || !values.length) {
     throw new ScheduleValidationError(`${label} son requeridos.`);
@@ -257,6 +371,15 @@ export function normalizeMaintenanceItemUpdates(items, existingItems, year) {
   return normalizeRequestedItems(items, existingItems).map(({ input, current }) => {
     const plannedDate = normalizeDateOnly(input.plannedDate, 'La fecha programada');
     const planned = assertWeekdayAndYear(plannedDate, normalizedYear);
+    const warrantyReleaseDate = assetWarrantyReleaseDate({
+      acquisitionDate: current.acquisition_date,
+      warrantyYears: current.warranty_years
+    });
+    if (warrantyReleaseDate && plannedDate < warrantyReleaseDate) {
+      throw new ScheduleValidationError(
+        `La fecha programada debe ser igual o posterior al fin de la garantía (${warrantyReleaseDate}).`
+      );
+    }
     const deadlineDate = dateOnlyFromDatabase(current.deadline_date, 'La fecha límite');
     const deadline = parseDateOnly(deadlineDate);
     const minimum = startOfMonthUtc(deadline);

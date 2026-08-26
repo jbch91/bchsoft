@@ -15,6 +15,28 @@ test('normaliza NR en fecha y correo como datos no registrados', () => {
   assert.equal(result.asset.supplierEmail, null);
 });
 
+test('solo permite garantía cuando existe una fecha de adquisición', () => {
+  const missingDate = validateAndNormalizeHvImportAsset({
+    acquisitionDate: 'NR',
+    warrantyYears: 1,
+    requiresCalibration: false
+  });
+  const noWarranty = validateAndNormalizeHvImportAsset({
+    acquisitionDate: 'NR',
+    warrantyYears: '',
+    requiresCalibration: false
+  });
+
+  assert.equal(
+    missingDate.errors.includes(
+      'La fecha de adquisición es obligatoria cuando el equipo tiene garantía.'
+    ),
+    true
+  );
+  assert.deepEqual(noWarranty.errors, []);
+  assert.equal(noWarranty.asset.warrantyYears, null);
+});
+
 test('rechaza frecuencia cuando el equipo no requiere calibración', () => {
   const result = validateAndNormalizeHvImportAsset({
     requiresCalibration: false,

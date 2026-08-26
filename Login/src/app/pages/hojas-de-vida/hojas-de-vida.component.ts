@@ -7,7 +7,9 @@ import {
   type AssetCategory,
   BiomedService,
   CatalogReviewDto,
-  EquipmentCatalogItemDto
+  EquipmentCatalogItemDto,
+  MaintenanceScheduleSyncBatchDto,
+  MaintenanceScheduleSyncDto
 } from '../../biomed/biomed.service';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
@@ -913,7 +915,7 @@ export class HojasDeVidaComponent implements OnDestroy {
         validRows.map((row) => row.payload!),
         this.assetCategory
       );
-      const importSuccess = `Importación completada: ${result.imported} hoja(s) de vida creadas.${this.catalogReviewNotice(result.catalogReview)}`;
+      const importSuccess = `Importación completada: ${result.imported} hoja(s) de vida creadas.${this.catalogReviewNotice(result.catalogReview)}${this.scheduleSyncBatchNotice(result.scheduleSync)}`;
       this.setImportMessage(importSuccess, 'success');
       this.successMessage = importSuccess;
       this.importPreviewRows = [];
@@ -1214,6 +1216,9 @@ export class HojasDeVidaComponent implements OnDestroy {
       if (warrantyRaw && !warrantyIsValid) {
         errors.push('Garantía debe ser 1, 2 o 3 años');
       }
+      if (warrantyIsValid && !acquisitionDate) {
+        errors.push('Fecha adquisición es obligatoria cuando el equipo tiene garantía');
+      }
 
       const supplierEmail = normalizeOptionalRecordedValue(supplierEmailRaw);
       if (supplierEmail && !this.isValidEmail(supplierEmail)) {
@@ -1413,6 +1418,49 @@ export class HojasDeVidaComponent implements OnDestroy {
     if (!pending.length) return '';
     const labels = pending.map((node) => `${node.label.toLowerCase()} ${node.value}`);
     return ` Quedó pendiente de aprobación en el catálogo: ${labels.join(', ')}.`;
+  }
+
+  private scheduleSyncNotice(sync?: MaintenanceScheduleSyncDto | null): string {
+    if (!sync) return '';
+    const firstDate = sync.firstPlannedDate ? this.formatIsoDateForDisplay(sync.firstPlannedDate) : '';
+    if (sync.status === 'scheduled') {
+      if (sync.itemsAdded) {
+        return ` Se incorporó al cronograma con ${sync.itemsAdded} mantenimiento(s)${firstDate ? ` desde el ${firstDate}` : ''}.`;
+      }
+      return ` El equipo ya está incorporado en el cronograma${firstDate ? ` desde el ${firstDate}` : ''}.`;
+    }
+    if (sync.status === 'warranty') {
+      const releaseDate = sync.warrantyReleaseDate
+        ? this.formatIsoDateForDisplay(sync.warrantyReleaseDate)
+        : '';
+      return ` Quedó en espera por garantía${releaseDate ? ` hasta el ${releaseDate}` : ''} y entrará en la siguiente vigencia aplicable.`;
+    }
+    if (sync.status === 'next_cycle') {
+      return ' No quedan ventanas aplicables en la vigencia actual; se incluirá en el siguiente cronograma.';
+    }
+    if (sync.status === 'warranty_data_required') {
+      return ` El cronograma quedó pendiente: ${sync.warrantyError || 'revisa la fecha de adquisición y la garantía.'}`;
+    }
+    return ' Se incluirá automáticamente cuando exista un cronograma para esta vigencia.';
+  }
+
+  private scheduleSyncBatchNotice(sync?: MaintenanceScheduleSyncBatchDto | null): string {
+    if (!sync?.assets?.length) return '';
+    const scheduled = sync.assets.filter((item) => item.status === 'scheduled').length;
+    const warranty = sync.assets.filter((item) => item.status === 'warranty').length;
+    const nextCycle = sync.assets.filter((item) => item.status === 'next_cycle').length;
+    const awaiting = sync.assets.filter((item) => item.status === 'awaiting_schedule').length;
+    const parts: string[] = [];
+    if (scheduled) parts.push(`${scheduled} incorporado(s) al cronograma`);
+    if (warranty) parts.push(`${warranty} en espera por garantía`);
+    if (nextCycle) parts.push(`${nextCycle} para la siguiente vigencia`);
+    if (awaiting) parts.push(`${awaiting} en espera de crear cronograma`);
+    return parts.length ? ` Programación: ${parts.join(', ')}.` : '';
+  }
+
+  private formatIsoDateForDisplay(value: string): string {
+    const [year, month, day] = value.slice(0, 10).split('-');
+    return year && month && day ? `${day}/${month}/${year}` : value;
   }
 
   private findCatalogEquipment(name: string): EquipmentCatalogItemDto | undefined {
@@ -1666,6 +1714,10 @@ export class HojasDeVidaComponent implements OnDestroy {
       this.errorMessage = 'Selecciona la clase de protección eléctrica y el tipo de parte aplicada.';
       return;
     }
+    if (this.warrantyYears && !this.acquisitionDate) {
+      this.errorMessage = 'La fecha de adquisición es obligatoria cuando el equipo tiene garantía.';
+      return;
+    }
 
     this.errorMessage = '';
     this.successMessage = '';
@@ -1719,7 +1771,7 @@ export class HojasDeVidaComponent implements OnDestroy {
           manualOperacion: this.manualOperacion,
           manualServicio: this.manualServicio
         });
-        this.successMessage = `Hoja de vida actualizada.${this.catalogReviewNotice(result.catalogReview)}`;
+        this.successMessage = `Hoja de vida actualizada.${this.catalogReviewNotice(result.catalogReview)}${this.scheduleSyncNotice(result.scheduleSync)}`;
       } else {
         const result = await this.biomed.createAsset(this.selectedClientId, {
           code: this.code.trim(),
@@ -1769,7 +1821,7 @@ export class HojasDeVidaComponent implements OnDestroy {
           manualOperacion: this.manualOperacion,
           manualServicio: this.manualServicio
         });
-        this.successMessage = `Hoja de vida creada.${this.catalogReviewNotice(result.catalogReview)}`;
+        this.successMessage = `Hoja de vida creada.${this.catalogReviewNotice(result.catalogReview)}${this.scheduleSyncNotice(result.scheduleSync)}`;
       }
 
       this.resetForm();

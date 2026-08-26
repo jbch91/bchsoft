@@ -1,6 +1,7 @@
 import { canonicalizeCatalogValue } from './equipment-catalog-text.js';
 import { normalizeBiomedicalRiskClassifications } from './biomedical-risk.js';
 import { normalizeAssetCategory } from './asset-category.js';
+import { assetWarrantyReleaseDate } from './schedule-workflow.js';
 
 export const HV_CALIBRATION_FREQUENCIES = Object.freeze([
   'mensual',
@@ -64,6 +65,9 @@ export function validateAndNormalizeHvImportAsset(asset = {}) {
   }
   const acquisitionDate = normalizeOptionalRecordedValue(asset.acquisitionDate);
   const supplierEmail = normalizeOptionalRecordedValue(asset.supplierEmail);
+  const warrantyYears = asset.warrantyYears === null || asset.warrantyYears === undefined || asset.warrantyYears === ''
+    ? null
+    : Number(asset.warrantyYears);
   const parsedRequiresCalibration = parseBoolean(asset.requiresCalibration);
   const requiresCalibration = assetCategory === 'industrial' ? false : parsedRequiresCalibration;
   const calibrationFrequencyRaw = String(asset.calibrationFrequency ?? '').trim();
@@ -83,6 +87,11 @@ export function validateAndNormalizeHvImportAsset(asset = {}) {
 
   if (acquisitionDate && !isValidIsoDate(acquisitionDate)) {
     errors.push('Fecha adquisición debe usar yyyy-mm-dd, quedar vacía o ser NR');
+  }
+  try {
+    assetWarrantyReleaseDate({ acquisitionDate, warrantyYears });
+  } catch (error) {
+    errors.push(error.message);
   }
   if (supplierEmail && !isValidEmail(supplierEmail)) {
     errors.push('Correo proveedor no tiene un formato válido');
@@ -108,6 +117,7 @@ export function validateAndNormalizeHvImportAsset(asset = {}) {
       model: canonicalizeCatalogValue(asset.model) || asset.model,
       assetCategory,
       acquisitionDate,
+      warrantyYears,
       supplierEmail,
       ...risk.values,
       requiresCalibration: requiresCalibration ?? false,

@@ -4,6 +4,9 @@ import {
   ScheduleValidationError,
   addBusinessDaysUtc,
   addMonthsUtc,
+  addYearsUtc,
+  assetWarrantyReleaseDate,
+  buildAssetMaintenanceOccurrences,
   buildRecurringDates,
   canEditMaintenanceSchedule,
   capDateAtMonthEndUtc,
@@ -38,6 +41,22 @@ test('calcula fechas sin depender de la zona horaria del servidor', () => {
   const friday = parseDateOnly('2026-08-21');
   assert.equal(formatDateOnly(addBusinessDaysUtc(friday, 1)), '2026-08-24');
   assert.equal(formatDateOnly(addMonthsUtc(parseDateOnly('2026-01-31'), 1)), '2026-02-28');
+  assert.equal(formatDateOnly(addYearsUtc(parseDateOnly('2024-02-29'), 1)), '2025-02-28');
+});
+
+test('calcula el fin de garantía y exige una fecha de adquisición verificable', () => {
+  assert.equal(
+    assetWarrantyReleaseDate({ acquisitionDate: '2025-09-10', warrantyYears: 1 }),
+    '2026-09-10'
+  );
+  assert.equal(
+    assetWarrantyReleaseDate({ acquisitionDate: null, warrantyYears: null }),
+    null
+  );
+  assert.throws(
+    () => assetWarrantyReleaseDate({ acquisitionDate: null, warrantyYears: 1 }),
+    /fecha de adquisición es obligatoria/
+  );
 });
 
 test('genera recurrencias en días hábiles dentro del año', () => {
@@ -78,6 +97,44 @@ test('genera todas las ventanas de una vigencia anual', () => {
   assert.deepEqual(
     monthly.map((date) => date.slice(0, 7)),
     Array.from({ length: 12 }, (_, index) => `2026-${String(index + 1).padStart(2, '0')}`)
+  );
+});
+
+test('incorpora un equipo nuevo desde la próxima fecha de su ubicación y área', () => {
+  const occurrences = buildAssetMaintenanceOccurrences({
+    year: 2026,
+    startDate: '2026-01-15',
+    frequency: 'trimestral',
+    notBeforeDate: '2026-08-26',
+    locationId: 'location-a',
+    referenceItems: [
+      { plannedDate: '2026-08-28', locationId: 'location-a' },
+      { plannedDate: '2026-09-28', locationId: 'location-a' },
+      { plannedDate: '2026-08-20', locationId: 'location-b' },
+      { plannedDate: '2026-11-27', locationId: 'location-a' }
+    ]
+  });
+  assert.deepEqual(occurrences, [
+    { plannedDate: '2026-10-28', deadlineDate: '2026-10-31' }
+  ]);
+});
+
+test('omite mantenimientos anteriores al vencimiento de la garantía', () => {
+  const occurrences = buildAssetMaintenanceOccurrences({
+    year: 2026,
+    startDate: '2026-01-15',
+    frequency: 'mensual',
+    notBeforeDate: '2026-09-20',
+    referenceItems: [
+      { plannedDate: '2026-09-10' },
+      { plannedDate: '2026-10-12' }
+    ]
+  });
+  assert.equal(occurrences[0]?.plannedDate, '2026-10-12');
+  assert.equal(occurrences.length, 3);
+  assert.deepEqual(
+    occurrences.map((item) => item.plannedDate.slice(0, 7)),
+    ['2026-10', '2026-11', '2026-12']
   );
 });
 
@@ -127,6 +184,32 @@ test('mantiene la fecha límite al editar mantenimientos dentro de su ventana', 
         2026
       ),
     /debe pertenecer al mes/
+  );
+});
+
+test('impide mover una fecha programada dentro del periodo de garantía', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const current = [{
+    id,
+    deadline_date: '2026-09-30',
+    acquisition_date: '2025-09-10',
+    warranty_years: 1
+  }];
+  assert.throws(
+    () => normalizeMaintenanceItemUpdates(
+      [{ id, plannedDate: '2026-09-09' }],
+      current,
+      2026
+    ),
+    /fin de la garantía/
+  );
+  assert.deepEqual(
+    normalizeMaintenanceItemUpdates(
+      [{ id, plannedDate: '2026-09-10' }],
+      current,
+      2026
+    ),
+    [{ id, plannedDate: '2026-09-10', deadlineDate: '2026-09-30' }]
   );
 });
 

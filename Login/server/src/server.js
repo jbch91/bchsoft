@@ -272,7 +272,8 @@ import {
   markScheduleItemDone,
   findScheduleItemForAsset,
   deleteDraftSchedule,
-  setScheduleEngineerEditAccess
+  setScheduleEngineerEditAccess,
+  syncAssetsIntoMaintenanceSchedules
 } from './schedules.js';
 import {
   createTrainingScheduleWithItems,
@@ -352,6 +353,8 @@ import {
 import {
   ScheduleValidationError,
   addMonthsUtc as addScheduleMonths,
+  assetWarrantyReleaseDate,
+  buildAssetMaintenanceOccurrences,
   buildRecurringDates,
   canEditMaintenanceSchedule,
   capDateAtScheduleYearEndUtc as capScheduleDateAtYearEnd,
@@ -7327,8 +7330,11 @@ function changedAssetFields(before, after) {
     ['brand', 'Marca'],
     ['model', 'Modelo'],
     ['serial', 'Serie'],
+    ['site_id', 'Sede'],
     ['area_id', 'Área'],
     ['location_id', 'Ubicación'],
+    ['acquisition_date', 'Fecha de adquisición'],
+    ['warranty_years', 'Garantía'],
     ['requires_sanitary_classification', 'Requiere riesgo sanitario'],
     ['risk_class', 'Clasificación de riesgo sanitario'],
     ['requires_electrical_classification', 'Requiere riesgo eléctrico'],
@@ -7347,6 +7353,20 @@ function changedAssetFields(before, after) {
       before: before[key] ?? null,
       after: after[key] ?? null
     }));
+}
+
+function assetScheduleConfigurationChanged(before, after) {
+  const scheduleFields = new Set([
+    'asset_category',
+    'site_id',
+    'area_id',
+    'location_id',
+    'acquisition_date',
+    'warranty_years',
+    'status',
+    'maintenance_frequency'
+  ]);
+  return changedAssetFields(before, after).some((change) => scheduleFields.has(change.field));
 }
 
 async function logEquipmentAudit(req, {
@@ -8583,6 +8603,14 @@ app.post(
       if (recommendationsList.length) await replaceRecommendations(clientId, result.id, recommendationsList);
 
       const createdAsset = await getAssetById(clientId, result.id);
+      const scheduleSyncResult = await syncAssetsIntoMaintenanceSchedules({
+        clientId,
+        schema: (await getClientById(clientId))?.schema_name,
+        assetIds: [result.id],
+        today: todayInBogota(),
+        actorUserId: req.user.sub
+      });
+      const scheduleSync = scheduleSyncResult.assets[0] || null;
       await logEquipmentAudit(req, {
         action: 'ASSET_CREATE',
         clientId,
@@ -8595,10 +8623,11 @@ app.post(
             photo: Boolean(req.files?.photo?.[0]),
             manualOperacion: Boolean(req.files?.manualOperacion?.[0]),
             manualServicio: Boolean(req.files?.manualServicio?.[0])
-          }
+          },
+          scheduleSync
         }
       });
-      return res.status(201).json(result);
+      return res.status(201).json({ ...result, scheduleSync });
     } catch (error) {
       if (String(error?.code || '').startsWith('CATALOG_')) {
         return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo de equipos.');
@@ -8607,6 +8636,9 @@ app.post(
         return res.status(400).json({ message: error.message });
       }
       if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
+      if (error instanceof ScheduleValidationError) {
         return res.status(400).json({ message: error.message });
       }
       console.error(error);
@@ -8776,9 +8808,19 @@ app.post(
         });
       }
 
+      const importClient = await getClientById(clientId);
+      const scheduleSync = await syncAssetsIntoMaintenanceSchedules({
+        clientId,
+        schema: importClient.schema_name,
+        assetIds: imported,
+        today: todayInBogota(),
+        actorUserId: req.user.sub
+      });
+
       return res.status(201).json({
         imported: imported.length,
         ids: imported,
+        scheduleSync,
         catalogReview: {
           status: pendingCatalogNodes.size ? 'pending' : 'approved',
           pendingNodes: Array.from(pendingCatalogNodes.values())
@@ -8792,6 +8834,9 @@ app.post(
         return res.status(400).json({ message: error.message });
       }
       if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
+      if (error instanceof ScheduleValidationError) {
         return res.status(400).json({ message: error.message });
       }
       console.error(error);
@@ -8949,6 +8994,16 @@ app.put(
       await replaceRecommendations(clientId, assetId, recommendationsList);
 
       const updatedAsset = await getAssetById(clientId, assetId);
+      const assetClient = await getClientById(clientId);
+      const scheduleSyncResult = await syncAssetsIntoMaintenanceSchedules({
+        clientId,
+        schema: assetClient.schema_name,
+        assetIds: [assetId],
+        today: todayInBogota(),
+        actorUserId: req.user.sub,
+        replaceFuturePending: assetScheduleConfigurationChanged(beforeAsset, updatedAsset)
+      });
+      const scheduleSync = scheduleSyncResult.assets[0] || null;
       await logEquipmentAudit(req, {
         action: 'ASSET_UPDATE',
         clientId,
@@ -8962,10 +9017,11 @@ app.put(
             photo: Boolean(req.files?.photo?.[0]),
             manualOperacion: Boolean(req.files?.manualOperacion?.[0]),
             manualServicio: Boolean(req.files?.manualServicio?.[0])
-          }
+          },
+          scheduleSync
         }
       });
-      return res.json({ ok: true, catalogReview: updateResult.catalogReview });
+      return res.json({ ok: true, catalogReview: updateResult.catalogReview, scheduleSync });
     } catch (error) {
       if (String(error?.code || '').startsWith('CATALOG_')) {
         return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo de equipos.');
@@ -8974,6 +9030,9 @@ app.put(
         return res.status(400).json({ message: error.message });
       }
       if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
+      if (error instanceof ScheduleValidationError) {
         return res.status(400).json({ message: error.message });
       }
       console.error(error);
@@ -9027,6 +9086,15 @@ app.post(
       });
 
       const client = await getClientById(clientId);
+      const scheduleSyncResult = await syncAssetsIntoMaintenanceSchedules({
+        clientId,
+        schema: client.schema_name,
+        assetIds: [assetId],
+        today: todayInBogota(),
+        actorUserId: req.user.sub,
+        replaceFuturePending: true
+      });
+      const scheduleSync = scheduleSyncResult.assets[0] || null;
       const dir = await ensureClientLogoDir(clientId);
       const movementDir = path.join(dir, 'assets', assetId, 'movements');
       await fs.promises.mkdir(movementDir, { recursive: true });
@@ -9062,11 +9130,17 @@ app.post(
             area: after.area_name,
             location: after.location_name
           },
-          pdfPath: publicPath
+          pdfPath: publicPath,
+          scheduleSync
         }
       });
 
-      return res.status(201).json({ ok: true, movementId: movement.id, pdfPath: publicPath });
+      return res.status(201).json({
+        ok: true,
+        movementId: movement.id,
+        pdfPath: publicPath,
+        scheduleSync
+      });
     } catch (error) {
       console.error(error);
       return res.status(500).json({ message: 'No se pudo mover el equipo.' });
@@ -11356,6 +11430,13 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
        AND s.year = EXTRACT(YEAR FROM $2::date)::int
        AND i.status IN ('pending', 'active')
        AND COALESCE(a.status, 'activo') <> 'dado_de_baja'
+       AND (
+         a.warranty_years IS NULL
+         OR (
+           a.acquisition_date IS NOT NULL
+           AND i.planned_date >= (a.acquisition_date + make_interval(years => a.warranty_years))::date
+         )
+       )
        AND i.planned_date <= $2
        AND i.deadline_date >= $2`,
     [clientId, today]
@@ -11483,7 +11564,8 @@ app.post(
     }
     const schema = client.schema_name;
     const assetsResult = await query(
-      `SELECT id, code, name, brand, model, serial, maintenance_frequency
+      `SELECT id, code, name, brand, model, serial, maintenance_frequency,
+              acquisition_date, warranty_years
        FROM "${schema}".assets
        WHERE maintenance_frequency IS NOT NULL
          AND asset_category = $1
@@ -11499,7 +11581,6 @@ app.post(
     }
 
     const items = [];
-    const datesByFrequency = new Map();
     const unsupportedFrequencies = new Set();
     for (const asset of assets) {
       const months = scheduleFrequencyToMonths(asset.maintenance_frequency);
@@ -11507,24 +11588,34 @@ app.post(
         unsupportedFrequencies.add(String(asset.maintenance_frequency));
         continue;
       }
-      if (!datesByFrequency.has(months)) {
-        datesByFrequency.set(months, buildRecurringDates({ ...scheduleInput, months }));
+      let warrantyReleaseDate;
+      try {
+        warrantyReleaseDate = assetWarrantyReleaseDate({
+          acquisitionDate: asset.acquisition_date,
+          warrantyYears: asset.warranty_years
+        });
+      } catch (error) {
+        return res.status(400).json({
+          message: `Equipo ${asset.code || asset.name}: ${error.message}`
+        });
       }
-      for (const plannedDate of datesByFrequency.get(months)) {
-        const planned = parseScheduleDate(plannedDate);
-        const deadlineDate = formatScheduleDate(endOfScheduleMonth(planned));
+      const occurrences = buildAssetMaintenanceOccurrences({
+        ...scheduleInput,
+        frequency: asset.maintenance_frequency,
+        notBeforeDate: warrantyReleaseDate
+      });
+      for (const occurrence of occurrences) {
         items.push({
           assetId: asset.id,
           frequency: asset.maintenance_frequency,
-          plannedDate,
-          deadlineDate
+          ...occurrence
         });
       }
     }
     if (!items.length) {
       const detail = unsupportedFrequencies.size
         ? ` Revisa estas periodicidades: ${Array.from(unsupportedFrequencies).join(', ')}.`
-        : '';
+        : ' Los equipos pueden continuar en garantía durante toda la vigencia seleccionada.';
       return res.status(400).json({
         message: `No se pudieron generar mantenimientos con las periodicidades registradas.${detail}`
       });

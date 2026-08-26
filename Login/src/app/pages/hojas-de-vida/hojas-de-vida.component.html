@@ -390,7 +390,7 @@
             <label>
               Garantía (años)
               <select [(ngModel)]="warrantyYears" name="warrantyYears">
-                <option [ngValue]="null">-</option>
+                <option [ngValue]="null">SIN GARANTÍA</option>
                 <option [ngValue]="1">1</option>
                 <option [ngValue]="2">2</option>
                 <option [ngValue]="3">3</option>
@@ -539,7 +539,7 @@
               <p><strong>Contrato:</strong> {{ contractText || '-' }}</p>
               <p><strong>Fecha:</strong> {{ acquisitionDate || '-' }}</p>
               <p><strong>Vida útil:</strong> {{ usefulLifeYears || '-' }}</p>
-              <p><strong>Garantía:</strong> {{ warrantyYears || '-' }}</p>
+              <p><strong>Garantía:</strong> {{ warrantyYears ? (warrantyYears + ' año(s)') : 'SIN GARANTÍA' }}</p>
               <p><strong>Proveedor:</strong> {{ supplierName || '-' }}</p>
               <p><strong>Teléfono:</strong> {{ supplierPhone || '-' }}</p>
               <p><strong>Correo:</strong> {{ supplierEmail || '-' }}</p>

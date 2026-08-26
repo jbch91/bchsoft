@@ -2,7 +2,7 @@ import { query, withTransaction } from './db.js';
 import { canonicalizeCatalogValue, ensureEquipmentCatalogPath } from './equipment-catalog.js';
 import { assertBiomedicalRiskClassifications } from './biomedical-risk.js';
 import { normalizeAssetCategory } from './asset-category.js';
-import { dateOnlyFromDatabase } from './schedule-workflow.js';
+import { assetWarrantyReleaseDate, dateOnlyFromDatabase } from './schedule-workflow.js';
 
 async function getSchemaByClientId(clientId) {
   const { rows } = await query('SELECT schema_name FROM clients WHERE id = $1', [clientId]);
@@ -549,6 +549,7 @@ export async function createAsset(clientId, payload) {
       });
   const assetRequiresCalibration = category === 'industrial' ? false : Boolean(requiresCalibration);
   const assetCalibrationFrequency = assetRequiresCalibration ? calibrationFrequency : null;
+  assetWarrantyReleaseDate({ acquisitionDate, warrantyYears });
   const catalogPath = await ensureEquipmentCatalogPath({
     equipmentName,
     brand: equipmentBrand,
@@ -693,6 +694,7 @@ export async function updateAsset(clientId, assetId, payload) {
       });
   const assetRequiresCalibration = category === 'industrial' ? false : Boolean(requiresCalibration);
   const assetCalibrationFrequency = assetRequiresCalibration ? calibrationFrequency : null;
+  assetWarrantyReleaseDate({ acquisitionDate, warrantyYears });
   const catalogPath = await ensureEquipmentCatalogPath({
     equipmentName,
     brand: equipmentBrand,

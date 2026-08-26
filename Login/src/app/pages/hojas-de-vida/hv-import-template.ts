@@ -408,6 +408,7 @@ export function buildHvImportTemplate(
     ['Equipo, marca y modelo', 'Selecciona en ese orden para ver únicamente las marcas y modelos relacionados. Si falta un valor, puedes escribirlo; al importar se guardará en MAYÚSCULAS y quedará disponible en el catálogo compartido.'],
     ['Sede, área y ubicación', 'Selecciona primero la sede y el área. La ubicación mostrará únicamente los registros asociados a esa combinación.'],
     ['Fecha de adquisición', 'Usa yyyy-mm-dd. Si el dato no existe, deja la celda vacía o escribe NR (No registra).'],
+    ['Garantía', 'Déjala vacía cuando el equipo no tenga garantía. Si eliges 1, 2 o 3 años, la fecha de adquisición es obligatoria y el mantenimiento se programará únicamente después de finalizar la garantía.'],
     ['Correo del proveedor', 'Ingresa un correo válido. Si el dato no existe, deja la celda vacía o escribe NR; se guardará como sin dato.'],
     ...(!isIndustrial ? [
       ['Riesgo sanitario', 'Selecciona Sí cuando aplique y elige Clase I, Clase IIA, Clase IIB o Clase III. Si seleccionas No, deja la clasificación vacía.'],
