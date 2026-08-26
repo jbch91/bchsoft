@@ -1529,6 +1529,14 @@ export class HojasDeVidaComponent implements OnDestroy {
     return null;
   }
 
+  private extractErrorCode(error: unknown): string | null {
+    if (typeof error === 'object' && error && 'error' in error) {
+      const nested = (error as { error?: { code?: string } }).error;
+      return nested?.code ?? null;
+    }
+    return null;
+  }
+
   private parseExcelDate(value: unknown): string | null {
     if (!value) return null;
     if (value instanceof Date) return this.formatDateForInput(value);
@@ -1830,6 +1838,37 @@ export class HojasDeVidaComponent implements OnDestroy {
     await this.onCreateAsset(true);
   }
 
+  private async prepareScheduleProgramming(): Promise<'required' | 'not_required' | 'error'> {
+    if (!this.selectedClientId || !this.editingAssetId) return 'not_required';
+    this.scheduleProgrammingLoading = true;
+    this.errorMessage = '';
+    try {
+      const preview = await this.biomed.previewAssetMaintenanceSchedule(
+        this.selectedClientId,
+        this.editingAssetId,
+        {
+          maintenanceFrequency: this.maintenanceFrequency,
+          areaId: this.areaId || null,
+          locationId: this.locationId || null,
+          acquisitionDate: this.acquisitionDate || null,
+          warrantyYears: this.warrantyYears
+        }
+      );
+      if (!preview.requiresConfirmation) return 'not_required';
+      this.scheduleProgrammingPreview = preview;
+      this.scheduleProgrammingError = '';
+      return 'required';
+    } catch (error) {
+      console.error(error);
+      this.errorMessage = this.extractErrorMessage(error)
+        || 'No se pudieron preparar las fechas del cronograma aprobado.';
+      return 'error';
+    } finally {
+      this.scheduleProgrammingLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
   async onCreateAsset(skipScheduleProgrammingPreview = false): Promise<void> {
     if (this.assetSaving || this.scheduleProgrammingLoading) return;
     if (!this.selectedClientId || !this.code || !this.name) {
@@ -1856,33 +1895,8 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.errorMessage = '';
     this.successMessage = '';
     if (this.editingAssetId && this.maintenanceFrequencyChanged() && !skipScheduleProgrammingPreview) {
-      this.scheduleProgrammingLoading = true;
-      try {
-        const preview = await this.biomed.previewAssetMaintenanceSchedule(
-          this.selectedClientId,
-          this.editingAssetId,
-          {
-            maintenanceFrequency: this.maintenanceFrequency,
-            areaId: this.areaId || null,
-            locationId: this.locationId || null,
-            acquisitionDate: this.acquisitionDate || null,
-            warrantyYears: this.warrantyYears
-          }
-        );
-        if (preview.requiresConfirmation) {
-          this.scheduleProgrammingPreview = preview;
-          this.scheduleProgrammingError = '';
-          return;
-        }
-      } catch (error) {
-        console.error(error);
-        this.errorMessage = this.extractErrorMessage(error)
-          || 'No se pudieron preparar las fechas del cronograma aprobado.';
-        return;
-      } finally {
-        this.scheduleProgrammingLoading = false;
-        this.cdr.detectChanges();
-      }
+      const preparation = await this.prepareScheduleProgramming();
+      if (preparation !== 'not_required') return;
     }
     this.assetSaving = true;
     let historicalFollowUpAssetId = '';
@@ -2016,6 +2030,16 @@ export class HojasDeVidaComponent implements OnDestroy {
     } catch (error) {
       console.error(error);
       const message = this.extractErrorMessage(error) || 'No se pudo guardar la hoja de vida.';
+      if (
+        !skipScheduleProgrammingPreview
+        && this.editingAssetId
+        && this.extractErrorCode(error) === 'MAINTENANCE_SCHEDULE_DATES_REQUIRED'
+      ) {
+        this.assetSaving = false;
+        const preparation = await this.prepareScheduleProgramming();
+        if (preparation === 'not_required') this.errorMessage = message;
+        return;
+      }
       if (this.scheduleProgrammingPreview) {
         this.scheduleProgrammingError = message;
       } else {
