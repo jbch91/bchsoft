@@ -5,7 +5,6 @@ import {
   AssetHistoryItemDto,
   AssetMovementDto,
   BiomedService,
-  HistoricalMaintenanceOccurrenceDto,
   MaintenanceScheduleSyncDto
 } from '../../biomed/biomed.service';
 import { CalibrationService } from '../../calibration/calibration.service';
@@ -45,12 +44,6 @@ interface MoveLocationOption {
   area_id: string | null;
 }
 
-type HistoryDocumentType =
-  | 'maintenance_preventive'
-  | 'maintenance_corrective'
-  | 'calibration'
-  | 'other';
-
 export type InventoryPanelMode = 'life_sheets' | 'inventory';
 
 @Component({
@@ -68,7 +61,6 @@ export class InventoryPanelComponent implements OnDestroy {
   @Input() canEdit = false;
   @Input() canDelete = false;
   @Input() canMove = false;
-  @Input() canUploadHistory = false;
   @Input() mode: InventoryPanelMode = 'inventory';
   @Input() viewInModal = false;
   @Input() showRetired = false;
@@ -79,7 +71,6 @@ export class InventoryPanelComponent implements OnDestroy {
   @Output() editItem = new EventEmitter<InventoryPanelItem>();
   @Output() deleteItem = new EventEmitter<InventoryPanelItem>();
   @Output() movedItem = new EventEmitter<void>();
-  @Output() historyUploaded = new EventEmitter<void>();
 
   searchTerm = '';
   filterSite = '';
@@ -99,18 +90,6 @@ export class InventoryPanelComponent implements OnDestroy {
   historyLimit = 4;
   historyOffset = 0;
   historyHasMore = true;
-  historyUploadFile: File | null = null;
-  historyUploadDate = '';
-  historyUploadDocumentType: HistoryDocumentType = 'maintenance_preventive';
-  historyUploadTitle = 'Mantenimiento preventivo histórico';
-  historyUploadDescription = '';
-  historicalMaintenanceOccurrences: HistoricalMaintenanceOccurrenceDto[] = [];
-  historicalEvidenceDates: string[] = [];
-  selectedHistoricalMaintenanceOccurrenceId = '';
-  historicalOccurrencesLoading = false;
-  historyUploadLoading = false;
-  historyUploadError = '';
-  historyUploadSuccess = '';
   movingAssetId: string | null = null;
   moveLoading = false;
   moveError = '';
@@ -138,15 +117,6 @@ export class InventoryPanelComponent implements OnDestroy {
     notes: ''
   };
   private destroyed = false;
-  private historicalOccurrenceLoadToken = 0;
-  private readonly maxHistoryPdfBytes = 15 * 1024 * 1024;
-
-  readonly historyDocumentTypeOptions: { value: HistoryDocumentType; label: string }[] = [
-    { value: 'maintenance_preventive', label: 'Mantenimiento preventivo' },
-    { value: 'maintenance_corrective', label: 'Mantenimiento correctivo' },
-    { value: 'calibration', label: 'Calibración' },
-    { value: 'other', label: 'Otro documento' }
-  ];
 
   constructor(
     private readonly biomed: BiomedService,
@@ -251,10 +221,6 @@ export class InventoryPanelComponent implements OnDestroy {
     return this.items.find((item) => item.id === this.historyAssetId) ?? null;
   }
 
-  get canUploadHistoryFile(): boolean {
-    return this.isLifeSheetMode && this.canUploadHistory;
-  }
-
   assetStatusLabel(status: string | null | undefined): string {
     const labels: Record<string, string> = {
       activo: 'Activo',
@@ -264,10 +230,6 @@ export class InventoryPanelComponent implements OnDestroy {
       dado_de_baja: 'Dado de baja'
     };
     return labels[String(status || '').toLowerCase()] || status || 'Sin estado';
-  }
-
-  get historicalEvidencePendingLabels(): string[] {
-    return this.historicalEvidenceDates.map((date) => this.formatHistoryDate(date));
   }
 
   get activeFilters(): { key: string; label: string }[] {
@@ -445,79 +407,6 @@ export class InventoryPanelComponent implements OnDestroy {
     return 'PDF migrado';
   }
 
-  get eligibleHistoricalMaintenanceOccurrences(): HistoricalMaintenanceOccurrenceDto[] {
-    return this.historicalMaintenanceOccurrences.filter((occurrence) => occurrence.eligible);
-  }
-
-  get historicalOccurrenceHelp(): string {
-    if (this.historyUploadDocumentType !== 'maintenance_preventive') return '';
-    if (!this.historyUploadDate) {
-      return 'Selecciona la fecha real para buscar la ocurrencia del cronograma de ese mes.';
-    }
-    if (this.historicalOccurrencesLoading) return 'Buscando ocurrencias del cronograma...';
-    if (!this.historicalMaintenanceOccurrences.length) {
-      return 'No existe una ocurrencia para ese mes. El PDF se archivará sin modificar el cronograma.';
-    }
-    if (!this.eligibleHistoricalMaintenanceOccurrences.length) {
-      return (
-        this.historicalMaintenanceOccurrences[0]?.unavailable_reason ||
-        'La ocurrencia encontrada no admite conciliación.'
-      );
-    }
-    return 'Al subir el PDF, esta ocurrencia quedará realizada con la fecha real del documento.';
-  }
-
-  historicalOccurrenceLabel(occurrence: HistoricalMaintenanceOccurrenceDto): string {
-    const planned = this.formatHistoryDate(occurrence.planned_date);
-    const frequency = this.titleCaseLabel(occurrence.frequency);
-    const status = this.historyOccurrenceStatusLabel(occurrence.status);
-    return `#${occurrence.occurrence_number} · ${planned} · ${frequency} · ${status}`;
-  }
-
-  onHistoryDocumentTypeChange(): void {
-    this.historyUploadTitle = this.historyDocumentDefaultTitle(this.historyUploadDocumentType);
-    this.clearHistoricalOccurrences();
-    if (this.historyUploadDocumentType === 'maintenance_preventive' && this.historyUploadDate) {
-      void this.loadHistoricalMaintenanceOccurrences();
-    }
-  }
-
-  onHistoryUploadDateChange(): void {
-    this.clearHistoricalOccurrences();
-    if (this.historyUploadDocumentType === 'maintenance_preventive' && this.historyUploadDate) {
-      void this.loadHistoricalMaintenanceOccurrences();
-    }
-  }
-
-  private async loadHistoricalMaintenanceOccurrences(): Promise<void> {
-    if (!this.selectedClientId || !this.historyAssetId || !this.historyUploadDate) return;
-    const token = ++this.historicalOccurrenceLoadToken;
-    this.historicalOccurrencesLoading = true;
-    this.historyUploadError = '';
-    try {
-      const rows = await this.biomed.listHistoricalMaintenanceOccurrences(
-        this.selectedClientId,
-        this.historyAssetId,
-        this.historyUploadDate
-      );
-      if (token !== this.historicalOccurrenceLoadToken) return;
-      this.historicalMaintenanceOccurrences = rows;
-      const eligible = rows.filter((occurrence) => occurrence.eligible);
-      this.selectedHistoricalMaintenanceOccurrenceId = eligible[0]?.id || '';
-    } catch (error: any) {
-      if (token !== this.historicalOccurrenceLoadToken) return;
-      this.historicalMaintenanceOccurrences = [];
-      this.selectedHistoricalMaintenanceOccurrenceId = '';
-      this.historyUploadError =
-        error?.error?.message || 'No se pudieron consultar las ocurrencias del cronograma.';
-    } finally {
-      if (token === this.historicalOccurrenceLoadToken) {
-        this.historicalOccurrencesLoading = false;
-        this.refreshViewSoon();
-      }
-    }
-  }
-
   async loadHistory(reset = true): Promise<void> {
     if (!this.selectedClientId || !this.historyAssetId) {
       this.historyItems = [];
@@ -586,119 +475,11 @@ export class InventoryPanelComponent implements OnDestroy {
     this.historyFrom = '';
     this.historyTo = '';
     this.historyOrder = 'asc';
-    this.historicalEvidenceDates = [];
-    this.resetHistoryUpload();
     await this.loadHistory(true);
     setTimeout(() => {
       const el = document.getElementById(`history-${item.id}`);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 0);
-  }
-
-  async openHistoricalUpload(item: InventoryPanelItem, plannedDates: string[]): Promise<void> {
-    this.expandedAssetId = item.id;
-    this.historyAssetId = item.id;
-    this.movingAssetId = null;
-    this.historyFrom = '';
-    this.historyTo = '';
-    this.historyOrder = 'asc';
-    this.historicalEvidenceDates = Array.from(
-      new Set(plannedDates.map((date) => date.slice(0, 10)).filter(Boolean))
-    ).sort();
-    this.resetHistoryUpload();
-    this.historyUploadDate = this.historicalEvidenceDates[0] || '';
-    await Promise.all([
-      this.loadHistory(true),
-      this.loadHistoricalMaintenanceOccurrences()
-    ]);
-    setTimeout(() => {
-      document.getElementById(`history-${item.id}`)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start'
-      });
-    }, 0);
-  }
-
-  onHistoryFileSelected(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0] ?? null;
-    if (file && !this.isPdfFile(file)) {
-      this.historyUploadFile = null;
-      input.value = '';
-      this.historyUploadError = 'Solo se permiten archivos PDF.';
-      return;
-    }
-    if (file && file.size > this.maxHistoryPdfBytes) {
-      this.historyUploadFile = null;
-      input.value = '';
-      this.historyUploadError = 'El PDF supera el límite de 15 MB.';
-      return;
-    }
-    this.historyUploadError = '';
-    this.historyUploadFile = file;
-  }
-
-  async uploadHistoryFile(): Promise<void> {
-    if (!this.selectedClientId || !this.historyAssetId) return;
-    if (!this.historyUploadDate) {
-      this.historyUploadError = 'Selecciona la fecha real del documento.';
-      return;
-    }
-    if (!this.historyUploadFile) {
-      this.historyUploadError = 'Selecciona un archivo PDF.';
-      return;
-    }
-    if (
-      this.historyUploadDocumentType === 'maintenance_preventive' &&
-      this.historicalMaintenanceOccurrences.length &&
-      !this.selectedHistoricalMaintenanceOccurrenceId
-    ) {
-      this.historyUploadError =
-        this.historicalMaintenanceOccurrences[0]?.unavailable_reason ||
-        'Selecciona una ocurrencia disponible del cronograma.';
-      return;
-    }
-    this.historyUploadLoading = true;
-    this.historyUploadError = '';
-    this.historyUploadSuccess = '';
-    try {
-      const result = await this.biomed.uploadAssetHistoryFile(this.selectedClientId, this.historyAssetId, {
-        file: this.historyUploadFile,
-        documentDate: this.historyUploadDate,
-        documentType: this.historyUploadDocumentType,
-        maintenanceScheduleItemId: this.selectedHistoricalMaintenanceOccurrenceId || undefined,
-        title: this.historyUploadTitle.trim(),
-        description: this.historyUploadDescription.trim()
-      });
-      this.historyUploadSuccess = result.reconciliation
-        ? 'Mantenimiento histórico conciliado con el cronograma.'
-        : 'PDF histórico archivado correctamente.';
-      this.historyUploaded.emit();
-      if (result.reconciliation) {
-        const reconciledMonth = result.reconciliation.plannedDate.slice(0, 7);
-        const matchingIndex = this.historicalEvidenceDates.findIndex(
-          (date) => date.startsWith(reconciledMonth)
-        );
-        if (matchingIndex >= 0) this.historicalEvidenceDates.splice(matchingIndex, 1);
-      }
-      this.resetHistoryUpload(true);
-      this.historyUploadDate = this.historicalEvidenceDates[0] || '';
-      if (this.historyUploadDate) {
-        await Promise.all([
-          this.loadHistory(true),
-          this.loadHistoricalMaintenanceOccurrences()
-        ]);
-        this.historyUploadSuccess += ` Continúa con ${this.historicalEvidenceDates.length} evidencia(s) pendiente(s).`;
-      } else {
-        await this.loadHistory(true);
-      }
-    } catch (error: any) {
-      console.error(error);
-      this.historyUploadError = error?.error?.message || 'No se pudo cargar el PDF histórico.';
-    } finally {
-      this.historyUploadLoading = false;
-      this.refreshViewSoon();
-    }
   }
 
   async deleteHistoryFile(item: AssetHistoryItemDto): Promise<void> {
@@ -709,7 +490,7 @@ export class InventoryPanelComponent implements OnDestroy {
       await this.biomed.deleteAssetHistoryFile(this.selectedClientId, item.id);
       await this.loadHistory(true);
     } catch (error: any) {
-      this.historyUploadError = error?.error?.message || 'No se pudo eliminar el PDF histórico.';
+      window.alert(error?.error?.message || 'No se pudo eliminar el PDF histórico.');
     }
   }
 
@@ -846,54 +627,9 @@ export class InventoryPanelComponent implements OnDestroy {
     return lines.join('\n');
   }
 
-  private resetHistoryUpload(keepSuccess = false): void {
-    this.historyUploadFile = null;
-    this.historyUploadDate = '';
-    this.historyUploadDocumentType = 'maintenance_preventive';
-    this.historyUploadTitle = 'Mantenimiento preventivo histórico';
-    this.historyUploadDescription = '';
-    this.clearHistoricalOccurrences();
-    this.historyUploadError = '';
-    if (!keepSuccess) this.historyUploadSuccess = '';
-  }
-
-  private clearHistoricalOccurrences(): void {
-    this.historicalOccurrenceLoadToken += 1;
-    this.historicalMaintenanceOccurrences = [];
-    this.selectedHistoricalMaintenanceOccurrenceId = '';
-    this.historicalOccurrencesLoading = false;
-  }
-
-  private historyDocumentDefaultTitle(type: HistoryDocumentType): string {
-    return {
-      maintenance_preventive: 'Mantenimiento preventivo histórico',
-      maintenance_corrective: 'Mantenimiento correctivo histórico',
-      calibration: 'Calibración histórica',
-      other: 'Documento histórico migrado'
-    }[type];
-  }
-
-  private historyOccurrenceStatusLabel(status: string): string {
-    return {
-      pending: 'Programado',
-      active: 'Activo',
-      expired: 'Vencido',
-      done: 'Realizado'
-    }[status] || status;
-  }
-
   private formatHistoryDate(value: string): string {
     const [year, month, day] = String(value || '').slice(0, 10).split('-');
     return year && month && day ? `${day}/${month}/${year}` : value;
-  }
-
-  private titleCaseLabel(value: string): string {
-    const clean = String(value || '').trim();
-    return clean ? clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase() : '-';
-  }
-
-  private isPdfFile(file: File): boolean {
-    return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   }
 
   private normalize(value: string | null | undefined): string {

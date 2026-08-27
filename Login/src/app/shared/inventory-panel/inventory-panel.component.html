@@ -111,7 +111,6 @@
         </span>
         <span class="actions">
           <button type="button" (click)="viewItem.emit(item)">Ver</button>
-          <button type="button" *ngIf="canUploadHistory" (click)="openHistoricalUpload(item, [])">Protocolos</button>
           <button type="button" *ngIf="canEdit" (click)="editItem.emit(item)">Editar</button>
           <button type="button" class="danger" *ngIf="canDelete" (click)="requestDelete(item)">Eliminar</button>
         </span>
@@ -228,91 +227,6 @@
             </label>
             <button type="button" class="ghost" (click)="loadHistory()">Buscar</button>
           </div>
-        </div>
-
-        <div class="history-upload" *ngIf="canUploadHistoryFile">
-          <div>
-            <strong>Migrar PDF físico al historial</strong>
-            <p class="muted">Documento escaneado con fecha real y trazabilidad.</p>
-          </div>
-          <div class="historical-evidence-progress" *ngIf="historicalEvidencePendingLabels.length">
-            <strong>{{ historicalEvidencePendingLabels.length }} mantenimiento(s) por conciliar</strong>
-            <div>
-              <span *ngFor="let date of historicalEvidencePendingLabels">{{ date }}</span>
-            </div>
-          </div>
-          <div class="history-upload-grid">
-            <label>
-              Tipo de documento
-              <select
-                [(ngModel)]="historyUploadDocumentType"
-                (change)="onHistoryDocumentTypeChange()"
-              >
-                <option *ngFor="let option of historyDocumentTypeOptions" [value]="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <label>
-              Fecha real del servicio
-              <input
-                type="date"
-                [(ngModel)]="historyUploadDate"
-                (change)="onHistoryUploadDateChange()"
-              />
-            </label>
-            <label>
-              Título
-              <input type="text" [(ngModel)]="historyUploadTitle" placeholder="Ej: Mantenimiento preventivo 2025" />
-            </label>
-            <label
-              class="occurrence-field"
-              *ngIf="historyUploadDocumentType === 'maintenance_preventive'"
-            >
-              Ocurrencia del cronograma
-              <select
-                [(ngModel)]="selectedHistoricalMaintenanceOccurrenceId"
-                [disabled]="historicalOccurrencesLoading || !historicalMaintenanceOccurrences.length"
-              >
-                <option value="">Sin ocurrencia seleccionada</option>
-                <option
-                  *ngFor="let occurrence of historicalMaintenanceOccurrences"
-                  [value]="occurrence.id"
-                  [disabled]="!occurrence.eligible"
-                >
-                  {{ historicalOccurrenceLabel(occurrence) }}
-                </option>
-              </select>
-              <small
-                [class.reconciliation-ready]="eligibleHistoricalMaintenanceOccurrences.length"
-                [class.reconciliation-blocked]="historicalMaintenanceOccurrences.length && !eligibleHistoricalMaintenanceOccurrences.length"
-              >
-                {{ historicalOccurrenceHelp }}
-              </small>
-            </label>
-            <label class="wide">
-              Descripción breve
-              <input type="text" [(ngModel)]="historyUploadDescription" placeholder="Ej: Migración de reporte físico firmado" />
-            </label>
-            <label class="file-field">
-              Archivo PDF
-              <input class="file-input" type="file" accept="application/pdf,.pdf" (change)="onHistoryFileSelected($event)" />
-              <small>{{ historyUploadFile?.name || 'Selecciona un PDF escaneado de hasta 15 MB' }}</small>
-            </label>
-            <div class="upload-action-wrap">
-              <span>Acción</span>
-              <button
-                type="button"
-                class="history-btn upload-action"
-                [disabled]="historyUploadLoading || historicalOccurrencesLoading"
-                (click)="uploadHistoryFile()"
-              >
-                {{ historyUploadLoading ? 'Subiendo...' : historicalOccurrencesLoading ? 'Consultando...' : 'Subir PDF' }}
-              </button>
-            </div>
-          </div>
-          <p class="error" *ngIf="historyUploadError">{{ historyUploadError }}</p>
-          <p class="success" *ngIf="historyUploadSuccess">{{ historyUploadSuccess }}</p>
         </div>
 
         <div class="history-list">

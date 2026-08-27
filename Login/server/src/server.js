@@ -9403,6 +9403,7 @@ app.get(
   '/biomed/:clientId/assets/:assetId/historical-maintenance-occurrences',
   requireAuth,
   requirePermission('asset_history:upload'),
+  requireActiveTemporaryPermission('asset_history:upload'),
   async (req, res) => {
     const { clientId, assetId } = req.params;
     if (req.user.clientId && req.user.clientId !== clientId) {
@@ -9435,6 +9436,7 @@ app.post(
   '/biomed/:clientId/assets/:assetId/history-files',
   requireAuth,
   requirePermission('asset_history:upload'),
+  requireActiveTemporaryPermission('asset_history:upload'),
   uploadHistoricalPdf,
   async (req, res) => {
     const { clientId, assetId } = req.params;

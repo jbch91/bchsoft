@@ -416,116 +416,6 @@ input[type='file'].file-input:hover::file-selector-button {
   font-size: 12px;
 }
 
-.history-upload {
-  background: #ffffff;
-  border: 1px dashed color-mix(in srgb, var(--brand-600) 42%, var(--border));
-  border-radius: 14px;
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-}
-
-.historical-evidence-progress {
-  background: #fff7ed;
-  border: 1px solid #fdba74;
-  border-radius: 8px;
-  color: #9a3412;
-  display: grid;
-  gap: 7px;
-  padding: 9px 10px;
-}
-
-.historical-evidence-progress > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.historical-evidence-progress span {
-  background: #ffffff;
-  border: 1px solid #fed7aa;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 800;
-  padding: 4px 7px;
-}
-
-.history-upload-grid {
-  align-items: stretch;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-}
-
-.history-upload-grid .wide {
-  grid-column: span 3;
-}
-
-.history-upload-grid label,
-.upload-action-wrap {
-  background: #fffafa;
-  border: 1px solid color-mix(in srgb, var(--brand-100) 70%, var(--border));
-  border-radius: 12px;
-  gap: 5px;
-  min-width: 0;
-  padding: 8px;
-}
-
-.history-upload-grid input {
-  min-height: 34px;
-  padding: 7px 9px;
-}
-
-.occurrence-field small {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.occurrence-field small.reconciliation-ready {
-  color: var(--table-success-color);
-}
-
-.occurrence-field small.reconciliation-blocked {
-  color: var(--table-danger-color);
-}
-
-.history-upload-grid label:not(.wide),
-.upload-action-wrap {
-  grid-column: span 2;
-}
-
-.history-upload-grid label.occurrence-field {
-  grid-column: 1 / -1;
-}
-
-.history-upload-grid .file-field {
-  grid-column: span 3;
-}
-
-.history-upload-grid .upload-action-wrap {
-  grid-column: 1 / -1;
-  justify-self: end;
-  width: min(240px, 100%);
-}
-
-.upload-action {
-  width: 100%;
-  min-height: 34px;
-}
-
-.upload-action-wrap {
-  align-content: end;
-  display: grid;
-  gap: 5px;
-}
-
-.upload-action-wrap span {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 800;
-}
-
 .history-actions {
   display: flex;
   flex-wrap: wrap;
@@ -620,29 +510,12 @@ button:disabled {
     grid-column: auto;
   }
 
-  .history-summary-card,
-  .history-upload-grid .wide {
+  .history-summary-card {
     grid-column: auto;
   }
 
   .history-summary-card {
     grid-template-columns: 1fr;
-  }
-
-  .history-upload-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .history-upload-grid label:not(.wide),
-  .upload-action-wrap {
-    grid-column: auto;
-  }
-
-  .history-upload-grid .file-field,
-  .history-upload-grid .upload-action-wrap {
-    grid-column: auto;
-    justify-self: stretch;
-    width: 100%;
   }
 }
 

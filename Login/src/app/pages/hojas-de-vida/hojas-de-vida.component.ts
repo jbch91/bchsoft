@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnDestroy, ViewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -138,6 +138,7 @@ interface AssetView extends InventoryPanelItem {
 }
 
 type LifeSheetWorkspaceView = 'records' | 'pending_protocols';
+type SupplementalDocumentType = 'maintenance_corrective' | 'calibration' | 'other';
 
 @Component({
   selector: 'app-hojas-de-vida',
@@ -147,13 +148,12 @@ type LifeSheetWorkspaceView = 'records' | 'pending_protocols';
   styleUrl: './hojas-de-vida.component.scss'
 })
 export class HojasDeVidaComponent implements OnDestroy {
-  @ViewChild(InventoryPanelComponent) private inventoryPanel?: InventoryPanelComponent;
-
   readonly assetCategory: AssetCategory;
   private readonly apiBase = getApiBase();
   private readonly publicBase = getPublicBase();
   private readonly maxImageSizeMb = 5;
   private readonly maxPdfSizeMb = 10;
+  private readonly maxHistoricalPdfBytes = 15 * 1024 * 1024;
   private readonly maxImportRows = 500;
   private readonly maxImportFileSizeMb = 10;
   private pendingRouteAssetId: string | null = null;
@@ -188,6 +188,16 @@ export class HojasDeVidaComponent implements OnDestroy {
   pendingProtocolSearch = '';
   pendingProtocolArea = '';
   pendingProtocolMonth = '';
+  pendingProtocolUpload: PendingHistoricalProtocolDto | null = null;
+  pendingProtocolUploadDate = '';
+  pendingProtocolUploadTitle = '';
+  pendingProtocolUploadDescription = '';
+  pendingProtocolUploadFile: File | null = null;
+  pendingProtocolUploadLoading = false;
+  pendingProtocolUploadError = '';
+  readonly todayInBogota = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota'
+  }).format(new Date());
   readonly pendingProtocolMonths = [
     { value: '01', label: 'Enero' },
     { value: '02', label: 'Febrero' },
@@ -211,6 +221,40 @@ export class HojasDeVidaComponent implements OnDestroy {
   assetHistoryLimit = 8;
   assetHistoryOffset = 0;
   assetHistoryHasMore = false;
+  supplementalDocumentType: SupplementalDocumentType = 'other';
+  supplementalDocumentDate = this.todayInBogota;
+  supplementalDocumentTitle = 'Documento técnico del equipo';
+  supplementalDocumentDescription = '';
+  supplementalDocumentFile: File | null = null;
+  supplementalDocumentLoading = false;
+  supplementalDocumentError = '';
+  supplementalDocumentSuccess = '';
+  archivedAssetDocuments: AssetHistoryItemDto[] = [];
+  archivedAssetDocumentsLoading = false;
+  archivedAssetDocumentsError = '';
+  private archivedAssetDocumentsLoaded = false;
+  private archivedAssetDocumentsLoadToken = 0;
+  readonly supplementalDocumentTypeOptions: {
+    value: SupplementalDocumentType;
+    label: string;
+    defaultTitle: string;
+  }[] = [
+    {
+      value: 'other',
+      label: 'Documento técnico u otro soporte',
+      defaultTitle: 'Documento técnico del equipo'
+    },
+    {
+      value: 'calibration',
+      label: 'Certificado de calibración histórico',
+      defaultTitle: 'Certificado de calibración histórico'
+    },
+    {
+      value: 'maintenance_corrective',
+      label: 'Reporte correctivo histórico',
+      defaultTitle: 'Reporte de mantenimiento correctivo histórico'
+    }
+  ];
   private assetHistoryLoadToken = 0;
   private lastPermissionRefreshAt = 0;
   private readonly permissionRefreshCooldownMs = 15_000;
@@ -485,6 +529,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   async onClientChange(): Promise<void> {
+    this.closePendingProtocolUpload(true);
     await this.loadSites();
     await Promise.all([
       this.loadAreas(),
@@ -572,20 +617,130 @@ export class HojasDeVidaComponent implements OnDestroy {
     }
   }
 
-  async openPendingProtocolUpload(protocol: PendingHistoricalProtocolDto): Promise<void> {
-    if (!this.canUploadHistoricalProtocols || !protocol.eligible) return;
-    const asset = this.assets.find((item) => item.id === protocol.asset_id);
-    if (!asset) {
-      this.pendingProtocolsError = 'No se encontró la hoja de vida asociada al protocolo.';
-      return;
-    }
-    this.activeLifeSheetView = 'records';
-    this.cdr.detectChanges();
-    await this.inventoryPanel?.openHistoricalUpload(asset, [protocol.planned_date]);
+  get pendingProtocolUploadMinDate(): string {
+    if (!this.pendingProtocolUpload?.planned_date) return '';
+    return `${this.pendingProtocolUpload.planned_date.slice(0, 7)}-01`;
   }
 
-  onHistoricalProtocolUploaded(): void {
-    void this.loadPendingProtocols();
+  get pendingProtocolUploadMaxDate(): string {
+    if (!this.pendingProtocolUpload?.planned_date) return '';
+    const [year, month] = this.pendingProtocolUpload.planned_date
+      .slice(0, 7)
+      .split('-')
+      .map(Number);
+    const monthEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+    return monthEnd < this.todayInBogota ? monthEnd : this.todayInBogota;
+  }
+
+  openPendingProtocolUpload(protocol: PendingHistoricalProtocolDto): void {
+    if (!this.canUploadHistoricalProtocols || !protocol.eligible) return;
+    this.pendingProtocolUpload = protocol;
+    this.pendingProtocolUploadDate = protocol.planned_date.slice(0, 10);
+    this.pendingProtocolUploadTitle = `Mantenimiento preventivo - ${this.formatProtocolMonth(protocol.planned_date)}`;
+    this.pendingProtocolUploadDescription = '';
+    this.pendingProtocolUploadFile = null;
+    this.pendingProtocolUploadLoading = false;
+    this.pendingProtocolUploadError = '';
+    this.cdr.detectChanges();
+  }
+
+  closePendingProtocolUpload(force = false): void {
+    if (this.pendingProtocolUploadLoading && !force) return;
+    this.pendingProtocolUpload = null;
+    this.pendingProtocolUploadDate = '';
+    this.pendingProtocolUploadTitle = '';
+    this.pendingProtocolUploadDescription = '';
+    this.pendingProtocolUploadFile = null;
+    this.pendingProtocolUploadLoading = false;
+    this.pendingProtocolUploadError = '';
+  }
+
+  onPendingProtocolFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    const validationError = this.historicalPdfSelectionError(file);
+    if (validationError) {
+      this.pendingProtocolUploadFile = null;
+      this.pendingProtocolUploadError = validationError;
+      input.value = '';
+      return;
+    }
+    this.pendingProtocolUploadFile = file;
+    this.pendingProtocolUploadError = '';
+  }
+
+  async uploadPendingProtocolPdf(): Promise<void> {
+    const protocol = this.pendingProtocolUpload;
+    if (!protocol || !this.selectedClientId || this.pendingProtocolUploadLoading) return;
+    if (!this.pendingProtocolUploadDate) {
+      this.pendingProtocolUploadError = 'Selecciona la fecha real del mantenimiento.';
+      return;
+    }
+    if (this.pendingProtocolUploadDate.slice(0, 7) !== protocol.planned_date.slice(0, 7)) {
+      this.pendingProtocolUploadError = 'La fecha real debe permanecer dentro del mes programado.';
+      return;
+    }
+    if (this.pendingProtocolUploadDate > this.todayInBogota) {
+      this.pendingProtocolUploadError = 'La fecha del mantenimiento no puede estar en el futuro.';
+      return;
+    }
+    const fileError = this.historicalPdfSelectionError(this.pendingProtocolUploadFile);
+    if (fileError) {
+      this.pendingProtocolUploadError = fileError;
+      return;
+    }
+    if (!this.pendingProtocolUploadTitle.trim()) {
+      this.pendingProtocolUploadError = 'Escribe un título para identificar el protocolo.';
+      return;
+    }
+
+    this.pendingProtocolUploadLoading = true;
+    this.pendingProtocolUploadError = '';
+    try {
+      await this.biomed.uploadAssetHistoryFile(this.selectedClientId, protocol.asset_id, {
+        file: this.pendingProtocolUploadFile!,
+        documentDate: this.pendingProtocolUploadDate,
+        documentType: 'maintenance_preventive',
+        maintenanceScheduleItemId: protocol.id,
+        title: this.pendingProtocolUploadTitle.trim(),
+        description: this.pendingProtocolUploadDescription.trim() || undefined
+      });
+      const equipmentLabel = `${protocol.code} - ${protocol.name}`;
+      this.closePendingProtocolUpload(true);
+      await this.loadPendingProtocols();
+      this.activeLifeSheetView = 'pending_protocols';
+      this.successMessage = `Protocolo de ${equipmentLabel} cargado y conciliado con el cronograma.`;
+    } catch (error) {
+      console.error(error);
+      this.pendingProtocolUploadError = this.extractErrorMessage(error)
+        || 'No se pudo cargar ni conciliar el protocolo.';
+    } finally {
+      this.pendingProtocolUploadLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  formatProtocolMonth(value: string): string {
+    const [year, month] = value.slice(0, 7).split('-').map(Number);
+    if (!year || !month) return value;
+    return new Intl.DateTimeFormat('es-CO', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC'
+    }).format(new Date(Date.UTC(year, month - 1, 1)));
+  }
+
+  formatHistoricalPdfFile(file: File | null): string {
+    if (!file) return 'Ningún archivo seleccionado';
+    return `${file.name} · ${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  private historicalPdfSelectionError(file: File | null): string | null {
+    if (!file) return 'Selecciona el archivo PDF.';
+    const isPdf = file.type === 'application/pdf' || file.name.toLocaleLowerCase('es-CO').endsWith('.pdf');
+    if (!isPdf) return 'El archivo debe estar en formato PDF.';
+    if (file.size > this.maxHistoricalPdfBytes) return 'El PDF supera el límite permitido de 15 MB.';
+    return null;
   }
 
   get equipmentCatalogNames(): string[] {
@@ -760,6 +915,7 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.assetModalMode = 'view';
     this.detailModalTab = 'summary';
     this.resetAssetHistory();
+    this.resetSupplementalDocumentUpload();
     this.assetDetailsLoading = true;
     try {
       await this.loadAssetDetails(asset.id);
@@ -806,6 +962,7 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.assetDetailsLoading = false;
     this.detailModalTab = 'summary';
     this.resetAssetHistory();
+    this.resetSupplementalDocumentUpload();
     this.resetForm();
     this.cdr.detectChanges();
   }
@@ -814,6 +971,9 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.detailModalTab = tab;
     if (tab === 'history' && !this.assetHistoryItems.length && !this.assetHistoryLoading) {
       void this.loadAssetHistory(true);
+    }
+    if (tab === 'documents' && !this.archivedAssetDocumentsLoaded && !this.archivedAssetDocumentsLoading) {
+      void this.loadArchivedAssetDocuments();
     }
   }
 
@@ -885,7 +1045,137 @@ export class HojasDeVidaComponent implements OnDestroy {
     }
     if (item.item_type === 'calibration_report') return 'Calibración';
     if (item.item_type === 'movement_report') return 'Movimiento';
-    return 'PDF histórico';
+    if (item.subtype === 'maintenance_preventive') return 'Protocolo preventivo histórico';
+    if (item.subtype === 'maintenance_corrective') return 'Reporte correctivo histórico';
+    if (item.subtype === 'calibration') return 'Certificado de calibración histórico';
+    return 'Documento PDF';
+  }
+
+  resetSupplementalDocumentUpload(preserveSuccess = false): void {
+    this.supplementalDocumentType = 'other';
+    this.supplementalDocumentDate = this.todayInBogota;
+    this.supplementalDocumentTitle = 'Documento técnico del equipo';
+    this.supplementalDocumentDescription = '';
+    this.supplementalDocumentFile = null;
+    this.supplementalDocumentLoading = false;
+    this.supplementalDocumentError = '';
+    if (!preserveSuccess) this.supplementalDocumentSuccess = '';
+    this.archivedAssetDocuments = [];
+    this.archivedAssetDocumentsLoading = false;
+    this.archivedAssetDocumentsError = '';
+    this.archivedAssetDocumentsLoaded = false;
+    this.archivedAssetDocumentsLoadToken += 1;
+  }
+
+  onSupplementalDocumentTypeChange(): void {
+    const defaultTitles = this.supplementalDocumentTypeOptions.map((item) => item.defaultTitle);
+    if (!this.supplementalDocumentTitle.trim() || defaultTitles.includes(this.supplementalDocumentTitle)) {
+      this.supplementalDocumentTitle = this.supplementalDocumentTypeOptions.find(
+        (item) => item.value === this.supplementalDocumentType
+      )?.defaultTitle ?? '';
+    }
+    this.supplementalDocumentError = '';
+  }
+
+  onSupplementalDocumentFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    const validationError = this.historicalPdfSelectionError(file);
+    if (validationError) {
+      this.supplementalDocumentFile = null;
+      this.supplementalDocumentError = validationError;
+      input.value = '';
+      return;
+    }
+    this.supplementalDocumentFile = file;
+    this.supplementalDocumentError = '';
+    this.supplementalDocumentSuccess = '';
+  }
+
+  async uploadSupplementalDocument(fileInput: HTMLInputElement): Promise<void> {
+    if (
+      !this.canUploadHistoricalProtocols
+      || !this.selectedClientId
+      || !this.selectedAssetForModal?.id
+      || this.supplementalDocumentLoading
+    ) return;
+    if (!this.supplementalDocumentDate) {
+      this.supplementalDocumentError = 'Selecciona la fecha del documento.';
+      return;
+    }
+    if (this.supplementalDocumentDate > this.todayInBogota) {
+      this.supplementalDocumentError = 'La fecha del documento no puede estar en el futuro.';
+      return;
+    }
+    if (!this.supplementalDocumentTitle.trim()) {
+      this.supplementalDocumentError = 'Escribe un título para identificar el documento.';
+      return;
+    }
+    const fileError = this.historicalPdfSelectionError(this.supplementalDocumentFile);
+    if (fileError) {
+      this.supplementalDocumentError = fileError;
+      return;
+    }
+
+    this.supplementalDocumentLoading = true;
+    this.supplementalDocumentError = '';
+    this.supplementalDocumentSuccess = '';
+    try {
+      await this.biomed.uploadAssetHistoryFile(this.selectedClientId, this.selectedAssetForModal.id, {
+        file: this.supplementalDocumentFile!,
+        documentDate: this.supplementalDocumentDate,
+        documentType: this.supplementalDocumentType,
+        title: this.supplementalDocumentTitle.trim(),
+        description: this.supplementalDocumentDescription.trim() || undefined
+      });
+      this.resetSupplementalDocumentUpload(true);
+      this.supplementalDocumentSuccess = 'Documento PDF archivado correctamente en la hoja de vida.';
+      fileInput.value = '';
+      await Promise.all([this.loadArchivedAssetDocuments(), this.loadAssetHistory(true)]);
+    } catch (error) {
+      console.error(error);
+      this.supplementalDocumentError = this.extractErrorMessage(error)
+        || 'No se pudo archivar el documento PDF.';
+    } finally {
+      this.supplementalDocumentLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  async loadArchivedAssetDocuments(): Promise<void> {
+    if (!this.selectedClientId || !this.selectedAssetForModal?.id) {
+      this.archivedAssetDocuments = [];
+      return;
+    }
+    const clientId = this.selectedClientId;
+    const assetId = this.selectedAssetForModal.id;
+    const token = ++this.archivedAssetDocumentsLoadToken;
+    this.archivedAssetDocumentsLoading = true;
+    this.archivedAssetDocumentsError = '';
+    try {
+      const rows = await this.biomed.listAssetHistory(clientId, assetId, {
+        order: 'desc',
+        limit: 25,
+        offset: 0
+      });
+      if (
+        token !== this.archivedAssetDocumentsLoadToken
+        || this.selectedClientId !== clientId
+        || this.selectedAssetForModal?.id !== assetId
+      ) return;
+      this.archivedAssetDocuments = rows.filter((item) => item.item_type === 'legacy_pdf');
+      this.archivedAssetDocumentsLoaded = true;
+    } catch (error) {
+      console.error(error);
+      if (token !== this.archivedAssetDocumentsLoadToken) return;
+      this.archivedAssetDocuments = [];
+      this.archivedAssetDocumentsError = 'No se pudieron cargar los documentos archivados.';
+    } finally {
+      if (token === this.archivedAssetDocumentsLoadToken) {
+        this.archivedAssetDocumentsLoading = false;
+        this.cdr.detectChanges();
+      }
+    }
   }
 
   async openSelectedAssetPdf(): Promise<void> {
@@ -2246,10 +2536,13 @@ export class HojasDeVidaComponent implements OnDestroy {
       await Promise.all([this.loadAssets(), this.loadEquipmentCatalog(), this.loadPendingProtocols()]);
       if (historicalFollowUpAssetId && historicalFollowUpDates.length) {
         if (this.auth.hasPermission('asset_history:upload')) {
-          const asset = this.assets.find((item) => item.id === historicalFollowUpAssetId);
-          if (asset && this.inventoryPanel) {
-            await this.inventoryPanel.openHistoricalUpload(asset, historicalFollowUpDates);
-          }
+          this.activeLifeSheetView = 'pending_protocols';
+          const nextPendingProtocol = this.pendingProtocols.find((item) =>
+            item.asset_id === historicalFollowUpAssetId
+            && historicalFollowUpDates.includes(item.planned_date)
+            && item.eligible
+          );
+          if (nextPendingProtocol) this.openPendingProtocolUpload(nextPendingProtocol);
         } else {
           this.successMessage += ` Solicita el permiso temporal “Migrar PDFs históricos de equipos” para cargar ${historicalFollowUpCount} evidencia(s) pendiente(s).`;
         }

@@ -89,14 +89,12 @@
     [errorMessage]="errorMessage"
     [canEdit]="auth.hasPermission('hb:create')"
     [canDelete]="auth.hasPermission('hb:create')"
-    [canUploadHistory]="canUploadHistoricalProtocols"
     mode="life_sheets"
     [viewInModal]="true"
     [title]="inventoryTitle"
     (viewItem)="openViewModal($event)"
     (editItem)="startEdit($event)"
     (deleteItem)="deleteAsset($event)"
-    (historyUploaded)="onHistoricalProtocolUploaded()"
   ></app-inventory-panel>
 
   <section class="pending-protocols-workspace" [hidden]="activeLifeSheetView !== 'pending_protocols'">
@@ -224,6 +222,132 @@
       <span *ngIf="!pendingProtocols.length">Los PDFs conciliados dejarán de aparecer automáticamente en esta bandeja.</span>
     </div>
   </section>
+
+  <div class="modal-backdrop protocol-upload-backdrop" *ngIf="pendingProtocolUpload as protocol">
+    <div
+      class="modal-shell protocol-upload-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pending-protocol-upload-title"
+    >
+      <div class="modal-header">
+        <div>
+          <span>Conciliación con el cronograma</span>
+          <h2 id="pending-protocol-upload-title">Cargar protocolo preventivo</h2>
+        </div>
+        <button
+          type="button"
+          class="modal-close"
+          [disabled]="pendingProtocolUploadLoading"
+          (click)="closePendingProtocolUpload()"
+        >
+          Cerrar
+        </button>
+      </div>
+
+      <div class="protocol-upload-equipment">
+        <div>
+          <span>Equipo</span>
+          <strong>{{ protocol.name }}</strong>
+          <small>{{ protocol.code }}</small>
+        </div>
+        <div>
+          <span>Identificación</span>
+          <strong>{{ protocol.brand || '-' }} · {{ protocol.model || '-' }}</strong>
+          <small>Serie {{ protocol.serial || '-' }}</small>
+        </div>
+        <div>
+          <span>Área y ubicación</span>
+          <strong>{{ protocol.area_name || '-' }} / {{ protocol.location_name || '-' }}</strong>
+          <small>{{ protocol.site_name || '-' }}</small>
+        </div>
+      </div>
+
+      <div class="protocol-upload-window">
+        <div>
+          <span>Mes programado</span>
+          <strong>{{ formatProtocolMonth(protocol.planned_date) }}</strong>
+        </div>
+        <div>
+          <span>Fecha programada</span>
+          <strong>{{ formatIsoDateForDisplay(protocol.planned_date) }}</strong>
+        </div>
+        <div>
+          <span>Fecha límite</span>
+          <strong>{{ formatIsoDateForDisplay(protocol.deadline_date) }}</strong>
+        </div>
+        <div>
+          <span>Periodicidad</span>
+          <strong>{{ protocol.occurrence_number }}.ª ocurrencia · {{ protocol.frequency }}</strong>
+        </div>
+      </div>
+
+      <div class="protocol-upload-form">
+        <label>
+          Fecha real del mantenimiento
+          <input
+            type="date"
+            [(ngModel)]="pendingProtocolUploadDate"
+            [min]="pendingProtocolUploadMinDate"
+            [max]="pendingProtocolUploadMaxDate"
+            [disabled]="pendingProtocolUploadLoading"
+          />
+          <small>Debe corresponder a {{ formatProtocolMonth(protocol.planned_date) }}.</small>
+        </label>
+        <label>
+          Título del protocolo
+          <input
+            type="text"
+            [(ngModel)]="pendingProtocolUploadTitle"
+            maxlength="160"
+            [disabled]="pendingProtocolUploadLoading"
+          />
+        </label>
+        <label class="protocol-upload-description">
+          Observación de archivo
+          <textarea
+            [(ngModel)]="pendingProtocolUploadDescription"
+            rows="3"
+            maxlength="1000"
+            placeholder="Opcional"
+            [disabled]="pendingProtocolUploadLoading"
+          ></textarea>
+        </label>
+        <label class="protocol-pdf-picker">
+          <span>Archivo del protocolo</span>
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            [disabled]="pendingProtocolUploadLoading"
+            (change)="onPendingProtocolFileSelected($event)"
+          />
+          <strong>{{ formatHistoricalPdfFile(pendingProtocolUploadFile) }}</strong>
+          <small>PDF, máximo 15 MB.</small>
+        </label>
+      </div>
+
+      <p class="error" *ngIf="pendingProtocolUploadError">{{ pendingProtocolUploadError }}</p>
+
+      <div class="protocol-upload-actions">
+        <button
+          type="button"
+          class="ghost"
+          [disabled]="pendingProtocolUploadLoading"
+          (click)="closePendingProtocolUpload()"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="primary"
+          [disabled]="pendingProtocolUploadLoading || !pendingProtocolUploadFile"
+          (click)="uploadPendingProtocolPdf()"
+        >
+          {{ pendingProtocolUploadLoading ? 'Cargando y conciliando...' : 'Cargar y conciliar' }}
+        </button>
+      </div>
+    </div>
+  </div>
 
   <div class="grid import-grid" *ngIf="activeLifeSheetView === 'records' && importPanelOpen && canImportAssets">
     <div class="card full import-card" *ngIf="auth.hasPermission('hb:import')">
@@ -1157,6 +1281,130 @@
             </div>
             <button type="button" class="ghost" (click)="openSelectedAssetQuickGuide()">Abrir guía</button>
           </div>
+
+          <section class="document-upload-panel">
+            <div class="document-upload-header">
+              <div>
+                <span>Archivo documental</span>
+                <strong>Cargar documento PDF</strong>
+              </div>
+              <span
+                class="document-permission-badge"
+                [class.active]="canUploadHistoricalProtocols"
+              >
+                {{ canUploadHistoricalProtocols ? 'Permiso activo' : 'Permiso temporal requerido' }}
+              </span>
+            </div>
+
+            <div class="document-permission-notice" *ngIf="!canUploadHistoricalProtocols">
+              <span>La carga documental está bloqueada hasta activar el permiso temporal.</span>
+              <button
+                type="button"
+                class="ghost"
+                *ngIf="canRefreshTemporaryPermissions"
+                [disabled]="permissionsRefreshLoading"
+                (click)="refreshCurrentPermissions()"
+              >
+                {{ permissionsRefreshLoading ? 'Actualizando...' : 'Actualizar permisos' }}
+              </button>
+            </div>
+
+            <div class="document-upload-form" *ngIf="canUploadHistoricalProtocols">
+              <label>
+                Tipo de documento
+                <select
+                  [(ngModel)]="supplementalDocumentType"
+                  [disabled]="supplementalDocumentLoading"
+                  (ngModelChange)="onSupplementalDocumentTypeChange()"
+                >
+                  <option *ngFor="let option of supplementalDocumentTypeOptions" [value]="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                Fecha del documento
+                <input
+                  type="date"
+                  [(ngModel)]="supplementalDocumentDate"
+                  [max]="todayInBogota"
+                  [disabled]="supplementalDocumentLoading"
+                />
+              </label>
+              <label class="document-upload-title">
+                Título
+                <input
+                  type="text"
+                  [(ngModel)]="supplementalDocumentTitle"
+                  maxlength="160"
+                  [disabled]="supplementalDocumentLoading"
+                />
+              </label>
+              <label class="document-upload-description">
+                Descripción
+                <textarea
+                  [(ngModel)]="supplementalDocumentDescription"
+                  rows="3"
+                  maxlength="1000"
+                  placeholder="Opcional"
+                  [disabled]="supplementalDocumentLoading"
+                ></textarea>
+              </label>
+              <label class="document-pdf-picker">
+                <span>Archivo PDF</span>
+                <input
+                  #supplementalPdfInput
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  [disabled]="supplementalDocumentLoading"
+                  (change)="onSupplementalDocumentFileSelected($event)"
+                />
+                <strong>{{ formatHistoricalPdfFile(supplementalDocumentFile) }}</strong>
+                <small>PDF, máximo 15 MB.</small>
+              </label>
+              <div class="document-upload-submit">
+                <button
+                  type="button"
+                  class="primary"
+                  [disabled]="supplementalDocumentLoading || !supplementalDocumentFile"
+                  (click)="uploadSupplementalDocument(supplementalPdfInput)"
+                >
+                  {{ supplementalDocumentLoading ? 'Archivando...' : 'Archivar documento' }}
+                </button>
+              </div>
+            </div>
+
+            <p class="error" *ngIf="supplementalDocumentError">{{ supplementalDocumentError }}</p>
+            <p class="success" *ngIf="supplementalDocumentSuccess">{{ supplementalDocumentSuccess }}</p>
+          </section>
+
+          <section class="archived-documents">
+            <div class="archived-documents-header">
+              <div>
+                <span>Archivo del equipo</span>
+                <strong>Documentos cargados</strong>
+              </div>
+              <span>{{ archivedAssetDocuments.length }}</span>
+            </div>
+
+            <p class="modal-loading" *ngIf="archivedAssetDocumentsLoading">Cargando documentos...</p>
+            <p class="error" *ngIf="archivedAssetDocumentsError">{{ archivedAssetDocumentsError }}</p>
+
+            <div class="archived-document-list" *ngIf="!archivedAssetDocumentsLoading && archivedAssetDocuments.length">
+              <div class="archived-document-row" *ngFor="let document of archivedAssetDocuments">
+                <div>
+                  <span>{{ assetHistoryTypeLabel(document) }}</span>
+                  <strong>{{ document.title }}</strong>
+                  <small>{{ document.event_date | date: 'dd/MM/yyyy' }}</small>
+                </div>
+                <button type="button" class="ghost" (click)="openAssetHistoryItem(document)">Abrir</button>
+              </div>
+            </div>
+
+            <p class="muted" *ngIf="!archivedAssetDocumentsLoading && !archivedAssetDocuments.length && !archivedAssetDocumentsError">
+              Aún no hay documentos PDF archivados para este equipo.
+            </p>
+          </section>
         </div>
 
         <div class="modal-actions" *ngIf="detailModalTab === 'summary'">
