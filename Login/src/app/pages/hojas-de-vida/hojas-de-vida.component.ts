@@ -135,6 +135,9 @@ interface AssetView extends InventoryPanelItem {
   siteId?: string | null;
   areaId?: string | null;
   locationId?: string | null;
+  acquisitionDate?: string | null;
+  warrantyYears?: number | null;
+  hasPendingSpare?: boolean;
 }
 
 type LifeSheetWorkspaceView = 'records' | 'pending_protocols';
@@ -2046,7 +2049,10 @@ export class HojasDeVidaComponent implements OnDestroy {
         areaName: row.area_name ?? null,
         locationName: row.location_name ?? null,
         areaId: row.area_id ?? null,
-        locationId: row.location_id ?? null
+        locationId: row.location_id ?? null,
+        acquisitionDate: row.acquisition_date ?? null,
+        warrantyYears: row.warranty_years ?? null,
+        hasPendingSpare: row.has_pending_spare ?? false
       }));
     } catch (error) {
       console.error(error);

@@ -1,5 +1,5 @@
 <div class="card filters-card">
-  <div class="filters-grid">
+  <div class="filters-grid" [class.life-sheet-filters]="isLifeSheetMode">
     <label>
       Búsqueda
       <input type="text" [(ngModel)]="searchTerm" placeholder="Código, nombre, marca, serie..." />
@@ -30,6 +30,15 @@
       <select [(ngModel)]="filterStatus">
         <option value="">Todos</option>
         <option *ngFor="let status of statusOptions" [value]="status">{{ status }}</option>
+      </select>
+    </label>
+    <label *ngIf="isLifeSheetMode">
+      Condición
+      <select [(ngModel)]="filterCondition">
+        <option value="">Todas ({{ lifeSheetConditionCount('') }})</option>
+        <option *ngFor="let condition of lifeSheetConditions" [value]="condition.value">
+          {{ condition.label }} ({{ lifeSheetConditionCount(condition.value) }})
+        </option>
       </select>
     </label>
     <label *ngIf="!isLifeSheetMode">
@@ -106,8 +115,10 @@
           <strong>{{ item.areaName || '-' }} / {{ item.locationName || '-' }}</strong>
           <small>{{ item.siteName || '-' }}</small>
         </span>
-        <span data-label="Estado">
+        <span class="status-stack" data-label="Estado">
           <span class="status-pill" [attr.data-status]="item.status">{{ assetStatusLabel(item.status) }}</span>
+          <span class="condition-pill spare" *ngIf="item.hasPendingSpare">Repuesto pendiente</span>
+          <span class="condition-pill warranty" *ngIf="isUnderWarranty(item)">En garantía</span>
         </span>
         <span class="actions">
           <button type="button" (click)="viewItem.emit(item)">Ver</button>

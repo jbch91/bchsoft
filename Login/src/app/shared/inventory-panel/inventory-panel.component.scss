@@ -5,6 +5,10 @@
   align-items: end;
 }
 
+.filters-grid.life-sheet-filters {
+  grid-template-columns: minmax(210px, 1.4fr) repeat(3, minmax(140px, 1fr)) auto;
+}
+
 .filter-summary {
   display: flex;
   flex-wrap: wrap;
@@ -181,6 +185,35 @@ input[type='file'].file-input:hover::file-selector-button {
   background: #fef2f2;
   border-color: #fecaca;
   color: #991b1b;
+}
+
+.status-stack {
+  align-content: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.condition-pill {
+  border: 1px solid;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1.25;
+  padding: 4px 7px;
+}
+
+.condition-pill.spare {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #9a3412;
+}
+
+.condition-pill.warranty {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
 }
 
 .row.header {
@@ -459,6 +492,10 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .filters-grid.life-sheet-filters {
+    grid-template-columns: 1fr;
+  }
+
   .row {
     grid-template-columns: 1fr;
     gap: 6px;
@@ -475,6 +512,17 @@ button:disabled {
     content: attr(data-label);
     font-weight: 800;
     color: var(--brand-700);
+  }
+
+  .row .status-stack[data-label] > * {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .row .status-stack[data-label]::before {
+    align-self: start;
+    grid-column: 1;
+    grid-row: 1 / span 3;
   }
 
   .actions {

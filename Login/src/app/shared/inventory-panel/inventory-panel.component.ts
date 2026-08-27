@@ -25,7 +25,20 @@ export interface InventoryPanelItem {
   locationName?: string | null;
   locationId?: string | null;
   status: string;
+  acquisitionDate?: string | null;
+  warrantyYears?: number | null;
+  hasPendingSpare?: boolean;
 }
+
+type LifeSheetCondition =
+  | ''
+  | 'attention_required'
+  | 'pending_spare'
+  | 'under_warranty'
+  | 'operational'
+  | 'operational_observation'
+  | 'out_of_service'
+  | 'without_current_warranty';
 
 interface MoveSiteOption {
   id: string;
@@ -54,6 +67,18 @@ export type InventoryPanelMode = 'life_sheets' | 'inventory';
   styleUrl: './inventory-panel.component.scss'
 })
 export class InventoryPanelComponent implements OnDestroy {
+  readonly lifeSheetConditions: readonly {
+    value: Exclude<LifeSheetCondition, ''>;
+    label: string;
+  }[] = [
+    { value: 'attention_required', label: 'Requieren atención' },
+    { value: 'pending_spare', label: 'Con repuesto pendiente' },
+    { value: 'under_warranty', label: 'En garantía' },
+    { value: 'operational', label: 'Operativos' },
+    { value: 'operational_observation', label: 'Operativos con observaciones' },
+    { value: 'out_of_service', label: 'Fuera de servicio' },
+    { value: 'without_current_warranty', label: 'Sin garantía vigente' }
+  ];
   @Input() items: InventoryPanelItem[] = [];
   @Input() selectedClientId = '';
   @Input() loading = false;
@@ -77,6 +102,7 @@ export class InventoryPanelComponent implements OnDestroy {
   filterArea = '';
   filterLocation = '';
   filterStatus = '';
+  filterCondition: LifeSheetCondition = '';
   exportFormat: 'csv' | 'xlsx' | 'pdf' = 'xlsx';
 
   historyAssetId = '';
@@ -117,6 +143,9 @@ export class InventoryPanelComponent implements OnDestroy {
     notes: ''
   };
   private destroyed = false;
+  private readonly currentDateInBogota = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota'
+  }).format(new Date());
 
   constructor(
     private readonly biomed: BiomedService,
@@ -172,6 +201,17 @@ export class InventoryPanelComponent implements OnDestroy {
     return Array.from(new Set(this.visibleItems.map((item) => item.status || '').filter(Boolean))).sort();
   }
 
+  lifeSheetConditionCount(condition: LifeSheetCondition): number {
+    const items = this.visibleItems.filter((item) => this.matchesBaseFilters(item));
+    if (!condition) return items.length;
+    return items.filter((item) => this.matchesLifeSheetCondition(item, condition)).length;
+  }
+
+  lifeSheetConditionLabel(condition: LifeSheetCondition): string {
+    if (!condition) return 'Todas';
+    return this.lifeSheetConditions.find((option) => option.value === condition)?.label || condition;
+  }
+
   get moveAreasForSite(): MoveAreaOption[] {
     return this.moveAreas.filter((area) => area.site_id === this.moveForm.siteId);
   }
@@ -181,26 +221,12 @@ export class InventoryPanelComponent implements OnDestroy {
   }
 
   get filteredItems(): InventoryPanelItem[] {
-    const term = this.normalize(this.searchTerm);
     return this.visibleItems.filter((item) => {
-      if (this.filterArea && item.areaName !== this.filterArea) return false;
-      if (this.filterSite && item.siteName !== this.filterSite) return false;
-      if (this.filterLocation && item.locationName !== this.filterLocation) return false;
-      if (this.filterStatus && item.status !== this.filterStatus) return false;
-      if (!term) return true;
-      const haystack = [
-        item.code,
-        item.name,
-        item.brand,
-        item.model,
-        item.serial,
-        item.siteName,
-        item.areaName,
-        item.locationName
-      ]
-        .map((value) => this.normalize(value))
-        .join(' ');
-      return haystack.includes(term);
+      if (!this.matchesBaseFilters(item)) return false;
+      if (this.isLifeSheetMode && this.filterCondition) {
+        return this.matchesLifeSheetCondition(item, this.filterCondition);
+      }
+      return true;
     });
   }
 
@@ -232,6 +258,28 @@ export class InventoryPanelComponent implements OnDestroy {
     return labels[String(status || '').toLowerCase()] || status || 'Sin estado';
   }
 
+  isUnderWarranty(item: InventoryPanelItem): boolean {
+    const acquisitionDate = this.dateOnly(item.acquisitionDate);
+    const warrantyYears = Number(item.warrantyYears);
+    if (
+      !acquisitionDate
+      || !Number.isInteger(warrantyYears)
+      || warrantyYears < 1
+      || warrantyYears > 50
+    ) {
+      return false;
+    }
+    const releaseDate = new Date(Date.UTC(
+      acquisitionDate.getUTCFullYear() + warrantyYears,
+      acquisitionDate.getUTCMonth(),
+      acquisitionDate.getUTCDate()
+    ));
+    if (releaseDate.getUTCMonth() !== acquisitionDate.getUTCMonth()) {
+      releaseDate.setUTCDate(0);
+    }
+    return this.formatDateOnly(releaseDate) > this.currentDateInBogota;
+  }
+
   get activeFilters(): { key: string; label: string }[] {
     const filters: { key: string; label: string }[] = [];
     if (this.searchTerm.trim()) filters.push({ key: 'search', label: `Búsqueda: ${this.searchTerm.trim()}` });
@@ -239,6 +287,12 @@ export class InventoryPanelComponent implements OnDestroy {
     if (this.filterArea) filters.push({ key: 'area', label: `Área: ${this.filterArea}` });
     if (this.filterLocation) filters.push({ key: 'location', label: `Ubicación: ${this.filterLocation}` });
     if (this.filterStatus) filters.push({ key: 'status', label: `Estado: ${this.filterStatus}` });
+    if (this.filterCondition) {
+      filters.push({
+        key: 'condition',
+        label: `Condición: ${this.lifeSheetConditionLabel(this.filterCondition)}`
+      });
+    }
     return filters;
   }
 
@@ -248,6 +302,7 @@ export class InventoryPanelComponent implements OnDestroy {
     if (key === 'area') this.filterArea = '';
     if (key === 'location') this.filterLocation = '';
     if (key === 'status') this.filterStatus = '';
+    if (key === 'condition') this.filterCondition = '';
   }
 
   clearFilters(): void {
@@ -256,6 +311,56 @@ export class InventoryPanelComponent implements OnDestroy {
     this.filterArea = '';
     this.filterLocation = '';
     this.filterStatus = '';
+    this.filterCondition = '';
+  }
+
+  private matchesBaseFilters(item: InventoryPanelItem): boolean {
+    if (this.filterArea && item.areaName !== this.filterArea) return false;
+    if (this.filterSite && item.siteName !== this.filterSite) return false;
+    if (this.filterLocation && item.locationName !== this.filterLocation) return false;
+    if (this.filterStatus && item.status !== this.filterStatus) return false;
+    const term = this.normalize(this.searchTerm);
+    if (!term) return true;
+    const haystack = [
+      item.code,
+      item.name,
+      item.brand,
+      item.model,
+      item.serial,
+      item.siteName,
+      item.areaName,
+      item.locationName
+    ]
+      .map((value) => this.normalize(value))
+      .join(' ');
+    return haystack.includes(term);
+  }
+
+  private matchesLifeSheetCondition(
+    item: InventoryPanelItem,
+    condition: Exclude<LifeSheetCondition, ''>
+  ): boolean {
+    const status = String(item.status || '').toLowerCase();
+    if (condition === 'pending_spare') return Boolean(item.hasPendingSpare);
+    if (condition === 'under_warranty') return this.isUnderWarranty(item);
+    if (condition === 'operational') return ['activo', 'operativo'].includes(status);
+    if (condition === 'operational_observation') return status === 'operativo_observacion';
+    if (condition === 'out_of_service') return status === 'fuera_de_servicio';
+    if (condition === 'without_current_warranty') return !this.isUnderWarranty(item);
+    return Boolean(item.hasPendingSpare)
+      || status === 'operativo_observacion'
+      || status === 'fuera_de_servicio';
+  }
+
+  private dateOnly(value: string | null | undefined): Date | null {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return null;
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  private formatDateOnly(value: Date): string {
+    return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`;
   }
 
   async exportInventory(useFiltered: boolean): Promise<void> {

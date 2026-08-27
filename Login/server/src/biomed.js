@@ -265,8 +265,8 @@ export async function listAssets(clientId, { assetCategory = null } = {}) {
     throw new Error('Cliente no encontrado');
   }
   const category = assetCategory ? normalizeAssetCategory(assetCategory) : null;
-  const params = category ? [category] : [];
-  const categoryWhere = category ? 'WHERE a.asset_category = $1' : '';
+  const params = category ? [clientId, category] : [clientId];
+  const categoryWhere = category ? 'WHERE a.asset_category = $2' : '';
   const { rows } = await query(
     `SELECT a.id, a.asset_category, a.code, a.name, a.brand, a.model, a.serial, a.location, a.status, a.created_at,
             a.photo_path, a.invima_reg, a.risk_class, a.requires_sanitary_classification,
@@ -280,6 +280,13 @@ export async function listAssets(clientId, { assetCategory = null } = {}) {
             a.hv_engineer_user_id, a.hv_engineer_signed_at,
             hu.display_name AS hv_engineer_name, hu.signature_path AS hv_engineer_signature_path,
             hu.invima_registration AS hv_engineer_invima_registration,
+            EXISTS (
+              SELECT 1
+              FROM maintenance_requests maintenance_request
+              WHERE maintenance_request.client_id = $1
+                AND maintenance_request.asset_id = a.id
+                AND maintenance_request.status = 'espera_repuesto'
+            ) AS has_pending_spare,
             a.site_id, s.name AS site_name, a.area_id, a.location_id, ar.name AS area_name, lo.name AS location_name
      FROM "${schema}".assets a
      LEFT JOIN "${schema}".sites s ON s.id = a.site_id
@@ -353,16 +360,16 @@ export async function listAssetsForReader(clientId, userId, { assetCategory = nu
   }
 
   let where = '';
-  let params = [];
+  const params = [clientId];
   if (locationIds.length && areaIds.length) {
-    where = 'AND (a.location_id = ANY($1) OR a.area_id = ANY($2))';
-    params = [locationIds, areaIds];
+    params.push(locationIds, areaIds);
+    where = 'AND (a.location_id = ANY($2) OR a.area_id = ANY($3))';
   } else if (locationIds.length) {
-    where = 'AND a.location_id = ANY($1)';
-    params = [locationIds];
+    params.push(locationIds);
+    where = 'AND a.location_id = ANY($2)';
   } else {
-    where = 'AND a.area_id = ANY($1)';
-    params = [areaIds];
+    params.push(areaIds);
+    where = 'AND a.area_id = ANY($2)';
   }
   if (assetCategory) {
     params.push(normalizeAssetCategory(assetCategory));
@@ -382,6 +389,13 @@ export async function listAssetsForReader(clientId, userId, { assetCategory = nu
             a.hv_engineer_user_id, a.hv_engineer_signed_at,
             hu.display_name AS hv_engineer_name, hu.signature_path AS hv_engineer_signature_path,
             hu.invima_registration AS hv_engineer_invima_registration,
+            EXISTS (
+              SELECT 1
+              FROM maintenance_requests maintenance_request
+              WHERE maintenance_request.client_id = $1
+                AND maintenance_request.asset_id = a.id
+                AND maintenance_request.status = 'espera_repuesto'
+            ) AS has_pending_spare,
             a.site_id, s.name AS site_name, a.area_id, a.location_id, ar.name AS area_name, lo.name AS location_name
      FROM "${schema}".assets a
      LEFT JOIN "${schema}".sites s ON s.id = a.site_id

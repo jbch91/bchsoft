@@ -37,6 +37,7 @@ interface AssetDto {
   acquisition_date?: string | null;
   useful_life_years?: number | null;
   warranty_years?: number | null;
+  has_pending_spare?: boolean;
   supplier_name?: string | null;
   supplier_phone?: string | null;
   supplier_email?: string | null;
