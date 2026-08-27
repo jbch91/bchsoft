@@ -79,6 +79,17 @@ test('clasifica el avance operativo de cada preventivo sin mezclar estados', () 
     'completed'
   );
   assert.equal(
+    maintenancePreventiveItemPhase({ is_under_warranty: true }),
+    'warranty'
+  );
+  assert.equal(
+    maintenancePreventiveItemPhase({
+      is_under_warranty: true,
+      warranty_resolution: 'perform'
+    }),
+    'not_started'
+  );
+  assert.equal(
     maintenancePreventiveItemPhase({
       completion_source: 'software_report',
       report_id: 'report-d',
@@ -108,20 +119,27 @@ test('resume el avance mensual y anual con vencidos como indicador transversal',
       request_status: 'firmado',
       is_overdue: false
     },
+    {
+      planned_date: '2026-08-25',
+      is_under_warranty: true,
+      is_overdue: true
+    },
     { planned_date: '2026-09-15', completion_source: 'historical_pdf', is_overdue: false }
   ], { year: 2026, month: 8 });
 
   assert.deepEqual(result.monthly, {
-    total: 4,
+    total: 5,
     not_started: 1,
     in_progress: 1,
     pending_signature: 1,
     waiting_spare: 1,
+    warranty: 1,
     completed: 1,
     overdue: 1,
     completion_percent: 25
   });
-  assert.equal(result.annual.total, 5);
+  assert.equal(result.annual.total, 6);
+  assert.equal(result.annual.warranty, 1);
   assert.equal(result.annual.completed, 2);
   assert.equal(result.annual.completion_percent, 40);
 });

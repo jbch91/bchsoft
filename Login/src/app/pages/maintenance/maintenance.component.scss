@@ -1858,9 +1858,20 @@ button:disabled {
   white-space: nowrap;
 }
 
+.preventive-warranty-counter {
+  padding: 4px 7px;
+  border: 1px solid #8fc9c2;
+  border-radius: 5px;
+  background: #ecfdf9;
+  color: #0f665d;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .preventive-progress-legend {
   display: grid;
-  grid-template-columns: repeat(4, minmax(112px, 1fr));
+  grid-template-columns: repeat(5, minmax(100px, 1fr));
   gap: 8px 14px;
 }
 
@@ -1893,7 +1904,7 @@ button:disabled {
 
 .preventive-phase-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  grid-template-columns: repeat(5, minmax(112px, 1fr));
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
@@ -1967,6 +1978,11 @@ button:disabled {
   background: #b23a48;
 }
 
+.preventive-status-track .warranty,
+.preventive-progress-legend .warranty > span {
+  background: #168579;
+}
+
 .preventive-status-track .completed,
 .preventive-progress-legend .completed > span {
   background: #278354;
@@ -2002,6 +2018,12 @@ button:disabled {
   color: #9f2630;
 }
 
+.preventive-phase-pill.warranty {
+  border-color: #8fc9c2;
+  background: #ecfdf9;
+  color: #0f665d;
+}
+
 .preventive-phase-pill.completed {
   border-color: #9ed0b5;
   background: #ecfdf3;
@@ -2010,6 +2032,11 @@ button:disabled {
 
 .preventive-overdue-note {
   color: #9f2630;
+  font-weight: 800;
+}
+
+.preventive-warranty-note {
+  color: #0f665d;
   font-weight: 800;
 }
 
@@ -2672,7 +2699,8 @@ button:disabled {
   }
 
   .preventive-overdue,
-  .preventive-spare-counter {
+  .preventive-spare-counter,
+  .preventive-warranty-counter {
     justify-self: start;
   }
 
@@ -2734,6 +2762,12 @@ button:disabled {
 
   .row:not(.header) > span.actions {
     align-items: center;
+  }
+
+  .compact-preventive-table .preventive-phase-actions button {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .card {
@@ -2858,12 +2892,16 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .preventive-phase-tabs button:nth-child(2) {
+  .preventive-phase-tabs button:nth-child(2n) {
     border-right: 0;
   }
 
-  .preventive-phase-tabs button:nth-child(-n + 2) {
+  .preventive-phase-tabs button:nth-child(-n + 4) {
     border-bottom-color: var(--border);
+  }
+
+  .preventive-phase-tabs button:last-child {
+    grid-column: 1 / -1;
   }
 
   .preventive-phase-tabs button.active {

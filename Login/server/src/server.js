@@ -11,7 +11,7 @@ import { promisify } from 'util';
 import multer from 'multer';
 import sharp from 'sharp';
 import { PDFDocument as PdfMergerDocument } from 'pdf-lib';
-import { query } from './db.js';
+import { query, withTransaction } from './db.js';
 import {
   authenticateUser,
   getCurrentSessionUser,
@@ -10492,6 +10492,210 @@ app.get(
   }
 );
 
+app.post(
+  '/maintenance/preventive-progress/:clientId/items/:itemId/warranty',
+  requireAuth,
+  requirePermission('maintenance:report:create'),
+  async (req, res) => {
+    const { clientId, itemId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const decision = String(req.body?.decision || '').trim().toLowerCase();
+    if (!['covered', 'perform'].includes(decision)) {
+      return res.status(400).json({ message: 'La decisión de garantía no es válida.' });
+    }
+
+    const client = await getClientById(clientId);
+    if (!client?.schema_name) {
+      return res.status(404).json({ message: 'Cliente no encontrado.' });
+    }
+    const today = todayInBogota();
+
+    try {
+      const result = await withTransaction(async (dbClient) => {
+        const { rows } = await dbClient.query(
+          `SELECT item.id,
+                  item.schedule_id,
+                  item.asset_id,
+                  item.planned_date,
+                  item.deadline_date,
+                  item.status,
+                  item.report_id,
+                  item.completion_source,
+                  item.legacy_history_file_id,
+                  item.warranty_resolution,
+                  schedule.status AS schedule_status,
+                  asset.code AS asset_code,
+                  asset.name AS asset_name,
+                  asset.acquisition_date,
+                  asset.warranty_years,
+                  CASE
+                    WHEN asset.acquisition_date IS NOT NULL AND asset.warranty_years IS NOT NULL
+                      THEN (
+                        asset.acquisition_date + make_interval(years => asset.warranty_years)
+                      )::date
+                    ELSE NULL
+                  END AS warranty_release_date,
+                  (
+                    asset.warranty_years IS NOT NULL
+                    AND (
+                      asset.acquisition_date IS NULL
+                      OR item.planned_date < (
+                        asset.acquisition_date + make_interval(years => asset.warranty_years)
+                      )::date
+                    )
+                  ) AS is_under_warranty,
+                  item.planned_date <= $3::date AS window_started,
+                  item.deadline_date < $3::date AS window_elapsed
+           FROM maintenance_schedule_items item
+           JOIN maintenance_schedules schedule ON schedule.id = item.schedule_id
+           JOIN "${client.schema_name}".assets asset ON asset.id = item.asset_id
+           WHERE item.id = $1
+             AND schedule.client_id = $2
+           FOR UPDATE OF item`,
+          [itemId, clientId, today]
+        );
+        const item = rows[0];
+        if (!item) {
+          const error = new Error('Actividad preventiva no encontrada.');
+          error.statusCode = 404;
+          throw error;
+        }
+        if (item.schedule_status !== 'approved') {
+          const error = new Error('La decisión solo está disponible en cronogramas aprobados.');
+          error.statusCode = 409;
+          throw error;
+        }
+        if (!item.is_under_warranty && item.warranty_resolution !== 'covered') {
+          const error = new Error('Esta ventana ya no corresponde al periodo de garantía.');
+          error.statusCode = 409;
+          throw error;
+        }
+
+        const { rows: requestRows } = await dbClient.query(
+          `SELECT request.id, request.status,
+                  EXISTS (
+                    SELECT 1 FROM maintenance_reports report WHERE report.request_id = request.id
+                  ) AS has_report
+           FROM maintenance_requests request
+           WHERE request.schedule_item_id = $1
+             AND request.type = 'preventivo'
+           ORDER BY request.created_at DESC
+           LIMIT 1`,
+          [item.id]
+        );
+        const request = requestRows[0] || null;
+        const operationalRequestStatuses = [
+          'en_proceso',
+          'espera_repuesto',
+          'reportado',
+          'firmado',
+          'correccion'
+        ];
+        const hasOperationalEvidence = Boolean(
+          item.report_id
+          || item.completion_source
+          || item.legacy_history_file_id
+          || request?.has_report
+          || operationalRequestStatuses.includes(request?.status)
+        );
+        if (hasOperationalEvidence) {
+          const error = new Error(
+            'La actividad ya tiene operación o evidencia registrada y no puede cambiarse a garantía.'
+          );
+          error.statusCode = 409;
+          throw error;
+        }
+        if (decision === 'perform' && item.window_elapsed) {
+          const error = new Error(
+            'La ventana ya finalizó. Regístrala como garantía; no es válido crear ahora un protocolo operativo retroactivo.'
+          );
+          error.statusCode = 409;
+          throw error;
+        }
+
+        const nextStatus = decision === 'covered'
+          ? 'warranty'
+          : item.window_started
+            ? 'active'
+            : 'pending';
+        await dbClient.query(
+          `UPDATE maintenance_schedule_items
+           SET status = $2,
+               warranty_resolution = $3,
+               warranty_resolved_at = NOW(),
+               warranty_resolved_by = $4
+           WHERE id = $1`,
+          [item.id, nextStatus, decision, req.user.sub]
+        );
+
+        if (request) {
+          const requestStatus = decision === 'covered'
+            ? 'garantia'
+            : item.window_started
+              ? 'abierto'
+              : 'garantia';
+          await dbClient.query(
+            `UPDATE maintenance_requests
+             SET status = $2,
+                 assigned_to = CASE WHEN $2 = 'abierto' THEN NULL ELSE assigned_to END,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [request.id, requestStatus]
+          );
+        }
+        await dbClient.query(
+          'UPDATE maintenance_schedules SET pdf_path = NULL WHERE id = $1',
+          [item.schedule_id]
+        );
+
+        return {
+          itemId: item.id,
+          scheduleId: item.schedule_id,
+          assetId: item.asset_id,
+          assetCode: item.asset_code,
+          assetName: item.asset_name,
+          decision,
+          warrantyReleaseDate: item.warranty_release_date
+        };
+      });
+
+      await syncDueScheduleRequests(clientId, req.user.sub);
+      await logAudit({
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        action: decision === 'covered'
+          ? 'MAINTENANCE_WARRANTY_COVERAGE_REGISTERED'
+          : 'MAINTENANCE_WARRANTY_PROTOCOL_AUTHORIZED',
+        details: {
+          clientId,
+          scheduleId: result.scheduleId,
+          scheduleItemId: result.itemId,
+          assetId: result.assetId,
+          assetCode: result.assetCode,
+          assetName: result.assetName,
+          warrantyReleaseDate: result.warrantyReleaseDate,
+          decision
+        }
+      });
+      return res.json({
+        ok: true,
+        decision,
+        message: decision === 'covered'
+          ? 'La ventana quedó registrada en garantía y no genera pendiente ni vencimiento.'
+          : 'El protocolo normal quedó habilitado para esta ventana.'
+      });
+    } catch (error) {
+      if (error?.statusCode) {
+        return res.status(error.statusCode).json({ message: error.message });
+      }
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo actualizar la decisión de garantía.' });
+    }
+  }
+);
+
 app.get(
   '/maintenance/requests/:clientId',
   requireAuth,
@@ -10560,6 +10764,24 @@ app.post(
       return res.status(400).json({
         message: 'Este equipo está dado de baja y no permite nuevas solicitudes de mantenimiento.'
       });
+    }
+    if (type === 'preventivo' && requestedAsset.warranty_years) {
+      let warrantyReleaseDate;
+      try {
+        warrantyReleaseDate = assetWarrantyReleaseDate({
+          acquisitionDate: requestedAsset.acquisition_date,
+          warrantyYears: requestedAsset.warranty_years
+        });
+      } catch {
+        return res.status(409).json({
+          message: 'El equipo registra garantía, pero no tiene una fecha de adquisición válida. Corrige la hoja de vida antes de crear el preventivo.'
+        });
+      }
+      if (warrantyReleaseDate && todayInBogota() < warrantyReleaseDate) {
+        return res.status(409).json({
+          message: `El equipo está en garantía hasta ${warrantyReleaseDate}. Usa la fase En garantía del cronograma para registrar la cobertura o habilitar excepcionalmente el protocolo.`
+        });
+      }
     }
     let assetCategory;
     try {
@@ -11577,10 +11799,207 @@ function todayInBogota() {
   return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
+const dueScheduleSyncPromises = new Map();
+
 async function syncDueScheduleRequests(clientId, fallbackUserId) {
+  const existing = dueScheduleSyncPromises.get(clientId);
+  if (existing) return existing;
+  const operation = performDueScheduleRequestSync(clientId, fallbackUserId);
+  dueScheduleSyncPromises.set(clientId, operation);
+  try {
+    return await operation;
+  } finally {
+    if (dueScheduleSyncPromises.get(clientId) === operation) {
+      dueScheduleSyncPromises.delete(clientId);
+    }
+  }
+}
+
+async function performDueScheduleRequestSync(clientId, fallbackUserId) {
   const today = todayInBogota();
   const client = await getClientById(clientId);
   if (!client?.schema_name) return;
+
+  await query(
+    `WITH removed AS (
+       DELETE FROM maintenance_schedule_items item
+       USING maintenance_schedules schedule,
+             "${client.schema_name}".assets asset
+       WHERE item.schedule_id = schedule.id
+         AND item.asset_id = asset.id
+         AND schedule.client_id = $1
+         AND schedule.status = 'approved'
+         AND item.status = 'pending'
+         AND item.planned_date > $2::date
+         AND item.report_id IS NULL
+         AND item.completion_source IS NULL
+         AND item.legacy_history_file_id IS NULL
+         AND item.warranty_resolution IS NULL
+         AND asset.warranty_years IS NOT NULL
+         AND (
+           asset.acquisition_date IS NULL
+           OR item.planned_date < (
+             asset.acquisition_date + make_interval(years => asset.warranty_years)
+           )::date
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM maintenance_requests request
+           WHERE request.schedule_item_id = item.id
+         )
+       RETURNING item.schedule_id
+     )
+     UPDATE maintenance_schedules schedule
+     SET pdf_path = NULL
+     WHERE schedule.id IN (SELECT DISTINCT schedule_id FROM removed)`,
+    [clientId, today]
+  );
+
+  await query(
+    `UPDATE maintenance_requests request
+     SET status = 'garantia', updated_at = NOW()
+     FROM maintenance_schedule_items item,
+          maintenance_schedules schedule,
+          "${client.schema_name}".assets asset
+     WHERE request.schedule_item_id = item.id
+       AND item.schedule_id = schedule.id
+       AND item.asset_id = asset.id
+       AND schedule.client_id = $1
+       AND schedule.status = 'approved'
+       AND request.type = 'preventivo'
+       AND request.source = 'cronograma'
+       AND request.status IN ('abierto', 'vencido')
+       AND item.report_id IS NULL
+       AND item.completion_source IS NULL
+       AND item.legacy_history_file_id IS NULL
+       AND item.warranty_resolution IS DISTINCT FROM 'perform'
+       AND asset.warranty_years IS NOT NULL
+       AND (
+         asset.acquisition_date IS NULL
+         OR item.planned_date < (
+           asset.acquisition_date + make_interval(years => asset.warranty_years)
+         )::date
+       )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM maintenance_reports report
+         WHERE report.request_id = request.id
+       )`,
+    [clientId]
+  );
+
+  await query(
+    `WITH protected AS (
+       UPDATE maintenance_schedule_items item
+       SET status = 'warranty'
+       FROM maintenance_schedules schedule,
+            "${client.schema_name}".assets asset
+       WHERE item.schedule_id = schedule.id
+         AND item.asset_id = asset.id
+         AND schedule.client_id = $1
+         AND schedule.status = 'approved'
+         AND item.status IN ('pending', 'active', 'expired')
+         AND item.report_id IS NULL
+         AND item.completion_source IS NULL
+         AND item.legacy_history_file_id IS NULL
+         AND item.warranty_resolution IS DISTINCT FROM 'perform'
+         AND asset.warranty_years IS NOT NULL
+         AND (
+           asset.acquisition_date IS NULL
+           OR item.planned_date < (
+             asset.acquisition_date + make_interval(years => asset.warranty_years)
+           )::date
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM maintenance_requests request
+           WHERE request.schedule_item_id = item.id
+             AND request.status IN (
+               'en_proceso', 'espera_repuesto', 'reportado', 'firmado', 'correccion'
+             )
+         )
+       RETURNING item.schedule_id
+     )
+     UPDATE maintenance_schedules schedule
+     SET pdf_path = NULL
+     WHERE schedule.id IN (SELECT DISTINCT schedule_id FROM protected)`,
+    [clientId]
+  );
+
+  await query(
+    `WITH restored AS (
+       UPDATE maintenance_schedule_items item
+       SET status = CASE
+         WHEN item.deadline_date < $2::date THEN 'expired'
+         WHEN item.planned_date <= $2::date THEN 'active'
+         ELSE 'pending'
+       END
+       FROM maintenance_schedules schedule,
+            "${client.schema_name}".assets asset
+       WHERE item.schedule_id = schedule.id
+         AND item.asset_id = asset.id
+         AND schedule.client_id = $1
+         AND item.status = 'warranty'
+         AND (
+           item.warranty_resolution = 'perform'
+           OR (
+             item.warranty_resolution IS DISTINCT FROM 'covered'
+             AND (
+               asset.warranty_years IS NULL
+               OR (
+                 asset.acquisition_date IS NOT NULL
+                 AND item.planned_date >= (
+                   asset.acquisition_date + make_interval(years => asset.warranty_years)
+                 )::date
+               )
+             )
+           )
+         )
+       RETURNING item.schedule_id
+     )
+     UPDATE maintenance_schedules schedule
+     SET pdf_path = NULL
+     WHERE schedule.id IN (SELECT DISTINCT schedule_id FROM restored)`,
+    [clientId, today]
+  );
+
+  await query(
+    `UPDATE maintenance_requests request
+     SET status = CASE
+           WHEN item.deadline_date < $2::date THEN 'vencido'
+           WHEN item.planned_date <= $2::date THEN 'abierto'
+           ELSE 'garantia'
+         END,
+         assigned_to = CASE
+           WHEN item.planned_date <= $2::date AND item.deadline_date >= $2::date THEN NULL
+           ELSE assigned_to
+         END,
+         updated_at = NOW()
+     FROM maintenance_schedule_items item,
+          maintenance_schedules schedule,
+          "${client.schema_name}".assets asset
+     WHERE request.schedule_item_id = item.id
+       AND item.schedule_id = schedule.id
+       AND item.asset_id = asset.id
+       AND schedule.client_id = $1
+       AND request.status = 'garantia'
+       AND (
+         item.warranty_resolution = 'perform'
+         OR (
+           item.warranty_resolution IS DISTINCT FROM 'covered'
+           AND (
+             asset.warranty_years IS NULL
+             OR (
+               asset.acquisition_date IS NOT NULL
+               AND item.planned_date >= (
+                 asset.acquisition_date + make_interval(years => asset.warranty_years)
+               )::date
+             )
+           )
+         )
+       )`,
+    [clientId, today]
+  );
 
   await query(
     `UPDATE maintenance_requests
@@ -11633,7 +12052,8 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
        AND i.status IN ('pending', 'active')
        AND COALESCE(a.status, 'activo') <> 'dado_de_baja'
        AND (
-         a.warranty_years IS NULL
+         i.warranty_resolution = 'perform'
+         OR a.warranty_years IS NULL
          OR (
            a.acquisition_date IS NOT NULL
            AND i.planned_date >= (a.acquisition_date + make_interval(years => a.warranty_years))::date
@@ -11648,7 +12068,7 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
 
   for (const item of rows) {
     const exists = await query(
-      `SELECT id
+      `SELECT id, status
        FROM maintenance_requests
        WHERE client_id = $1
          AND asset_id = $2
@@ -11661,6 +12081,14 @@ async function syncDueScheduleRequests(clientId, fallbackUserId) {
       [clientId, item.asset_id, item.id, item.planned_date]
     );
     if (exists.rows.length) {
+      if (['garantia', 'vencido'].includes(exists.rows[0].status)) {
+        await query(
+          `UPDATE maintenance_requests
+           SET status = 'abierto', assigned_to = NULL, updated_at = NOW()
+           WHERE id = $1`,
+          [exists.rows[0].id]
+        );
+      }
       await query(
         `UPDATE maintenance_requests
          SET schedule_id = $1, schedule_item_id = $2

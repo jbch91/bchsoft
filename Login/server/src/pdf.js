@@ -1765,7 +1765,11 @@ export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
       });
     }
     let resolution = '';
-    if (item.historical_resolution === 'not_performed') {
+    if (item.status === 'warranty') {
+      resolution = item.warranty_release_date
+        ? ` · EN GARANTÍA HASTA ${formatDate(item.warranty_release_date)}`
+        : ' · EN GARANTÍA';
+    } else if (item.historical_resolution === 'not_performed') {
       resolution = ` · NO REALIZADO: ${safeText(item.non_execution_reason)}`;
     } else if (item.historical_resolution === 'pending_evidence') {
       resolution = ' · PDF HISTÓRICO PENDIENTE';

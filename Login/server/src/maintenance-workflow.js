@@ -20,6 +20,14 @@ export function maintenancePreventiveItemWaitsForSpare(item = {}) {
   );
 }
 
+export function maintenancePreventiveItemIsWarranty(item = {}) {
+  if (item.warranty_resolution === 'perform') return false;
+  return Boolean(
+    item.warranty_resolution === 'covered'
+    || item.is_under_warranty
+  );
+}
+
 export function maintenancePreventiveItemPhase(item = {}) {
   if (
     item.legacy_history_file_id
@@ -48,6 +56,9 @@ export function maintenancePreventiveItemPhase(item = {}) {
   if (item.request_status === 'en_proceso' || item.request_status === 'espera_repuesto') {
     return 'in_progress';
   }
+  if (maintenancePreventiveItemIsWarranty(item)) {
+    return 'warranty';
+  }
   return 'not_started';
 }
 
@@ -58,6 +69,7 @@ function emptyPreventiveProgressSummary() {
     in_progress: 0,
     pending_signature: 0,
     waiting_spare: 0,
+    warranty: 0,
     completed: 0,
     overdue: 0,
     completion_percent: 0
@@ -82,12 +94,13 @@ function summarizePreventiveItems(items) {
     if (maintenancePreventiveItemWaitsForSpare(item)) {
       summary.waiting_spare += 1;
     }
-    if (item.is_overdue && phase !== 'completed') {
+    if (item.is_overdue && phase !== 'completed' && phase !== 'warranty') {
       summary.overdue += 1;
     }
   }
-  if (summary.total) {
-    const rawCompletionPercent = (summary.completed / summary.total) * 100;
+  const applicableTotal = summary.total - summary.warranty;
+  if (applicableTotal) {
+    const rawCompletionPercent = (summary.completed / applicableTotal) * 100;
     summary.completion_percent = rawCompletionPercent > 0 && rawCompletionPercent < 1
       ? Number(rawCompletionPercent.toFixed(1))
       : Math.round(rawCompletionPercent);

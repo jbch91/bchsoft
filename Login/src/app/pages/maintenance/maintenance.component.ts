@@ -63,7 +63,7 @@ type MaintenanceViewMode =
   | 'bajas'
   | 'equipos';
 
-type PreventivePhaseView = 'work' | 'pending_signature' | 'waiting_spare' | 'completed';
+type PreventivePhaseView = 'work' | 'warranty' | 'pending_signature' | 'waiting_spare' | 'completed';
 type ReportAssetStatus = 'operativo' | 'operativo_observacion' | 'fuera_de_servicio';
 type ReportNarrativeField = 'summary' | 'findings' | 'actions' | 'statusObservations' | 'spareParts';
 type PreventiveOutcomeValue = 'conforme' | 'observacion' | 'hallazgo' | 'fuera_de_servicio';
@@ -470,6 +470,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   preventivePdfTitle = '';
   preventivePdfAsset: AssetLite | null = null;
   preventivePdfLoadingId = '';
+  preventiveWarrantyLoadingId = '';
   preventivePdfPage = 1;
   preventivePdfPageCount = 0;
   preventivePdfZoom = 1;
@@ -1592,6 +1593,12 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         percent: percent(progress.pending_signature)
       },
       {
+        key: 'warranty',
+        label: 'En garantía (no aplican)',
+        count: progress.warranty,
+        percent: percent(progress.warranty)
+      },
+      {
         key: 'completed',
         label: 'Finalizados',
         count: progress.completed,
@@ -1630,6 +1637,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         value: 'work',
         label: 'Por atender',
         count: (progress?.not_started ?? 0) + (progress?.in_progress ?? 0)
+      },
+      {
+        value: 'warranty',
+        label: 'En garantía',
+        count: progress?.warranty ?? 0
       },
       {
         value: 'pending_signature',
@@ -1819,6 +1831,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       in_progress: 'En proceso',
       pending_signature: 'Pendiente de aval/firma',
       waiting_spare: 'Esperando repuesto',
+      warranty: 'En garantía',
       completed: 'Finalizado'
     };
     return labels[phase];
@@ -1836,6 +1849,46 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   preventiveReportForItem(item: PreventiveProgressItemDto): MaintenanceReportDto | null {
     if (!item.report_id) return null;
     return this.reports.find((report) => report.id === item.report_id) ?? null;
+  }
+
+  preventiveApplicableTotal(progress: PreventiveProgressSummaryDto): number {
+    return Math.max(0, progress.total - progress.warranty);
+  }
+
+  preventiveWarrantyReleaseLabel(item: PreventiveProgressItemDto): string {
+    if (!item.warranty_release_date) return 'Fin de garantía no registrado';
+    const date = new Date(`${String(item.warranty_release_date).slice(0, 10)}T00:00:00`);
+    return `Garantía hasta ${date.toLocaleDateString('es-CO')}`;
+  }
+
+  async resolvePreventiveWarranty(
+    item: PreventiveProgressItemDto,
+    decision: 'covered' | 'perform'
+  ): Promise<void> {
+    if (!this.selectedClientId || this.preventiveWarrantyLoadingId) return;
+    const confirmation = decision === 'covered'
+      ? '¿Registrar esta ventana como cubierta por garantía? No contará como pendiente ni vencida.'
+      : '¿Habilitar el protocolo normal para esta ventana aun cuando corresponde al periodo de garantía?';
+    if (!confirm(confirmation)) return;
+
+    this.preventiveWarrantyLoadingId = item.id;
+    this.errorMessage = '';
+    this.successMessage = '';
+    try {
+      const result = await this.maintenance.resolvePreventiveWarranty(
+        this.selectedClientId,
+        item.id,
+        decision
+      );
+      this.successMessage = result.message;
+      if (decision === 'perform') this.preventivePhaseView = 'work';
+      await this.loadData();
+    } catch (error: any) {
+      this.errorMessage = error?.error?.message ?? 'No se pudo actualizar la decisión de garantía.';
+    } finally {
+      this.preventiveWarrantyLoadingId = '';
+      this.refreshViewSoon();
+    }
   }
 
   async openPreventiveFinalPdf(item: PreventiveProgressItemDto): Promise<void> {
@@ -2810,6 +2863,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return this.auth.hasRole('superuser')
       || !request.assigned_to
       || request.assigned_to === this.auth.currentUser()?.id;
+  }
+
+  canManagePreventiveWarranty(): boolean {
+    return this.auth.hasPermission('maintenance:report:create');
   }
 
   spareCaseAssignmentLabel(report: MaintenanceReportDto): string {

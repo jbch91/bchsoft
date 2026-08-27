@@ -31,6 +31,7 @@ export interface ScheduleItemDto {
   planned_date: string;
   deadline_date: string;
   status: string;
+  persisted_status?: string;
   code?: string | null;
   name?: string | null;
   brand?: string | null;
@@ -52,6 +53,10 @@ export interface ScheduleItemDto {
   non_execution_reason?: string | null;
   non_execution_recorded_at?: string | null;
   non_execution_recorded_by?: string | null;
+  warranty_resolution?: 'covered' | 'perform' | null;
+  warranty_resolved_at?: string | null;
+  warranty_resolved_by?: string | null;
+  warranty_release_date?: string | null;
 }
 
 export interface AssetRescheduleResultDto {

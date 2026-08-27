@@ -527,6 +527,10 @@ button:disabled {
   background: #ffffff;
 }
 
+.summary-strip.maintenance-summary-strip {
+  grid-template-columns: repeat(7, minmax(100px, 1fr));
+}
+
 .summary-strip > div {
   display: grid;
   gap: 1px;
@@ -625,6 +629,12 @@ button:disabled {
   background: #fef2f2;
   border-color: #fecaca;
   color: #991b1b;
+}
+
+.status-pill.warranty {
+  color: #0f665d;
+  background: #ecfdf9;
+  border-color: #8fc9c2;
 }
 
 .status-pill.edit-ready {
@@ -1386,6 +1396,10 @@ button:disabled {
   .summary-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     overflow: hidden;
+  }
+
+  .summary-strip.maintenance-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .edit-level-bar {

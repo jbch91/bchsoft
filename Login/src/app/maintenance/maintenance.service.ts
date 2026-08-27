@@ -31,6 +31,7 @@ export interface PreventiveProgressSummaryDto {
   in_progress: number;
   pending_signature: number;
   waiting_spare: number;
+  warranty: number;
   completed: number;
   overdue: number;
   completion_percent: number;
@@ -41,6 +42,7 @@ export type PreventiveProgressPhase =
   | 'in_progress'
   | 'pending_signature'
   | 'waiting_spare'
+  | 'warranty'
   | 'completed';
 
 export interface PreventiveProgressItemDto {
@@ -58,6 +60,11 @@ export interface PreventiveProgressItemDto {
   deadline_date: string;
   phase: PreventiveProgressPhase;
   is_overdue: boolean;
+  warranty_resolution?: 'covered' | 'perform' | null;
+  warranty_resolved_at?: string | null;
+  warranty_release_date?: string | null;
+  is_under_warranty?: boolean;
+  can_perform_protocol?: boolean;
   request_id?: string | null;
   request_status?: string | null;
   assigned_to?: string | null;
@@ -148,6 +155,19 @@ export class MaintenanceService {
     return firstValueFrom(
       this.http.get<PreventiveMaintenanceProgressDto>(
         `${this.apiBase}/maintenance/preventive-progress/${clientId}?${query}`
+      )
+    );
+  }
+
+  async resolvePreventiveWarranty(
+    clientId: string,
+    itemId: string,
+    decision: 'covered' | 'perform'
+  ): Promise<{ ok: boolean; decision: 'covered' | 'perform'; message: string }> {
+    return firstValueFrom(
+      this.http.post<{ ok: boolean; decision: 'covered' | 'perform'; message: string }>(
+        `${this.apiBase}/maintenance/preventive-progress/${clientId}/items/${itemId}/warranty`,
+        { decision }
       )
     );
   }

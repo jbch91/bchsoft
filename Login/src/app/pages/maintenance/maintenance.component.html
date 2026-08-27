@@ -333,7 +333,9 @@
             <div class="preventive-completion-row">
               <div class="preventive-completion-value">
                 <strong>{{ progress.completion_percent }}%</strong>
-                <span>{{ progress.completed }} de {{ progress.total }} finalizados</span>
+                <span>
+                  {{ progress.completed }} de {{ preventiveApplicableTotal(progress) }} aplicables finalizados
+                </span>
               </div>
               <div
                 class="preventive-completion-track"
@@ -350,6 +352,9 @@
               </span>
               <span class="preventive-spare-counter" *ngIf="progress.waiting_spare">
                 {{ progress.waiting_spare }} con repuesto pendiente
+              </span>
+              <span class="preventive-warranty-counter" *ngIf="progress.warranty">
+                {{ progress.warranty }} en garantía · no genera pendiente
               </span>
             </div>
 
@@ -472,6 +477,9 @@
             </span>
             <small *ngIf="item.assigned_name">Asignado: {{ item.assigned_name }}</small>
             <small class="preventive-overdue-note" *ngIf="item.is_overdue">Vencido sin finalizar</small>
+            <small class="preventive-warranty-note" *ngIf="item.phase === 'warranty'">
+              {{ preventiveWarrantyReleaseLabel(item) }}
+            </small>
           </span>
           <span data-label="Estado" class="preventive-status-cell">
             <span
@@ -486,6 +494,9 @@
             </span>
             <small *ngIf="item.has_pending_spare && preventivePhaseView !== 'waiting_spare'">
               Repuesto solicitado
+            </small>
+            <small *ngIf="item.phase === 'warranty'">
+              {{ item.warranty_resolution === 'covered' ? 'Exención registrada' : 'Garantía detectada' }}
             </small>
           </span>
           <span class="actions preventive-phase-actions" data-label="Acción">
@@ -510,6 +521,34 @@
             </ng-container>
 
             <ng-template #primaryPreventiveActions>
+              <ng-container *ngIf="item.phase === 'warranty'">
+                <ng-container *ngIf="canManagePreventiveWarranty(); else warrantyReadOnly">
+                  <button
+                    *ngIf="item.warranty_resolution !== 'covered'"
+                    type="button"
+                    [disabled]="preventiveWarrantyLoadingId === item.id"
+                    (click)="resolvePreventiveWarranty(item, 'covered')"
+                  >
+                    {{ preventiveWarrantyLoadingId === item.id ? 'Guardando...' : 'Registrar garantía' }}
+                  </button>
+                  <button
+                    *ngIf="item.can_perform_protocol"
+                    type="button"
+                    class="ghost"
+                    [disabled]="preventiveWarrantyLoadingId === item.id"
+                    (click)="resolvePreventiveWarranty(item, 'perform')"
+                  >
+                    Realizar protocolo
+                  </button>
+                  <small *ngIf="!item.can_perform_protocol">
+                    Ventana finalizada; solo aplica el registro de garantía.
+                  </small>
+                </ng-container>
+                <ng-template #warrantyReadOnly>
+                  <small>La decisión corresponde al ingeniero biomédico.</small>
+                </ng-template>
+              </ng-container>
+
               <ng-container *ngIf="item.phase === 'not_started' || item.phase === 'in_progress'">
                 <ng-container *ngIf="preventiveRequestForItem(item) as request; else preventiveNotAvailable">
                   <button

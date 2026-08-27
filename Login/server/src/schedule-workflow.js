@@ -60,7 +60,7 @@ export function maintenanceScheduleItemHasOperationalEvidence(item = {}) {
   const status = String(item.status || '').trim().toLowerCase();
   const historicalResolution = String(item.historical_resolution || '').trim().toLowerCase();
   return Boolean(
-    !['pending', 'active', 'expired'].includes(status)
+    !['pending', 'active', 'expired', 'warranty'].includes(status)
     || item.report_id
     || item.completion_source
     || item.legacy_history_file_id

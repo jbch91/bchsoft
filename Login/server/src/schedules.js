@@ -1084,14 +1084,50 @@ export async function setScheduleEngineerEditAccess(scheduleId, enabled, enabled
 
 export async function listScheduleItemsWithSchema(scheduleId, schema) {
   const { rows } = await query(
-    `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date, i.status,
+    `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date,
+            CASE
+              WHEN i.status IN ('pending', 'active', 'expired', 'warranty')
+                AND i.report_id IS NULL
+                AND i.completion_source IS NULL
+                AND i.legacy_history_file_id IS NULL
+                AND (
+                  i.warranty_resolution = 'covered'
+                  OR (
+                    i.warranty_resolution IS DISTINCT FROM 'perform'
+                    AND a.warranty_years IS NOT NULL
+                    AND (
+                      a.acquisition_date IS NULL
+                      OR i.planned_date < (
+                        a.acquisition_date + make_interval(years => a.warranty_years)
+                      )::date
+                    )
+                  )
+                )
+                THEN 'warranty'
+              WHEN i.status = 'warranty' THEN
+                CASE
+                  WHEN i.deadline_date < (CURRENT_TIMESTAMP AT TIME ZONE 'America/Bogota')::date
+                    THEN 'expired'
+                  WHEN i.planned_date <= (CURRENT_TIMESTAMP AT TIME ZONE 'America/Bogota')::date
+                    THEN 'active'
+                  ELSE 'pending'
+                END
+              ELSE i.status
+            END AS status,
+            i.status AS persisted_status,
             i.programming_confirmed, i.programmed_at, i.programmed_by,
             i.report_id, i.completion_source, i.legacy_history_file_id,
             i.historical_resolution, i.non_execution_reason,
             i.non_execution_recorded_at, i.non_execution_recorded_by,
+            i.warranty_resolution, i.warranty_resolved_at, i.warranty_resolved_by,
             a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id, a.location_id,
             a.maintenance_frequency AS asset_maintenance_frequency,
             a.acquisition_date, a.warranty_years,
+            CASE
+              WHEN a.acquisition_date IS NOT NULL AND a.warranty_years IS NOT NULL
+                THEN (a.acquisition_date + make_interval(years => a.warranty_years))::date
+              ELSE NULL
+            END AS warranty_release_date,
             ar.name AS area_name, s.name AS site_name, lo.name AS location_name
      FROM maintenance_schedule_items i
      JOIN "${schema}".assets a ON a.id = i.asset_id
@@ -1333,7 +1369,7 @@ export async function setScheduleClosedIfDone(scheduleId) {
   const { rows } = await query(
     `SELECT COUNT(*)::int AS pending
      FROM maintenance_schedule_items
-     WHERE schedule_id = $1 AND status <> 'done'`,
+     WHERE schedule_id = $1 AND status NOT IN ('done', 'warranty')`,
     [scheduleId]
   );
   if ((rows[0]?.pending ?? 0) === 0) {
@@ -1374,7 +1410,7 @@ export async function findScheduleItemForAsset(scheduleId, assetId, date) {
      FROM maintenance_schedule_items
      WHERE schedule_id = $1
        AND asset_id = $2
-       AND status <> 'done'
+       AND status NOT IN ('done', 'warranty')
        AND planned_date <= $3
        AND deadline_date >= $3
      ORDER BY planned_date ASC

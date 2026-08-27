@@ -351,12 +351,13 @@
         </div>
       </div>
 
-      <div class="summary-strip" aria-label="Resumen del cronograma">
+      <div class="summary-strip maintenance-summary-strip" aria-label="Resumen del cronograma">
         <div><strong>{{ items.length }}</strong><span>Total</span></div>
         <div><strong>{{ maintenanceSummary.pending }}</strong><span>Programados</span></div>
         <div><strong>{{ maintenanceSummary.active }}</strong><span>Activos</span></div>
         <div><strong>{{ maintenanceSummary.done }}</strong><span>Realizados</span></div>
         <div><strong>{{ maintenanceSummary.expired }}</strong><span>Vencidos</span></div>
+        <div><strong>{{ maintenanceSummary.warranty }}</strong><span>En garantía</span></div>
         <div><strong>{{ maintenanceSummary.not_performed }}</strong><span>No realizados</span></div>
       </div>
 
@@ -486,6 +487,7 @@
             <option value="active">Activo</option>
             <option value="done">Realizado</option>
             <option value="expired">Vencido</option>
+            <option value="warranty">En garantía</option>
             <option value="not_performed">No realizado</option>
           </select>
         </label>

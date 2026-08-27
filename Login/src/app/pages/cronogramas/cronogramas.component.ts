@@ -811,9 +811,9 @@ export class CronogramasComponent implements OnInit {
     );
   }
 
-  get maintenanceSummary(): Record<'pending' | 'active' | 'done' | 'expired' | 'not_performed', number> {
+  get maintenanceSummary(): Record<'pending' | 'active' | 'done' | 'expired' | 'warranty' | 'not_performed', number> {
     return this.countStatuses(this.items, (item) => this.maintenanceItemStatusKey(item)) as Record<
-      'pending' | 'active' | 'done' | 'expired' | 'not_performed',
+      'pending' | 'active' | 'done' | 'expired' | 'warranty' | 'not_performed',
       number
     >;
   }
@@ -1150,7 +1150,7 @@ export class CronogramasComponent implements OnInit {
 
   areaStatusItems(group: MaintenanceItemGroup): { status: string; count: number }[] {
     const counts = this.countStatuses(group.items, (item) => this.maintenanceItemStatusKey(item));
-    return ['active', 'expired', 'not_performed', 'pending', 'done']
+    return ['active', 'expired', 'warranty', 'not_performed', 'pending', 'done']
       .filter((status) => counts[status] > 0)
       .map((status) => ({ status, count: counts[status] }));
   }
@@ -2115,6 +2115,7 @@ export class CronogramasComponent implements OnInit {
       active: 'Activo',
       done: 'Realizado',
       expired: 'Vencido',
+      warranty: 'En garantía',
       not_performed: 'No realizado'
     };
     return labels[String(status || '').toLowerCase()] ?? status;
@@ -2394,6 +2395,7 @@ export class CronogramasComponent implements OnInit {
       active: 0,
       done: 0,
       expired: 0,
+      warranty: 0,
       not_performed: 0
     };
     for (const item of items) {

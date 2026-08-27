@@ -1247,7 +1247,7 @@ export async function createAssetHistoryFile(clientId, payload) {
            AND NOT EXISTS (
              SELECT 1
              FROM maintenance_schedule_items item
-             WHERE item.schedule_id = schedule.id AND item.status <> 'done'
+             WHERE item.schedule_id = schedule.id AND item.status NOT IN ('done', 'warranty')
            )`,
         [occurrence.schedule_id]
       );

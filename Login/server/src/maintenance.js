@@ -92,11 +92,30 @@ export async function getPreventiveMaintenanceProgress(
             item.legacy_history_file_id,
             item.historical_resolution,
             item.non_execution_reason,
+            item.warranty_resolution,
+            item.warranty_resolved_at,
+            item.warranty_resolved_by,
             a.code AS asset_code,
             a.name AS asset_name,
             a.brand AS asset_brand,
             a.model AS asset_model,
             a.serial AS asset_serial,
+            a.acquisition_date,
+            a.warranty_years,
+            CASE
+              WHEN a.acquisition_date IS NOT NULL AND a.warranty_years IS NOT NULL
+                THEN (a.acquisition_date + make_interval(years => a.warranty_years))::date
+              ELSE NULL
+            END AS warranty_release_date,
+            (
+              a.warranty_years IS NOT NULL
+              AND (
+                a.acquisition_date IS NULL
+                OR item.planned_date < (
+                  a.acquisition_date + make_interval(years => a.warranty_years)
+                )::date
+              )
+            ) AS is_under_warranty,
             site.name AS site_name,
             area.name AS area_name,
             location.name AS location_name,
@@ -120,7 +139,12 @@ export async function getPreventiveMaintenanceProgress(
             COALESCE(signatures.has_engineer_signature, FALSE) AS has_engineer_signature,
             COALESCE(signatures.has_area_responsible_signature, FALSE) AS has_area_responsible_signature,
             COALESCE(signatures.has_acceptance_signature, FALSE) AS has_acceptance_signature,
-            item.deadline_date < CURRENT_DATE AS is_overdue
+            item.deadline_date < (
+              CURRENT_TIMESTAMP AT TIME ZONE 'America/Bogota'
+            )::date AS is_overdue,
+            item.deadline_date >= (
+              CURRENT_TIMESTAMP AT TIME ZONE 'America/Bogota'
+            )::date AS can_perform_protocol
      FROM maintenance_schedule_items item
      JOIN "${schema}".assets a ON a.id = item.asset_id
      LEFT JOIN "${schema}".sites site ON site.id = a.site_id
@@ -195,7 +219,12 @@ export async function getPreventiveMaintenanceProgress(
       planned_date: item.planned_date,
       deadline_date: item.deadline_date,
       phase,
-      is_overdue: Boolean(item.is_overdue && phase !== 'completed'),
+      is_overdue: Boolean(item.is_overdue && !['completed', 'warranty'].includes(phase)),
+      warranty_resolution: item.warranty_resolution,
+      warranty_resolved_at: item.warranty_resolved_at,
+      warranty_release_date: item.warranty_release_date,
+      is_under_warranty: Boolean(item.is_under_warranty),
+      can_perform_protocol: Boolean(item.can_perform_protocol),
       request_id: item.request_id,
       request_status: item.request_status,
       assigned_to: item.assigned_to,
@@ -310,7 +339,7 @@ export async function listMaintenanceRequests(clientId, { assetCategory = null }
      LEFT JOIN users assigned ON assigned.id = r.assigned_to
      WHERE r.client_id = $1
        ${categoryClause}
-       AND r.status NOT IN ('firmado', 'vencido')
+       AND r.status NOT IN ('firmado', 'vencido', 'garantia')
      ORDER BY r.created_at DESC`,
     params
   );
@@ -364,7 +393,7 @@ export async function listMaintenanceRequestsForReader(
      LEFT JOIN users u ON u.id = r.requested_by
      LEFT JOIN users assigned ON assigned.id = r.assigned_to
      WHERE r.client_id = $1 ${where}
-       AND r.status NOT IN ('firmado', 'vencido')
+       AND r.status NOT IN ('firmado', 'vencido', 'garantia')
      ORDER BY r.created_at DESC`,
     params
   );

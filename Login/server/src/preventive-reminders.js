@@ -37,7 +37,7 @@ export async function sendPreventiveRemindersForClient(clientId) {
      WHERE r.client_id = $1
        AND r.type = 'preventivo'
        AND r.source = 'cronograma'
-       AND r.status NOT IN ('reportado', 'firmado', 'vencido')
+       AND r.status NOT IN ('reportado', 'firmado', 'vencido', 'garantia')
        AND (
          (r.planned_date = $2 AND r.reminder_day_sent_at IS NULL)
          OR (r.planned_date = $3 AND r.reminder_3_sent_at IS NULL)

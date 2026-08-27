@@ -80,21 +80,23 @@ describe('maintenance report modal flow', () => {
       year: 2026,
       month: 8,
       monthly: {
-        total: 10,
+        total: 11,
         not_started: 4,
         in_progress: 1,
         pending_signature: 2,
         waiting_spare: 1,
+        warranty: 1,
         completed: 3,
         overdue: 1,
         completion_percent: 30
       },
       annual: {
-        total: 40,
+        total: 41,
         not_started: 30,
         in_progress: 1,
         pending_signature: 2,
         waiting_spare: 1,
+        warranty: 1,
         completed: 7,
         overdue: 4,
         completion_percent: 18
@@ -146,6 +148,19 @@ describe('maintenance report modal flow', () => {
           is_overdue: false,
           report_id: 'report-4',
           pdf_available: true
+        },
+        {
+          id: 'item-5',
+          asset_id: 'asset-5',
+          asset_code: 'EQ-005',
+          asset_name: 'Monitor en garantía',
+          planned_date: '2026-08-24',
+          deadline_date: '2026-08-31',
+          phase: 'warranty',
+          is_overdue: false,
+          warranty_release_date: '2027-02-15',
+          can_perform_protocol: true,
+          pdf_available: false
         }
       ],
       generated_at: '2026-08-26T10:00:00.000Z'
@@ -153,10 +168,12 @@ describe('maintenance report modal flow', () => {
 
     expect(component.activePreventiveProgress?.completion_percent).toBe(30);
     expect(component.preventiveProgressSegments.map((segment) => segment.count)).toEqual([
-      4, 1, 2, 3
+      4, 1, 2, 1, 3
     ]);
-    expect(component.preventivePhaseTabs.map((tab) => tab.count)).toEqual([5, 2, 1, 3]);
+    expect(component.preventivePhaseTabs.map((tab) => tab.count)).toEqual([5, 1, 2, 1, 3]);
     expect(component.filteredPreventiveItems.map((item) => item.id)).toEqual(['item-1', 'item-2']);
+    component.setPreventivePhaseView('warranty');
+    expect(component.filteredPreventiveItems.map((item) => item.id)).toEqual(['item-5']);
     component.setPreventivePhaseView('pending_signature');
     expect(component.filteredPreventiveItems.map((item) => item.id)).toEqual(['item-3']);
     component.setPreventivePhaseView('waiting_spare');
