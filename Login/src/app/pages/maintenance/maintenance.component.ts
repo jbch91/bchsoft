@@ -2980,6 +2980,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   canReopenOwnPreventiveReport(report: MaintenanceReportDto): boolean {
+    if (typeof report.can_reopen_by_me === 'boolean') {
+      return report.can_reopen_by_me;
+    }
     if (report.type !== 'preventivo' || report.is_fully_signed || report.correction_requested) {
       return false;
     }

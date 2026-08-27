@@ -350,6 +350,7 @@ import {
   canOperateAssignedMaintenanceRequest,
   isMaintenanceReportFullySigned,
   maintenanceAssetStatusObservationError,
+  maintenanceReportEngineerReopenError,
   maintenanceSpareWorkflowForReport,
   maintenanceRequestDescriptionError,
   normalizeMaintenanceRequestDescription,
@@ -11083,10 +11084,19 @@ app.get(
     const enriched = rows.map((report) => {
       const sigs = byReport.get(report.id) || [];
       const signedByMe = sigs.some((sig) => sig.user_id === req.user.sub);
+      const isFullySigned = isMaintenanceReportFullySigned(report, sigs);
+      const canReopenByMe = hasRole(req.user, 'ingeniero_biomedico')
+        && req.user.permissions?.includes('maintenance:report:create')
+        && !maintenanceReportEngineerReopenError(
+          { ...report, is_fully_signed: isFullySigned },
+          sigs,
+          req.user.sub
+        );
       return {
         ...report,
         signed_by_me: signedByMe,
-        is_fully_signed: isMaintenanceReportFullySigned(report, sigs)
+        is_fully_signed: isFullySigned,
+        can_reopen_by_me: canReopenByMe
       };
     });
     return res.json(enriched);

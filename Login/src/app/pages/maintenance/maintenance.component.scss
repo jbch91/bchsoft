@@ -2104,7 +2104,7 @@ button:disabled {
 }
 
 .compact-reports-table .row {
-  grid-template-columns: minmax(100px, 0.55fr) minmax(230px, 1.45fr) minmax(145px, 0.8fr) minmax(190px, 1fr) minmax(105px, 0.55fr);
+  grid-template-columns: minmax(100px, 0.55fr) minmax(230px, 1.45fr) minmax(145px, 0.8fr) minmax(190px, 1fr) minmax(155px, 0.72fr);
   min-height: 62px;
   padding-block: 9px;
 }
@@ -2149,9 +2149,9 @@ button:disabled {
   gap: 4px;
 }
 
-.view-report-button {
+.compact-reports-table .actions button {
   width: 100%;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .report-pagination {

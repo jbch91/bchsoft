@@ -36,6 +36,36 @@ describe('maintenance report modal flow', () => {
     expect(component.canReopenOwnPreventiveReport({ ...report, type: 'correctivo' })).toBe(false);
   });
 
+  it('usa la autorización calculada por la API para mostrar la corrección', () => {
+    const auth = {
+      hasRole: () => false,
+      hasPermission: () => false,
+      currentUser: () => ({ id: 'stale-user' })
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      auth as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { snapshot: { data: { assetCategory: 'biomedical' } } } as never
+    );
+    const report = {
+      id: 'report-1',
+      client_id: 'client-1',
+      request_id: 'request-1',
+      asset_id: 'asset-1',
+      type: 'preventivo',
+      created_by: 'engineer-1',
+      created_at: '2026-08-27T10:00:00.000Z',
+      request_status: 'reportado',
+      can_reopen_by_me: true
+    } as const;
+
+    expect(component.canReopenOwnPreventiveReport(report)).toBe(true);
+    expect(component.canReopenOwnPreventiveReport({ ...report, can_reopen_by_me: false })).toBe(false);
+  });
+
   it('abre un reporte preventivo sin cambiar la pestaña activa', () => {
     vi.useFakeTimers();
     const component = new MaintenanceComponent(

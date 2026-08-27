@@ -114,6 +114,7 @@ export interface MaintenanceReportDto {
   request_status?: string | null;
   signed_by_me?: boolean;
   is_fully_signed?: boolean;
+  can_reopen_by_me?: boolean;
   correction_requested?: boolean;
   correction_reason?: string | null;
   correction_requested_at?: string | null;
