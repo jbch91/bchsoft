@@ -5,9 +5,11 @@ import {
   isMaintenanceReportFullySigned,
   maintenanceAssetStatusObservationError,
   maintenancePreventiveItemPhase,
+  maintenancePreventiveItemWaitsForSpare,
   maintenanceSpareWorkflowForReport,
   maintenanceRequestDescriptionError,
   normalizeMaintenanceRequestDescription,
+  shouldCompletePreventiveScheduleItem,
   summarizeMaintenancePreventiveProgress
 } from './maintenance-workflow.js';
 
@@ -31,10 +33,37 @@ test('clasifica el avance operativo de cada preventivo sin mezclar estados', () 
       requires_spare_parts: true,
       spare_parts_status: 'solicitado',
       has_engineer_signature: true,
+      area_responsible_required: true
+    }),
+    'pending_signature'
+  );
+  assert.equal(
+    maintenancePreventiveItemPhase({
+      report_id: 'report-b',
+      requires_spare_parts: true,
+      spare_parts_status: 'solicitado',
+      has_engineer_signature: true,
       has_area_responsible_signature: true,
       area_responsible_required: true
     }),
-    'waiting_spare'
+    'completed'
+  );
+  assert.equal(
+    maintenancePreventiveItemWaitsForSpare({
+      request_status: 'espera_repuesto',
+      report_id: 'report-b',
+      spare_parts_status: 'solicitado'
+    }),
+    true
+  );
+  assert.equal(
+    maintenancePreventiveItemWaitsForSpare({
+      request_status: 'reportado',
+      requires_spare_parts: true,
+      spare_parts_status: 'solicitado',
+      spare_case_resolved: true
+    }),
+    false
   );
   assert.equal(
     maintenancePreventiveItemPhase({
@@ -69,6 +98,9 @@ test('resume el avance mensual y anual con vencidos como indicador transversal',
       report_id: 'report-a',
       has_engineer_signature: true,
       area_responsible_required: true,
+      request_status: 'espera_repuesto',
+      requires_spare_parts: true,
+      spare_parts_status: 'solicitado',
       is_overdue: false
     },
     {
@@ -84,7 +116,7 @@ test('resume el avance mensual y anual con vencidos como indicador transversal',
     not_started: 1,
     in_progress: 1,
     pending_signature: 1,
-    waiting_spare: 0,
+    waiting_spare: 1,
     completed: 1,
     overdue: 1,
     completion_percent: 25
@@ -174,6 +206,30 @@ test('limita la operación al ingeniero que tomó la solicitud', () => {
   assert.equal(canOperateAssignedMaintenanceRequest(request, 'ingeniero-b'), false);
   assert.equal(canOperateAssignedMaintenanceRequest({ assigned_to: null }, 'ingeniero-b'), true);
   assert.equal(canOperateAssignedMaintenanceRequest(request, 'superuser', true), true);
+});
+
+test('el preventivo cierra su ítem y la instalación posterior queda como correctivo', () => {
+  assert.equal(
+    shouldCompletePreventiveScheduleItem({
+      requestType: 'preventivo',
+      reportType: 'preventivo'
+    }),
+    true
+  );
+  assert.equal(
+    shouldCompletePreventiveScheduleItem({
+      requestType: 'preventivo',
+      reportType: 'correctivo'
+    }),
+    false
+  );
+  assert.equal(
+    shouldCompletePreventiveScheduleItem({
+      requestType: 'correctivo',
+      reportType: 'correctivo'
+    }),
+    false
+  );
 });
 
 test('exige observaciones para estados finales condicionados', () => {

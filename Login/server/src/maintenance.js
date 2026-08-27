@@ -2,6 +2,7 @@ import { query } from './db.js';
 import { normalizeAssetCategory } from './asset-category.js';
 import {
   maintenancePreventiveItemPhase,
+  maintenancePreventiveItemWaitsForSpare,
   summarizeMaintenancePreventiveProgress
 } from './maintenance-workflow.js';
 
@@ -109,6 +110,7 @@ export async function getPreventiveMaintenanceProgress(
             report.area_responsible_required,
             report.requires_spare_parts,
             report.spare_parts_status,
+            report.spare_case_resolved,
             EXISTS (
               SELECT 1
               FROM maintenance_report_corrections correction
@@ -140,6 +142,13 @@ export async function getPreventiveMaintenanceProgress(
               maintenance_report.area_responsible_required,
               maintenance_report.requires_spare_parts,
               maintenance_report.spare_parts_status,
+              EXISTS (
+                SELECT 1
+                FROM maintenance_reports resolution_report
+                WHERE resolution_report.request_id = maintenance_report.request_id
+                  AND resolution_report.type = 'correctivo'
+                  AND resolution_report.created_at >= maintenance_report.created_at
+              ) AS spare_case_resolved,
               maintenance_report.pdf_path,
               maintenance_report.created_at
        FROM maintenance_reports maintenance_report
@@ -194,6 +203,7 @@ export async function getPreventiveMaintenanceProgress(
       report_id: item.report_id,
       report_created_at: item.report_created_at,
       pdf_available: Boolean(item.report_pdf_path || item.legacy_history_file_id),
+      has_pending_spare: maintenancePreventiveItemWaitsForSpare(item),
       legacy_history_file_id: item.legacy_history_file_id,
       completion_source: item.completion_source,
       historical_resolution: item.historical_resolution,

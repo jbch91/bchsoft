@@ -350,7 +350,8 @@ import {
   maintenanceAssetStatusObservationError,
   maintenanceSpareWorkflowForReport,
   maintenanceRequestDescriptionError,
-  normalizeMaintenanceRequestDescription
+  normalizeMaintenanceRequestDescription,
+  shouldCompletePreventiveScheduleItem
 } from './maintenance-workflow.js';
 import {
   ScheduleValidationError,
@@ -10947,7 +10948,8 @@ app.post(
       approvalAsset,
       request
     );
-    const reportType = request.status === 'espera_repuesto' ? 'correctivo' : request.type;
+    const reportType = correctionReport?.type
+      || (request.status === 'espera_repuesto' ? 'correctivo' : request.type);
     const reportPayload = {
       clientId: request.client_id,
       requestId,
@@ -11027,7 +11029,10 @@ app.post(
 
     await writeMaintenanceReportPdfFile(result.id);
 
-    if (request.type === 'preventivo' && requestStatusAfter !== 'espera_repuesto') {
+    if (shouldCompletePreventiveScheduleItem({
+      requestType: request.type,
+      reportType
+    })) {
       if (request.schedule_id && request.schedule_item_id) {
         await markScheduleItemDone(request.schedule_id, request.schedule_item_id, result.id);
         await setScheduleClosedIfDone(request.schedule_id);
@@ -11058,7 +11063,7 @@ app.post(
           ? 'Mantenimiento correctivo pendiente de aval'
           : 'Reporte correctivo pendiente de firma');
       const message = requestStatusAfter === 'espera_repuesto'
-        ? `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)} y requiere ${signingPlan.areaResponsibleRequired ? 'tu aval como responsable del área' : 'firma'}. El caso queda en espera del repuesto: ${cleanSparePartsNeeded}.`
+        ? `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)} y requiere ${signingPlan.areaResponsibleRequired ? 'tu aval como responsable del área' : 'firma'} para finalizar el protocolo. El caso de repuesto continuará abierto en paralelo: ${cleanSparePartsNeeded}.`
         : `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)}. Debe recibir ${signingPlan.areaResponsibleRequired ? 'el aval del responsable del área' : 'la firma de aceptación'} para quedar validado.`;
       await createNotification({
         userId: signer.id,

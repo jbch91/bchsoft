@@ -114,7 +114,8 @@ const MIGRATIONS = [
   'cleanup_orphaned_asset_schedules.sql',
   'area_responsible_role.sql',
   'maintenance_schedule_warranty_guard.sql',
-  'maintenance_periodicity_reconciliation.sql'
+  'maintenance_periodicity_reconciliation.sql',
+  'maintenance_preventive_spare_split.sql'
 ];
 
 async function ensureMigrationsTable() {

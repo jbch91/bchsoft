@@ -348,6 +348,9 @@
               <span class="preventive-overdue" *ngIf="progress.overdue">
                 {{ progress.overdue }} vencido{{ progress.overdue === 1 ? '' : 's' }} sin finalizar
               </span>
+              <span class="preventive-spare-counter" *ngIf="progress.waiting_spare">
+                {{ progress.waiting_spare }} con repuesto pendiente
+              </span>
             </div>
 
             <div class="preventive-status-track" aria-label="Distribución por estado">
@@ -470,83 +473,106 @@
             <small *ngIf="item.assigned_name">Asignado: {{ item.assigned_name }}</small>
             <small class="preventive-overdue-note" *ngIf="item.is_overdue">Vencido sin finalizar</small>
           </span>
-          <span data-label="Estado">
-            <span class="status-pill preventive-phase-pill" [ngClass]="preventivePhaseClass(item.phase)">
-              {{ preventivePhaseLabel(item.phase) }}
+          <span data-label="Estado" class="preventive-status-cell">
+            <span
+              class="status-pill preventive-phase-pill"
+              [ngClass]="preventivePhaseView === 'waiting_spare'
+                ? 'waiting-spare'
+                : preventivePhaseClass(item.phase)"
+            >
+              {{ preventivePhaseView === 'waiting_spare'
+                ? 'Esperando repuesto'
+                : preventivePhaseLabel(item.phase) }}
             </span>
+            <small *ngIf="item.has_pending_spare && preventivePhaseView !== 'waiting_spare'">
+              Repuesto solicitado
+            </small>
           </span>
           <span class="actions preventive-phase-actions" data-label="Acción">
-            <ng-container *ngIf="item.phase === 'not_started' || item.phase === 'in_progress'">
-              <ng-container *ngIf="preventiveRequestForItem(item) as request; else preventiveNotAvailable">
-                <button
-                  *ngIf="canTakeRequest(request)"
-                  type="button"
-                  [disabled]="reportOpening"
-                  (click)="startPreventiveReport(request)"
-                >
-                  {{
-                    openingReportRequestId === request.id
-                      ? 'Abriendo...'
-                      : request.status === 'en_proceso'
-                        ? 'Continuar'
-                        : 'Realizar'
-                  }}
-                </button>
-                <ng-container *ngIf="preventiveReportForItem(item) as report">
-                  <button
-                    *ngIf="canCorrectReport(report)"
-                    type="button"
-                    (click)="startPreventiveReportCorrection(report)"
-                  >
-                    Corregir reporte
-                  </button>
-                  <button
-                    *ngIf="!canTakeRequest(request) && !canCorrectReport(report)"
-                    type="button"
-                    class="ghost"
-                    (click)="openReportDetail(report)"
-                  >
-                    Ver reporte
-                  </button>
-                </ng-container>
-                <small *ngIf="!canTakeRequest(request) && !item.report_id">
-                  {{ item.assigned_name ? 'Asignado a ' + item.assigned_name : 'Sin acción disponible' }}
-                </small>
-              </ng-container>
-              <ng-template #preventiveNotAvailable>
-                <small>{{ item.is_overdue ? 'Sin solicitud activa' : 'Aún no disponible' }}</small>
-              </ng-template>
-            </ng-container>
-
-            <ng-container *ngIf="item.phase === 'pending_signature'">
-              <ng-container *ngIf="preventiveReportForItem(item) as report">
-                <button type="button" class="ghost" (click)="openReportDetail(report)">Ver reporte</button>
-              </ng-container>
-            </ng-container>
-
-            <ng-container *ngIf="item.phase === 'waiting_spare'">
-              <ng-container *ngIf="preventiveReportForItem(item) as report">
+            <ng-container *ngIf="preventivePhaseView === 'waiting_spare'; else primaryPreventiveActions">
+              <ng-container *ngIf="preventiveReportForItem(item) as report; else spareReportUnavailable">
                 <button *ngIf="canContinueSpareCase(report)" type="button" (click)="startSpareInstallation(report)">
                   Instalar repuesto
                 </button>
-                <button type="button" class="ghost" (click)="openReportDetail(report)">Ver reporte</button>
+                <button
+                  *ngIf="canContinueSpareCase(report)"
+                  type="button"
+                  class="danger-soft"
+                  (click)="startAssetRetirement(report)"
+                >
+                  Dar de baja
+                </button>
+                <button type="button" class="ghost" (click)="openReportDetail(report)">Ver preventivo</button>
               </ng-container>
+              <ng-template #spareReportUnavailable>
+                <small>Reporte preventivo no disponible</small>
+              </ng-template>
             </ng-container>
 
-            <button
-              *ngIf="item.phase === 'completed'"
-              type="button"
-              [disabled]="!item.pdf_available || preventivePdfLoadingId === item.id"
-              (click)="openPreventiveFinalPdf(item)"
-            >
-              {{
-                preventivePdfLoadingId === item.id
-                  ? 'Abriendo...'
-                  : item.pdf_available
-                    ? 'Abrir PDF'
-                    : 'PDF no disponible'
-              }}
-            </button>
+            <ng-template #primaryPreventiveActions>
+              <ng-container *ngIf="item.phase === 'not_started' || item.phase === 'in_progress'">
+                <ng-container *ngIf="preventiveRequestForItem(item) as request; else preventiveNotAvailable">
+                  <button
+                    *ngIf="canTakeRequest(request)"
+                    type="button"
+                    [disabled]="reportOpening"
+                    (click)="startPreventiveReport(request)"
+                  >
+                    {{
+                      openingReportRequestId === request.id
+                        ? 'Abriendo...'
+                        : request.status === 'en_proceso'
+                          ? 'Continuar'
+                          : 'Realizar'
+                    }}
+                  </button>
+                  <ng-container *ngIf="preventiveReportForItem(item) as report">
+                    <button
+                      *ngIf="canCorrectReport(report)"
+                      type="button"
+                      (click)="startPreventiveReportCorrection(report)"
+                    >
+                      Corregir reporte
+                    </button>
+                    <button
+                      *ngIf="!canTakeRequest(request) && !canCorrectReport(report)"
+                      type="button"
+                      class="ghost"
+                      (click)="openReportDetail(report)"
+                    >
+                      Ver reporte
+                    </button>
+                  </ng-container>
+                  <small *ngIf="!canTakeRequest(request) && !item.report_id">
+                    {{ item.assigned_name ? 'Asignado a ' + item.assigned_name : 'Sin acción disponible' }}
+                  </small>
+                </ng-container>
+                <ng-template #preventiveNotAvailable>
+                  <small>{{ item.is_overdue ? 'Sin solicitud activa' : 'Aún no disponible' }}</small>
+                </ng-template>
+              </ng-container>
+
+              <ng-container *ngIf="item.phase === 'pending_signature'">
+                <ng-container *ngIf="preventiveReportForItem(item) as report">
+                  <button type="button" class="ghost" (click)="openReportDetail(report)">Ver reporte</button>
+                </ng-container>
+              </ng-container>
+
+              <button
+                *ngIf="item.phase === 'completed'"
+                type="button"
+                [disabled]="!item.pdf_available || preventivePdfLoadingId === item.id"
+                (click)="openPreventiveFinalPdf(item)"
+              >
+                {{
+                  preventivePdfLoadingId === item.id
+                    ? 'Abriendo...'
+                    : item.pdf_available
+                      ? 'Abrir PDF'
+                      : 'PDF no disponible'
+                }}
+              </button>
+            </ng-template>
           </span>
         </div>
       </div>
@@ -1084,7 +1110,8 @@
                   <span>Estado al guardar</span>
                   <strong>{{ reportSpareStateLabel() }}</strong>
                   <small *ngIf="reportSpareStateLabel() === 'Repuesto solicitado'">
-                    El equipo quedará en Pendientes repuestos y se notificará al almacenista.
+                    El preventivo continuará a aval o firma y, en paralelo, el equipo quedará en
+                    Pendientes repuestos. Se notificará al almacenista.
                   </small>
                   <small
                     *ngIf="reportSpareStateLabel() === 'Repuesto instalado'
@@ -1097,7 +1124,8 @@
                     *ngIf="reportSpareStateLabel() === 'Repuesto instalado'
                       && (reportFlowMode !== 'normal' || reportCorrectionMode)"
                   >
-                    Esta intervención cerrará la espera del repuesto y continuará con el flujo de firma.
+                    Esta intervención cerrará la espera del repuesto y generará un reporte correctivo
+                    independiente para aval o firma.
                   </small>
                 </div>
               </div>
@@ -1444,7 +1472,7 @@
       <div class="list-title">
         <div>
           <h2>Equipos pendientes por repuesto</h2>
-          <p>Vista rápida para seguimiento de equipos que no quedan plenamente operativos.</p>
+          <p>El preventivo conserva su cierre documental; la instalación se registra en un correctivo independiente.</p>
         </div>
       </div>
 

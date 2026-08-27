@@ -65,6 +65,7 @@ export interface PreventiveProgressItemDto {
   report_id?: string | null;
   report_created_at?: string | null;
   pdf_available: boolean;
+  has_pending_spare?: boolean;
   legacy_history_file_id?: string | null;
   completion_source?: string | null;
 }

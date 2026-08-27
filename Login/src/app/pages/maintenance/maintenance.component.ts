@@ -1093,7 +1093,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         const message = installedSpareDuringService
           ? `Reporte preventivo guardado${savedAssetLabel ? ` para ${savedAssetLabel}` : ''} con el repuesto instalado. Puedes continuar con el siguiente equipo.`
           : hadPendingSparePartRequest
-          ? `Reporte preventivo guardado${savedAssetLabel ? ` para ${savedAssetLabel}` : ''}. El equipo quedó en Pendientes repuestos y se notificó al almacenista. Puedes continuar con el siguiente preventivo.`
+          ? `Reporte preventivo guardado${savedAssetLabel ? ` para ${savedAssetLabel}` : ''}. Quedó pendiente de aval o firma y, en paralelo, en Pendientes repuestos. Se notificó al almacenista.`
           : `Reporte preventivo guardado${savedAssetLabel ? ` para ${savedAssetLabel}` : ''}. Puedes continuar con el siguiente equipo.`;
         this.showAlert(
           message,
@@ -1105,7 +1105,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       const message = wasCorrection
         ? 'Corrección guardada. El reporte volvió a quedar pendiente de firma.'
         : flowMode === 'install_spare'
-        ? 'Reporte de instalación de repuesto creado. El caso salió de pendientes de repuesto.'
+        ? 'Reporte correctivo de instalación creado. El caso salió de pendientes de repuesto y quedó en flujo de firma.'
         : flowMode === 'retire_asset'
           ? 'Reporte de baja técnica creado. El caso salió de pendientes de repuesto.'
           : installedSpareDuringService
@@ -1592,12 +1592,6 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         percent: percent(progress.pending_signature)
       },
       {
-        key: 'waiting-spare',
-        label: 'Esperando repuesto',
-        count: progress.waiting_spare,
-        percent: percent(progress.waiting_spare)
-      },
-      {
         key: 'completed',
         label: 'Finalizados',
         count: progress.completed,
@@ -2003,6 +1997,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   private preventiveItemMatchesActivePhase(item: PreventiveProgressItemDto): boolean {
     if (this.preventivePhaseView === 'work') {
       return item.phase === 'not_started' || item.phase === 'in_progress';
+    }
+    if (this.preventivePhaseView === 'waiting_spare') {
+      return Boolean(item.has_pending_spare);
     }
     return item.phase === this.preventivePhaseView;
   }
@@ -2563,7 +2560,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportMaintenanceTests = ['encendido_apagado', 'prueba_modos_operacion', 'equipo_operativo_entregado'];
     this.reportFlowMode = 'install_spare';
     this.reportFlowSource = report;
-    this.successMessage = 'Cargué la falla anterior. Completa el estado final y guarda el reporte de instalación.';
+    this.successMessage = 'Cargué el antecedente preventivo. Completa el estado final para generar el reporte correctivo de instalación.';
     this.scrollToReportForm();
   }
 

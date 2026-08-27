@@ -85,9 +85,9 @@ describe('maintenance report modal flow', () => {
         in_progress: 1,
         pending_signature: 2,
         waiting_spare: 1,
-        completed: 2,
+        completed: 3,
         overdue: 1,
-        completion_percent: 20
+        completion_percent: 30
       },
       annual: {
         total: 40,
@@ -95,9 +95,9 @@ describe('maintenance report modal flow', () => {
         in_progress: 1,
         pending_signature: 2,
         waiting_spare: 1,
-        completed: 6,
+        completed: 7,
         overdue: 4,
-        completion_percent: 15
+        completion_percent: 18
       },
       items: [
         {
@@ -132,6 +132,7 @@ describe('maintenance report modal flow', () => {
           phase: 'pending_signature',
           is_overdue: false,
           report_id: 'report-3',
+          has_pending_spare: true,
           pdf_available: true
         },
         {
@@ -150,18 +151,20 @@ describe('maintenance report modal flow', () => {
       generated_at: '2026-08-26T10:00:00.000Z'
     };
 
-    expect(component.activePreventiveProgress?.completion_percent).toBe(20);
+    expect(component.activePreventiveProgress?.completion_percent).toBe(30);
     expect(component.preventiveProgressSegments.map((segment) => segment.count)).toEqual([
-      4, 1, 2, 1, 2
+      4, 1, 2, 3
     ]);
-    expect(component.preventivePhaseTabs.map((tab) => tab.count)).toEqual([5, 2, 1, 2]);
+    expect(component.preventivePhaseTabs.map((tab) => tab.count)).toEqual([5, 2, 1, 3]);
     expect(component.filteredPreventiveItems.map((item) => item.id)).toEqual(['item-1', 'item-2']);
     component.setPreventivePhaseView('pending_signature');
+    expect(component.filteredPreventiveItems.map((item) => item.id)).toEqual(['item-3']);
+    component.setPreventivePhaseView('waiting_spare');
     expect(component.filteredPreventiveItems.map((item) => item.id)).toEqual(['item-3']);
     component.setPreventivePhaseView('completed');
     expect(component.filteredPreventiveItems[0]?.pdf_available).toBe(true);
     component.preventiveProgressScope = 'year';
-    expect(component.activePreventiveProgress?.completion_percent).toBe(15);
+    expect(component.activePreventiveProgress?.completion_percent).toBe(18);
     expect(component.preventiveProgressPeriodLabel).toBe('Vigencia 2026');
   });
 

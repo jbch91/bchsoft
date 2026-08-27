@@ -10,6 +10,16 @@ export const MAINTENANCE_REQUEST_REPORTABLE_STATUSES = Object.freeze([
   'correccion'
 ]);
 
+export function maintenancePreventiveItemWaitsForSpare(item = {}) {
+  return Boolean(
+    !item.spare_case_resolved
+    && (
+      item.request_status === 'espera_repuesto'
+      || (item.requires_spare_parts && item.spare_parts_status !== 'recibido')
+    )
+  );
+}
+
 export function maintenancePreventiveItemPhase(item = {}) {
   if (
     item.legacy_history_file_id
@@ -18,18 +28,13 @@ export function maintenancePreventiveItemPhase(item = {}) {
     return 'completed';
   }
 
-  const waitsForSpare = Boolean(
-    item.request_status === 'espera_repuesto'
-    || (item.requires_spare_parts && item.spare_parts_status !== 'recibido')
-  );
-  if (waitsForSpare) {
-    return 'waiting_spare';
-  }
-
   const hasEngineerSignature = Boolean(item.has_engineer_signature);
   const hasAcceptanceSignature = item.area_responsible_required
     ? Boolean(item.has_area_responsible_signature)
     : Boolean(item.has_acceptance_signature);
+  if (item.correction_requested || item.request_status === 'correccion') {
+    return 'in_progress';
+  }
   if (
     item.request_status === 'firmado'
     || (hasEngineerSignature && hasAcceptanceSignature)
@@ -37,13 +42,10 @@ export function maintenancePreventiveItemPhase(item = {}) {
     return 'completed';
   }
 
-  if (item.correction_requested || item.request_status === 'correccion') {
-    return 'in_progress';
-  }
   if (item.report_id) {
     return 'pending_signature';
   }
-  if (item.request_status === 'en_proceso') {
+  if (item.request_status === 'en_proceso' || item.request_status === 'espera_repuesto') {
     return 'in_progress';
   }
   return 'not_started';
@@ -77,6 +79,9 @@ function summarizePreventiveItems(items) {
     const phase = maintenancePreventiveItemPhase(item);
     summary.total += 1;
     summary[phase] += 1;
+    if (maintenancePreventiveItemWaitsForSpare(item)) {
+      summary.waiting_spare += 1;
+    }
     if (item.is_overdue && phase !== 'completed') {
       summary.overdue += 1;
     }
@@ -168,6 +173,10 @@ export function maintenanceAssetStatusObservationError(status, observation) {
 export function canOperateAssignedMaintenanceRequest(request, userId, isPlatformSuperuser = false) {
   if (isPlatformSuperuser) return true;
   return !request?.assigned_to || request.assigned_to === userId;
+}
+
+export function shouldCompletePreventiveScheduleItem({ requestType, reportType } = {}) {
+  return requestType === 'preventivo' && reportType === 'preventivo';
 }
 
 export function maintenanceSpareWorkflowForReport({
