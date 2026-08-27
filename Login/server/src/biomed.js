@@ -1008,7 +1008,7 @@ export async function listPendingHistoricalMaintenanceEvidence(
   const { rows } = await query(
     `WITH occurrences AS (
        SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date,
-              i.deadline_date, i.status, i.completion_source,
+              i.deadline_date, i.status, i.report_id, i.completion_source,
               i.legacy_history_file_id, i.historical_resolution,
               s.year, s.status AS schedule_status,
               a.code, a.name, a.brand, a.model, a.serial,
@@ -1068,9 +1068,15 @@ export async function listPendingHistoricalMaintenanceEvidence(
          created_at DESC
        LIMIT 1
      ) request ON TRUE
-     WHERE occurrence.historical_resolution = 'pending_evidence'
-       AND occurrence.legacy_history_file_id IS NULL
+     WHERE occurrence.deadline_date < (CURRENT_TIMESTAMP AT TIME ZONE 'America/Bogota')::date
        AND occurrence.status IN ('pending', 'active', 'expired')
+       AND occurrence.report_id IS NULL
+       AND occurrence.completion_source IS NULL
+       AND occurrence.legacy_history_file_id IS NULL
+       AND (
+         occurrence.historical_resolution IS NULL
+         OR occurrence.historical_resolution = 'pending_evidence'
+       )
      ORDER BY occurrence.planned_date ASC, occurrence.area_name ASC,
               occurrence.location_name ASC, occurrence.code ASC`,
     [clientId, year, category, readerUserId || null]
