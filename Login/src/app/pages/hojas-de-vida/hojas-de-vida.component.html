@@ -414,6 +414,36 @@
         <div class="form-section" *ngIf="showSection(2)">
           <h3>{{ isIndustrialAssetModule ? 'DATOS DE MANTENIMIENTO' : 'DATOS DE MANTENIMIENTO Y CALIBRACION' }}</h3>
           <div class="section-grid">
+            <div class="schedule-enrollment-control" *ngIf="assetModalMode === 'create'">
+              <span>Ingreso al cronograma de mantenimiento</span>
+              <div class="schedule-enrollment-options" role="group" aria-label="Ingreso al cronograma">
+                <button
+                  type="button"
+                  [class.active]="scheduleEnrollmentMode === 'new'"
+                  [attr.aria-pressed]="scheduleEnrollmentMode === 'new'"
+                  (click)="scheduleEnrollmentMode = 'new'"
+                >
+                  Equipo nuevo
+                </button>
+                <button
+                  type="button"
+                  [class.active]="scheduleEnrollmentMode === 'existing_omitted'"
+                  [attr.aria-pressed]="scheduleEnrollmentMode === 'existing_omitted'"
+                  (click)="scheduleEnrollmentMode = 'existing_omitted'"
+                >
+                  Equipo existente omitido
+                </button>
+              </div>
+              <small *ngIf="scheduleEnrollmentMode === 'new'; else omittedEquipmentNotice">
+                Se programará desde la ventana vigente o desde el final de la garantía.
+              </small>
+              <ng-template #omittedEquipmentNotice>
+                <small>
+                  Se reconstruirá la vigencia actual: periodos anteriores para PDF, ventana vigente
+                  para realizar y fechas futuras pendientes.
+                </small>
+              </ng-template>
+            </div>
             <label>
               Frecuencia de mantenimiento
               <select [(ngModel)]="maintenanceFrequency" name="maintenanceFrequency">
@@ -547,6 +577,10 @@
             <div>
               <h4>Mantenimiento</h4>
               <p><strong>Frecuencia:</strong> {{ maintenanceFrequency || '-' }}</p>
+              <p *ngIf="assetModalMode === 'create'">
+                <strong>Ingreso al cronograma:</strong>
+                {{ scheduleEnrollmentMode === 'existing_omitted' ? 'Equipo existente omitido' : 'Equipo nuevo' }}
+              </p>
               <ng-container *ngIf="!isIndustrialAssetModule">
                 <p><strong>Requiere calibración:</strong> {{ requiresCalibration ? 'Sí' : 'No' }}</p>
                 <p *ngIf="requiresCalibration"><strong>Frecuencia calibración:</strong> {{ calibrationFrequency || '-' }}</p>

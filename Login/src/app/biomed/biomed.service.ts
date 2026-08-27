@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 import { getApiBase } from '../core/api-base';
 
 export type AssetCategory = 'biomedical' | 'industrial';
+export type AssetScheduleEnrollmentMode = 'new' | 'existing_omitted';
 
 interface AssetDto {
   id: string;
@@ -402,6 +403,7 @@ export class BiomedService {
     humidityMin?: number;
     humidityMax?: number;
     maintenanceFrequency?: string;
+    scheduleEnrollmentMode?: AssetScheduleEnrollmentMode;
     requiresCalibration?: boolean;
     calibrationFrequency?: string;
     assetCategory?: AssetCategory;
@@ -450,6 +452,9 @@ export class BiomedService {
     if (payload.humidityMin !== undefined) form.append('humidityMin', String(payload.humidityMin));
     if (payload.humidityMax !== undefined) form.append('humidityMax', String(payload.humidityMax));
     if (payload.maintenanceFrequency) form.append('maintenanceFrequency', payload.maintenanceFrequency);
+    if (payload.scheduleEnrollmentMode) {
+      form.append('scheduleEnrollmentMode', payload.scheduleEnrollmentMode);
+    }
     if (payload.requiresCalibration !== undefined) form.append('requiresCalibration', String(payload.requiresCalibration));
     if (payload.calibrationFrequency) form.append('calibrationFrequency', payload.calibrationFrequency);
     if (payload.assetCategory) form.append('assetCategory', payload.assetCategory);

@@ -16,7 +16,9 @@ import {
   changedMaintenanceItemUpdates,
   endOfMonthUtc,
   formatDateOnly,
+  maintenanceScheduleOccurrenceState,
   normalizeCalibrationItemUpdates,
+  normalizeAssetScheduleEnrollmentMode,
   normalizeAssetScheduleProgrammingSelection,
   normalizePeriodicityChangeMode,
   normalizeMaintenanceItemUpdates,
@@ -60,6 +62,15 @@ test('calcula el fin de garantía y exige una fecha de adquisición verificable'
   assert.throws(
     () => assetWarrantyReleaseDate({ acquisitionDate: null, warrantyYears: 1 }),
     /fecha de adquisición es obligatoria/
+  );
+});
+
+test('distingue el ingreso de un equipo nuevo de uno existente omitido', () => {
+  assert.equal(normalizeAssetScheduleEnrollmentMode(undefined), 'new');
+  assert.equal(normalizeAssetScheduleEnrollmentMode('existing_omitted'), 'existing_omitted');
+  assert.throws(
+    () => normalizeAssetScheduleEnrollmentMode('historical'),
+    /tipo de incorporación/
   );
 });
 
@@ -140,6 +151,56 @@ test('activa la ventana mensual vigente aunque la fecha del área ya haya pasado
     { plannedDate: '2026-08-26', deadlineDate: '2026-08-31' },
     { plannedDate: '2026-09-10', deadlineDate: '2026-09-30' }
   ]);
+});
+
+test('reconstruye la vigencia de un equipo existente omitido', () => {
+  const today = '2026-08-26';
+  const occurrences = buildOperationalMaintenanceOccurrences({
+    year: 2026,
+    startDate: '2026-01-12',
+    frequency: 'mensual',
+    availableFrom: '2026-01-01',
+    referenceItems: Array.from({ length: 12 }, (_, index) => ({
+      planned_date: `2026-${String(index + 1).padStart(2, '0')}-12`,
+      location_id: 'location-a'
+    })),
+    locationId: 'location-a'
+  });
+
+  const historical = occurrences.filter((item) => item.deadlineDate < today);
+  const current = occurrences.filter(
+    (item) => item.plannedDate <= today && item.deadlineDate >= today
+  );
+  const future = occurrences.filter((item) => item.plannedDate > today);
+
+  assert.equal(occurrences.length, 12);
+  assert.equal(historical.length, 7);
+  assert.deepEqual(current, [{ plannedDate: '2026-08-12', deadlineDate: '2026-08-31' }]);
+  assert.equal(future.length, 4);
+  assert.deepEqual(
+    maintenanceScheduleOccurrenceState(historical[0], {
+      today,
+      scheduleStatus: 'approved',
+      historicalBackfill: true
+    }),
+    { status: 'expired', historicalResolution: 'pending_evidence' }
+  );
+  assert.deepEqual(
+    maintenanceScheduleOccurrenceState(current[0], {
+      today,
+      scheduleStatus: 'approved',
+      historicalBackfill: true
+    }),
+    { status: 'active', historicalResolution: null }
+  );
+  assert.deepEqual(
+    maintenanceScheduleOccurrenceState(future[0], {
+      today,
+      scheduleStatus: 'approved',
+      historicalBackfill: true
+    }),
+    { status: 'pending', historicalResolution: null }
+  );
 });
 
 test('omite mantenimientos anteriores al vencimiento de la garantía', () => {

@@ -367,6 +367,7 @@ import {
   formatDateOnly as formatScheduleDate,
   frequencyToMonths as scheduleFrequencyToMonths,
   normalizeCalibrationItemUpdates,
+  normalizeAssetScheduleEnrollmentMode,
   normalizeAssetScheduleProgrammingSelection,
   normalizeDateOnly,
   normalizeMaintenanceItemUpdates,
@@ -8525,6 +8526,7 @@ app.post(
       humidityMin,
       humidityMax,
       maintenanceFrequency,
+      scheduleEnrollmentMode,
       requiresCalibration,
       calibrationFrequency,
       assetCategory,
@@ -8537,6 +8539,9 @@ app.post(
     }
 
     try {
+      const normalizedScheduleEnrollmentMode = normalizeAssetScheduleEnrollmentMode(
+        scheduleEnrollmentMode
+      );
       const hvEngineerUserId = await resolveHvEngineerUserId(req);
       const result = await createAsset(clientId, {
         code,
@@ -8628,7 +8633,8 @@ app.post(
         schema: (await getClientById(clientId))?.schema_name,
         assetIds: [result.id],
         today: todayInBogota(),
-        actorUserId: req.user.sub
+        actorUserId: req.user.sub,
+        enrollmentMode: normalizedScheduleEnrollmentMode
       });
       const scheduleSync = scheduleSyncResult.assets[0] || null;
       await logEquipmentAudit(req, {
@@ -8644,6 +8650,7 @@ app.post(
             manualOperacion: Boolean(req.files?.manualOperacion?.[0]),
             manualServicio: Boolean(req.files?.manualServicio?.[0])
           },
+          scheduleEnrollmentMode: normalizedScheduleEnrollmentMode,
           scheduleSync
         }
       });

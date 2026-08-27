@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import {
   AssetHistoryItemDto,
   type AssetCategory,
+  type AssetScheduleEnrollmentMode,
   BiomedService,
   CatalogReviewDto,
   EquipmentCatalogItemDto,
@@ -288,6 +289,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   humidityMin: number | null = null;
   humidityMax: number | null = null;
   maintenanceFrequency = 'mensual';
+  scheduleEnrollmentMode: AssetScheduleEnrollmentMode = 'new';
   requiresCalibration = false;
   calibrationFrequency = 'anual';
   siteId = '';
@@ -1704,7 +1706,11 @@ export class HojasDeVidaComponent implements OnDestroy {
       this.locationId = '';
       return;
     }
-    const rows = await this.biomed.listLocations(this.selectedClientId, this.areaId || undefined);
+    const requestedAreaId = this.areaId;
+    const rows = await this.biomed.listLocations(this.selectedClientId, requestedAreaId);
+    if (this.areaId !== requestedAreaId) {
+      return;
+    }
     this.locations = rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -1715,6 +1721,7 @@ export class HojasDeVidaComponent implements OnDestroy {
     if (!this.locations.find((loc) => loc.id === this.locationId)) {
       this.locationId = this.locations[0]?.id ?? '';
     }
+    this.cdr.detectChanges();
   }
 
   areasForSelectedSite(): AreaOption[] {
@@ -2055,6 +2062,7 @@ export class HojasDeVidaComponent implements OnDestroy {
           humidityMin: this.humidityMin ?? undefined,
           humidityMax: this.humidityMax ?? undefined,
           maintenanceFrequency: this.maintenanceFrequency,
+          scheduleEnrollmentMode: this.scheduleEnrollmentMode,
           requiresCalibration: !this.isIndustrialAssetModule && this.requiresCalibration,
           calibrationFrequency: !this.isIndustrialAssetModule && this.requiresCalibration
             ? this.calibrationFrequency
@@ -2080,6 +2088,12 @@ export class HojasDeVidaComponent implements OnDestroy {
           manualOperacion: this.manualOperacion,
           manualServicio: this.manualServicio
         });
+        const evidence = result.scheduleSync?.historicalEvidenceRequired ?? [];
+        if (result.id && evidence.length) {
+          historicalFollowUpAssetId = result.id;
+          historicalFollowUpDates = evidence.map((item) => item.plannedDate);
+          historicalFollowUpCount = evidence.length;
+        }
         this.successMessage = `Hoja de vida creada.${this.catalogReviewNotice(result.catalogReview)}${this.scheduleSyncNotice(result.scheduleSync)}`;
       }
 
@@ -2155,6 +2169,7 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.humidityMin = null;
     this.humidityMax = null;
     this.maintenanceFrequency = 'mensual';
+    this.scheduleEnrollmentMode = 'new';
     this.originalMaintenanceFrequency = '';
     this.scheduleProgrammingPreview = null;
     this.scheduleProgrammingError = '';

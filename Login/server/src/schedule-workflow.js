@@ -15,6 +15,11 @@ export const PERIODICITY_CHANGE_MODES = Object.freeze([
   'operational'
 ]);
 
+export const ASSET_SCHEDULE_ENROLLMENT_MODES = Object.freeze([
+  'new',
+  'existing_omitted'
+]);
+
 export const HISTORICAL_MAINTENANCE_RESOLUTIONS = Object.freeze([
   'pending_evidence',
   'not_performed'
@@ -35,6 +40,17 @@ export function normalizePeriodicityChangeMode(value, fallback = 'correction') {
     throw new ScheduleValidationError(
       'El modo de actualización de la periodicidad no es válido.',
       'INVALID_PERIODICITY_CHANGE_MODE'
+    );
+  }
+  return mode;
+}
+
+export function normalizeAssetScheduleEnrollmentMode(value, fallback = 'new') {
+  const mode = String(value || fallback).trim().toLowerCase();
+  if (!ASSET_SCHEDULE_ENROLLMENT_MODES.includes(mode)) {
+    throw new ScheduleValidationError(
+      'El tipo de incorporación del equipo al cronograma no es válido.',
+      'INVALID_ASSET_SCHEDULE_ENROLLMENT_MODE'
     );
   }
   return mode;
@@ -99,6 +115,31 @@ export function dateOnlyFromDatabase(value, label = 'La fecha') {
     return normalizeDateOnly(value.slice(0, 10), label);
   }
   throw new ScheduleValidationError(`${label} no es válida.`);
+}
+
+export function maintenanceScheduleOccurrenceState(
+  item,
+  { today, scheduleStatus, historicalBackfill = false }
+) {
+  const plannedDate = normalizeDateOnly(
+    item?.plannedDate ?? item?.planned_date,
+    'La fecha programada'
+  );
+  const deadlineDate = normalizeDateOnly(
+    item?.deadlineDate ?? item?.deadline_date,
+    'La fecha límite'
+  );
+  const normalizedToday = normalizeDateOnly(today, 'La fecha actual');
+  const status = deadlineDate < normalizedToday
+    ? 'expired'
+    : scheduleStatus === 'approved' && plannedDate <= normalizedToday
+      ? 'active'
+      : 'pending';
+  return {
+    status,
+    historicalResolution:
+      historicalBackfill && status === 'expired' ? 'pending_evidence' : null
+  };
 }
 
 export function parseDateOnly(value, label = 'La fecha') {

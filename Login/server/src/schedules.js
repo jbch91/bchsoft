@@ -6,7 +6,9 @@ import {
   canCorrectAssetScheduleItems,
   dateOnlyFromDatabase,
   maintenanceScheduleItemHasOperationalEvidence,
+  maintenanceScheduleOccurrenceState,
   nextBusinessDateInWindow,
+  normalizeAssetScheduleEnrollmentMode,
   normalizeAssetScheduleProgrammingSelection,
   normalizeDateOnly,
   normalizePeriodicityChangeMode,
@@ -89,12 +91,6 @@ function maintenanceOccurrencePhase(item, today) {
   if (item.deadlineDate < today) return 'historical';
   if (item.plannedDate <= today) return 'current';
   return 'future';
-}
-
-function maintenanceItemStatus(item, today, scheduleStatus) {
-  if (item.deadlineDate < today) return 'expired';
-  if (scheduleStatus === 'approved' && item.plannedDate <= today) return 'active';
-  return 'pending';
 }
 
 async function removeReplaceableScheduleItems(client, scheduleId, itemIds) {
@@ -484,7 +480,10 @@ export async function applyAssetScheduleProgramming({
       if (selectedItems.length) {
         const programmingConfirmed = plan.status === 'approved';
         const itemStatuses = selectedItems.map((item) =>
-          maintenanceItemStatus(item, normalizedToday, plan.status)
+          maintenanceScheduleOccurrenceState(item, {
+            today: normalizedToday,
+            scheduleStatus: plan.status
+          }).status
         );
         const inserted = await client.query(
           `INSERT INTO maintenance_schedule_items
@@ -707,7 +706,8 @@ export async function syncAssetsIntoMaintenanceSchedules({
   today,
   actorUserId = null,
   replaceFuturePending = false,
-  replaceOpenCurrent = false
+  replaceOpenCurrent = false,
+  enrollmentMode = 'new'
 }) {
   const ids = Array.from(new Set((assetIds || []).map((value) => String(value || '').trim()).filter(Boolean)));
   if (!ids.length) {
@@ -715,6 +715,8 @@ export async function syncAssetsIntoMaintenanceSchedules({
   }
   const normalizedToday = normalizeDateOnly(today, 'La fecha actual');
   const currentYear = Number(normalizedToday.slice(0, 4));
+  const normalizedEnrollmentMode = normalizeAssetScheduleEnrollmentMode(enrollmentMode);
+  const reconstructCurrentYear = normalizedEnrollmentMode === 'existing_omitted';
 
   return withTransaction(async (client) => {
     const tenantResult = await client.query(
@@ -765,6 +767,7 @@ export async function syncAssetsIntoMaintenanceSchedules({
     let totalRequestsRemoved = 0;
     let totalActiveAdded = 0;
     let totalRequestsCreated = 0;
+    const historicalEvidenceRequired = [];
     const updatedScheduleIds = new Set();
 
     for (const schedule of scheduleResult.rows) {
@@ -866,7 +869,14 @@ export async function syncAssetsIntoMaintenanceSchedules({
       for (const asset of scheduleAssets) {
         const detail = detailsByAsset.get(asset.id);
         const availableFrom = maximumDate(
-          schedule.year === currentYear ? normalizedToday : scheduleYearStart,
+          reconstructCurrentYear && schedule.year === currentYear
+            ? scheduleYearStart
+            : schedule.year === currentYear
+              ? normalizedToday
+              : scheduleYearStart,
+          reconstructCurrentYear && asset.acquisition_date
+            ? dateOnlyFromDatabase(asset.acquisition_date, 'La fecha de adquisición')
+            : null,
           detail.warrantyReleaseDate
         );
         const assetReferences = asset.area_id
@@ -893,11 +903,17 @@ export async function syncAssetsIntoMaintenanceSchedules({
         for (const occurrence of desired) {
           if (occupiedMonths.has(occurrence.plannedDate.slice(0, 7))) continue;
           occupiedMonths.add(occurrence.plannedDate.slice(0, 7));
+          const occurrenceState = maintenanceScheduleOccurrenceState(occurrence, {
+            today: normalizedToday,
+            scheduleStatus: schedule.status,
+            historicalBackfill: reconstructCurrentYear
+          });
           additions.push({
             assetId: asset.id,
             frequency: asset.maintenance_frequency,
             ...occurrence,
-            status: maintenanceItemStatus(occurrence, normalizedToday, schedule.status)
+            status: occurrenceState.status,
+            historicalResolution: occurrenceState.historicalResolution
           });
           detail.itemsAdded += 1;
           changedAssetIds.add(asset.id);
@@ -913,14 +929,15 @@ export async function syncAssetsIntoMaintenanceSchedules({
         const inserted = await client.query(
           `INSERT INTO maintenance_schedule_items
              (schedule_id, asset_id, frequency, planned_date, deadline_date, status,
-              programming_confirmed, programmed_at, programmed_by)
+              historical_resolution, programming_confirmed, programmed_at, programmed_by)
            SELECT $1, data.asset_id, data.frequency, data.planned_date, data.deadline_date,
-                  data.item_status, $7,
-                  CASE WHEN $7 THEN NOW() ELSE NULL END,
-                  CASE WHEN $7 THEN $8::uuid ELSE NULL END
-           FROM UNNEST($2::uuid[], $3::text[], $4::date[], $5::date[], $6::text[])
-             AS data(asset_id, frequency, planned_date, deadline_date, item_status)
-           RETURNING id, asset_id, planned_date, deadline_date, status`,
+                  data.item_status, data.historical_resolution, $8,
+                  CASE WHEN $8 THEN NOW() ELSE NULL END,
+                  CASE WHEN $8 THEN $9::uuid ELSE NULL END
+           FROM UNNEST($2::uuid[], $3::text[], $4::date[], $5::date[], $6::text[], $7::text[])
+             AS data(asset_id, frequency, planned_date, deadline_date, item_status,
+                     historical_resolution)
+           RETURNING id, asset_id, planned_date, deadline_date, status, historical_resolution`,
           [
             schedule.id,
             additions.map((item) => item.assetId),
@@ -928,12 +945,28 @@ export async function syncAssetsIntoMaintenanceSchedules({
             additions.map((item) => item.plannedDate),
             additions.map((item) => item.deadlineDate),
             additions.map((item) => item.status),
+            additions.map((item) => item.historicalResolution),
             programmingConfirmed,
             actorUserId || schedule.created_by
           ]
         );
         totalAdded += inserted.rows.length;
         for (const item of inserted.rows) {
+          if (
+            item.status === 'expired'
+            && item.historical_resolution === 'pending_evidence'
+          ) {
+            const evidence = {
+              scheduleId: schedule.id,
+              scheduleItemId: item.id,
+              scheduleYear: schedule.year,
+              plannedDate: dateOnlyFromDatabase(item.planned_date),
+              deadlineDate: dateOnlyFromDatabase(item.deadline_date)
+            };
+            historicalEvidenceRequired.push(evidence);
+            const detail = detailsByAsset.get(item.asset_id);
+            if (detail) detail.historicalEvidenceRequired.push(evidence);
+          }
           if (item.status !== 'active') continue;
           totalActiveAdded += 1;
           const detail = detailsByAsset.get(item.asset_id);
@@ -993,7 +1026,8 @@ export async function syncAssetsIntoMaintenanceSchedules({
       requestsRemoved: totalRequestsRemoved,
       activeItemsAdded: totalActiveAdded,
       requestsCreated: totalRequestsCreated,
-      historicalEvidenceRequired: [],
+      historicalEvidenceRequired,
+      enrollmentMode: normalizedEnrollmentMode,
       assets: details
     };
   });

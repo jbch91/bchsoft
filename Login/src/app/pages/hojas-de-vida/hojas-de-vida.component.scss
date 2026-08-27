@@ -1084,6 +1084,57 @@ form {
   grid-column: span 2;
 }
 
+.schedule-enrollment-control {
+  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--brand-200) 72%, var(--border));
+  border-radius: 8px;
+  display: grid;
+  gap: 9px;
+  grid-column: 1 / -1;
+  padding: 12px;
+}
+
+.schedule-enrollment-control > span {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.schedule-enrollment-control > small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.schedule-enrollment-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 560px;
+}
+
+.schedule-enrollment-options button {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--muted);
+  min-height: 38px;
+  padding: 8px 12px;
+}
+
+.schedule-enrollment-options button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.schedule-enrollment-options button:last-child {
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+}
+
+.schedule-enrollment-options button.active {
+  background: var(--brand-700);
+  border-color: var(--brand-700);
+  color: #ffffff;
+}
+
 .risk-classification-grid {
   border-block: 1px solid color-mix(in srgb, var(--border) 82%, var(--brand-600));
   display: grid;
