@@ -357,6 +357,7 @@
         <div><strong>{{ maintenanceSummary.active }}</strong><span>Activos</span></div>
         <div><strong>{{ maintenanceSummary.done }}</strong><span>Realizados</span></div>
         <div><strong>{{ maintenanceSummary.expired }}</strong><span>Vencidos</span></div>
+        <div><strong>{{ maintenanceSummary.not_performed }}</strong><span>No realizados</span></div>
       </div>
 
       <div *ngIf="selectedSchedule.status === 'draft'" class="programming-panel">
@@ -485,6 +486,7 @@
             <option value="active">Activo</option>
             <option value="done">Realizado</option>
             <option value="expired">Vencido</option>
+            <option value="not_performed">No realizado</option>
           </select>
         </label>
         <div class="filter-result-actions">

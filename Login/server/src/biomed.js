@@ -948,7 +948,8 @@ export async function listHistoricalMaintenanceOccurrences(clientId, assetId, do
   const { rows } = await query(
     `WITH occurrences AS (
        SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date,
-              i.status, i.completion_source, i.legacy_history_file_id, s.year,
+              i.status, i.completion_source, i.legacy_history_file_id,
+              i.historical_resolution, i.non_execution_reason, s.year,
               s.status AS schedule_status,
               ROW_NUMBER() OVER (
                 PARTITION BY i.schedule_id, i.asset_id
@@ -966,6 +967,7 @@ export async function listHistoricalMaintenanceOccurrences(clientId, assetId, do
               occurrence.schedule_status = 'approved'
               AND occurrence.status IN ('pending', 'active', 'expired')
               AND occurrence.legacy_history_file_id IS NULL
+              AND occurrence.historical_resolution IS DISTINCT FROM 'not_performed'
               AND COALESCE(request.status, 'abierto') IN ('abierto', 'vencido')
             ) AS eligible,
             CASE
@@ -973,6 +975,7 @@ export async function listHistoricalMaintenanceOccurrences(clientId, assetId, do
               WHEN occurrence.schedule_status <> 'approved' THEN 'El cronograma no admite conciliaciones.'
               WHEN occurrence.status = 'done' THEN 'Esta ocurrencia ya está realizada.'
               WHEN occurrence.legacy_history_file_id IS NOT NULL THEN 'Ya tiene un PDF histórico conciliado.'
+              WHEN occurrence.historical_resolution = 'not_performed' THEN 'Este periodo fue registrado como no realizado.'
               WHEN request.status NOT IN ('abierto', 'vencido') THEN 'La solicitud tiene un proceso operativo en curso.'
               ELSE NULL
             END AS unavailable_reason
@@ -1022,7 +1025,8 @@ export async function createAssetHistoryFile(clientId, payload) {
     if (maintenanceScheduleItemId) {
       const occurrenceResult = await client.query(
         `SELECT i.id, i.schedule_id, i.asset_id, i.planned_date, i.deadline_date, i.status,
-                i.legacy_history_file_id, s.status AS schedule_status, s.year
+                i.legacy_history_file_id, i.historical_resolution,
+                s.status AS schedule_status, s.year
          FROM maintenance_schedule_items i
          JOIN maintenance_schedules s ON s.id = i.schedule_id
          WHERE i.id = $1 AND i.asset_id = $2 AND s.client_id = $3
@@ -1046,6 +1050,12 @@ export async function createAssetHistoryFile(clientId, payload) {
         throw historicalReconciliationError(
           'HISTORICAL_OCCURRENCE_COMPLETED',
           'La ocurrencia seleccionada ya está registrada como realizada.'
+        );
+      }
+      if (occurrence.historical_resolution === 'not_performed') {
+        throw historicalReconciliationError(
+          'HISTORICAL_OCCURRENCE_NOT_PERFORMED',
+          'El periodo seleccionado fue registrado como no realizado y no admite conciliación automática.'
         );
       }
       if (!['pending', 'active', 'expired'].includes(occurrence.status)) {
@@ -1111,7 +1121,11 @@ export async function createAssetHistoryFile(clientId, payload) {
              completed_at = ($2::date::timestamp AT TIME ZONE 'America/Bogota'),
              report_id = NULL,
              completion_source = 'historical_pdf',
-             legacy_history_file_id = $3
+             legacy_history_file_id = $3,
+             historical_resolution = 'evidence_uploaded',
+             non_execution_reason = NULL,
+             non_execution_recorded_at = NULL,
+             non_execution_recorded_by = NULL
          WHERE id = $1`,
         [occurrence.id, documentDate, historyFile.id]
       );

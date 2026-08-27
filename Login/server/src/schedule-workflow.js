@@ -10,12 +10,52 @@ export const SCHEDULE_PERIODICITIES = Object.freeze({
   anual: 12
 });
 
+export const PERIODICITY_CHANGE_MODES = Object.freeze([
+  'correction',
+  'operational'
+]);
+
+export const HISTORICAL_MAINTENANCE_RESOLUTIONS = Object.freeze([
+  'pending_evidence',
+  'not_performed'
+]);
+
 export class ScheduleValidationError extends Error {
-  constructor(message) {
+  constructor(message, code = 'SCHEDULE_VALIDATION_ERROR') {
     super(message);
     this.name = 'ScheduleValidationError';
     this.statusCode = 400;
+    this.code = code;
   }
+}
+
+export function normalizePeriodicityChangeMode(value, fallback = 'correction') {
+  const mode = String(value || fallback).trim().toLowerCase();
+  if (!PERIODICITY_CHANGE_MODES.includes(mode)) {
+    throw new ScheduleValidationError(
+      'El modo de actualización de la periodicidad no es válido.',
+      'INVALID_PERIODICITY_CHANGE_MODE'
+    );
+  }
+  return mode;
+}
+
+export function maintenanceScheduleItemHasOperationalEvidence(item = {}) {
+  const status = String(item.status || '').trim().toLowerCase();
+  const historicalResolution = String(item.historical_resolution || '').trim().toLowerCase();
+  return Boolean(
+    !['pending', 'active', 'expired'].includes(status)
+    || item.report_id
+    || item.completion_source
+    || item.legacy_history_file_id
+    || historicalResolution === 'not_performed'
+    || historicalResolution === 'evidence_uploaded'
+    || item.has_blocking_request
+  );
+}
+
+export function canCorrectAssetScheduleItems(items = []) {
+  return !items.some((item) => maintenanceScheduleItemHasOperationalEvidence(item));
 }
 
 export function normalizeScheduleYear(value) {
@@ -431,7 +471,34 @@ export function normalizeMaintenanceItemUpdates(items, existingItems, year) {
   });
 }
 
-export function normalizeAssetScheduleProgrammingSelection(selection, expectedSchedules) {
+export function normalizeAssetScheduleProgrammingSelection(
+  selection,
+  expectedSchedules,
+  { expectedChangeMode = 'correction', expectedEffectiveDate = null } = {}
+) {
+  const normalizedExpectedMode = normalizePeriodicityChangeMode(expectedChangeMode);
+  const changeMode = normalizePeriodicityChangeMode(
+    selection?.changeMode,
+    normalizedExpectedMode
+  );
+  if (changeMode !== normalizedExpectedMode) {
+    throw new ScheduleValidationError(
+      'El modo de actualización cambió mientras confirmabas el cronograma.',
+      'SCHEDULE_EDIT_STATE_CHANGED'
+    );
+  }
+  const effectiveDate = expectedEffectiveDate
+    ? normalizeDateOnly(
+        selection?.effectiveDate || expectedEffectiveDate,
+        'La fecha efectiva del cambio'
+      )
+    : null;
+  if (expectedEffectiveDate && effectiveDate !== expectedEffectiveDate) {
+    throw new ScheduleValidationError(
+      'La fecha efectiva cambió mientras confirmabas el cronograma.',
+      'SCHEDULE_EDIT_STATE_CHANGED'
+    );
+  }
   const expected = Array.isArray(expectedSchedules) ? expectedSchedules : [];
   const submitted = Array.isArray(selection?.schedules) ? selection.schedules : [];
   if (submitted.length !== expected.length) {
@@ -449,7 +516,7 @@ export function normalizeAssetScheduleProgrammingSelection(selection, expectedSc
     submittedBySchedule.set(scheduleId, schedule);
   }
 
-  return expected.map((schedule) => {
+  const normalizedSchedules = expected.map((schedule) => {
     const scheduleId = String(schedule.scheduleId || '').trim();
     const current = submittedBySchedule.get(scheduleId);
     if (!current) {
@@ -494,15 +561,50 @@ export function normalizeAssetScheduleProgrammingSelection(selection, expectedSc
           `La fecha de ${month} debe estar entre ${minDate} y ${maxDate}.`
         );
       }
+      const phase = String(expectedItem.phase || '').trim().toLowerCase();
+      let historicalResolution = null;
+      let nonExecutionReason = null;
+      if (phase === 'historical') {
+        historicalResolution = String(
+          selectedItem.historicalResolution || expectedItem.historicalResolution || 'pending_evidence'
+        ).trim().toLowerCase();
+        if (!HISTORICAL_MAINTENANCE_RESOLUTIONS.includes(historicalResolution)) {
+          throw new ScheduleValidationError(
+            `Selecciona cómo se resolverá el periodo histórico de ${month}.`
+          );
+        }
+        if (historicalResolution === 'not_performed') {
+          nonExecutionReason = String(selectedItem.nonExecutionReason || '').trim();
+          if (!nonExecutionReason) {
+            throw new ScheduleValidationError(
+              `Registra la justificación del mantenimiento no realizado de ${month}.`
+            );
+          }
+          if (nonExecutionReason.length > 500) {
+            throw new ScheduleValidationError(
+              `La justificación de ${month} no puede superar 500 caracteres.`
+            );
+          }
+        }
+      }
       return {
         month,
         plannedDate,
-        deadlineDate: normalizeDateOnly(expectedItem.deadlineDate, 'La fecha límite')
+        deadlineDate: normalizeDateOnly(expectedItem.deadlineDate, 'La fecha límite'),
+        ...(phase === 'historical'
+          ? { phase, historicalResolution, nonExecutionReason }
+          : {})
       };
     });
 
     return { scheduleId, items };
   });
+
+  return {
+    changeMode,
+    effectiveDate,
+    schedules: normalizedSchedules
+  };
 }
 
 export function canEditMaintenanceSchedule(schedule, roles = []) {

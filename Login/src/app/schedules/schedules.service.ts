@@ -48,6 +48,10 @@ export interface ScheduleItemDto {
   report_id?: string | null;
   completion_source?: string | null;
   legacy_history_file_id?: string | null;
+  historical_resolution?: 'pending_evidence' | 'not_performed' | 'evidence_uploaded' | null;
+  non_execution_reason?: string | null;
+  non_execution_recorded_at?: string | null;
+  non_execution_recorded_by?: string | null;
 }
 
 export interface AssetRescheduleResultDto {

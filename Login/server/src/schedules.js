@@ -3,10 +3,13 @@ import { normalizeAssetCategory } from './asset-category.js';
 import {
   assetWarrantyReleaseDate,
   buildOperationalMaintenanceOccurrences,
+  canCorrectAssetScheduleItems,
   dateOnlyFromDatabase,
+  maintenanceScheduleItemHasOperationalEvidence,
   nextBusinessDateInWindow,
   normalizeAssetScheduleProgrammingSelection,
   normalizeDateOnly,
+  normalizePeriodicityChangeMode,
   normalizePeriodicity
 } from './schedule-workflow.js';
 
@@ -79,13 +82,7 @@ function normalizeProgrammingAsset(asset, configuration = {}) {
 }
 
 function replaceableProgrammingItem(item) {
-  return (
-    ['pending', 'active', 'expired'].includes(String(item.status || '').toLowerCase())
-    && !item.report_id
-    && !item.completion_source
-    && !item.legacy_history_file_id
-    && !item.has_blocking_request
-  );
+  return !maintenanceScheduleItemHasOperationalEvidence(item);
 }
 
 function maintenanceOccurrencePhase(item, today) {
@@ -168,6 +165,8 @@ function publicProgrammingSchedule(plan) {
     status: plan.status,
     itemsToReplace: plan.replaceableItemIds.length,
     preservedItems: plan.preservedItems,
+    preservedEvidenceItems: plan.preservedEvidenceItems,
+    preservedHistoricalItems: plan.preservedHistoricalItems,
     historicalItems: plan.items.filter((item) => item.phase === 'historical').length,
     currentItems: plan.items.filter((item) => item.phase === 'current').length,
     futureItems: plan.items.filter((item) => item.phase === 'future').length,
@@ -226,12 +225,39 @@ async function buildAssetScheduleProgrammingPlans(client, {
      ${lock ? 'FOR UPDATE' : ''}`,
     [clientId, category, currentYear]
   );
+  const correctionStateResult = await client.query(
+    `SELECT item.status, item.report_id, item.completion_source,
+            item.legacy_history_file_id, item.historical_resolution,
+            EXISTS (
+              SELECT 1 FROM maintenance_requests request
+              WHERE request.schedule_item_id = item.id
+                AND request.status NOT IN ('abierto', 'vencido')
+            ) AS has_blocking_request
+     FROM maintenance_schedule_items item
+     JOIN maintenance_schedules schedule ON schedule.id = item.schedule_id
+     WHERE schedule.client_id = $1
+       AND schedule.asset_category = $2
+       AND schedule.year >= $3
+       AND schedule.status IN ('draft', 'approved', 'closed')
+       AND item.asset_id = $4
+     ${lock ? 'FOR UPDATE OF item' : ''}`,
+    [clientId, category, currentYear, asset.id]
+  );
+  const correctionAllowed = canCorrectAssetScheduleItems(correctionStateResult.rows);
+  const requestedChangeMode = normalizePeriodicityChangeMode(configuration.changeMode);
+  const changeMode = requestedChangeMode === 'correction' && !correctionAllowed
+    ? 'operational'
+    : requestedChangeMode;
+  const correctionBlockedReason = correctionAllowed
+    ? null
+    : 'El equipo ya tiene mantenimientos realizados, firmas, PDFs, una novedad declarada o trabajo operativo iniciado. La historia se conservará y la nueva periodicidad aplicará desde hoy.';
 
   const plans = [];
   for (const schedule of scheduleResult.rows) {
     const targetItemsResult = await client.query(
       `SELECT item.id, item.frequency, item.planned_date, item.deadline_date, item.status,
               item.report_id, item.completion_source, item.legacy_history_file_id,
+              item.historical_resolution, item.non_execution_reason,
               EXISTS (
                 SELECT 1 FROM maintenance_requests request
                 WHERE request.schedule_item_id = item.id
@@ -242,7 +268,17 @@ async function buildAssetScheduleProgrammingPlans(client, {
        ${lock ? 'FOR UPDATE OF item' : ''}`,
       [schedule.id, asset.id]
     );
-    const replaceableItems = targetItemsResult.rows.filter(replaceableProgrammingItem);
+    const scheduleYearStart = `${schedule.year}-01-01`;
+    const effectiveDate = changeMode === 'operational' && schedule.year === currentYear
+      ? today
+      : scheduleYearStart;
+    const replaceableItems = targetItemsResult.rows.filter((item) =>
+      replaceableProgrammingItem(item)
+      && (
+        changeMode === 'correction'
+        || dateOnlyFromDatabase(item.deadline_date, 'La fecha límite') >= effectiveDate
+      )
+    );
     const replaceableIds = new Set(replaceableItems.map((item) => item.id));
     const preservedItems = targetItemsResult.rows.filter((item) => !replaceableIds.has(item.id));
 
@@ -264,18 +300,10 @@ async function buildAssetScheduleProgrammingPlans(client, {
       schedule.start_date,
       'La fecha inicial del cronograma'
     );
-    const scheduleYearStart = `${schedule.year}-01-01`;
-    const firstExistingDate = targetItemsResult.rows
-      .map((item) => dateOnlyFromDatabase(item.planned_date))
-      .sort()[0] || null;
-    const participationDate = minimumDate(
-      firstExistingDate,
-      dateOnlyFromDatabase(asset.created_at, 'La fecha de creación de la hoja de vida')
-    );
     const eligibleFrom = maximumDate(
       scheduleYearStart,
       warrantyReleaseDate,
-      schedule.year === currentYear ? participationDate : scheduleYearStart
+      effectiveDate
     );
     const desired = buildOperationalMaintenanceOccurrences({
       year: schedule.year,
@@ -308,9 +336,12 @@ async function buildAssetScheduleProgrammingPlans(client, {
         maxDate: occurrence.deadlineDate,
         deadlineDate: occurrence.deadlineDate
       };
+      const phase = maintenanceOccurrencePhase(item, today);
       items.push({
         ...item,
-        phase: maintenanceOccurrencePhase(item, today)
+        phase,
+        historicalResolution: phase === 'historical' ? 'pending_evidence' : null,
+        nonExecutionReason: ''
       });
     }
     const preservedOperationalDates = preservedItems
@@ -323,13 +354,29 @@ async function buildAssetScheduleProgrammingPlans(client, {
       createdBy: schedule.created_by,
       replaceableItemIds: replaceableItems.map((item) => item.id),
       preservedItems: preservedItems.length,
+      preservedEvidenceItems: preservedItems.filter(
+        (item) => maintenanceScheduleItemHasOperationalEvidence(item)
+      ).length,
+      preservedHistoricalItems: preservedItems.filter(
+        (item) => dateOnlyFromDatabase(item.deadline_date) < today
+      ).length,
       preservedOperationalDates,
       items,
       changed: replaceableItems.length > 0 || items.length > 0
     });
   }
 
-  return { asset, storedAsset, warrantyReleaseDate, plans };
+  return {
+    asset,
+    storedAsset,
+    warrantyReleaseDate,
+    plans,
+    requestedChangeMode,
+    changeMode,
+    effectiveDate: changeMode === 'operational' ? today : `${currentYear}-01-01`,
+    correctionAllowed,
+    correctionBlockedReason
+  };
 }
 
 export async function previewApprovedAssetScheduleProgramming({
@@ -356,6 +403,10 @@ export async function previewApprovedAssetScheduleProgramming({
       previousFrequency: result.storedAsset.maintenance_frequency,
       frequency: result.asset.maintenance_frequency,
       effectiveToday: normalizedToday,
+      changeMode: result.changeMode,
+      effectiveDate: result.effectiveDate,
+      correctionAllowed: result.correctionAllowed,
+      correctionBlockedReason: result.correctionBlockedReason,
       warrantyReleaseDate: result.warrantyReleaseDate,
       requiresConfirmation: schedules.length > 0,
       schedules
@@ -378,17 +429,24 @@ export async function applyAssetScheduleProgramming({
       schema,
       assetId,
       today: normalizedToday,
-      lock: true
+      lock: true,
+      configuration: {
+        changeMode: selection?.changeMode
+      }
     });
     const approvedPlans = result.plans.filter(
       (plan) => plan.status === 'approved' && plan.changed
     );
     const normalizedSelection = normalizeAssetScheduleProgrammingSelection(
       selection,
-      approvedPlans.map(publicProgrammingSchedule)
+      approvedPlans.map(publicProgrammingSchedule),
+      {
+        expectedChangeMode: result.changeMode,
+        expectedEffectiveDate: result.effectiveDate
+      }
     );
     const selectionBySchedule = new Map(
-      normalizedSelection.map((schedule) => [schedule.scheduleId, schedule.items])
+      normalizedSelection.schedules.map((schedule) => [schedule.scheduleId, schedule.items])
     );
     const updatedScheduleIds = new Set();
     let itemsAdded = 0;
@@ -398,6 +456,7 @@ export async function applyAssetScheduleProgramming({
     let requestsCreated = 0;
     let firstPlannedDate = null;
     const historicalEvidenceRequired = [];
+    let historicalNotPerformed = 0;
 
     for (const plan of result.plans) {
       const selectedItems = plan.status === 'approved'
@@ -430,14 +489,20 @@ export async function applyAssetScheduleProgramming({
         const inserted = await client.query(
           `INSERT INTO maintenance_schedule_items
              (schedule_id, asset_id, frequency, planned_date, deadline_date, status,
+              historical_resolution, non_execution_reason,
+              non_execution_recorded_at, non_execution_recorded_by,
               programming_confirmed, programmed_at, programmed_by)
            SELECT $1, $2, $3, data.planned_date, data.deadline_date, data.item_status,
-                  $7,
-                  CASE WHEN $7 THEN NOW() ELSE NULL END,
-                  CASE WHEN $7 THEN $8::uuid ELSE NULL END
-           FROM UNNEST($4::date[], $5::date[], $6::text[])
-             AS data(planned_date, deadline_date, item_status)
-           RETURNING id, planned_date, deadline_date, status`,
+                  data.historical_resolution, data.non_execution_reason,
+                  CASE WHEN data.historical_resolution = 'not_performed' THEN NOW() ELSE NULL END,
+                  CASE WHEN data.historical_resolution = 'not_performed' THEN $10::uuid ELSE NULL END,
+                  $9,
+                  CASE WHEN $9 THEN NOW() ELSE NULL END,
+                  CASE WHEN $9 THEN $10::uuid ELSE NULL END
+           FROM UNNEST($4::date[], $5::date[], $6::text[], $7::text[], $8::text[])
+             AS data(planned_date, deadline_date, item_status, historical_resolution,
+                     non_execution_reason)
+           RETURNING id, planned_date, deadline_date, status, historical_resolution`,
           [
             plan.scheduleId,
             result.asset.id,
@@ -445,6 +510,8 @@ export async function applyAssetScheduleProgramming({
             selectedItems.map((item) => item.plannedDate),
             selectedItems.map((item) => item.deadlineDate),
             itemStatuses,
+            selectedItems.map((item) => item.historicalResolution || null),
+            selectedItems.map((item) => item.nonExecutionReason || null),
             programmingConfirmed,
             actorUserId || plan.createdBy
           ]
@@ -453,7 +520,10 @@ export async function applyAssetScheduleProgramming({
         for (const item of inserted.rows) {
           const plannedDate = dateOnlyFromDatabase(item.planned_date);
           const deadlineDate = dateOnlyFromDatabase(item.deadline_date);
-          if (item.status === 'expired') {
+          if (
+            item.status === 'expired'
+            && item.historical_resolution === 'pending_evidence'
+          ) {
             historicalEvidenceRequired.push({
               scheduleId: plan.scheduleId,
               scheduleItemId: item.id,
@@ -461,6 +531,9 @@ export async function applyAssetScheduleProgramming({
               plannedDate,
               deadlineDate
             });
+          }
+          if (item.historical_resolution === 'not_performed') {
+            historicalNotPerformed += 1;
           }
           if (item.status === 'active') {
             activeItemsAdded += 1;
@@ -516,6 +589,9 @@ export async function applyAssetScheduleProgramming({
       activeItemsAdded,
       requestsCreated,
       historicalEvidenceRequired,
+      historicalNotPerformed,
+      periodicityChangeMode: result.changeMode,
+      periodicityEffectiveDate: result.effectiveDate,
       firstPlannedDate,
       latestScheduleYear
     };
@@ -527,6 +603,9 @@ export async function applyAssetScheduleProgramming({
       activeItemsAdded,
       requestsCreated,
       historicalEvidenceRequired,
+      historicalNotPerformed,
+      periodicityChangeMode: result.changeMode,
+      periodicityEffectiveDate: result.effectiveDate,
       assets: [assetResult]
     };
   });
@@ -721,6 +800,7 @@ export async function syncAssetsIntoMaintenanceSchedules({
              AND item.report_id IS NULL
              AND item.completion_source IS NULL
              AND item.legacy_history_file_id IS NULL
+             AND item.historical_resolution IS DISTINCT FROM 'not_performed'
              AND NOT EXISTS (
                SELECT 1
                FROM maintenance_requests AS request
@@ -973,6 +1053,8 @@ export async function listScheduleItemsWithSchema(scheduleId, schema) {
     `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date, i.status,
             i.programming_confirmed, i.programmed_at, i.programmed_by,
             i.report_id, i.completion_source, i.legacy_history_file_id,
+            i.historical_resolution, i.non_execution_reason,
+            i.non_execution_recorded_at, i.non_execution_recorded_by,
             a.code, a.name, a.brand, a.model, a.serial, a.area_id, a.site_id, a.location_id,
             a.maintenance_frequency AS asset_maintenance_frequency,
             a.acquisition_date, a.warranty_years,
@@ -1119,7 +1201,8 @@ export async function rescheduleDraftAsset({
     }
 
     const { rows: currentItems } = await client.query(
-      `SELECT id, status, report_id, completion_source, legacy_history_file_id
+      `SELECT id, status, report_id, completion_source, legacy_history_file_id,
+              historical_resolution
        FROM maintenance_schedule_items
        WHERE schedule_id = $1 AND asset_id = $2
        FOR UPDATE`,
@@ -1136,7 +1219,8 @@ export async function rescheduleDraftAsset({
           item.status !== 'pending' ||
           item.report_id ||
           item.completion_source ||
-          item.legacy_history_file_id
+          item.legacy_history_file_id ||
+          item.historical_resolution === 'not_performed'
       )
     ) {
       const error = new Error('El equipo ya tiene mantenimientos operativos o históricos y no puede regenerarse.');
@@ -1240,7 +1324,11 @@ export async function markScheduleItemDone(scheduleId, itemId, reportId) {
          completed_at = NOW(),
          report_id = $3,
          completion_source = 'software_report',
-         legacy_history_file_id = NULL
+         legacy_history_file_id = NULL,
+         historical_resolution = NULL,
+         non_execution_reason = NULL,
+         non_execution_recorded_at = NULL,
+         non_execution_recorded_by = NULL
      WHERE id = $1 AND schedule_id = $2`,
     [itemId, scheduleId, reportId]
   );

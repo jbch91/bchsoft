@@ -8,6 +8,7 @@ import {
   BiomedService,
   CatalogReviewDto,
   EquipmentCatalogItemDto,
+  MaintenancePeriodicityChangeMode,
   MaintenanceScheduleProgrammingItemDto,
   MaintenanceScheduleProgrammingPreviewDto,
   MaintenanceScheduleProgrammingSelectionDto,
@@ -1475,6 +1476,9 @@ export class HojasDeVidaComponent implements OnDestroy {
     if (evidenceCount) {
       notes.push(`${evidenceCount} periodo(s) anterior(es) requieren conciliar su PDF escaneado.`);
     }
+    if (sync.historicalNotPerformed) {
+      notes.push(`${sync.historicalNotPerformed} periodo(s) quedaron registrados como no realizados.`);
+    }
     return notes.length ? ` ${notes.join(' ')}` : '';
   }
 
@@ -1749,11 +1753,19 @@ export class HojasDeVidaComponent implements OnDestroy {
   private scheduleProgrammingSelection(): MaintenanceScheduleProgrammingSelectionDto | undefined {
     if (!this.scheduleProgrammingPreview?.requiresConfirmation) return undefined;
     return {
+      changeMode: this.scheduleProgrammingPreview.changeMode,
+      effectiveDate: this.scheduleProgrammingPreview.effectiveDate,
       schedules: this.scheduleProgrammingPreview.schedules.map((schedule) => ({
         scheduleId: schedule.scheduleId,
         items: schedule.items.map((item) => ({
           month: item.month,
-          plannedDate: item.plannedDate
+          plannedDate: item.plannedDate,
+          ...(item.phase === 'historical'
+            ? {
+                historicalResolution: item.historicalResolution || 'pending_evidence',
+                nonExecutionReason: item.nonExecutionReason.trim()
+              }
+            : {})
         }))
       }))
     };
@@ -1772,10 +1784,29 @@ export class HojasDeVidaComponent implements OnDestroy {
     return '';
   }
 
+  scheduleProgrammingResolutionError(item: MaintenanceScheduleProgrammingItemDto): string {
+    if (item.phase !== 'historical') return '';
+    if (!item.historicalResolution) return 'Selecciona cómo se resolverá este periodo.';
+    if (
+      item.historicalResolution === 'not_performed'
+      && !item.nonExecutionReason.trim()
+    ) {
+      return 'La justificación es obligatoria.';
+    }
+    if (item.nonExecutionReason.trim().length > 500) {
+      return 'La justificación no puede superar 500 caracteres.';
+    }
+    return '';
+  }
+
   get scheduleProgrammingValid(): boolean {
     return Boolean(
       this.scheduleProgrammingPreview?.schedules.every((schedule) =>
-        schedule.items.every((item) => !this.scheduleProgrammingDateError(item))
+        schedule.items.every(
+          (item) =>
+            !this.scheduleProgrammingDateError(item)
+            && !this.scheduleProgrammingResolutionError(item)
+        )
       )
     );
   }
@@ -1794,6 +1825,28 @@ export class HojasDeVidaComponent implements OnDestroy {
     ) ?? 0;
   }
 
+  get scheduleProgrammingEvidenceCount(): number {
+    return this.scheduleProgrammingPreview?.schedules.reduce(
+      (total, schedule) => total + schedule.items.filter(
+        (item) =>
+          item.phase === 'historical'
+          && item.historicalResolution === 'pending_evidence'
+      ).length,
+      0
+    ) ?? 0;
+  }
+
+  get scheduleProgrammingNotPerformedCount(): number {
+    return this.scheduleProgrammingPreview?.schedules.reduce(
+      (total, schedule) => total + schedule.items.filter(
+        (item) =>
+          item.phase === 'historical'
+          && item.historicalResolution === 'not_performed'
+      ).length,
+      0
+    ) ?? 0;
+  }
+
   get scheduleProgrammingCurrentCount(): number {
     return this.scheduleProgrammingPreview?.schedules.reduce(
       (total, schedule) => total + schedule.currentItems,
@@ -1802,11 +1855,15 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   scheduleProgrammingPhaseLabel(item: MaintenanceScheduleProgrammingItemDto): string {
+    if (item.phase === 'historical') {
+      return item.historicalResolution === 'not_performed'
+        ? 'No realizado'
+        : 'PDF por conciliar';
+    }
     return {
-      historical: 'PDF histórico requerido',
       current: 'Ventana vigente',
       future: 'Próximo mantenimiento'
-    }[item.phase];
+    }[item.phase] || item.phase;
   }
 
   scheduleProgrammingDateLabel(item: MaintenanceScheduleProgrammingItemDto): string {
@@ -1832,13 +1889,25 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.scheduleProgrammingError = '';
   }
 
+  async setScheduleProgrammingMode(mode: MaintenancePeriodicityChangeMode): Promise<void> {
+    if (
+      this.assetSaving
+      || this.scheduleProgrammingLoading
+      || this.scheduleProgrammingPreview?.changeMode === mode
+      || (mode === 'correction' && !this.scheduleProgrammingPreview?.correctionAllowed)
+    ) return;
+    await this.prepareScheduleProgramming(mode);
+  }
+
   async confirmScheduleProgramming(): Promise<void> {
     if (!this.scheduleProgrammingValid || this.assetSaving) return;
     this.scheduleProgrammingError = '';
     await this.onCreateAsset(true);
   }
 
-  private async prepareScheduleProgramming(): Promise<'required' | 'not_required' | 'error'> {
+  private async prepareScheduleProgramming(
+    changeMode: MaintenancePeriodicityChangeMode = 'correction'
+  ): Promise<'required' | 'not_required' | 'error'> {
     if (!this.selectedClientId || !this.editingAssetId) return 'not_required';
     this.scheduleProgrammingLoading = true;
     this.errorMessage = '';
@@ -1851,7 +1920,8 @@ export class HojasDeVidaComponent implements OnDestroy {
           areaId: this.areaId || null,
           locationId: this.locationId || null,
           acquisitionDate: this.acquisitionDate || null,
-          warrantyYears: this.warrantyYears
+          warrantyYears: this.warrantyYears,
+          changeMode
         }
       );
       if (!preview.requiresConfirmation) return 'not_required';

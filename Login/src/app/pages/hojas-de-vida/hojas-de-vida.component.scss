@@ -88,10 +88,10 @@
 }
 
 .schedule-programming-modal {
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
   max-height: min(820px, calc(100dvh - 48px));
   overflow: hidden;
-  width: min(920px, 100%);
+  width: min(1040px, 100%);
 }
 
 .schedule-programming-summary {
@@ -123,12 +123,74 @@
   overflow-wrap: anywhere;
 }
 
+.schedule-programming-mode {
+  align-items: center;
+  border-block: 1px solid var(--border);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding-block: 10px;
+}
+
+.schedule-programming-mode > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.schedule-programming-mode span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.schedule-programming-mode strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.schedule-mode-options {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.schedule-mode-options button {
+  background: #ffffff;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 9px 12px;
+}
+
+.schedule-mode-options button + button {
+  border-left: 1px solid var(--border);
+}
+
+.schedule-mode-options button.active {
+  background: var(--brand-600);
+  color: #ffffff;
+}
+
+.schedule-mode-options button:disabled:not(.active) {
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
 .schedule-programming-notices {
   display: grid;
   gap: 8px;
 }
 
 .schedule-programming-notice,
+.schedule-programming-blocked-notice,
 .schedule-programming-history-notice,
 .schedule-programming-current-notice,
 .schedule-no-windows {
@@ -140,6 +202,12 @@
   font-weight: 700;
   margin: 0;
   padding: 10px 12px;
+}
+
+.schedule-programming-blocked-notice {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
 }
 
 .schedule-programming-history-notice,
@@ -216,6 +284,14 @@
   padding: 9px 10px;
 }
 
+.schedule-date-row.with-resolution {
+  grid-template-columns:
+    minmax(120px, 0.7fr)
+    minmax(150px, 0.8fr)
+    minmax(235px, 1.35fr)
+    minmax(145px, 0.8fr);
+}
+
 .schedule-date-row:last-child {
   border-bottom: 0;
 }
@@ -237,6 +313,27 @@
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
+}
+
+.schedule-date-resolution {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.schedule-date-resolution label {
+  color: var(--muted);
+  display: grid;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 4px;
+  min-width: 0;
+}
+
+.schedule-date-resolution input,
+.schedule-date-resolution select {
+  min-width: 0;
+  width: 100%;
 }
 
 .schedule-date-phase {
@@ -272,6 +369,13 @@
   font-size: 11px;
   font-weight: 800;
   grid-column: 2 / -1;
+}
+
+.schedule-resolution-error {
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 800;
+  grid-column: 3 / -1;
 }
 
 .schedule-no-windows {
@@ -1342,6 +1446,20 @@ li span {
     align-items: stretch;
     flex-direction: column;
   }
+
+  .schedule-date-row.with-resolution {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .schedule-date-row.with-resolution .schedule-date-resolution,
+  .schedule-date-row.with-resolution .schedule-date-deadline,
+  .schedule-date-row.with-resolution .schedule-resolution-error {
+    grid-column: 1 / -1;
+  }
+
+  .schedule-date-row.with-resolution .schedule-date-resolution {
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  }
 }
 
 @media (max-width: 680px) {
@@ -1406,6 +1524,15 @@ li span {
     grid-template-columns: 1fr;
   }
 
+  .schedule-programming-mode {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .schedule-mode-options {
+    width: 100%;
+  }
+
   .schedule-programming-year-header {
     align-items: flex-start;
     flex-direction: column;
@@ -1419,7 +1546,19 @@ li span {
     grid-template-columns: 1fr;
   }
 
+  .schedule-date-row.with-resolution {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-date-row.with-resolution .schedule-date-resolution {
+    grid-template-columns: 1fr;
+  }
+
   .schedule-date-error {
+    grid-column: 1;
+  }
+
+  .schedule-resolution-error {
     grid-column: 1;
   }
 

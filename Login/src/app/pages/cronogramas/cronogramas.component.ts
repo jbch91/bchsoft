@@ -811,9 +811,9 @@ export class CronogramasComponent implements OnInit {
     );
   }
 
-  get maintenanceSummary(): Record<'pending' | 'active' | 'done' | 'expired', number> {
-    return this.countStatuses(this.items, (item) => item.status) as Record<
-      'pending' | 'active' | 'done' | 'expired',
+  get maintenanceSummary(): Record<'pending' | 'active' | 'done' | 'expired' | 'not_performed', number> {
+    return this.countStatuses(this.items, (item) => this.maintenanceItemStatusKey(item)) as Record<
+      'pending' | 'active' | 'done' | 'expired' | 'not_performed',
       number
     >;
   }
@@ -853,7 +853,10 @@ export class CronogramasComponent implements OnInit {
       if (this.maintenanceAreaFilter && item.area_name !== this.maintenanceAreaFilter) return false;
       if (this.maintenanceLocationFilter && item.location_name !== this.maintenanceLocationFilter) return false;
       if (this.maintenanceFrequencyFilter && item.frequency !== this.maintenanceFrequencyFilter) return false;
-      if (this.maintenanceItemStatusFilter && item.status !== this.maintenanceItemStatusFilter) return false;
+      if (
+        this.maintenanceItemStatusFilter
+        && this.maintenanceItemStatusKey(item) !== this.maintenanceItemStatusFilter
+      ) return false;
       if (!term) return true;
       return `${item.code ?? ''} ${item.name ?? ''} ${item.brand ?? ''} ${item.model ?? ''} ${item.serial ?? ''} ${item.site_name ?? ''} ${item.area_name ?? ''} ${item.location_name ?? ''}`
         .toLowerCase()
@@ -1146,8 +1149,8 @@ export class CronogramasComponent implements OnInit {
   }
 
   areaStatusItems(group: MaintenanceItemGroup): { status: string; count: number }[] {
-    const counts = this.countStatuses(group.items, (item) => item.status);
-    return ['active', 'expired', 'pending', 'done']
+    const counts = this.countStatuses(group.items, (item) => this.maintenanceItemStatusKey(item));
+    return ['active', 'expired', 'not_performed', 'pending', 'done']
       .filter((status) => counts[status] > 0)
       .map((status) => ({ status, count: counts[status] }));
   }
@@ -2111,9 +2114,16 @@ export class CronogramasComponent implements OnInit {
       pending: 'Programado',
       active: 'Activo',
       done: 'Realizado',
-      expired: 'Vencido'
+      expired: 'Vencido',
+      not_performed: 'No realizado'
     };
     return labels[String(status || '').toLowerCase()] ?? status;
+  }
+
+  maintenanceItemStatusKey(item: ScheduleItemDto): string {
+    return item.historical_resolution === 'not_performed'
+      ? 'not_performed'
+      : item.status;
   }
 
   trainingItemStatusKey(item: TrainingItemDto): string {
@@ -2379,7 +2389,13 @@ export class CronogramasComponent implements OnInit {
   }
 
   private countStatuses<T>(items: T[], selector: (item: T) => string): Record<string, number> {
-    const counts: Record<string, number> = { pending: 0, active: 0, done: 0, expired: 0 };
+    const counts: Record<string, number> = {
+      pending: 0,
+      active: 0,
+      done: 0,
+      expired: 0,
+      not_performed: 0
+    };
     for (const item of items) {
       const status = selector(item) || 'pending';
       counts[status] = (counts[status] ?? 0) + 1;

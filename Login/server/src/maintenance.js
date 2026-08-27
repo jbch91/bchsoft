@@ -89,6 +89,8 @@ export async function getPreventiveMaintenanceProgress(
             item.status AS item_status,
             item.completion_source,
             item.legacy_history_file_id,
+            item.historical_resolution,
+            item.non_execution_reason,
             a.code AS asset_code,
             a.name AS asset_name,
             a.brand AS asset_brand,
@@ -193,7 +195,9 @@ export async function getPreventiveMaintenanceProgress(
       report_created_at: item.report_created_at,
       pdf_available: Boolean(item.report_pdf_path || item.legacy_history_file_id),
       legacy_history_file_id: item.legacy_history_file_id,
-      completion_source: item.completion_source
+      completion_source: item.completion_source,
+      historical_resolution: item.historical_resolution,
+      non_execution_reason: item.non_execution_reason
     };
   });
   return {

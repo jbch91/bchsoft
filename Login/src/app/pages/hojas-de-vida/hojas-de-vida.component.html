@@ -629,18 +629,57 @@
         </div>
       </div>
 
+      <div class="schedule-programming-mode">
+        <div>
+          <span>Aplicación del cambio</span>
+          <strong>
+            {{ programming.changeMode === 'correction'
+              ? 'Corrección de la vigencia completa'
+              : 'Cambio operativo desde ' + formatIsoDateForDisplay(programming.effectiveDate) }}
+          </strong>
+        </div>
+        <div class="schedule-mode-options" role="group" aria-label="Aplicación del cambio de periodicidad">
+          <button
+            type="button"
+            [class.active]="programming.changeMode === 'correction'"
+            [disabled]="assetSaving || scheduleProgrammingLoading || !programming.correctionAllowed"
+            (click)="setScheduleProgrammingMode('correction')"
+          >
+            Corrección de dato
+          </button>
+          <button
+            type="button"
+            [class.active]="programming.changeMode === 'operational'"
+            [disabled]="assetSaving || scheduleProgrammingLoading"
+            (click)="setScheduleProgrammingMode('operational')"
+          >
+            Cambio desde hoy
+          </button>
+        </div>
+      </div>
+
       <div class="schedule-programming-notices">
-        <p class="schedule-programming-notice">
-          Se conservarán los mantenimientos realizados, firmados, históricos o con una operación iniciada.
-          Solo se reemplazarán registros sin evidencia ni trabajo en curso.
+        <p class="schedule-programming-notice" *ngIf="programming.changeMode === 'correction'; else operationalChangeNotice">
+          La periodicidad anterior se reemplazará en toda la vigencia. Los periodos se reconstruyen
+          con la frecuencia correcta desde el inicio del año, respetando la garantía.
+        </p>
+        <ng-template #operationalChangeNotice>
+          <p class="schedule-programming-notice">
+            La historia registrada se conserva con su periodicidad original. La nueva frecuencia se
+            aplicará únicamente a las ventanas vigentes y futuras desde la fecha efectiva.
+          </p>
+        </ng-template>
+
+        <p class="schedule-programming-blocked-notice" *ngIf="programming.correctionBlockedReason">
+          {{ programming.correctionBlockedReason }}
         </p>
 
         <p class="schedule-programming-history-notice" *ngIf="scheduleProgrammingHistoricalCount">
-          <strong>{{ scheduleProgrammingHistoricalCount }} evidencia(s) histórica(s) pendiente(s).</strong>
-          Los periodos anteriores quedarán vencidos y, después de guardar, se abrirá “Migrar PDF físico”
-          para cargar cada mantenimiento escaneado.
+          <strong>{{ scheduleProgrammingHistoricalCount }} periodo(s) histórico(s) por resolver.</strong>
+          {{ scheduleProgrammingEvidenceCount }} con PDF por conciliar y
+          {{ scheduleProgrammingNotPerformedCount }} marcado(s) como no realizado(s).
           <span *ngIf="!auth.hasPermission('asset_history:upload')">
-            Necesitarás el permiso temporal para migrar PDFs históricos.
+            Los PDFs pendientes requerirán el permiso temporal de migración histórica.
           </span>
         </p>
 
@@ -660,6 +699,7 @@
             <small>
               {{ schedule.itemsToReplace }} pendiente(s) por reemplazar ·
               {{ schedule.preservedItems }} registro(s) conservado(s) ·
+              {{ schedule.preservedEvidenceItems }} con trazabilidad ·
               {{ schedule.historicalItems }} histórico(s) ·
               {{ schedule.currentItems }} vigente(s) ·
               {{ schedule.futureItems }} futuro(s)
@@ -667,30 +707,56 @@
           </div>
 
           <div class="schedule-date-list" *ngIf="schedule.items.length; else noFutureWindows">
-            <label class="schedule-date-row" *ngFor="let item of schedule.items">
+            <div
+              class="schedule-date-row"
+              [class.with-resolution]="item.phase === 'historical'"
+              *ngFor="let item of schedule.items"
+            >
               <span class="schedule-date-heading">
                 <span class="schedule-date-month">{{ formatScheduleMonth(item.month) }}</span>
                 <small class="schedule-date-phase" [ngClass]="item.phase">
                   {{ scheduleProgrammingPhaseLabel(item) }}
                 </small>
               </span>
-              <span class="schedule-date-input">
+              <label class="schedule-date-input">
                 <small>{{ scheduleProgrammingDateLabel(item) }}</small>
-              <input
-                type="date"
-                [(ngModel)]="item.plannedDate"
-                [min]="item.minDate"
-                [max]="item.maxDate"
-                [disabled]="assetSaving"
-              />
-              </span>
+                <input
+                  type="date"
+                  [(ngModel)]="item.plannedDate"
+                  [min]="item.minDate"
+                  [max]="item.maxDate"
+                  [disabled]="assetSaving"
+                />
+              </label>
+              <div class="schedule-date-resolution" *ngIf="item.phase === 'historical'">
+                <label>
+                  Resolución del periodo
+                  <select [(ngModel)]="item.historicalResolution" [disabled]="assetSaving">
+                    <option value="pending_evidence">Tengo PDF para conciliar</option>
+                    <option value="not_performed">No se realizó</option>
+                  </select>
+                </label>
+                <label *ngIf="item.historicalResolution === 'not_performed'">
+                  Justificación
+                  <input
+                    type="text"
+                    [(ngModel)]="item.nonExecutionReason"
+                    maxlength="500"
+                    placeholder="Motivo verificable de la no ejecución"
+                    [disabled]="assetSaving"
+                  />
+                </label>
+              </div>
               <span class="schedule-date-deadline">
                 Fecha límite: {{ formatIsoDateForDisplay(item.deadlineDate) }}
               </span>
               <small class="schedule-date-error" *ngIf="scheduleProgrammingDateError(item) as dateError">
                 {{ dateError }}
               </small>
-            </label>
+              <small class="schedule-resolution-error" *ngIf="scheduleProgrammingResolutionError(item) as resolutionError">
+                {{ resolutionError }}
+              </small>
+            </div>
           </div>
           <ng-template #noFutureWindows>
             <p class="schedule-no-windows">
@@ -719,7 +785,7 @@
           [disabled]="!scheduleProgrammingValid || assetSaving"
         >
           {{ assetSaving ? 'Guardando...' : 'Guardar hoja de vida y cronograma' }}
-          <ng-container *ngIf="!assetSaving && scheduleProgrammingHistoricalCount">
+          <ng-container *ngIf="!assetSaving && scheduleProgrammingEvidenceCount">
             y continuar con PDFs
           </ng-container>
         </button>

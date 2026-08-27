@@ -484,10 +484,10 @@ function isPdfFile(file) {
 
 function respondScheduleError(res, error, fallbackMessage) {
   if (error instanceof ScheduleValidationError || error?.code === 'SCHEDULE_ITEM_MISMATCH') {
-    return res.status(400).json({ message: error.message });
+    return res.status(400).json({ message: error.message, code: error.code });
   }
   if (error?.code === 'SCHEDULE_EDIT_LOCKED' || error?.code === 'SCHEDULE_EDIT_STATE_CHANGED') {
-    return res.status(409).json({ message: error.message });
+    return res.status(409).json({ message: error.message, code: error.code });
   }
   console.error(error);
   return res.status(500).json({ message: fallbackMessage });
@@ -8886,6 +8886,7 @@ app.post(
         today: todayInBogota(),
         configuration: {
           maintenanceFrequency,
+          changeMode: req.body?.changeMode,
           areaId: req.body?.areaId || null,
           locationId: req.body?.locationId || null,
           acquisitionDate: req.body?.acquisitionDate || null,
@@ -8988,6 +8989,12 @@ app.put(
       }
       let scheduleProgrammingPreview = null;
       let scheduleProgrammingSelection = null;
+      const submittedScheduleProgramming = maintenanceScheduleProgramming
+        ? parseJsonObject(
+            maintenanceScheduleProgramming,
+            'La programación del mantenimiento'
+          )
+        : null;
       if (frequencyChanged) {
         scheduleProgrammingPreview = await previewApprovedAssetScheduleProgramming({
           clientId,
@@ -8996,6 +9003,7 @@ app.put(
           today: todayInBogota(),
           configuration: {
             maintenanceFrequency: requestedMaintenanceFrequency,
+            changeMode: submittedScheduleProgramming?.changeMode,
             areaId: areaId || null,
             locationId: locationId || null,
             acquisitionDate: requestedAcquisitionDate,
@@ -9003,10 +9011,7 @@ app.put(
           }
         });
         if (scheduleProgrammingPreview.requiresConfirmation) {
-          scheduleProgrammingSelection = parseJsonObject(
-            maintenanceScheduleProgramming,
-            'La programación del mantenimiento'
-          );
+          scheduleProgrammingSelection = submittedScheduleProgramming;
           if (!scheduleProgrammingSelection) {
             return res.status(409).json({
               message: 'Selecciona las fechas de mantenimiento antes de guardar la nueva periodicidad.',
@@ -9015,7 +9020,11 @@ app.put(
           }
           normalizeAssetScheduleProgrammingSelection(
             scheduleProgrammingSelection,
-            scheduleProgrammingPreview.schedules
+            scheduleProgrammingPreview.schedules,
+            {
+              expectedChangeMode: scheduleProgrammingPreview.changeMode,
+              expectedEffectiveDate: scheduleProgrammingPreview.effectiveDate
+            }
           );
         }
       }
@@ -9155,7 +9164,8 @@ app.put(
         return res.status(400).json({ message: error.message });
       }
       if (error instanceof ScheduleValidationError) {
-        return res.status(400).json({ message: error.message });
+        const status = error.code === 'SCHEDULE_EDIT_STATE_CHANGED' ? 409 : 400;
+        return res.status(status).json({ message: error.message, code: error.code });
       }
       console.error(error);
       return res.status(500).json({ message: 'No se pudo actualizar la hoja de vida.' });

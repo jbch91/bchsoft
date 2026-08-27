@@ -9,6 +9,7 @@ import {
   buildAssetMaintenanceOccurrences,
   buildOperationalMaintenanceOccurrences,
   buildRecurringDates,
+  canCorrectAssetScheduleItems,
   canEditMaintenanceSchedule,
   capDateAtMonthEndUtc,
   capDateAtScheduleYearEndUtc,
@@ -17,6 +18,7 @@ import {
   formatDateOnly,
   normalizeCalibrationItemUpdates,
   normalizeAssetScheduleProgrammingSelection,
+  normalizePeriodicityChangeMode,
   normalizeMaintenanceItemUpdates,
   normalizeScheduleStart,
   normalizeTrainingItemUpdates,
@@ -267,13 +269,17 @@ test('valida todas las fechas elegidas al cambiar la periodicidad de una hoja de
         ]
       }]
     }, expected),
-    [{
-      scheduleId,
-      items: [
-        { month: '2026-09', plannedDate: '2026-09-21', deadlineDate: '2026-09-30' },
-        { month: '2026-10', plannedDate: '2026-10-20', deadlineDate: '2026-10-31' }
-      ]
-    }]
+    {
+      changeMode: 'correction',
+      effectiveDate: null,
+      schedules: [{
+        scheduleId,
+        items: [
+          { month: '2026-09', plannedDate: '2026-09-21', deadlineDate: '2026-09-30' },
+          { month: '2026-10', plannedDate: '2026-10-20', deadlineDate: '2026-10-31' }
+        ]
+      }]
+    }
   );
 
   assert.throws(
@@ -299,6 +305,97 @@ test('valida todas las fechas elegidas al cambiar la periodicidad de una hoja de
       }]
     }, expected),
     /día hábil/
+  );
+});
+
+test('distingue una corrección anual de un cambio operativo con evidencia', () => {
+  assert.equal(normalizePeriodicityChangeMode(undefined), 'correction');
+  assert.equal(normalizePeriodicityChangeMode('operational'), 'operational');
+  assert.equal(
+    canCorrectAssetScheduleItems([
+      { status: 'expired', historical_resolution: 'pending_evidence' },
+      { status: 'active', has_blocking_request: false }
+    ]),
+    true
+  );
+  assert.equal(
+    canCorrectAssetScheduleItems([{ status: 'done', completion_source: 'software_report' }]),
+    false
+  );
+  assert.equal(
+    canCorrectAssetScheduleItems([
+      { status: 'expired', historical_resolution: 'not_performed' }
+    ]),
+    false
+  );
+  assert.equal(
+    canCorrectAssetScheduleItems([{ status: 'active', has_blocking_request: true }]),
+    false
+  );
+});
+
+test('exige resolución y justificación para cada periodo histórico reconstruido', () => {
+  const scheduleId = '11111111-1111-4111-8111-111111111111';
+  const expected = [{
+    scheduleId,
+    year: 2026,
+    items: [{
+      month: '2026-05',
+      plannedDate: '2026-05-18',
+      minDate: '2026-05-01',
+      maxDate: '2026-05-31',
+      deadlineDate: '2026-05-31',
+      phase: 'historical',
+      historicalResolution: 'pending_evidence'
+    }]
+  }];
+
+  assert.deepEqual(
+    normalizeAssetScheduleProgrammingSelection({
+      changeMode: 'correction',
+      effectiveDate: '2026-01-01',
+      schedules: [{
+        scheduleId,
+        items: [{
+          month: '2026-05',
+          plannedDate: '2026-05-18',
+          historicalResolution: 'not_performed',
+          nonExecutionReason: 'No fue ejecutado durante la vigencia.'
+        }]
+      }]
+    }, expected, {
+      expectedChangeMode: 'correction',
+      expectedEffectiveDate: '2026-01-01'
+    }),
+    {
+      changeMode: 'correction',
+      effectiveDate: '2026-01-01',
+      schedules: [{
+        scheduleId,
+        items: [{
+          month: '2026-05',
+          plannedDate: '2026-05-18',
+          deadlineDate: '2026-05-31',
+          phase: 'historical',
+          historicalResolution: 'not_performed',
+          nonExecutionReason: 'No fue ejecutado durante la vigencia.'
+        }]
+      }]
+    }
+  );
+
+  assert.throws(
+    () => normalizeAssetScheduleProgrammingSelection({
+      schedules: [{
+        scheduleId,
+        items: [{
+          month: '2026-05',
+          plannedDate: '2026-05-18',
+          historicalResolution: 'not_performed'
+        }]
+      }]
+    }, expected),
+    /justificación/
   );
 });
 

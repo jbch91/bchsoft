@@ -621,6 +621,12 @@ button:disabled {
   border-color: #e9aaaa;
 }
 
+.status-pill.not_performed {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
 .status-pill.edit-ready {
   color: #17653a;
   background: #ebf8f0;

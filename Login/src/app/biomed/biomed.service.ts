@@ -100,6 +100,9 @@ export interface MaintenanceScheduleSyncDto {
   activeItemsAdded?: number;
   requestsCreated?: number;
   historicalEvidenceRequired?: MaintenanceHistoricalEvidenceDto[];
+  historicalNotPerformed?: number;
+  periodicityChangeMode?: MaintenancePeriodicityChangeMode;
+  periodicityEffectiveDate?: string;
   firstPlannedDate: string | null;
   latestScheduleYear: number | null;
 }
@@ -112,6 +115,9 @@ export interface MaintenanceScheduleSyncBatchDto {
   activeItemsAdded?: number;
   requestsCreated?: number;
   historicalEvidenceRequired?: MaintenanceHistoricalEvidenceDto[];
+  historicalNotPerformed?: number;
+  periodicityChangeMode?: MaintenancePeriodicityChangeMode;
+  periodicityEffectiveDate?: string;
   assets: MaintenanceScheduleSyncDto[];
 }
 
@@ -123,6 +129,9 @@ export interface MaintenanceHistoricalEvidenceDto {
   deadlineDate: string;
 }
 
+export type MaintenancePeriodicityChangeMode = 'correction' | 'operational';
+export type MaintenanceHistoricalResolution = 'pending_evidence' | 'not_performed';
+
 export interface MaintenanceScheduleProgrammingItemDto {
   month: string;
   plannedDate: string;
@@ -130,6 +139,8 @@ export interface MaintenanceScheduleProgrammingItemDto {
   maxDate: string;
   deadlineDate: string;
   phase: 'historical' | 'current' | 'future';
+  historicalResolution: MaintenanceHistoricalResolution | null;
+  nonExecutionReason: string;
 }
 
 export interface MaintenanceScheduleProgrammingScheduleDto {
@@ -138,6 +149,8 @@ export interface MaintenanceScheduleProgrammingScheduleDto {
   status: 'approved';
   itemsToReplace: number;
   preservedItems: number;
+  preservedEvidenceItems: number;
+  preservedHistoricalItems: number;
   historicalItems: number;
   currentItems: number;
   futureItems: number;
@@ -149,15 +162,26 @@ export interface MaintenanceScheduleProgrammingPreviewDto {
   previousFrequency: string | null;
   frequency: string;
   effectiveToday: string;
+  changeMode: MaintenancePeriodicityChangeMode;
+  effectiveDate: string;
+  correctionAllowed: boolean;
+  correctionBlockedReason: string | null;
   warrantyReleaseDate: string | null;
   requiresConfirmation: boolean;
   schedules: MaintenanceScheduleProgrammingScheduleDto[];
 }
 
 export interface MaintenanceScheduleProgrammingSelectionDto {
+  changeMode: MaintenancePeriodicityChangeMode;
+  effectiveDate: string;
   schedules: Array<{
     scheduleId: string;
-    items: Array<{ month: string; plannedDate: string }>;
+    items: Array<{
+      month: string;
+      plannedDate: string;
+      historicalResolution?: MaintenanceHistoricalResolution;
+      nonExecutionReason?: string;
+    }>;
   }>;
 }
 
@@ -232,6 +256,8 @@ export interface HistoricalMaintenanceOccurrenceDto {
   occurrence_number: number;
   request_id?: string | null;
   request_status?: string | null;
+  historical_resolution?: 'pending_evidence' | 'not_performed' | 'evidence_uploaded' | null;
+  non_execution_reason?: string | null;
   eligible: boolean;
   unavailable_reason?: string | null;
 }
@@ -683,6 +709,7 @@ export class BiomedService {
       locationId?: string | null;
       acquisitionDate?: string | null;
       warrantyYears?: number | null;
+      changeMode?: MaintenancePeriodicityChangeMode;
     }
   ): Promise<MaintenanceScheduleProgrammingPreviewDto> {
     return firstValueFrom(

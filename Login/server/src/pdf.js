@@ -1764,9 +1764,17 @@ export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
         dates: []
       });
     }
+    let resolution = '';
+    if (item.historical_resolution === 'not_performed') {
+      resolution = ` · NO REALIZADO: ${safeText(item.non_execution_reason)}`;
+    } else if (item.historical_resolution === 'pending_evidence') {
+      resolution = ' · PDF HISTÓRICO PENDIENTE';
+    } else if (item.historical_resolution === 'evidence_uploaded') {
+      resolution = ' · PDF HISTÓRICO CONCILIADO';
+    }
     grouped
       .get(item.asset_id)
-      .dates.push(`${formatDate(item.planned_date)}-${formatDate(item.deadline_date)}`);
+      .dates.push(`${formatDate(item.planned_date)}-${formatDate(item.deadline_date)}${resolution}`);
   }
   const rows = Array.from(grouped.values()).map((item) => [
     safeText(item.code),
