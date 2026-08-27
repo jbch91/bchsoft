@@ -1851,8 +1851,24 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return this.reports.find((report) => report.id === item.report_id) ?? null;
   }
 
-  preventiveApplicableTotal(progress: PreventiveProgressSummaryDto): number {
-    return Math.max(0, progress.total - progress.warranty);
+  preventiveManagedTotal(progress: PreventiveProgressSummaryDto): number {
+    return progress.completed + progress.warranty;
+  }
+
+  preventiveManagedPercent(progress: PreventiveProgressSummaryDto): number {
+    const rawPercent = progress.total
+      ? (this.preventiveManagedTotal(progress) / progress.total) * 100
+      : 0;
+    return rawPercent > 0 && rawPercent < 1
+      ? Number(rawPercent.toFixed(1))
+      : Math.round(rawPercent);
+  }
+
+  preventiveProgressShare(
+    progress: PreventiveProgressSummaryDto,
+    phase: 'completed' | 'warranty'
+  ): number {
+    return progress.total ? (progress[phase] / progress.total) * 100 : 0;
   }
 
   preventiveWarrantyReleaseLabel(item: PreventiveProgressItemDto): string {

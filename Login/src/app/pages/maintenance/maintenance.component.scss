@@ -1782,7 +1782,7 @@ button:disabled {
 
 .preventive-completion-row {
   display: grid;
-  grid-template-columns: minmax(150px, auto) minmax(180px, 1fr) auto auto;
+  grid-template-columns: minmax(150px, auto) minmax(180px, 1fr) repeat(3, auto);
 }
 
 .preventive-completion-value {
@@ -1813,15 +1813,22 @@ button:disabled {
 }
 
 .preventive-completion-track {
+  display: flex;
   height: 9px;
 }
 
 .preventive-completion-track > span {
   display: block;
   height: 100%;
-  border-radius: inherit;
-  background: #278354;
   transition: width 180ms ease;
+}
+
+.preventive-completion-track .completed {
+  background: #278354;
+}
+
+.preventive-completion-track .warranty {
+  background: #168579;
 }
 
 .preventive-status-track {

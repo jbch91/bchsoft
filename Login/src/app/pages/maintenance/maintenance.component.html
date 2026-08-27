@@ -332,20 +332,30 @@
           <ng-container *ngIf="activePreventiveProgress as progress">
             <div class="preventive-completion-row">
               <div class="preventive-completion-value">
-                <strong>{{ progress.completion_percent }}%</strong>
+                <strong>{{ preventiveManagedPercent(progress) }}%</strong>
                 <span>
-                  {{ progress.completed }} de {{ preventiveApplicableTotal(progress) }} aplicables finalizados
+                  {{ preventiveManagedTotal(progress) }} de {{ progress.total }} actividades gestionadas
                 </span>
               </div>
               <div
                 class="preventive-completion-track"
                 role="progressbar"
-                aria-label="Preventivos finalizados"
-                [attr.aria-valuenow]="progress.completion_percent"
+                aria-label="Avance preventivo gestionado"
+                [attr.aria-valuenow]="preventiveManagedPercent(progress)"
+                [attr.aria-valuetext]="progress.completed + ' finalizadas y ' + progress.warranty + ' cubiertas por garantía de ' + progress.total"
                 aria-valuemin="0"
                 aria-valuemax="100"
               >
-                <span [style.width.%]="progress.completion_percent"></span>
+                <span
+                  class="completed"
+                  [style.width.%]="preventiveProgressShare(progress, 'completed')"
+                  [title]="'Finalizadas: ' + progress.completed"
+                ></span>
+                <span
+                  class="warranty"
+                  [style.width.%]="preventiveProgressShare(progress, 'warranty')"
+                  [title]="'Cubiertas por garantía: ' + progress.warranty"
+                ></span>
               </div>
               <span class="preventive-overdue" *ngIf="progress.overdue">
                 {{ progress.overdue }} vencido{{ progress.overdue === 1 ? '' : 's' }} sin finalizar
