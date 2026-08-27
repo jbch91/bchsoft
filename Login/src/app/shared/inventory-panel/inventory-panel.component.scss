@@ -118,7 +118,6 @@ input[type='file'].file-input:hover::file-selector-button {
 
 .row {
   display: grid;
-  grid-template-columns: 96px 1.25fr 0.9fr 0.9fr 0.9fr 0.95fr 0.95fr 0.95fr 190px;
   gap: 12px;
   background: #ffffff;
   padding: 12px;
@@ -126,6 +125,62 @@ input[type='file'].file-input:hover::file-selector-button {
   border: 1px solid color-mix(in srgb, var(--border) 76%, var(--ink));
   box-shadow: 0 12px 22px rgba(15, 23, 42, 0.06);
   font-size: 13px;
+}
+
+.life-sheet-row {
+  grid-template-columns: 96px minmax(150px, 1fr) minmax(190px, 1.2fr) minmax(210px, 1.3fr) 130px minmax(230px, 1.25fr);
+}
+
+.inventory-row {
+  grid-template-columns: 96px minmax(150px, 1fr) minmax(190px, 1.2fr) minmax(230px, 1.45fr) 150px minmax(170px, 0.85fr);
+}
+
+.cell-stack {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cell-stack strong,
+.cell-stack small {
+  overflow-wrap: anywhere;
+}
+
+.cell-stack small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.status-pill {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  color: #334155;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.25;
+  padding: 5px 8px;
+}
+
+.status-pill[data-status='activo'],
+.status-pill[data-status='operativo'] {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.status-pill[data-status='operativo_observacion'] {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.status-pill[data-status='fuera_de_servicio'],
+.status-pill[data-status='dado_de_baja'] {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
 }
 
 .row.header {
@@ -140,6 +195,35 @@ input[type='file'].file-input:hover::file-selector-button {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.inventory-summary {
+  border-block: 1px solid color-mix(in srgb, var(--border) 78%, var(--brand-600));
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.inventory-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 16px;
+}
+
+.inventory-summary > div + div {
+  border-left: 1px solid var(--border);
+}
+
+.inventory-summary span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.inventory-summary strong {
+  color: var(--ink);
+  font-size: 20px;
 }
 
 .actions button,
@@ -507,6 +591,19 @@ button:disabled {
     flex-direction: column;
     align-items: stretch;
   }
+
+  .inventory-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inventory-summary > div:nth-child(3) {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .inventory-summary > div:nth-child(4) {
+    border-top: 1px solid var(--border);
+  }
 }
 
 @media (max-width: 720px) {
@@ -552,5 +649,15 @@ button:disabled {
 @media (max-width: 600px) {
   .card {
     padding: 16px;
+  }
+
+  .inventory-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-summary > div + div,
+  .inventory-summary > div:nth-child(3) {
+    border-left: 0;
+    border-top: 1px solid var(--border);
   }
 }

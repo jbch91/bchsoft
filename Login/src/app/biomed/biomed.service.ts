@@ -263,6 +263,34 @@ export interface HistoricalMaintenanceOccurrenceDto {
   unavailable_reason?: string | null;
 }
 
+export interface PendingHistoricalProtocolDto {
+  id: string;
+  schedule_id: string;
+  asset_id: string;
+  frequency: string;
+  planned_date: string;
+  deadline_date: string;
+  status: string;
+  schedule_status: string;
+  year: number;
+  occurrence_number: number;
+  code: string;
+  name: string;
+  brand?: string | null;
+  model?: string | null;
+  serial?: string | null;
+  site_id?: string | null;
+  site_name?: string | null;
+  area_id?: string | null;
+  area_name?: string | null;
+  location_id?: string | null;
+  location_name?: string | null;
+  request_id?: string | null;
+  request_status?: string | null;
+  eligible: boolean;
+  unavailable_reason?: string | null;
+}
+
 export interface AssetHistoryUploadResultDto {
   id: string;
   reconciliation?: {
@@ -584,6 +612,21 @@ export class BiomedService {
     return firstValueFrom(
       this.http.get<HistoricalMaintenanceOccurrenceDto[]>(
         `${this.apiBase}/biomed/${clientId}/assets/${assetId}/historical-maintenance-occurrences?${query}`
+      )
+    );
+  }
+
+  async listPendingHistoricalProtocols(
+    clientId: string,
+    params: { year: number; assetCategory: AssetCategory }
+  ): Promise<PendingHistoricalProtocolDto[]> {
+    const query = new URLSearchParams({
+      year: String(params.year),
+      category: params.assetCategory
+    });
+    return firstValueFrom(
+      this.http.get<PendingHistoricalProtocolDto[]>(
+        `${this.apiBase}/biomed/${clientId}/pending-historical-protocols?${query}`
       )
     );
   }

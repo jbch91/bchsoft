@@ -1,7 +1,6 @@
 import { ChangeDetectorRef, Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
 import { BiomedService } from '../../biomed/biomed.service';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
@@ -50,8 +49,7 @@ export class InventarioComponent {
     private readonly biomed: BiomedService,
     private readonly admin: AdminService,
     public readonly auth: AuthService,
-    private readonly cdr: ChangeDetectorRef,
-    private readonly router: Router
+    private readonly cdr: ChangeDetectorRef
   ) {
     void this.init();
   }
@@ -275,16 +273,6 @@ export class InventarioComponent {
     });
 
     doc.save('codigos-qr-inventario.pdf');
-  }
-
-  async deleteItem(item: InventoryPanelItem): Promise<void> {
-    if (!this.selectedClientId) return;
-    await this.biomed.deleteAsset(this.selectedClientId, item.id);
-    await this.loadItems();
-  }
-
-  goEdit(item: InventoryPanelItem): void {
-    void this.router.navigate(['/hojas-de-vida'], { queryParams: { assetId: item.id } });
   }
 
   async generateQrCodes(items: InventoryPanelItem[], force = false): Promise<void> {

@@ -3,6 +3,7 @@ import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, Output } 
 import { FormsModule } from '@angular/forms';
 import {
   AssetHistoryItemDto,
+  AssetMovementDto,
   BiomedService,
   HistoricalMaintenanceOccurrenceDto,
   MaintenanceScheduleSyncDto
@@ -50,6 +51,8 @@ type HistoryDocumentType =
   | 'calibration'
   | 'other';
 
+export type InventoryPanelMode = 'life_sheets' | 'inventory';
+
 @Component({
   selector: 'app-inventory-panel',
   standalone: true,
@@ -63,8 +66,10 @@ export class InventoryPanelComponent implements OnDestroy {
   @Input() loading = false;
   @Input() errorMessage = '';
   @Input() canEdit = false;
+  @Input() canDelete = false;
   @Input() canMove = false;
   @Input() canUploadHistory = false;
+  @Input() mode: InventoryPanelMode = 'inventory';
   @Input() viewInModal = false;
   @Input() showRetired = false;
   @Input() title = 'Inventario';
@@ -74,6 +79,7 @@ export class InventoryPanelComponent implements OnDestroy {
   @Output() editItem = new EventEmitter<InventoryPanelItem>();
   @Output() deleteItem = new EventEmitter<InventoryPanelItem>();
   @Output() movedItem = new EventEmitter<void>();
+  @Output() historyUploaded = new EventEmitter<void>();
 
   searchTerm = '';
   filterSite = '';
@@ -158,6 +164,32 @@ export class InventoryPanelComponent implements OnDestroy {
     return Array.from(new Set(this.items.map((item) => item.areaName || '').filter(Boolean))).sort();
   }
 
+  get isLifeSheetMode(): boolean {
+    return this.mode === 'life_sheets';
+  }
+
+  get inventoryAreaCount(): number {
+    return this.areaOptions.length;
+  }
+
+  get inventoryOperationalCount(): number {
+    return this.visibleItems.filter((item) =>
+      ['activo', 'operativo'].includes(String(item.status || '').toLowerCase())
+    ).length;
+  }
+
+  get inventoryObservationCount(): number {
+    return this.visibleItems.filter(
+      (item) => String(item.status || '').toLowerCase() === 'operativo_observacion'
+    ).length;
+  }
+
+  get inventoryOutOfServiceCount(): number {
+    return this.visibleItems.filter(
+      (item) => String(item.status || '').toLowerCase() === 'fuera_de_servicio'
+    ).length;
+  }
+
   get siteOptions(): string[] {
     return Array.from(new Set(this.items.map((item) => item.siteName || '').filter(Boolean))).sort();
   }
@@ -220,7 +252,18 @@ export class InventoryPanelComponent implements OnDestroy {
   }
 
   get canUploadHistoryFile(): boolean {
-    return this.canUploadHistory;
+    return this.isLifeSheetMode && this.canUploadHistory;
+  }
+
+  assetStatusLabel(status: string | null | undefined): string {
+    const labels: Record<string, string> = {
+      activo: 'Activo',
+      operativo: 'Operativo',
+      operativo_observacion: 'Operativo con observaciones',
+      fuera_de_servicio: 'Fuera de servicio',
+      dado_de_baja: 'Dado de baja'
+    };
+    return labels[String(status || '').toLowerCase()] || status || 'Sin estado';
   }
 
   get historicalEvidencePendingLabels(): string[] {
@@ -488,13 +531,22 @@ export class InventoryPanelComponent implements OnDestroy {
     const token = ++this.historyLoadToken;
     this.historyLoading = true;
     try {
-      const result = await this.biomed.listAssetHistory(this.selectedClientId, this.historyAssetId, {
-        from: this.historyFrom || undefined,
-        to: this.historyTo || undefined,
-        order: this.historyOrder,
-        limit: this.historyLimit,
-        offset: this.historyOffset
-      });
+      const result = this.isLifeSheetMode
+        ? await this.biomed.listAssetHistory(this.selectedClientId, this.historyAssetId, {
+            from: this.historyFrom || undefined,
+            to: this.historyTo || undefined,
+            order: this.historyOrder,
+            limit: this.historyLimit,
+            offset: this.historyOffset
+          })
+        : this.mapMovementHistory(
+            await this.biomed.listAssetMovements(
+              this.selectedClientId,
+              this.historyAssetId,
+              this.historyLimit,
+              this.historyOffset
+            )
+          );
       if (token !== this.historyLoadToken) return;
       this.historyItems = result;
       this.historyHasMore = result.length === this.historyLimit;
@@ -621,6 +673,7 @@ export class InventoryPanelComponent implements OnDestroy {
       this.historyUploadSuccess = result.reconciliation
         ? 'Mantenimiento histórico conciliado con el cronograma.'
         : 'PDF histórico archivado correctamente.';
+      this.historyUploaded.emit();
       if (result.reconciliation) {
         const reconciledMonth = result.reconciliation.plannedDate.slice(0, 7);
         const matchingIndex = this.historicalEvidenceDates.findIndex(
@@ -756,6 +809,35 @@ export class InventoryPanelComponent implements OnDestroy {
       ? ` ${sync.activeItemsAdded} mantenimiento(s) quedó(aron) activo(s).`
       : '';
     return ` El cronograma aprobado se alineó con el área y ubicación de destino: ${sync.itemsRemoved} fecha(s) anterior(es) reemplazada(s) por ${sync.itemsAdded} fecha(s)${firstDate ? ` desde el ${firstDate}` : ''}.${active}`;
+  }
+
+  private mapMovementHistory(rows: AssetMovementDto[]): AssetHistoryItemDto[] {
+    return rows.map((movement) => {
+      const origin = [
+        movement.from_site_name,
+        movement.from_area_name,
+        movement.from_location_name
+      ].filter(Boolean).join(' / ') || 'Sin ubicación anterior';
+      const destination = [
+        movement.to_site_name,
+        movement.to_area_name,
+        movement.to_location_name
+      ].filter(Boolean).join(' / ') || 'Sin ubicación de destino';
+      const details = [
+        movement.notes,
+        movement.moved_by_name ? `Responsable: ${movement.moved_by_name}` : ''
+      ].filter(Boolean).join(' · ');
+      return {
+        id: movement.id,
+        item_type: 'movement_report',
+        subtype: 'movement',
+        event_date: movement.created_at,
+        title: `${origin} -> ${destination}`,
+        description: details || null,
+        pdf_path: movement.pdf_path ?? null,
+        created_at: movement.created_at
+      };
+    });
   }
 
   private toCsv(headers: string[], rows: string[][]): string {

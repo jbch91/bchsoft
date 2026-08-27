@@ -14,7 +14,8 @@ import {
   MaintenanceScheduleProgrammingPreviewDto,
   MaintenanceScheduleProgrammingSelectionDto,
   MaintenanceScheduleSyncBatchDto,
-  MaintenanceScheduleSyncDto
+  MaintenanceScheduleSyncDto,
+  PendingHistoricalProtocolDto
 } from '../../biomed/biomed.service';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
@@ -136,6 +137,8 @@ interface AssetView extends InventoryPanelItem {
   locationId?: string | null;
 }
 
+type LifeSheetWorkspaceView = 'records' | 'pending_protocols';
+
 @Component({
   selector: 'app-hojas-de-vida',
   standalone: true,
@@ -177,6 +180,28 @@ export class HojasDeVidaComponent implements OnDestroy {
   selectedAssetForModal: AssetView | null = null;
   assetDetailsLoading = false;
   detailModalTab: 'summary' | 'history' | 'documents' = 'summary';
+  activeLifeSheetView: LifeSheetWorkspaceView = 'records';
+  readonly currentProtocolYear = new Date().getFullYear();
+  pendingProtocols: PendingHistoricalProtocolDto[] = [];
+  pendingProtocolsLoading = false;
+  pendingProtocolsError = '';
+  pendingProtocolSearch = '';
+  pendingProtocolArea = '';
+  pendingProtocolMonth = '';
+  readonly pendingProtocolMonths = [
+    { value: '01', label: 'Enero' },
+    { value: '02', label: 'Febrero' },
+    { value: '03', label: 'Marzo' },
+    { value: '04', label: 'Abril' },
+    { value: '05', label: 'Mayo' },
+    { value: '06', label: 'Junio' },
+    { value: '07', label: 'Julio' },
+    { value: '08', label: 'Agosto' },
+    { value: '09', label: 'Septiembre' },
+    { value: '10', label: 'Octubre' },
+    { value: '11', label: 'Noviembre' },
+    { value: '12', label: 'Diciembre' }
+  ];
   assetHistoryItems: AssetHistoryItemDto[] = [];
   assetHistoryLoading = false;
   assetHistoryError = '';
@@ -363,8 +388,8 @@ export class HojasDeVidaComponent implements OnDestroy {
 
   get inventoryTitle(): string {
     return this.isIndustrialAssetModule
-      ? 'Inventario de equipos industriales'
-      : 'Inventario de hojas de vida';
+      ? 'Hojas de vida industriales registradas'
+      : 'Hojas de vida registradas';
   }
 
   ngOnDestroy(): void {
@@ -461,8 +486,106 @@ export class HojasDeVidaComponent implements OnDestroy {
 
   async onClientChange(): Promise<void> {
     await this.loadSites();
-    await Promise.all([this.loadAreas(), this.loadEquipmentCatalog(), this.loadAssets()]);
+    await Promise.all([
+      this.loadAreas(),
+      this.loadEquipmentCatalog(),
+      this.loadAssets(),
+      this.loadPendingProtocols()
+    ]);
     await this.openPendingRouteAsset();
+  }
+
+  setLifeSheetView(view: LifeSheetWorkspaceView): void {
+    this.activeLifeSheetView = view;
+    if (view === 'pending_protocols' && !this.pendingProtocolsLoading) {
+      void this.loadPendingProtocols();
+    }
+  }
+
+  get canUploadHistoricalProtocols(): boolean {
+    return this.auth.hasPermission('asset_history:upload');
+  }
+
+  get pendingProtocolAreas(): string[] {
+    return Array.from(
+      new Set(this.pendingProtocols.map((item) => item.area_name || '').filter(Boolean))
+    ).sort();
+  }
+
+  get filteredPendingProtocols(): PendingHistoricalProtocolDto[] {
+    const term = this.pendingProtocolSearch.toLocaleLowerCase('es-CO').trim();
+    return this.pendingProtocols.filter((item) => {
+      if (this.pendingProtocolArea && item.area_name !== this.pendingProtocolArea) return false;
+      if (this.pendingProtocolMonth && item.planned_date.slice(5, 7) !== this.pendingProtocolMonth) {
+        return false;
+      }
+      if (!term) return true;
+      return [item.code, item.name, item.brand, item.model, item.serial, item.area_name, item.location_name]
+        .map((value) => String(value || '').toLocaleLowerCase('es-CO'))
+        .join(' ')
+        .includes(term);
+    });
+  }
+
+  get pendingProtocolEquipmentCount(): number {
+    return new Set(this.pendingProtocols.map((item) => item.asset_id)).size;
+  }
+
+  get pendingProtocolEligibleCount(): number {
+    return this.pendingProtocols.filter((item) => item.eligible).length;
+  }
+
+  get pendingProtocolOldestDate(): string {
+    return this.pendingProtocols[0]?.planned_date || '';
+  }
+
+  clearPendingProtocolFilters(): void {
+    this.pendingProtocolSearch = '';
+    this.pendingProtocolArea = '';
+    this.pendingProtocolMonth = '';
+  }
+
+  pendingProtocolStateLabel(item: PendingHistoricalProtocolDto): string {
+    if (!item.eligible) return item.schedule_status === 'draft' ? 'Cronograma sin aprobar' : 'No conciliable';
+    return 'Pendiente de PDF';
+  }
+
+  async loadPendingProtocols(): Promise<void> {
+    if (!this.selectedClientId) {
+      this.pendingProtocols = [];
+      return;
+    }
+    this.pendingProtocolsLoading = true;
+    this.pendingProtocolsError = '';
+    try {
+      this.pendingProtocols = await this.biomed.listPendingHistoricalProtocols(
+        this.selectedClientId,
+        { year: this.currentProtocolYear, assetCategory: this.assetCategory }
+      );
+    } catch (error) {
+      console.error(error);
+      this.pendingProtocols = [];
+      this.pendingProtocolsError = 'No se pudieron cargar los protocolos pendientes.';
+    } finally {
+      this.pendingProtocolsLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  async openPendingProtocolUpload(protocol: PendingHistoricalProtocolDto): Promise<void> {
+    if (!this.canUploadHistoricalProtocols || !protocol.eligible) return;
+    const asset = this.assets.find((item) => item.id === protocol.asset_id);
+    if (!asset) {
+      this.pendingProtocolsError = 'No se encontró la hoja de vida asociada al protocolo.';
+      return;
+    }
+    this.activeLifeSheetView = 'records';
+    this.cdr.detectChanges();
+    await this.inventoryPanel?.openHistoricalUpload(asset, [protocol.planned_date]);
+  }
+
+  onHistoricalProtocolUploaded(): void {
+    void this.loadPendingProtocols();
   }
 
   get equipmentCatalogNames(): string[] {
@@ -552,7 +675,6 @@ export class HojasDeVidaComponent implements OnDestroy {
 
   get canRefreshTemporaryPermissions(): boolean {
     return this.auth.isAuthenticated()
-      && !this.canImportAssets
       && (this.auth.hasRole('ingeniero_biomedico') || Boolean(this.auth.currentUser()?.clientId));
   }
 
@@ -566,6 +688,7 @@ export class HojasDeVidaComponent implements OnDestroy {
 
   toggleImportPanel(): void {
     if (!this.canImportAssets) return;
+    this.activeLifeSheetView = 'records';
     this.importPanelOpen = !this.importPanelOpen;
   }
 
@@ -575,6 +698,7 @@ export class HojasDeVidaComponent implements OnDestroy {
     if (!force && now - this.lastPermissionRefreshAt < this.permissionRefreshCooldownMs) return;
     this.lastPermissionRefreshAt = now;
     const hadImportPermission = this.canImportAssets;
+    const hadHistoryPermission = this.canUploadHistoricalProtocols;
     this.permissionsRefreshLoading = true;
     try {
       let refreshed = await this.auth.refreshSession();
@@ -582,14 +706,33 @@ export class HojasDeVidaComponent implements OnDestroy {
         refreshed = await this.auth.reloadCurrentUser();
       }
       if (!refreshed) return;
+      const gainedPermissions: string[] = [];
       const gainedImportPermission = !hadImportPermission && this.canImportAssets;
       if (gainedImportPermission) {
+        this.activeLifeSheetView = 'records';
         this.importPanelOpen = true;
+        gainedPermissions.push('importación masiva');
+      }
+      if (!hadHistoryPermission && this.canUploadHistoricalProtocols) {
+        gainedPermissions.push('migración de protocolos históricos');
+      }
+      if (gainedPermissions.length) {
         this.errorMessage = '';
-        this.successMessage = 'Permisos actualizados. Ya puedes importar hojas de vida.';
-      } else if (force && !this.canImportAssets) {
-        this.successMessage = '';
-        this.errorMessage = 'Aún no aparece el permiso temporal de importación. Verifica que esté activo y con fecha vigente.';
+        this.successMessage = `Permisos actualizados. Ya puedes usar: ${gainedPermissions.join(' y ')}.`;
+      } else if (force) {
+        const activePermissions: string[] = [];
+        if (this.canImportAssets) activePermissions.push('importación masiva');
+        if (this.canUploadHistoricalProtocols) activePermissions.push('migración de protocolos históricos');
+        if (activePermissions.length) {
+          this.errorMessage = '';
+          this.successMessage = `Permisos actualizados. Activos: ${activePermissions.join(' y ')}.`;
+        } else {
+          this.successMessage = '';
+          this.errorMessage = 'No aparecen permisos temporales activos para importación o migración de PDFs. Verifica su vigencia con el administrador del cliente.';
+        }
+      }
+      if (!this.canUploadHistoricalProtocols && this.activeLifeSheetView === 'pending_protocols') {
+        this.pendingProtocolsError = '';
       }
     } finally {
       this.permissionsRefreshLoading = false;
@@ -933,7 +1076,7 @@ export class HojasDeVidaComponent implements OnDestroy {
       this.successMessage = importSuccess;
       this.importPreviewRows = [];
       this.importFileName = '';
-      await Promise.all([this.loadAssets(), this.loadEquipmentCatalog()]);
+      await Promise.all([this.loadAssets(), this.loadEquipmentCatalog(), this.loadPendingProtocols()]);
       this.resetForm();
       this.importPanelOpen = false;
     } catch (error) {
@@ -2100,7 +2243,7 @@ export class HojasDeVidaComponent implements OnDestroy {
       this.resetForm();
       this.assetModalMode = null;
       this.selectedAssetForModal = null;
-      await Promise.all([this.loadAssets(), this.loadEquipmentCatalog()]);
+      await Promise.all([this.loadAssets(), this.loadEquipmentCatalog(), this.loadPendingProtocols()]);
       if (historicalFollowUpAssetId && historicalFollowUpDates.length) {
         if (this.auth.hasPermission('asset_history:upload')) {
           const asset = this.assets.find((item) => item.id === historicalFollowUpAssetId);
@@ -2318,7 +2461,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   async deleteAsset(asset: InventoryPanelItem): Promise<void> {
     if (!this.selectedClientId) return;
     await this.biomed.deleteAsset(this.selectedClientId, asset.id);
-    await this.loadAssets();
+    await Promise.all([this.loadAssets(), this.loadPendingProtocols()]);
   }
 
   async downloadPdf(asset: AssetView): Promise<void> {

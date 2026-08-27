@@ -51,12 +51,9 @@
     [selectedClientId]="selectedClientId"
     [loading]="loading"
     [errorMessage]="errorMessage"
-    [canEdit]="auth.hasPermission('hb:create')"
     [canMove]="auth.hasPermission('inventory:move')"
-    [canUploadHistory]="auth.hasPermission('asset_history:upload')"
-    title="Inventario"
-    (editItem)="goEdit($event)"
-    (deleteItem)="deleteItem($event)"
+    mode="inventory"
+    title="Control de inventario"
     (movedItem)="loadItems()"
   ></app-inventory-panel>
 

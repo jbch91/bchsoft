@@ -18,21 +18,21 @@
         <option *ngFor="let area of areaOptions" [value]="area">{{ area }}</option>
       </select>
     </label>
-    <label>
+    <label *ngIf="!isLifeSheetMode">
       Ubicación
       <select [(ngModel)]="filterLocation">
         <option value="">Todas</option>
         <option *ngFor="let location of locationOptions" [value]="location">{{ location }}</option>
       </select>
     </label>
-    <label>
+    <label *ngIf="!isLifeSheetMode">
       Estado operativo
       <select [(ngModel)]="filterStatus">
         <option value="">Todos</option>
         <option *ngFor="let status of statusOptions" [value]="status">{{ status }}</option>
       </select>
     </label>
-    <label>
+    <label *ngIf="!isLifeSheetMode">
       Exportar como
       <select [(ngModel)]="exportFormat">
         <option value="xlsx">Excel (.xlsx)</option>
@@ -41,12 +41,15 @@
       </select>
     </label>
     <button type="button" class="ghost" (click)="clearFilters()">Limpiar</button>
-    <button type="button" class="ghost" (click)="exportInventory(true)">Exportar filtrado</button>
-    <button type="button" class="ghost" (click)="exportInventory(false)">Exportar todo</button>
+    <button type="button" class="ghost" *ngIf="!isLifeSheetMode" (click)="exportInventory(true)">Exportar filtrado</button>
+    <button type="button" class="ghost" *ngIf="!isLifeSheetMode" (click)="exportInventory(false)">Exportar todo</button>
   </div>
 
   <div class="filter-summary">
-    <span>Mostrando {{ filteredCount }} de {{ totalCount }} equipos</span>
+    <span>
+      Mostrando {{ filteredCount }} de {{ totalCount }}
+      {{ isLifeSheetMode ? 'hojas de vida' : 'equipos' }}
+    </span>
     <div class="filter-chips" *ngIf="activeFilters.length">
       <button
         type="button"
@@ -64,40 +67,77 @@
 <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
 <p class="success movement-feedback" *ngIf="moveSuccess && !movingAssetId">{{ moveSuccess }}</p>
 
+<div class="inventory-summary" *ngIf="!loading && !isLifeSheetMode">
+  <div><span>Equipos activos</span><strong>{{ inventoryOperationalCount }}</strong></div>
+  <div><span>Con observaciones</span><strong>{{ inventoryObservationCount }}</strong></div>
+  <div><span>Fuera de servicio</span><strong>{{ inventoryOutOfServiceCount }}</strong></div>
+  <div><span>Áreas con equipos</span><strong>{{ inventoryAreaCount }}</strong></div>
+</div>
+
 <div class="card table-card" *ngIf="!loading">
   <h2>{{ title }}</h2>
   <p class="muted" *ngIf="!filteredItems.length">{{ emptyMessage }}</p>
   <div class="table" *ngIf="filteredItems.length">
-    <div class="row header">
+    <div class="row header life-sheet-row" *ngIf="isLifeSheetMode">
       <span>Código</span>
       <span>Equipo</span>
-      <span>Marca</span>
-      <span>Modelo</span>
-      <span>Serial</span>
-      <span>Sede</span>
-      <span>Área</span>
-      <span>Ubicación</span>
+      <span>Identificación técnica</span>
+      <span>Ubicación registrada</span>
+      <span>Estado</span>
+      <span>Acciones</span>
+    </div>
+    <div class="row header inventory-row" *ngIf="!isLifeSheetMode">
+      <span>Código</span>
+      <span>Equipo</span>
+      <span>Identificación</span>
+      <span>Ubicación actual</span>
+      <span>Estado operativo</span>
       <span>Acciones</span>
     </div>
     <ng-container *ngFor="let item of filteredItems">
-      <div class="row">
+      <div class="row life-sheet-row" *ngIf="isLifeSheetMode">
         <span data-label="Código">{{ item.code }}</span>
         <span data-label="Equipo">{{ item.name }}</span>
-        <span data-label="Marca">{{ item.brand || '-' }}</span>
-        <span data-label="Modelo">{{ item.model || '-' }}</span>
-        <span data-label="Serial">{{ item.serial || '-' }}</span>
-        <span data-label="Sede">{{ item.siteName || '-' }}</span>
-        <span data-label="Área">{{ item.areaName || '-' }}</span>
-        <span data-label="Ubicación">{{ item.locationName || '-' }}</span>
+        <span class="cell-stack" data-label="Identificación técnica">
+          <strong>{{ item.brand || '-' }} · {{ item.model || '-' }}</strong>
+          <small>Serie {{ item.serial || '-' }}</small>
+        </span>
+        <span class="cell-stack" data-label="Ubicación registrada">
+          <strong>{{ item.areaName || '-' }} / {{ item.locationName || '-' }}</strong>
+          <small>{{ item.siteName || '-' }}</small>
+        </span>
+        <span data-label="Estado">
+          <span class="status-pill" [attr.data-status]="item.status">{{ assetStatusLabel(item.status) }}</span>
+        </span>
         <span class="actions">
-          <button type="button" (click)="viewInModal ? viewItem.emit(item) : toggleHistory(item)">Ver hoja de vida</button>
-          <button type="button" *ngIf="canMove" (click)="startMove(item)">Mover</button>
+          <button type="button" (click)="viewItem.emit(item)">Ver</button>
+          <button type="button" *ngIf="canUploadHistory" (click)="openHistoricalUpload(item, [])">Protocolos</button>
           <button type="button" *ngIf="canEdit" (click)="editItem.emit(item)">Editar</button>
-          <button type="button" class="danger" *ngIf="canEdit" (click)="requestDelete(item)">Eliminar</button>
+          <button type="button" class="danger" *ngIf="canDelete" (click)="requestDelete(item)">Eliminar</button>
         </span>
       </div>
 
-      <div class="move-inline" *ngIf="movingAssetId === item.id">
+      <div class="row inventory-row" *ngIf="!isLifeSheetMode">
+        <span data-label="Código">{{ item.code }}</span>
+        <span data-label="Equipo">{{ item.name }}</span>
+        <span class="cell-stack" data-label="Identificación">
+          <strong>{{ item.brand || '-' }} · {{ item.model || '-' }}</strong>
+          <small>Serie {{ item.serial || '-' }}</small>
+        </span>
+        <span class="cell-stack" data-label="Ubicación actual">
+          <strong>{{ item.areaName || '-' }} / {{ item.locationName || '-' }}</strong>
+          <small>{{ item.siteName || '-' }}</small>
+        </span>
+        <span data-label="Estado operativo">
+          <span class="status-pill" [attr.data-status]="item.status">{{ assetStatusLabel(item.status) }}</span>
+        </span>
+        <span class="actions">
+          <button type="button" (click)="toggleHistory(item)">Trazabilidad</button>
+          <button type="button" *ngIf="canMove" (click)="startMove(item)">Mover</button>
+        </span>
+      </div>
+
+      <div class="move-inline" *ngIf="!isLifeSheetMode && movingAssetId === item.id">
         <div class="move-inline-header">
           <div>
             <strong>Mover equipo</strong>
@@ -147,7 +187,7 @@
         <div class="history-inline-header">
           <div class="history-inline-title">
             <div>
-              <strong>Historial del equipo</strong>
+              <strong>{{ isLifeSheetMode ? 'Historial documental' : 'Trazabilidad de ubicación' }}</strong>
               <p class="muted">
                 {{ item.code }} · {{ item.name }} · Serie {{ item.serial || '-' }}
               </p>
@@ -170,7 +210,7 @@
             </div>
           </div>
 
-          <div class="history-inline-filters">
+          <div class="history-inline-filters" *ngIf="isLifeSheetMode">
             <label>
               Desde
               <input type="date" [(ngModel)]="historyFrom" (change)="loadHistory()" />
@@ -285,14 +325,14 @@
             <span>Acciones</span>
           </div>
 
-          <div class="history-row pinned">
+          <div class="history-row pinned" *ngIf="isLifeSheetMode">
             <span class="history-badge">Hoja de vida</span>
             <span>-</span>
             <span>PDF principal de la hoja de vida del equipo seleccionado</span>
             <span><button type="button" class="history-btn" (click)="openHistoryHv()">VER</button></span>
           </div>
 
-          <div class="history-row pinned guide-pinned">
+          <div class="history-row pinned guide-pinned" *ngIf="isLifeSheetMode">
             <span class="history-badge">Guía rápida</span>
             <span>-</span>
             <span>Guía práctica de uso seguro por marca y modelo del equipo</span>
@@ -312,7 +352,7 @@
               <button
                 type="button"
                 class="danger small"
-                *ngIf="canEdit && event.item_type === 'legacy_pdf' && !event.maintenance_schedule_item_id"
+                *ngIf="isLifeSheetMode && canEdit && event.item_type === 'legacy_pdf' && !event.maintenance_schedule_item_id"
                 (click)="deleteHistoryFile(event)"
               >
                 Eliminar
@@ -321,7 +361,7 @@
           </div>
 
           <p class="muted" *ngIf="!historyLoading && historyItems.length === 0">
-            Sin reportes o PDFs históricos en el rango seleccionado.
+            {{ isLifeSheetMode ? 'Sin reportes o PDFs históricos en el rango seleccionado.' : 'Sin movimientos registrados para este equipo.' }}
           </p>
           <div class="history-more">
             <button type="button" class="ghost" [disabled]="historyLoading || historyOffset === 0" (click)="prevHistoryPage()">

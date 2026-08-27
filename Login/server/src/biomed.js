@@ -996,6 +996,88 @@ export async function listHistoricalMaintenanceOccurrences(clientId, assetId, do
   return rows;
 }
 
+export async function listPendingHistoricalMaintenanceEvidence(
+  clientId,
+  { year, assetCategory = 'biomedical', readerUserId = null } = {}
+) {
+  const schema = await getSchemaByClientId(clientId);
+  if (!schema) {
+    throw new Error('Cliente no encontrado');
+  }
+  const category = normalizeAssetCategory(assetCategory);
+  const { rows } = await query(
+    `WITH occurrences AS (
+       SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date,
+              i.deadline_date, i.status, i.completion_source,
+              i.legacy_history_file_id, i.historical_resolution,
+              s.year, s.status AS schedule_status,
+              a.code, a.name, a.brand, a.model, a.serial,
+              a.site_id, site.name AS site_name,
+              a.area_id, area.name AS area_name,
+              a.location_id, location.name AS location_name,
+              ROW_NUMBER() OVER (
+                PARTITION BY i.schedule_id, i.asset_id
+                ORDER BY i.planned_date ASC, i.id ASC
+              )::int AS occurrence_number
+       FROM maintenance_schedule_items i
+       JOIN maintenance_schedules s ON s.id = i.schedule_id
+       JOIN "${schema}".assets a ON a.id = i.asset_id
+       LEFT JOIN "${schema}".sites site ON site.id = a.site_id
+       LEFT JOIN "${schema}".areas area ON area.id = a.area_id
+       LEFT JOIN "${schema}".locations location ON location.id = a.location_id
+       WHERE s.client_id = $1
+         AND s.year = $2
+         AND s.asset_category = $3
+         AND COALESCE(a.asset_category, 'biomedical') = $3
+         AND COALESCE(a.status, 'activo') <> 'dado_de_baja'
+         AND (
+           $4::uuid IS NULL
+           OR EXISTS (
+             SELECT 1
+             FROM reader_access ra
+             WHERE ra.client_id = $1
+               AND ra.user_id = $4::uuid
+               AND (
+                 (ra.area_id IS NOT NULL AND ra.area_id = a.area_id)
+                 OR (ra.location_id IS NOT NULL AND ra.location_id = a.location_id)
+               )
+           )
+         )
+     )
+     SELECT occurrence.*,
+            request.id AS request_id,
+            request.status AS request_status,
+            (
+              occurrence.schedule_status = 'approved'
+              AND occurrence.status IN ('pending', 'active', 'expired')
+              AND COALESCE(request.status, 'abierto') IN ('abierto', 'vencido')
+            ) AS eligible,
+            CASE
+              WHEN occurrence.schedule_status = 'draft' THEN 'Aprueba primero el cronograma.'
+              WHEN occurrence.schedule_status <> 'approved' THEN 'El cronograma no admite conciliaciones.'
+              WHEN request.status NOT IN ('abierto', 'vencido') THEN 'La solicitud tiene un proceso operativo en curso.'
+              ELSE NULL
+            END AS unavailable_reason
+     FROM occurrences occurrence
+     LEFT JOIN LATERAL (
+       SELECT id, status
+       FROM maintenance_requests
+       WHERE schedule_item_id = occurrence.id
+       ORDER BY
+         CASE WHEN status IN ('abierto', 'vencido') THEN 1 ELSE 0 END ASC,
+         created_at DESC
+       LIMIT 1
+     ) request ON TRUE
+     WHERE occurrence.historical_resolution = 'pending_evidence'
+       AND occurrence.legacy_history_file_id IS NULL
+       AND occurrence.status IN ('pending', 'active', 'expired')
+     ORDER BY occurrence.planned_date ASC, occurrence.area_name ASC,
+              occurrence.location_name ASC, occurrence.code ASC`,
+    [clientId, year, category, readerUserId || null]
+  );
+  return rows;
+}
+
 function historicalReconciliationError(code, message) {
   const error = new Error(message);
   error.code = code;

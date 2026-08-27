@@ -221,6 +221,7 @@ import {
   isAssetHistoryFileReconciled,
   listAssetHistory,
   listHistoricalMaintenanceOccurrences,
+  listPendingHistoricalMaintenanceEvidence,
   listAssetsForBlankMaintenanceProtocols,
   listAssetsForReader,
   listAssetMovements,
@@ -8978,6 +8979,26 @@ app.put(
       if (!beforeAsset) {
         return res.status(404).json({ message: 'Equipo no encontrado.' });
       }
+      const requestedPlacement = {
+        siteId: siteId || null,
+        areaId: areaId || null,
+        locationId: locationId || null
+      };
+      const currentPlacement = {
+        siteId: beforeAsset.site_id || null,
+        areaId: beforeAsset.area_id || null,
+        locationId: beforeAsset.location_id || null
+      };
+      if (
+        requestedPlacement.siteId !== currentPlacement.siteId
+        || requestedPlacement.areaId !== currentPlacement.areaId
+        || requestedPlacement.locationId !== currentPlacement.locationId
+      ) {
+        return res.status(409).json({
+          code: 'ASSET_LOCATION_REQUIRES_MOVEMENT',
+          message: 'La sede, el área y la ubicación solo pueden cambiarse desde Inventario para registrar la trazabilidad del traslado.'
+        });
+      }
       const currentCategory = normalizeAssetCategory(beforeAsset.asset_category);
       const requestedAssetCategory = normalizeAssetCategory(assetCategory ?? currentCategory);
       if (currentCategory !== requestedAssetCategory) {
@@ -9012,8 +9033,8 @@ app.put(
           configuration: {
             maintenanceFrequency: requestedMaintenanceFrequency,
             changeMode: submittedScheduleProgramming?.changeMode,
-            areaId: areaId || null,
-            locationId: locationId || null,
+            areaId: currentPlacement.areaId,
+            locationId: currentPlacement.locationId,
             acquisitionDate: requestedAcquisitionDate,
             warrantyYears: requestedWarrantyYears
           }
@@ -9048,9 +9069,9 @@ app.put(
         model,
         serial,
         invimaReg,
-        siteId: siteId || null,
-        areaId,
-        locationId,
+        siteId: currentPlacement.siteId,
+        areaId: currentPlacement.areaId,
+        locationId: currentPlacement.locationId,
         riskClass,
         requiresSanitaryClassification,
         requiresElectricalClassification,
@@ -9343,6 +9364,37 @@ app.get(
     } catch (error) {
       console.error(error);
       return res.status(500).json({ message: 'No se pudo cargar el historial del equipo.' });
+    }
+  }
+);
+
+app.get(
+  '/biomed/:clientId/pending-historical-protocols',
+  requireAuth,
+  requireAnyPermission(['hb:create', 'hb:view', 'read:all']),
+  async (req, res) => {
+    const { clientId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const year = Number(req.query.year || todayInBogota().slice(0, 4));
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ message: 'La vigencia indicada no es válida.' });
+    }
+    try {
+      const assetCategory = normalizeAssetCategory(req.query.category);
+      const rows = await listPendingHistoricalMaintenanceEvidence(clientId, {
+        year,
+        assetCategory,
+        readerUserId: isAreaScopedOperationalUser(req.user) ? req.user.sub : null
+      });
+      return res.json(rows);
+    } catch (error) {
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudieron cargar los protocolos pendientes.' });
     }
   }
 );

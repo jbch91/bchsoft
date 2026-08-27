@@ -58,23 +58,174 @@
   </div>
   <p class="success page-feedback" *ngIf="successMessage && !assetFormModalOpen">{{ successMessage }}</p>
 
+  <div class="life-sheet-workspace-tabs" role="tablist" aria-label="Gestión de hojas de vida">
+    <button
+      type="button"
+      role="tab"
+      [class.active]="activeLifeSheetView === 'records'"
+      [attr.aria-selected]="activeLifeSheetView === 'records'"
+      (click)="setLifeSheetView('records')"
+    >
+      <span>Hojas de vida</span>
+      <strong>{{ assets.length }}</strong>
+    </button>
+    <button
+      type="button"
+      role="tab"
+      [class.active]="activeLifeSheetView === 'pending_protocols'"
+      [attr.aria-selected]="activeLifeSheetView === 'pending_protocols'"
+      (click)="setLifeSheetView('pending_protocols')"
+    >
+      <span>Protocolos pendientes</span>
+      <strong>{{ pendingProtocols.length }}</strong>
+    </button>
+  </div>
+
   <app-inventory-panel
+    [hidden]="activeLifeSheetView !== 'records'"
     [items]="assets"
     [selectedClientId]="selectedClientId"
     [loading]="loading"
     [errorMessage]="errorMessage"
     [canEdit]="auth.hasPermission('hb:create')"
-    [canMove]="auth.hasPermission('inventory:move')"
-    [canUploadHistory]="auth.hasPermission('asset_history:upload')"
+    [canDelete]="auth.hasPermission('hb:create')"
+    [canUploadHistory]="canUploadHistoricalProtocols"
+    mode="life_sheets"
     [viewInModal]="true"
     [title]="inventoryTitle"
     (viewItem)="openViewModal($event)"
     (editItem)="startEdit($event)"
     (deleteItem)="deleteAsset($event)"
-    (movedItem)="loadAssets()"
+    (historyUploaded)="onHistoricalProtocolUploaded()"
   ></app-inventory-panel>
 
-  <div class="grid import-grid" *ngIf="importPanelOpen && canImportAssets">
+  <section class="pending-protocols-workspace" [hidden]="activeLifeSheetView !== 'pending_protocols'">
+    <div class="pending-protocols-head">
+      <div>
+        <span>Vigencia {{ currentProtocolYear }}</span>
+        <h2>Protocolos preventivos pendientes</h2>
+      </div>
+      <div
+        class="protocol-permission-state"
+        [class.permission-active]="canUploadHistoricalProtocols"
+      >
+        <span>{{ canUploadHistoricalProtocols ? 'Permiso temporal activo' : 'Permiso temporal requerido' }}</span>
+        <button
+          type="button"
+          class="ghost"
+          *ngIf="canRefreshTemporaryPermissions"
+          [disabled]="permissionsRefreshLoading"
+          (click)="refreshCurrentPermissions()"
+        >
+          {{ permissionsRefreshLoading ? 'Actualizando...' : 'Actualizar permisos' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="pending-protocol-summary">
+      <div>
+        <span>Protocolos pendientes</span>
+        <strong>{{ pendingProtocols.length }}</strong>
+      </div>
+      <div>
+        <span>Equipos involucrados</span>
+        <strong>{{ pendingProtocolEquipmentCount }}</strong>
+      </div>
+      <div>
+        <span>Listos para conciliar</span>
+        <strong>{{ pendingProtocolEligibleCount }}</strong>
+      </div>
+      <div>
+        <span>Más antiguo</span>
+        <strong>{{ pendingProtocolOldestDate ? formatIsoDateForDisplay(pendingProtocolOldestDate) : '-' }}</strong>
+      </div>
+    </div>
+
+    <div class="pending-protocol-filters">
+      <label>
+        Buscar equipo
+        <input
+          type="search"
+          [(ngModel)]="pendingProtocolSearch"
+          placeholder="Código, nombre, marca, modelo o serie"
+        />
+      </label>
+      <label>
+        Área
+        <select [(ngModel)]="pendingProtocolArea">
+          <option value="">Todas</option>
+          <option *ngFor="let area of pendingProtocolAreas" [value]="area">{{ area }}</option>
+        </select>
+      </label>
+      <label>
+        Mes programado
+        <select [(ngModel)]="pendingProtocolMonth">
+          <option value="">Todos</option>
+          <option *ngFor="let month of pendingProtocolMonths" [value]="month.value">{{ month.label }}</option>
+        </select>
+      </label>
+      <button type="button" class="ghost" (click)="clearPendingProtocolFilters()">Limpiar</button>
+    </div>
+
+    <p class="muted pending-loading" *ngIf="pendingProtocolsLoading">Consultando protocolos pendientes...</p>
+    <p class="error" *ngIf="pendingProtocolsError">{{ pendingProtocolsError }}</p>
+
+    <div class="pending-protocol-table" *ngIf="!pendingProtocolsLoading && filteredPendingProtocols.length">
+      <div class="pending-protocol-row header">
+        <span>Fecha</span>
+        <span>Equipo</span>
+        <span>Identificación</span>
+        <span>Ubicación</span>
+        <span>Estado</span>
+        <span>Acción</span>
+      </div>
+      <div class="pending-protocol-row" *ngFor="let protocol of filteredPendingProtocols">
+        <span class="protocol-date" data-label="Fecha">
+          <strong>{{ formatIsoDateForDisplay(protocol.planned_date) }}</strong>
+          <small>Límite {{ formatIsoDateForDisplay(protocol.deadline_date) }}</small>
+        </span>
+        <span class="protocol-cell" data-label="Equipo">
+          <strong>{{ protocol.name }}</strong>
+          <small>{{ protocol.code }}</small>
+        </span>
+        <span class="protocol-cell" data-label="Identificación">
+          <strong>{{ protocol.brand || '-' }} · {{ protocol.model || '-' }}</strong>
+          <small>Serie {{ protocol.serial || '-' }}</small>
+        </span>
+        <span class="protocol-cell" data-label="Ubicación">
+          <strong>{{ protocol.area_name || '-' }} / {{ protocol.location_name || '-' }}</strong>
+          <small>{{ protocol.site_name || '-' }}</small>
+        </span>
+        <span class="protocol-cell" data-label="Estado">
+          <span class="protocol-status" [class.ready]="protocol.eligible">
+            {{ pendingProtocolStateLabel(protocol) }}
+          </span>
+          <small>{{ protocol.occurrence_number }}.ª ocurrencia · {{ protocol.frequency }}</small>
+          <small class="protocol-blocked-reason" *ngIf="protocol.unavailable_reason">
+            {{ protocol.unavailable_reason }}
+          </small>
+        </span>
+        <span class="protocol-action" data-label="Acción">
+          <button
+            type="button"
+            class="primary"
+            [disabled]="!canUploadHistoricalProtocols || !protocol.eligible"
+            [attr.title]="!canUploadHistoricalProtocols ? 'Activa el permiso temporal de migración de PDFs históricos.' : protocol.unavailable_reason"
+            (click)="openPendingProtocolUpload(protocol)"
+          >
+            {{ canUploadHistoricalProtocols ? 'Cargar PDF' : 'Permiso requerido' }}
+          </button>
+        </span>
+      </div>
+    </div>
+
+    <div class="pending-protocol-empty" *ngIf="!pendingProtocolsLoading && !filteredPendingProtocols.length">
+      <strong>{{ pendingProtocols.length ? 'No hay resultados con estos filtros.' : 'No hay protocolos preventivos pendientes.' }}</strong>
+      <span *ngIf="!pendingProtocols.length">Los PDFs conciliados dejarán de aparecer automáticamente en esta bandeja.</span>
+    </div>
+  </section>
+
+  <div class="grid import-grid" *ngIf="activeLifeSheetView === 'records' && importPanelOpen && canImportAssets">
     <div class="card full import-card" *ngIf="auth.hasPermission('hb:import')">
       <div class="import-header">
         <div>
@@ -233,22 +384,37 @@
             </label>
             <label class="required">
               <span class="label-line"><span class="label-text">Sede</span><span class="required-star">*</span></span>
-              <select [(ngModel)]="siteId" name="siteId" (change)="onSiteForFormChange()" required>
+              <select
+                [(ngModel)]="siteId"
+                name="siteId"
+                [disabled]="assetModalMode === 'edit'"
+                (change)="onSiteForFormChange()"
+                required
+              >
                 <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
               </select>
             </label>
             <label class="required">
               <span class="label-line"><span class="label-text">Área</span><span class="required-star">*</span></span>
-              <select [(ngModel)]="areaId" name="areaId" (change)="loadLocationsForForm()" required>
+              <select
+                [(ngModel)]="areaId"
+                name="areaId"
+                [disabled]="assetModalMode === 'edit'"
+                (change)="loadLocationsForForm()"
+                required
+              >
                 <option *ngFor="let area of areasForSelectedSite()" [value]="area.id">{{ area.name }}</option>
               </select>
             </label>
             <label class="required">
               <span class="label-line"><span class="label-text">Ubicación</span><span class="required-star">*</span></span>
-              <select [(ngModel)]="locationId" name="locationId" required>
+              <select [(ngModel)]="locationId" name="locationId" [disabled]="assetModalMode === 'edit'" required>
                 <option *ngFor="let location of locations" [value]="location.id">{{ location.name }}</option>
               </select>
             </label>
+            <div class="inventory-location-notice" *ngIf="assetModalMode === 'edit'">
+              La ubicación actual es informativa. Los traslados se realizan desde Inventario para conservar su trazabilidad.
+            </div>
             <label class="required">
               <span class="label-line"><span class="label-text">Código</span><span class="required-star">*</span></span>
               <input type="text" name="code" [(ngModel)]="code" required />
