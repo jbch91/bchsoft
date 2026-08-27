@@ -86,6 +86,8 @@ export class InventoryPanelComponent implements OnDestroy {
   @Input() canEdit = false;
   @Input() canDelete = false;
   @Input() canMove = false;
+  @Input() canRequestMaintenance = false;
+  @Input() showOperationalConditions = false;
   @Input() mode: InventoryPanelMode = 'inventory';
   @Input() viewInModal = false;
   @Input() showRetired = false;
@@ -95,6 +97,7 @@ export class InventoryPanelComponent implements OnDestroy {
   @Output() viewItem = new EventEmitter<InventoryPanelItem>();
   @Output() editItem = new EventEmitter<InventoryPanelItem>();
   @Output() deleteItem = new EventEmitter<InventoryPanelItem>();
+  @Output() requestMaintenance = new EventEmitter<InventoryPanelItem>();
   @Output() movedItem = new EventEmitter<void>();
 
   searchTerm = '';
@@ -167,6 +170,10 @@ export class InventoryPanelComponent implements OnDestroy {
     return this.mode === 'life_sheets';
   }
 
+  get conditionFilterEnabled(): boolean {
+    return this.isLifeSheetMode || this.showOperationalConditions;
+  }
+
   get inventoryAreaCount(): number {
     return this.areaOptions.length;
   }
@@ -175,6 +182,14 @@ export class InventoryPanelComponent implements OnDestroy {
     return this.visibleItems.filter((item) =>
       ['activo', 'operativo'].includes(String(item.status || '').toLowerCase())
     ).length;
+  }
+
+  get inventoryWarrantyCount(): number {
+    return this.visibleItems.filter((item) => this.isUnderWarranty(item)).length;
+  }
+
+  get inventoryPendingSpareCount(): number {
+    return this.visibleItems.filter((item) => Boolean(item.hasPendingSpare)).length;
   }
 
   get inventoryObservationCount(): number {
@@ -223,7 +238,7 @@ export class InventoryPanelComponent implements OnDestroy {
   get filteredItems(): InventoryPanelItem[] {
     return this.visibleItems.filter((item) => {
       if (!this.matchesBaseFilters(item)) return false;
-      if (this.isLifeSheetMode && this.filterCondition) {
+      if (this.conditionFilterEnabled && this.filterCondition) {
         return this.matchesLifeSheetCondition(item, this.filterCondition);
       }
       return true;
@@ -252,6 +267,7 @@ export class InventoryPanelComponent implements OnDestroy {
       activo: 'Activo',
       operativo: 'Operativo',
       operativo_observacion: 'Operativo con observaciones',
+      pendiente_repuesto: 'Pendiente de repuesto',
       fuera_de_servicio: 'Fuera de servicio',
       dado_de_baja: 'Dado de baja'
     };

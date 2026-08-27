@@ -642,7 +642,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (this.canRefreshMaintenanceTemporaryPermissions) {
       await this.refreshCurrentPermissions(false);
     }
-    if (!this.auth.hasPermission('maintenance:request:create') && this.auth.hasPermission('maintenance:report:create')) {
+    if (this.isAreaResponsible) {
+      this.viewMode = 'reportes';
+      this.reportSubView = 'pendientes_firma';
+    } else if (!this.auth.hasPermission('maintenance:request:create') && this.auth.hasPermission('maintenance:report:create')) {
       this.viewMode = 'preventivos';
     } else if (!this.auth.hasPermission('maintenance:request:create')) {
       this.viewMode = 'solicitudes';
@@ -716,6 +719,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   async switchView(mode: MaintenanceViewMode): Promise<void> {
+    if (this.isAreaResponsible && mode !== 'reportes') return;
     if (mode === 'protocolos_fisicos' && !this.canPrintBlankProtocols) return;
     this.viewMode = mode;
     this.refreshViewSoon();
@@ -739,7 +743,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       await this.loadData();
     }
 
-    if (assetId || assetCode) {
+    if ((assetId || assetCode) && !this.isAreaResponsible) {
       if (!this.assets.length && this.selectedClientId) {
         await this.loadData();
       }
@@ -785,7 +789,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.activateReportForm(requestId, 'Abrí la solicitud desde la notificación. Completa el reporte cuando termines la intervención.');
       return;
     }
-    if (view === 'repuestos') {
+    if (view === 'repuestos' && !this.isAreaResponsible) {
       this.viewMode = 'repuestos';
       if (requestId) {
         const report = this.sparePartReports.find((item) => item.request_id === requestId);
@@ -811,12 +815,14 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     try {
       const [assets, requests, reports, preventiveProgress] = await Promise.all([
         this.biomed.listAssets(this.selectedClientId, this.assetCategory),
-        this.maintenance.listRequests(this.selectedClientId, this.assetCategory),
+        this.isAreaResponsible
+          ? Promise.resolve([] as MaintenanceRequestDto[])
+          : this.maintenance.listRequests(this.selectedClientId, this.assetCategory),
         this.maintenance.listReports(this.selectedClientId, {
           assetCategory: this.assetCategory,
           order: 'desc'
         }),
-        this.loadPreventiveProgress()
+        this.isAreaResponsible ? Promise.resolve(null) : this.loadPreventiveProgress()
       ]);
       this.assets = assets.map((asset) => ({
         id: asset.id,
@@ -2161,6 +2167,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   get filteredReports(): MaintenanceReportDto[] {
     const term = this.normalize(this.reportSearchTerm);
     const filterKey = [
+      this.isAreaResponsible ? 'area-responsible' : 'standard',
       this.reportSubView,
       term,
       this.reportStatusFilter,
@@ -2179,9 +2186,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       return this.reportFilterCacheItems;
     }
 
-    const source = this.reportSubView === 'pendientes_firma'
-      ? this.pendingSignatureReports
-      : this.reportHistory;
+    const source = this.isAreaResponsible
+      ? this.areaResponsiblePendingReports
+      : this.reportSubView === 'pendientes_firma'
+        ? this.pendingSignatureReports
+        : this.reportHistory;
 
     const filtered = source.filter((report) => {
       const reportState = this.reportWorkflowStatus(report);
@@ -2332,6 +2341,16 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   get pendingSignatureReports(): MaintenanceReportDto[] {
     return this.reports.filter((report) => !report.is_fully_signed);
+  }
+
+  get areaResponsiblePendingReports(): MaintenanceReportDto[] {
+    return this.reports.filter((report) => this.canSignReport(report));
+  }
+
+  get actionablePendingReportCount(): number {
+    return this.isAreaResponsible
+      ? this.areaResponsiblePendingReports.length
+      : this.pendingSignatureReports.length;
   }
 
   get reportHistory(): MaintenanceReportDto[] {

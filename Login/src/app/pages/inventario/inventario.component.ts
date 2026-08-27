@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { BiomedService } from '../../biomed/biomed.service';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
+import { MaintenanceService } from '../../maintenance/maintenance.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 import { InventoryPanelComponent, InventoryPanelItem } from '../../shared/inventory-panel/inventory-panel.component';
@@ -17,8 +18,6 @@ interface ClientOption {
   address?: string | null;
   logoPath?: string | null;
 }
-
-type InventoryView = 'listado' | 'qr';
 
 @Component({
   selector: 'app-inventario',
@@ -35,7 +34,7 @@ export class InventarioComponent {
   items: InventoryPanelItem[] = [];
   loading = false;
   errorMessage = '';
-  activeInventoryView: InventoryView = 'listado';
+  qrModalOpen = false;
   qrSearchTerm = '';
   qrAreaFilter = '';
   qrStatusFilter = '';
@@ -44,10 +43,16 @@ export class InventarioComponent {
   qrGenerating = false;
   qrError = '';
   qrSuccess = '';
+  requestModalItem: InventoryPanelItem | null = null;
+  requestDescription = '';
+  requestSaving = false;
+  requestError = '';
+  requestSuccess = '';
 
   constructor(
     private readonly biomed: BiomedService,
     private readonly admin: AdminService,
+    private readonly maintenance: MaintenanceService,
     public readonly auth: AuthService,
     private readonly cdr: ChangeDetectorRef
   ) {
@@ -92,6 +97,18 @@ export class InventarioComponent {
     return this.clients.find((client) => client.id === this.selectedClientId) ?? null;
   }
 
+  get isAreaResponsible(): boolean {
+    return this.auth.hasRole('responsable_area');
+  }
+
+  get canManageQr(): boolean {
+    return !this.isAreaResponsible && !this.auth.hasRole(['lector', 'viewer']);
+  }
+
+  get canRequestMaintenance(): boolean {
+    return this.isAreaResponsible && this.auth.hasPermission('maintenance:request:create');
+  }
+
   clientLogoUrl(client: ClientOption | null): string | null {
     if (!client?.logoPath) return null;
     if (client.logoPath.startsWith('http')) return client.logoPath;
@@ -117,11 +134,14 @@ export class InventarioComponent {
         areaName: row.area_name ?? null,
         locationId: row.location_id ?? null,
         locationName: row.location_name ?? null,
-        status: row.status
+        status: row.status,
+        acquisitionDate: row.acquisition_date ?? null,
+        warrantyYears: row.warranty_years ?? null,
+        hasPendingSpare: Boolean(row.has_pending_spare)
       }));
       this.qrCodes = {};
       this.qrSelectedIds.clear();
-      if (this.activeInventoryView === 'qr') {
+      if (this.qrModalOpen) {
         await this.generateQrCodes(this.qrFilteredItems);
       }
     } catch (error) {
@@ -133,12 +153,63 @@ export class InventarioComponent {
     }
   }
 
-  setInventoryView(view: InventoryView): void {
-    this.activeInventoryView = view;
+  openQrModal(): void {
+    if (!this.canManageQr) return;
+    this.qrModalOpen = true;
     this.qrError = '';
     this.qrSuccess = '';
-    if (view === 'qr') {
-      void this.generateQrCodes(this.qrFilteredItems);
+    void this.generateQrCodes(this.qrFilteredItems);
+  }
+
+  closeQrModal(): void {
+    this.qrModalOpen = false;
+    this.qrError = '';
+    this.qrSuccess = '';
+  }
+
+  openMaintenanceRequest(item: InventoryPanelItem): void {
+    if (!this.canRequestMaintenance) return;
+    this.requestModalItem = item;
+    this.requestDescription = '';
+    this.requestError = '';
+    this.requestSuccess = '';
+  }
+
+  closeMaintenanceRequest(): void {
+    if (this.requestSaving) return;
+    this.requestModalItem = null;
+    this.requestDescription = '';
+    this.requestError = '';
+  }
+
+  async submitMaintenanceRequest(): Promise<void> {
+    const item = this.requestModalItem;
+    if (!item || !this.selectedClientId || this.requestSaving) return;
+
+    const description = this.requestDescription.replace(/\s+/g, ' ').trim();
+    if (description.length < 10) {
+      this.requestError = 'Describe la falla o necesidad con al menos 10 caracteres.';
+      return;
+    }
+
+    this.requestSaving = true;
+    this.requestError = '';
+    try {
+      await this.maintenance.createRequest({
+        clientId: this.selectedClientId,
+        assetId: item.id,
+        assetCategory: 'biomedical',
+        type: 'correctivo',
+        description
+      });
+      this.requestSuccess = `Solicitud enviada para ${item.code} - ${item.name}.`;
+      this.requestModalItem = null;
+      this.requestDescription = '';
+    } catch (error: any) {
+      this.requestError = error?.error?.message ?? 'No se pudo enviar la solicitud de revisión.';
+    } finally {
+      this.requestSaving = false;
+      this.cdr.detectChanges();
     }
   }
 

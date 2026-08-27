@@ -1,5 +1,5 @@
 <div class="card filters-card">
-  <div class="filters-grid" [class.life-sheet-filters]="isLifeSheetMode">
+  <div class="filters-grid" [class.life-sheet-filters]="conditionFilterEnabled">
     <label>
       Búsqueda
       <input type="text" [(ngModel)]="searchTerm" placeholder="Código, nombre, marca, serie..." />
@@ -25,14 +25,14 @@
         <option *ngFor="let location of locationOptions" [value]="location">{{ location }}</option>
       </select>
     </label>
-    <label *ngIf="!isLifeSheetMode">
+    <label *ngIf="!isLifeSheetMode && !showOperationalConditions">
       Estado operativo
       <select [(ngModel)]="filterStatus">
         <option value="">Todos</option>
         <option *ngFor="let status of statusOptions" [value]="status">{{ status }}</option>
       </select>
     </label>
-    <label *ngIf="isLifeSheetMode">
+    <label *ngIf="conditionFilterEnabled">
       Condición
       <select [(ngModel)]="filterCondition">
         <option value="">Todas ({{ lifeSheetConditionCount('') }})</option>
@@ -77,10 +77,11 @@
 <p class="success movement-feedback" *ngIf="moveSuccess && !movingAssetId">{{ moveSuccess }}</p>
 
 <div class="inventory-summary" *ngIf="!loading && !isLifeSheetMode">
-  <div><span>Equipos activos</span><strong>{{ inventoryOperationalCount }}</strong></div>
+  <div><span>Operativos</span><strong>{{ inventoryOperationalCount }}</strong></div>
+  <div><span>En garantía</span><strong>{{ inventoryWarrantyCount }}</strong></div>
+  <div><span>Repuesto pendiente</span><strong>{{ inventoryPendingSpareCount }}</strong></div>
   <div><span>Con observaciones</span><strong>{{ inventoryObservationCount }}</strong></div>
   <div><span>Fuera de servicio</span><strong>{{ inventoryOutOfServiceCount }}</strong></div>
-  <div><span>Áreas con equipos</span><strong>{{ inventoryAreaCount }}</strong></div>
 </div>
 
 <div class="card table-card" *ngIf="!loading">
@@ -138,10 +139,20 @@
           <strong>{{ item.areaName || '-' }} / {{ item.locationName || '-' }}</strong>
           <small>{{ item.siteName || '-' }}</small>
         </span>
-        <span data-label="Estado operativo">
+        <span class="status-stack" data-label="Estado operativo">
           <span class="status-pill" [attr.data-status]="item.status">{{ assetStatusLabel(item.status) }}</span>
+          <span class="condition-pill spare" *ngIf="item.hasPendingSpare">Repuesto pendiente</span>
+          <span class="condition-pill warranty" *ngIf="isUnderWarranty(item)">En garantía</span>
         </span>
         <span class="actions">
+          <button
+            type="button"
+            class="request-action"
+            *ngIf="canRequestMaintenance"
+            (click)="requestMaintenance.emit(item)"
+          >
+            Solicitar revisión
+          </button>
           <button type="button" (click)="toggleHistory(item)">Trazabilidad</button>
           <button type="button" *ngIf="canMove" (click)="startMove(item)">Mover</button>
         </span>

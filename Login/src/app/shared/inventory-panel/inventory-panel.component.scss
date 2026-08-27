@@ -180,6 +180,12 @@ input[type='file'].file-input:hover::file-selector-button {
   color: #92400e;
 }
 
+.status-pill[data-status='pendiente_repuesto'] {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #9a3412;
+}
+
 .status-pill[data-status='fuera_de_servicio'],
 .status-pill[data-status='dado_de_baja'] {
   background: #fef2f2;
@@ -234,7 +240,7 @@ input[type='file'].file-input:hover::file-selector-button {
   border-block: 1px solid color-mix(in srgb, var(--border) 78%, var(--brand-600));
   display: grid;
   gap: 0;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-top: 18px;
 }
 
@@ -534,13 +540,16 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .inventory-summary > div:nth-child(3) {
-    border-left: 0;
+  .inventory-summary > div {
     border-top: 1px solid var(--border);
   }
 
-  .inventory-summary > div:nth-child(4) {
-    border-top: 1px solid var(--border);
+  .inventory-summary > div:nth-child(-n + 2) {
+    border-top: 0;
+  }
+
+  .inventory-summary > div:nth-child(odd) {
+    border-left: 0;
   }
 }
 
@@ -577,8 +586,13 @@ button:disabled {
   }
 
   .inventory-summary > div + div,
-  .inventory-summary > div:nth-child(3) {
+  .inventory-summary > div:nth-child(3),
+  .inventory-summary > div:nth-child(-n + 2) {
     border-left: 0;
     border-top: 1px solid var(--border);
+  }
+
+  .inventory-summary > div:first-child {
+    border-top: 0;
   }
 }

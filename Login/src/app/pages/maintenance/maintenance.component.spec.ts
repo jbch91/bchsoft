@@ -2,6 +2,73 @@ import { describe, expect, it, vi } from 'vitest';
 import { MaintenanceComponent } from './maintenance.component';
 
 describe('maintenance report modal flow', () => {
+  it('muestra al jefe de área solo reportes que todavía puede firmar', () => {
+    const auth = {
+      hasRole: (role: string | string[]) => Array.isArray(role)
+        ? role.includes('responsable_area')
+        : role === 'responsable_area',
+      hasPermission: (permission: string) => permission === 'maintenance:report:sign',
+      currentUser: () => ({ id: 'responsable-1' })
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      auth as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { snapshot: { data: { assetCategory: 'biomedical' } } } as never
+    );
+    const baseReport = {
+      client_id: 'client-1',
+      request_id: 'request-1',
+      asset_id: 'asset-1',
+      created_by: 'engineer-1',
+      created_at: '2026-08-27T10:00:00.000Z',
+      request_status: 'reportado',
+      area_responsible_required: true,
+      is_fully_signed: false,
+      signed_by_me: false,
+      correction_requested: false
+    } as const;
+    component.reports = [
+      { ...baseReport, id: 'preventive', type: 'preventivo' },
+      { ...baseReport, id: 'corrective', type: 'correctivo' },
+      { ...baseReport, id: 'already-signed', type: 'preventivo', signed_by_me: true },
+      { ...baseReport, id: 'correction', type: 'correctivo', correction_requested: true },
+      { ...baseReport, id: 'completed', type: 'preventivo', is_fully_signed: true }
+    ];
+
+    expect(component.areaResponsiblePendingReports.map((report) => report.id)).toEqual([
+      'preventive',
+      'corrective'
+    ]);
+    expect(component.actionablePendingReportCount).toBe(2);
+  });
+
+  it('mantiene al jefe de área en la bandeja de avales aunque reciba una ruta operativa', async () => {
+    const auth = {
+      hasRole: (role: string | string[]) => Array.isArray(role)
+        ? role.includes('responsable_area')
+        : role === 'responsable_area',
+      hasPermission: () => false,
+      currentUser: () => ({ id: 'responsable-1', clientId: 'client-1' })
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      auth as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { snapshot: { data: { assetCategory: 'biomedical' } } } as never
+    );
+    component.viewMode = 'reportes';
+    const params = { get: (name: string) => name === 'view' ? 'repuestos' : null };
+
+    await component.applyRouteIntent(params as never);
+
+    expect(component.viewMode).toBe('reportes');
+  });
+
   it('permite al ingeniero autor corregir un preventivo mientras sigue pendiente de firma', () => {
     const auth = {
       hasRole: (role: string) => role === 'ingeniero_biomedico',

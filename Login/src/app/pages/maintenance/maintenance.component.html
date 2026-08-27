@@ -28,12 +28,12 @@
     </div>
   </div>
 
-  <div class="maintenance-workspace-bar">
+  <div class="maintenance-workspace-bar" [class.area-responsible-workspace]="isAreaResponsible">
     <div class="maintenance-workspace-title" [title]="maintenanceModuleTitle">
-      <strong>{{ isIndustrialMaintenanceModule ? 'Industrial' : 'Biomédico' }}</strong>
+      <strong>{{ isAreaResponsible ? 'Avales' : (isIndustrialMaintenanceModule ? 'Industrial' : 'Biomédico') }}</strong>
     </div>
 
-    <div class="tab-bar" role="tablist" aria-label="Secciones de mantenimiento">
+    <div class="tab-bar" *ngIf="!isAreaResponsible" role="tablist" aria-label="Secciones de mantenimiento">
       <button
         type="button"
         class="tab"
@@ -60,7 +60,7 @@
         Preventivos <strong>{{ preventiveProgrammedRequests.length }}</strong>
       </button>
       <button type="button" role="tab" class="tab" [class.active]="viewMode === 'reportes'" [attr.aria-selected]="viewMode === 'reportes'" (click)="switchView('reportes')">
-        Reportes <strong>{{ pendingSignatureReports.length }}</strong>
+        Reportes <strong>{{ actionablePendingReportCount }}</strong>
       </button>
       <button
         type="button"
@@ -84,9 +84,14 @@
       </button>
     </div>
 
+    <div class="area-responsible-workspace-copy" *ngIf="isAreaResponsible">
+      <strong>Pendientes de firma</strong>
+      <span>{{ actionablePendingReportCount }} reporte{{ actionablePendingReportCount === 1 ? '' : 's' }} por revisar</span>
+    </div>
+
     <div class="maintenance-workspace-actions">
       <button
-        *ngIf="canRefreshMaintenanceTemporaryPermissions"
+        *ngIf="!isAreaResponsible && canRefreshMaintenanceTemporaryPermissions"
         type="button"
         class="ghost permission-refresh"
         [class.active]="canPrintBlankProtocols"
@@ -1203,7 +1208,121 @@
 
   <ng-container *ngIf="viewMode === 'reportes'">
 
-    <div class="card report-list-card">
+    <section class="area-approval-queue" *ngIf="isAreaResponsible">
+      <div class="area-approval-heading">
+        <div>
+          <span>Aval operativo</span>
+          <h2>Mantenimientos por revisar</h2>
+          <p>Preventivos y correctivos pendientes de tu firma en las áreas o ubicaciones asignadas.</p>
+        </div>
+        <strong>{{ filteredReports.length }}</strong>
+      </div>
+
+      <div class="area-approval-toolbar">
+        <label>
+          Buscar equipo
+          <input
+            type="search"
+            [(ngModel)]="reportSearchTerm"
+            (ngModelChange)="resetReportPage()"
+            placeholder="Código, equipo, marca, modelo o serie"
+          />
+        </label>
+        <label>
+          Tipo de mantenimiento
+          <select [(ngModel)]="reportTypeFilter" (ngModelChange)="resetReportPage()">
+            <option value="">Todos</option>
+            <option value="preventivo">Preventivo</option>
+            <option value="correctivo">Correctivo</option>
+          </select>
+        </label>
+        <button type="button" class="ghost" [disabled]="!hasActiveReportFilters" (click)="clearReportFilters()">
+          Limpiar
+        </button>
+      </div>
+
+      <div class="area-report-grid" *ngIf="paginatedReports.length; else noAreaApprovals">
+        <article class="area-report-card" *ngFor="let report of paginatedReports">
+          <div class="area-report-photo" *ngIf="assetForReport(report) as asset">
+            <img
+              *ngIf="assetPhotoAvailable(asset)"
+              [src]="assetPhotoUrl(asset) || ''"
+              [alt]="'Fotografía de ' + asset.code + ' - ' + asset.name"
+              loading="lazy"
+              decoding="async"
+              (error)="onAssetPhotoError(asset.id)"
+            />
+            <span *ngIf="!assetPhotoAvailable(asset)">Sin fotografía</span>
+          </div>
+
+          <div class="area-report-content" *ngIf="assetForReport(report) as asset">
+            <div class="area-report-title">
+              <div>
+                <span>{{ report.type === 'preventivo' ? 'Preventivo' : 'Correctivo' }}</span>
+                <h3>{{ asset.code }} - {{ asset.name }}</h3>
+              </div>
+            </div>
+
+            <dl class="area-report-technical-data">
+              <div><dt>Marca</dt><dd>{{ asset.brand || '-' }}</dd></div>
+              <div><dt>Modelo</dt><dd>{{ asset.model || '-' }}</dd></div>
+              <div><dt>Serie</dt><dd>{{ asset.serial || '-' }}</dd></div>
+            </dl>
+
+            <p class="area-report-location">
+              {{ asset.siteName || 'Sin sede' }} / {{ asset.areaName || 'Sin área' }} / {{ asset.locationName || 'Sin ubicación' }}
+            </p>
+            <p class="area-report-summary">{{ report.summary || 'Reporte técnico disponible para revisión.' }}</p>
+
+            <div class="area-report-meta">
+              <span>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</span>
+              <span>{{ report.engineer_name || 'Ingeniero no registrado' }}</span>
+            </div>
+          </div>
+
+          <div class="area-report-review">
+            <div class="area-report-review-status">
+              <span>Estado del equipo</span>
+              <span class="status-pill" [ngClass]="statusClass(report.asset_status_after)">
+                {{ statusLabel(report.asset_status_after || 'operativo') }}
+              </span>
+              <span class="spare-note" *ngIf="report.requires_spare_parts">Repuesto registrado</span>
+            </div>
+            <div class="area-report-actions">
+              <button type="button" (click)="openReportDetail(report)">Revisar y firmar</button>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <ng-template #noAreaApprovals>
+        <div class="area-approval-empty">
+          <strong>No tienes reportes pendientes de firma.</strong>
+          <span *ngIf="hasActiveReportFilters">Prueba limpiando la búsqueda o el filtro de tipo.</span>
+        </div>
+      </ng-template>
+
+      <div class="report-pagination" *ngIf="filteredReports.length > 0">
+        <div class="report-page-summary">
+          <span>Mostrando {{ reportPageStart }}–{{ reportPageEnd }} de {{ filteredReports.length }}</span>
+          <label>
+            Por página
+            <select [(ngModel)]="reportPageSize" (ngModelChange)="onReportPageSizeChange()">
+              <option [ngValue]="10">10</option>
+              <option [ngValue]="20">20</option>
+              <option [ngValue]="50">50</option>
+            </select>
+          </label>
+        </div>
+        <div class="report-page-actions" aria-label="Paginación de reportes">
+          <button type="button" class="icon-action ghost" title="Página anterior" aria-label="Página anterior" [disabled]="reportPage <= 1" (click)="goToReportPage(reportPage - 1)">‹</button>
+          <span>Página {{ reportPage }} de {{ reportPageCount }}</span>
+          <button type="button" class="icon-action ghost" title="Página siguiente" aria-label="Página siguiente" [disabled]="reportPage >= reportPageCount" (click)="goToReportPage(reportPage + 1)">›</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="card report-list-card" *ngIf="!isAreaResponsible">
       <div class="list-title report-list-title">
         <div>
           <h2>Reportes</h2>
@@ -1811,7 +1930,9 @@
       <div class="modal-actions report-detail-actions">
         <button type="button" class="ghost" (click)="closeReportDetail()">Cerrar</button>
         <button type="button" class="ghost" (click)="downloadReport(report.id)">Abrir PDF</button>
-        <button *ngIf="canSignReport(report)" type="button" (click)="openSignConfirmation(report)">Firmar</button>
+        <button *ngIf="canSignReport(report)" type="button" (click)="openSignConfirmation(report)">
+          {{ isAreaResponsible ? 'Firmar y avalar' : 'Firmar' }}
+        </button>
         <button
           *ngIf="canRequestReportCorrection(report)"
           type="button"
