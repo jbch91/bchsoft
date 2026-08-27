@@ -4,6 +4,7 @@ import {
   canOperateAssignedMaintenanceRequest,
   isMaintenanceReportFullySigned,
   maintenanceAssetStatusObservationError,
+  maintenanceReportEngineerReopenError,
   maintenancePreventiveItemPhase,
   maintenancePreventiveItemWaitsForSpare,
   maintenanceSpareWorkflowForReport,
@@ -199,6 +200,53 @@ test('conserva el aval legado cuando el área aún no tiene responsable', () => 
       [engineer, { role: 'usuario', user_id: 'solicitante-a' }]
     ),
     true
+  );
+});
+
+test('permite al ingeniero autor reabrir un preventivo solo antes del aval', () => {
+  const report = {
+    type: 'preventivo',
+    created_by: 'ingeniero-a',
+    request_status: 'reportado',
+    area_responsible_required: true,
+    correction_requested: false
+  };
+  const engineerSignature = [{
+    role: 'ingeniero_biomedico',
+    user_id: 'ingeniero-a'
+  }];
+
+  assert.equal(
+    maintenanceReportEngineerReopenError(report, engineerSignature, 'ingeniero-a'),
+    ''
+  );
+  assert.equal(
+    maintenanceReportEngineerReopenError(report, engineerSignature, 'ingeniero-b'),
+    'not_owner'
+  );
+  assert.equal(
+    maintenanceReportEngineerReopenError(
+      report,
+      [...engineerSignature, { role: 'responsable_area', user_id: 'responsable-a' }],
+      'ingeniero-a'
+    ),
+    'accepted_signature_exists'
+  );
+  assert.equal(
+    maintenanceReportEngineerReopenError(
+      { ...report, request_status: 'firmado' },
+      engineerSignature,
+      'ingeniero-a'
+    ),
+    'already_finalized'
+  );
+  assert.equal(
+    maintenanceReportEngineerReopenError(
+      { ...report, type: 'correctivo' },
+      engineerSignature,
+      'ingeniero-a'
+    ),
+    'not_preventive'
   );
 });
 

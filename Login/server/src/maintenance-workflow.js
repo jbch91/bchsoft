@@ -154,6 +154,30 @@ export function isMaintenanceReportFullySigned(
   );
 }
 
+export function maintenanceReportEngineerReopenError(
+  report,
+  signatures = [],
+  userId = ''
+) {
+  if (!report || report.type !== 'preventivo') return 'not_preventive';
+  if (!userId || report.created_by !== userId) return 'not_owner';
+  if (report.correction_requested) return 'already_in_correction';
+  if (signatures.some((signature) => signature.user_id !== userId)) {
+    return 'accepted_signature_exists';
+  }
+  if (
+    report.request_status === 'firmado'
+    || report.is_fully_signed
+    || isMaintenanceReportFullySigned(report, signatures)
+  ) {
+    return 'already_finalized';
+  }
+  if (!['reportado', 'espera_repuesto'].includes(report.request_status)) {
+    return 'not_pending_signature';
+  }
+  return '';
+}
+
 export function normalizeMaintenanceRequestDescription(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }

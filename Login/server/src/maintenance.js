@@ -1,6 +1,7 @@
-import { query } from './db.js';
+import { query, withTransaction } from './db.js';
 import { normalizeAssetCategory } from './asset-category.js';
 import {
+  maintenanceReportEngineerReopenError,
   maintenancePreventiveItemPhase,
   maintenancePreventiveItemWaitsForSpare,
   summarizeMaintenancePreventiveProgress
@@ -819,6 +820,78 @@ export async function requestMaintenanceReportCorrection(payload) {
     [reportId, userId, reason]
   );
   return rows[0];
+}
+
+export async function reopenMaintenanceReportForEngineer(payload) {
+  const { reportId, userId, reason } = payload;
+  return withTransaction(async (client) => {
+    const { rows: reportRows } = await client.query(
+      `SELECT r.id, r.client_id, r.request_id, r.asset_id, r.type, r.created_by, r.pdf_path,
+              req.status AS request_status, r.area_responsible_required
+       FROM maintenance_reports r
+       JOIN maintenance_requests req ON req.id = r.request_id
+       WHERE r.id = $1
+       FOR UPDATE OF r, req`,
+      [reportId]
+    );
+    const report = reportRows[0];
+    if (!report) return { error: 'not_found' };
+
+    const { rows: correctionRows } = await client.query(
+      `SELECT id
+       FROM maintenance_report_corrections
+       WHERE report_id = $1 AND resolved_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [reportId]
+    );
+    const { rows: signatures } = await client.query(
+      `SELECT id, user_id, role
+       FROM report_signatures
+       WHERE report_id = $1
+       FOR UPDATE`,
+      [reportId]
+    );
+    const reopenError = maintenanceReportEngineerReopenError(
+      { ...report, correction_requested: correctionRows.length > 0 },
+      signatures,
+      userId
+    );
+    if (reopenError) return { error: reopenError };
+
+    const { rows: insertedCorrections } = await client.query(
+      `INSERT INTO maintenance_report_corrections (report_id, requested_by, reason)
+       VALUES ($1,$2,$3)
+       RETURNING id`,
+      [reportId, userId, reason]
+    );
+    await client.query('DELETE FROM report_signatures WHERE report_id = $1', [reportId]);
+    await client.query('UPDATE maintenance_reports SET pdf_path = NULL WHERE id = $1', [reportId]);
+    await client.query(
+      `UPDATE maintenance_requests
+       SET status = 'correccion', updated_at = NOW()
+       WHERE id = $1`,
+      [report.request_id]
+    );
+    await client.query(
+      `UPDATE notifications
+       SET read_at = COALESCE(read_at, NOW())
+       WHERE payload->>'reportId' = $1
+         AND type = 'maintenance_report_ready'
+         AND read_at IS NULL`,
+      [reportId]
+    );
+
+    return {
+      id: insertedCorrections[0].id,
+      reportId,
+      requestId: report.request_id,
+      clientId: report.client_id,
+      assetId: report.asset_id,
+      previousPdfPath: report.pdf_path,
+      invalidatedSignatureCount: signatures.length
+    };
+  });
 }
 
 export async function updateMaintenanceRequestStatus(requestId, status) {

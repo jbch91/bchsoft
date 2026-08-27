@@ -525,6 +525,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   correctionDialogReport: MaintenanceReportDto | null = null;
   correctionReason = '';
   correctionSubmitting = false;
+  engineerCorrectionDialogReport: MaintenanceReportDto | null = null;
+  engineerCorrectionReason = '';
+  engineerCorrectionSubmitting = false;
+  engineerCorrectionReturnView: 'preventivos' | 'reportes' = 'preventivos';
 
   readonly requestStatuses = [
     { value: '', label: 'Todos' },
@@ -1186,6 +1190,55 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.showAlert(this.errorMessage, 'error');
     } finally {
       this.correctionSubmitting = false;
+    }
+  }
+
+  openEngineerCorrectionDialog(report: MaintenanceReportDto): void {
+    if (!this.canReopenOwnPreventiveReport(report)) return;
+    this.engineerCorrectionReturnView = this.viewMode === 'preventivos' ? 'preventivos' : 'reportes';
+    this.reportDetail = null;
+    this.engineerCorrectionDialogReport = report;
+    this.engineerCorrectionReason = '';
+  }
+
+  closeEngineerCorrectionDialog(): void {
+    if (this.engineerCorrectionSubmitting) return;
+    this.engineerCorrectionDialogReport = null;
+    this.engineerCorrectionReason = '';
+  }
+
+  async reopenOwnPreventiveReport(): Promise<void> {
+    const report = this.engineerCorrectionDialogReport;
+    const cleanReason = this.engineerCorrectionReason.replace(/\s+/g, ' ').trim();
+    if (!report || this.engineerCorrectionSubmitting) return;
+    if (cleanReason.length < 10) {
+      this.errorMessage = 'Describe el motivo de la corrección con al menos 10 caracteres.';
+      return;
+    }
+
+    this.engineerCorrectionSubmitting = true;
+    try {
+      const returnView = this.engineerCorrectionReturnView;
+      await this.maintenance.reopenReportForCorrection(report.id, cleanReason);
+      await this.loadData();
+      const reopenedReport = this.reports.find((item) => item.id === report.id);
+      this.engineerCorrectionDialogReport = null;
+      this.engineerCorrectionReason = '';
+      if (!reopenedReport?.correction_requested) {
+        throw new Error('El protocolo fue reabierto, pero no se pudo cargar para editarlo.');
+      }
+      if (returnView === 'preventivos') {
+        this.startPreventiveReportCorrection(reopenedReport);
+      } else {
+        this.startReportCorrection(reopenedReport);
+      }
+      this.showAlert('Protocolo reabierto. Corrige los campos y guárdalo para enviarlo nuevamente a firma.', 'success');
+    } catch (error: any) {
+      console.error(error);
+      this.errorMessage = error?.error?.message ?? error?.message ?? 'No se pudo reabrir el protocolo.';
+      this.showAlert(this.errorMessage, 'error');
+    } finally {
+      this.engineerCorrectionSubmitting = false;
     }
   }
 
@@ -2924,6 +2977,22 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       return false;
     }
     return report.request_status !== 'firmado';
+  }
+
+  canReopenOwnPreventiveReport(report: MaintenanceReportDto): boolean {
+    if (report.type !== 'preventivo' || report.is_fully_signed || report.correction_requested) {
+      return false;
+    }
+    if (
+      !this.auth.hasRole('ingeniero_biomedico')
+      || !this.auth.hasPermission('maintenance:report:create')
+    ) {
+      return false;
+    }
+    if (report.created_by !== this.auth.currentUser()?.id) {
+      return false;
+    }
+    return ['reportado', 'espera_repuesto'].includes(report.request_status || '');
   }
 
   canCorrectReport(report: MaintenanceReportDto): boolean {

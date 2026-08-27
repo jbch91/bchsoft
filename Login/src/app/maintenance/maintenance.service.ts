@@ -257,6 +257,12 @@ export class MaintenanceService {
     );
   }
 
+  async reopenReportForCorrection(reportId: string, reason: string): Promise<void> {
+    await firstValueFrom(
+      this.http.post(`${this.apiBase}/maintenance/reports/${reportId}/reopen`, { reason })
+    );
+  }
+
   async downloadReportPdf(reportId: string): Promise<Blob> {
     return firstValueFrom(
       this.http.get(`${this.apiBase}/maintenance/reports/${reportId}/pdf`, {

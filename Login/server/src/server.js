@@ -339,6 +339,7 @@ import {
   markAllNotificationsRead,
   markMaintenanceReportNotificationsResolved,
   markMaintenanceRequestNotificationsResolved,
+  reopenMaintenanceReportForEngineer,
   requestMaintenanceReportCorrection,
   resolveMaintenanceReportCorrections,
   listUsersByRoleAndClient
@@ -11411,6 +11412,87 @@ app.post(
     }
 
     return res.status(201).json(result);
+  }
+);
+
+app.post(
+  '/maintenance/reports/:id/reopen',
+  requireAuth,
+  requirePermission('maintenance:report:create'),
+  async (req, res) => {
+    const reason = String(req.body?.reason || '').replace(/\s+/g, ' ').trim();
+    if (reason.length < 10) {
+      return res.status(400).json({ message: 'Describe el motivo de la corrección con al menos 10 caracteres.' });
+    }
+    if (reason.length > 600) {
+      return res.status(400).json({ message: 'El motivo de corrección admite máximo 600 caracteres.' });
+    }
+    if (!hasRole(req.user, 'ingeniero_biomedico')) {
+      return res.status(403).json({ message: 'Solo el ingeniero biomédico autor puede reabrir este protocolo.' });
+    }
+
+    const report = await getMaintenanceReportById(req.params.id);
+    if (!report) {
+      return res.status(404).json({ message: 'Reporte no encontrado.' });
+    }
+    if (req.user.clientId && req.user.clientId !== report.client_id) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+
+    const result = await reopenMaintenanceReportForEngineer({
+      reportId: report.id,
+      userId: req.user.sub,
+      reason
+    });
+    if (result.error) {
+      const errors = {
+        not_found: [404, 'Reporte no encontrado.'],
+        not_preventive: [409, 'Solo se pueden reabrir protocolos preventivos desde este flujo.'],
+        not_owner: [403, 'Solo el ingeniero que elaboró el protocolo puede corregirlo antes de la firma.'],
+        already_in_correction: [409, 'Este protocolo ya se encuentra en corrección.'],
+        accepted_signature_exists: [409, 'El protocolo ya recibió una firma o aval de otra persona y no puede reabrirse.'],
+        already_finalized: [409, 'El protocolo ya fue firmado y finalizado.'],
+        not_pending_signature: [409, 'El protocolo ya no se encuentra pendiente de firma.']
+      };
+      const [status, message] = errors[result.error] || [409, 'El protocolo no se puede reabrir en su estado actual.'];
+      return res.status(status).json({ message });
+    }
+
+    if (result.previousPdfPath) {
+      const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+      const previousPdf = path.resolve(
+        process.cwd(),
+        String(result.previousPdfPath).replace(/^[/\\]+/, '')
+      );
+      if (previousPdf.startsWith(`${uploadsRoot}${path.sep}`)) {
+        try {
+          await fs.promises.unlink(previousPdf);
+        } catch (error) {
+          if (error?.code !== 'ENOENT') {
+            console.error('No se pudo retirar el PDF anterior del reporte', error);
+          }
+        }
+      }
+    }
+
+    const reportAsset = await getAssetById(result.clientId, result.assetId);
+    await logEquipmentAudit(req, {
+      action: 'MAINTENANCE_REPORT_REOPENED_BY_ENGINEER',
+      clientId: result.clientId,
+      assetId: result.assetId,
+      asset: reportAsset,
+      description: `Protocolo preventivo reabierto antes de firma para ${assetLabel(reportAsset)}.`,
+      details: {
+        eventType: 'reporte_preventivo_reabierto_por_ingeniero',
+        reportId: result.reportId,
+        requestId: result.requestId,
+        correctionId: result.id,
+        reason,
+        invalidatedSignatureCount: result.invalidatedSignatureCount
+      }
+    });
+
+    return res.status(201).json(await getMaintenanceReportById(report.id));
   }
 );
 

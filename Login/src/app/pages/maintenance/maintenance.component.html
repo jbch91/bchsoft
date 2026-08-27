@@ -603,6 +603,14 @@
 
               <ng-container *ngIf="item.phase === 'pending_signature'">
                 <ng-container *ngIf="preventiveReportForItem(item) as report">
+                  <button
+                    *ngIf="canReopenOwnPreventiveReport(report)"
+                    type="button"
+                    class="warning"
+                    (click)="openEngineerCorrectionDialog(report)"
+                  >
+                    Corregir antes de firma
+                  </button>
                   <button type="button" class="ghost" (click)="openReportDetail(report)">Ver reporte</button>
                 </ng-container>
               </ng-container>
@@ -1329,6 +1337,14 @@
             </span>
           </span>
           <span class="actions" data-label="Reporte">
+            <button
+              *ngIf="canReopenOwnPreventiveReport(report)"
+              type="button"
+              class="warning"
+              (click)="openEngineerCorrectionDialog(report)"
+            >
+              Corregir
+            </button>
             <button type="button" class="ghost view-report-button" (click)="openReportDetail(report)">Ver reporte</button>
           </span>
         </div>
@@ -1805,6 +1821,14 @@
           Solicitar corrección
         </button>
         <button
+          *ngIf="canReopenOwnPreventiveReport(report)"
+          type="button"
+          class="warning"
+          (click)="openEngineerCorrectionDialog(report)"
+        >
+          Editar antes de firma
+        </button>
+        <button
           *ngIf="canCorrectReport(report)"
           type="button"
           class="warning"
@@ -1998,6 +2022,72 @@
           <button type="button" class="ghost" [disabled]="correctionSubmitting" (click)="closeCorrectionDialog()">Cancelar</button>
           <button type="submit" [disabled]="correctionSubmitting || correctionReason.trim().length < 10">
             {{ correctionSubmitting ? 'Enviando...' : 'Enviar corrección' }}
+          </button>
+        </div>
+      </form>
+    </article>
+  </div>
+
+  <div
+    class="maintenance-modal-backdrop"
+    *ngIf="engineerCorrectionDialogReport as report"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="engineer-correction-dialog-title"
+    (click)="closeEngineerCorrectionDialog()"
+  >
+    <article class="maintenance-modal" (click)="$event.stopPropagation()">
+      <div class="modal-heading">
+        <div>
+          <span>Control de versión</span>
+          <h2 id="engineer-correction-dialog-title">Corregir antes de firma</h2>
+        </div>
+        <button
+          type="button"
+          class="icon-action ghost"
+          aria-label="Cerrar"
+          title="Cerrar"
+          (click)="closeEngineerCorrectionDialog()"
+        >
+          ×
+        </button>
+      </div>
+      <div class="modal-report-context">
+        <strong>{{ assetLabel(report.asset_id) }}</strong>
+        <span>{{ report.summary || 'Reporte sin resumen' }}</span>
+      </div>
+      <p class="modal-notice">
+        La versión actual saldrá del flujo de firma. Su PDF y la firma anterior del ingeniero
+        quedarán invalidados; al guardar la corrección se generará una nueva versión y se enviará nuevamente para firma o aval.
+      </p>
+      <form (ngSubmit)="reopenOwnPreventiveReport()">
+        <label>
+          Motivo de la corrección
+          <textarea
+            [(ngModel)]="engineerCorrectionReason"
+            name="engineerCorrectionReason"
+            rows="4"
+            minlength="10"
+            maxlength="600"
+            placeholder="Ejemplo: se registró incorrectamente el estado final del equipo."
+            autofocus
+          ></textarea>
+          <small class="field-help">Mínimo 10 caracteres · {{ engineerCorrectionReason.trim().length }}/600</small>
+        </label>
+        <div class="modal-actions">
+          <button
+            type="button"
+            class="ghost"
+            [disabled]="engineerCorrectionSubmitting"
+            (click)="closeEngineerCorrectionDialog()"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            [disabled]="engineerCorrectionSubmitting || engineerCorrectionReason.trim().length < 10"
+          >
+            {{ engineerCorrectionSubmitting ? 'Reabriendo...' : 'Reabrir y editar' }}
           </button>
         </div>
       </form>
