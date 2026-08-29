@@ -2915,6 +2915,16 @@ function resolveStoredFilePath(filePath) {
   return fs.existsSync(fullPath) ? fullPath : null;
 }
 
+const MAINTENANCE_REPORT_PDF_TEMPLATE_VERSION = 'v2';
+
+function maintenanceReportPdfFilename(reportId) {
+  return `reporte-${reportId}-${MAINTENANCE_REPORT_PDF_TEMPLATE_VERSION}.pdf`;
+}
+
+function maintenanceReportPdfUsesCurrentTemplate(pdfPath, reportId) {
+  return path.basename(String(pdfPath || '')) === maintenanceReportPdfFilename(reportId);
+}
+
 function buildPdfKitBuffer(builder) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
@@ -2929,7 +2939,10 @@ function buildPdfKitBuffer(builder) {
 
 async function resolveAssetHistoryPdfFile(item) {
   let filePath = resolveStoredFilePath(item.pdf_path);
-  if (!filePath && item.item_type === 'maintenance_report') {
+  if (
+    item.item_type === 'maintenance_report' &&
+    (!filePath || !maintenanceReportPdfUsesCurrentTemplate(item.pdf_path, item.id))
+  ) {
     const publicPath = await writeMaintenanceReportPdfFile(item.id);
     filePath = resolveStoredFilePath(publicPath);
   }
@@ -11610,8 +11623,9 @@ app.post(
     if (client && asset && request) {
       const dir = path.join(process.cwd(), 'uploads', 'clients', report.client_id, 'maintenance');
       await fs.promises.mkdir(dir, { recursive: true });
-      const filename = path.join(dir, `reporte-${report.id}.pdf`);
-      const publicPath = `/${path.join('uploads', 'clients', report.client_id, 'maintenance', `reporte-${report.id}.pdf`)}`.replace(/\\/g, '/');
+      const reportPdfFilename = maintenanceReportPdfFilename(report.id);
+      const filename = path.join(dir, reportPdfFilename);
+      const publicPath = `/${path.join('uploads', 'clients', report.client_id, 'maintenance', reportPdfFilename)}`.replace(/\\/g, '/');
       const doc = new PDFDocument({ size: 'A4', margin: 50 });
       const stream = fs.createWriteStream(filename);
       doc.pipe(stream);
@@ -11762,8 +11776,9 @@ async function writeMaintenanceReportPdfFile(reportId) {
 
   const dir = path.join(process.cwd(), 'uploads', 'clients', report.client_id, 'maintenance');
   await fs.promises.mkdir(dir, { recursive: true });
-  const filename = path.join(dir, `reporte-${report.id}.pdf`);
-  const publicPath = `/${path.join('uploads', 'clients', report.client_id, 'maintenance', `reporte-${report.id}.pdf`)}`.replace(/\\/g, '/');
+  const reportPdfFilename = maintenanceReportPdfFilename(report.id);
+  const filename = path.join(dir, reportPdfFilename);
+  const publicPath = `/${path.join('uploads', 'clients', report.client_id, 'maintenance', reportPdfFilename)}`.replace(/\\/g, '/');
   const doc = new PDFDocument({ size: 'A4', margin: 50 });
   const stream = fs.createWriteStream(filename);
   doc.pipe(stream);
@@ -11795,16 +11810,20 @@ app.get(
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
       }
     }
-    const reportRow = report;
-    if (!reportRow.pdf_path) {
-      return res.status(404).json({ message: 'PDF no disponible.' });
+    let reportPdfPath = report.pdf_path;
+    let pdfPath = resolveStoredFilePath(reportPdfPath);
+    if (
+      !pdfPath ||
+      !maintenanceReportPdfUsesCurrentTemplate(reportPdfPath, report.id)
+    ) {
+      reportPdfPath = await writeMaintenanceReportPdfFile(report.id);
+      pdfPath = resolveStoredFilePath(reportPdfPath);
     }
-    const pdfPath = path.join(process.cwd(), reportRow.pdf_path.replace(/^\//, ''));
-    if (!fs.existsSync(pdfPath)) {
+    if (!pdfPath) {
       return res.status(404).json({ message: 'PDF no encontrado.' });
     }
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="reporte-${reportRow.id}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="reporte-${report.id}.pdf"`);
     return fs.createReadStream(pdfPath).pipe(res);
   }
 );

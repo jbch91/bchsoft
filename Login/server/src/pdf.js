@@ -53,6 +53,17 @@ function maintenanceSignerRoleLabel(value) {
   return labels[value] || safeText(value);
 }
 
+function maintenanceSignerDescription(value) {
+  const descriptions = {
+    ingeniero_biomedico: 'Responsable técnico del mantenimiento',
+    responsable_area: 'Aval y recepción del servicio en el área',
+    almacenista: 'Validación de repuestos y suministros',
+    lector: 'Aval operativo del servicio',
+    viewer: 'Aval operativo del servicio'
+  };
+  return descriptions[value] || 'Firmante autorizado del reporte';
+}
+
 function listLabels(values, labels) {
   const list = Array.isArray(values) ? values : [];
   if (!list.length) return 'No registrado';
@@ -1624,74 +1635,130 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
   ];
   drawTable(doc, reportRows, { colWidths: [140, 360], rowHeight: 24 });
 
+  ensureSpace(doc, 215);
   sectionTitle(doc, 'FIRMAS');
   if (!signatures?.length) {
     doc.fontSize(10).fillColor(PDF_MUTED).text('Sin firmas registradas.');
     return;
   }
 
-  const signatureWidth = 160;
-  const signatureHeight = 60;
-  const gap = 14;
-  let cursorX = doc.page.margins.left;
+  const signaturesPerRow = 2;
+  const gap = 24;
+  const rowGap = 22;
+  const availableWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const signatureWidth = (availableWidth - gap) / signaturesPerRow;
+  const signatureHeight = 158;
+  const left = doc.page.margins.left;
+  const bottomLimit = doc.page.height - doc.page.margins.bottom;
   let cursorY = doc.y;
 
   signatures.forEach((sig, index) => {
-    if (index > 0 && cursorX + signatureWidth > doc.page.width - doc.page.margins.right) {
-      cursorX = doc.page.margins.left;
-      cursorY += signatureHeight + 40;
+    const column = index % signaturesPerRow;
+    if (index > 0 && column === 0) {
+      cursorY += signatureHeight + rowGap;
+      if (cursorY + signatureHeight > bottomLimit) {
+        doc.addPage();
+        paintPageBackground(doc);
+        sectionTitle(doc, 'FIRMAS (CONTINUACIÓN)');
+        cursorY = doc.y;
+      }
     }
+    const cursorX = left + column * (signatureWidth + gap);
 
     doc
-      .rect(cursorX, cursorY, signatureWidth, signatureHeight)
-      .strokeColor(PDF_TABLE_DIVIDER)
+      .roundedRect(cursorX, cursorY, signatureWidth, signatureHeight, 5)
+      .fillColor(PDF_WHITE)
+      .strokeColor(PDF_TABLE_BORDER)
       .lineWidth(0.8)
+      .fillAndStroke();
+
+    doc
+      .rect(cursorX + 1, cursorY + 1, signatureWidth - 2, 37)
+      .fillColor(PDF_BRAND_50)
+      .fill();
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(10.5)
+      .fillColor(PDF_BRAND_700)
+      .text(maintenanceSignerRoleLabel(sig.role), cursorX + 10, cursorY + 6, {
+        width: signatureWidth - 20,
+        height: 13,
+        align: 'center',
+        ellipsis: true
+      });
+
+    doc
+      .font('Helvetica')
+      .fontSize(8.8)
+      .fillColor(PDF_MUTED)
+      .text(maintenanceSignerDescription(sig.role), cursorX + 10, cursorY + 21, {
+        width: signatureWidth - 20,
+        height: 12,
+        align: 'center',
+        ellipsis: true
+      });
+
+    const signatureBoxX = cursorX + 18;
+    const signatureBoxY = cursorY + 45;
+    const signatureBoxWidth = signatureWidth - 36;
+    const signatureBoxHeight = 43;
+    doc
+      .roundedRect(signatureBoxX, signatureBoxY, signatureBoxWidth, signatureBoxHeight, 4)
+      .strokeColor(PDF_TABLE_DIVIDER)
+      .lineWidth(0.7)
       .stroke();
 
     const sigPath = sig.signature_path
       ? path.join(process.cwd(), sig.signature_path.replace(/^\//, ''))
       : null;
     if (sigPath && fs.existsSync(sigPath)) {
-      doc.image(sigPath, cursorX + 6, cursorY + 6, { fit: [signatureWidth - 12, signatureHeight - 12] });
+      doc.image(sigPath, signatureBoxX + 6, signatureBoxY + 4, {
+        fit: [signatureBoxWidth - 12, signatureBoxHeight - 8],
+        align: 'center',
+        valign: 'center'
+      });
+    } else {
+      doc
+        .font('Helvetica')
+        .fontSize(8.4)
+        .fillColor(PDF_MUTED)
+        .text('Firma digital no disponible', signatureBoxX + 6, signatureBoxY + 16, {
+          width: signatureBoxWidth - 12,
+          align: 'center'
+        });
     }
 
     doc
       .font('Helvetica')
-      .fontSize(8.5)
+      .fontSize(7.8)
       .fillColor(PDF_MUTED)
-      .text('Firmante', cursorX, cursorY + signatureHeight + 2, {
-        width: signatureWidth,
+      .text('NOMBRE DEL FIRMANTE', cursorX + 10, cursorY + 97, {
+        width: signatureWidth - 20,
         align: 'center'
       });
     doc
       .font('Helvetica-Bold')
-      .fontSize(10)
+      .fontSize(10.2)
       .fillColor(PDF_INK)
-      .text(safeText(sig.display_name), cursorX, cursorY + signatureHeight + 12, {
-        width: signatureWidth,
-        align: 'center'
+      .text(safeText(sig.display_name), cursorX + 10, cursorY + 109, {
+        width: signatureWidth - 20,
+        height: 27,
+        lineGap: 1,
+        align: 'center',
+        ellipsis: true
       });
     doc
       .font('Helvetica')
-      .fontSize(8.5)
+      .fontSize(9)
       .fillColor(PDF_MUTED)
-      .text(`Rol: ${maintenanceSignerRoleLabel(sig.role)}`, cursorX, cursorY + signatureHeight + 24, {
-        width: signatureWidth,
+      .text(`Firmado el ${formatDate(sig.signed_at)}`, cursorX + 10, cursorY + 141, {
+        width: signatureWidth - 20,
         align: 'center'
       });
-    doc
-      .font('Helvetica')
-      .fontSize(8.5)
-      .fillColor(PDF_MUTED)
-      .text(`Fecha: ${formatDate(sig.signed_at)}`, cursorX, cursorY + signatureHeight + 34, {
-        width: signatureWidth,
-        align: 'center'
-      });
-
-    cursorX += signatureWidth + gap;
   });
 
-  doc.y = cursorY + signatureHeight + 32;
+  doc.y = cursorY + signatureHeight + 10;
 }
 
 export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
