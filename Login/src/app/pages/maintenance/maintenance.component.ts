@@ -2947,7 +2947,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return Boolean(
       report.requires_spare_parts &&
       report.spare_parts_status !== 'recibido' &&
-      report.request_status === 'espera_repuesto' &&
+      ['espera_repuesto', 'correccion'].includes(report.request_status || '') &&
       !this.hasReceivedSpareReport(report)
     );
   }

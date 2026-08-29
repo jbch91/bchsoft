@@ -145,6 +145,49 @@ describe('maintenance report modal flow', () => {
     expect(component.filteredReports.map((report) => report.id)).toEqual(['corrective-completed']);
   });
 
+  it('mantiene en Repuestos un preventivo en corrección mientras el repuesto siga pendiente', () => {
+    const auth = {
+      hasRole: () => false,
+      hasPermission: () => false,
+      currentUser: () => ({ id: 'engineer-1', clientId: 'client-1' })
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      auth as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { snapshot: { data: { assetCategory: 'biomedical' } } } as never
+    );
+    const asset = {
+      id: 'asset-1',
+      code: '10003',
+      name: 'ANALIZADOR DE HEMATOLOGÍA',
+      status: 'pendiente_repuesto'
+    };
+    component.assets = [asset];
+    component.assetMap = new Map([[asset.id, asset]]);
+    component.reports = [{
+      id: 'report-1',
+      client_id: 'client-1',
+      request_id: 'request-1',
+      asset_id: asset.id,
+      type: 'preventivo',
+      created_by: 'engineer-1',
+      created_at: '2026-08-28T10:00:00.000Z',
+      request_status: 'correccion',
+      requires_spare_parts: true,
+      spare_parts_needed: 'Celda de lectura de hemoglobina',
+      spare_parts_status: 'solicitado'
+    }];
+
+    expect(component.sparePartReports.map((report) => report.id)).toEqual(['report-1']);
+    expect(component.pendingSpareCount).toBe(1);
+
+    component.reports = [{ ...component.reports[0], spare_parts_status: 'recibido' }];
+    expect(component.sparePartReports).toEqual([]);
+  });
+
   it('usa la autorización calculada por la API para mostrar la corrección', () => {
     const auth = {
       hasRole: () => false,
