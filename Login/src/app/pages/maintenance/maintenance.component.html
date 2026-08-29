@@ -612,9 +612,11 @@
                     *ngIf="canReopenOwnPreventiveReport(report)"
                     type="button"
                     class="warning"
+                    title="Corregir el reporte antes de la firma"
+                    aria-label="Corregir el reporte antes de la firma"
                     (click)="openEngineerCorrectionDialog(report)"
                   >
-                    Corregir antes de firma
+                    Corregir
                   </button>
                   <button type="button" class="ghost" (click)="openReportDetail(report)">Ver reporte</button>
                 </ng-container>
@@ -1476,9 +1478,11 @@
               *ngIf="canReopenOwnPreventiveReport(report)"
               type="button"
               class="warning"
+              title="Corregir el reporte antes de la firma"
+              aria-label="Corregir el reporte antes de la firma"
               (click)="openEngineerCorrectionDialog(report)"
             >
-              Corregir antes de firma
+              Corregir
             </button>
             <button type="button" class="ghost view-report-button" (click)="openReportDetail(report)">Ver reporte</button>
           </span>
