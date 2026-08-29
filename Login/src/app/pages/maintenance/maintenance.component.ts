@@ -595,6 +595,12 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return this.auth.hasRole('responsable_area');
   }
 
+  get engineerReportsOnlyCorrectives(): boolean {
+    return !this.isAreaResponsible
+      && !this.auth.hasRole('superuser')
+      && this.auth.hasRole('ingeniero_biomedico');
+  }
+
   async ngOnInit(): Promise<void> {
     if (this.canRefreshMaintenanceTemporaryPermissions) {
       await this.refreshCurrentPermissions(false);
@@ -2030,13 +2036,18 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   get filteredReports(): MaintenanceReportDto[] {
     const term = this.normalize(this.reportSearchTerm);
+    const typeFilter = this.engineerReportsOnlyCorrectives ? '' : this.reportTypeFilter;
     const filterKey = [
-      this.isAreaResponsible ? 'area-responsible' : 'standard',
+      this.isAreaResponsible
+        ? 'area-responsible'
+        : this.engineerReportsOnlyCorrectives
+          ? 'engineer-correctives'
+          : 'standard',
       this.reportSubView,
       term,
       this.reportStatusFilter,
       this.reportSpareFilter,
-      this.reportTypeFilter,
+      typeFilter,
       this.reportSiteFilter,
       this.reportAreaFilter,
       this.reportDateFrom,
@@ -2061,7 +2072,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       if (this.reportStatusFilter && reportState !== this.reportStatusFilter) return false;
       if (this.reportSpareFilter === 'con_repuesto' && !report.requires_spare_parts) return false;
       if (this.reportSpareFilter === 'sin_repuesto' && report.requires_spare_parts) return false;
-      if (this.reportTypeFilter && report.type !== this.reportTypeFilter) return false;
+      if (typeFilter && report.type !== typeFilter) return false;
       const asset = this.assetMap.get(report.asset_id);
       if (this.reportSiteFilter && asset?.siteName !== this.reportSiteFilter) return false;
       if (this.reportAreaFilter && asset?.areaName !== this.reportAreaFilter) return false;
@@ -2103,7 +2114,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   get reportSiteOptions(): string[] {
     return Array.from(
       new Set(
-        this.reports
+        this.reportWorkspaceReports
           .map((report) => this.assetMap.get(report.asset_id)?.siteName)
           .filter(Boolean) as string[]
       )
@@ -2112,8 +2123,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   get reportAreaOptions(): string[] {
     const source = this.reportSiteFilter
-      ? this.reports.filter((report) => this.assetMap.get(report.asset_id)?.siteName === this.reportSiteFilter)
-      : this.reports;
+      ? this.reportWorkspaceReports.filter(
+        (report) => this.assetMap.get(report.asset_id)?.siteName === this.reportSiteFilter
+      )
+      : this.reportWorkspaceReports;
     return Array.from(
       new Set(
         source
@@ -2143,7 +2156,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return Boolean(
       this.reportSearchTerm.trim()
       || this.reportStatusFilter
-      || this.reportTypeFilter
+      || (!this.engineerReportsOnlyCorrectives && this.reportTypeFilter)
       || this.reportSpareFilter
       || this.reportSiteFilter
       || this.reportAreaFilter
@@ -2204,7 +2217,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   get pendingSignatureReports(): MaintenanceReportDto[] {
-    return this.reports.filter((report) => !report.is_fully_signed);
+    return this.reportWorkspaceReports.filter((report) => !report.is_fully_signed);
   }
 
   get areaResponsiblePendingReports(): MaintenanceReportDto[] {
@@ -2218,7 +2231,13 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   get reportHistory(): MaintenanceReportDto[] {
-    return this.reports.filter((report) => report.is_fully_signed);
+    return this.reportWorkspaceReports.filter((report) => report.is_fully_signed);
+  }
+
+  private get reportWorkspaceReports(): MaintenanceReportDto[] {
+    return this.engineerReportsOnlyCorrectives
+      ? this.reports.filter((report) => report.type === 'correctivo')
+      : this.reports;
   }
 
   get sparePartReports(): MaintenanceReportDto[] {

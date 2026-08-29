@@ -1335,8 +1335,14 @@
     <div class="card report-list-card" *ngIf="!isAreaResponsible">
       <div class="list-title report-list-title">
         <div>
-          <h2>Reportes</h2>
-          <p>Consulta primero el listado y abre únicamente el reporte que necesitas revisar o gestionar.</p>
+          <h2>{{ engineerReportsOnlyCorrectives ? 'Reportes correctivos' : 'Reportes' }}</h2>
+          <p>
+            {{
+              engineerReportsOnlyCorrectives
+                ? 'Consulta y gestiona aquí únicamente los mantenimientos correctivos.'
+                : 'Consulta primero el listado y abre únicamente el reporte que necesitas revisar o gestionar.'
+            }}
+          </p>
         </div>
         <span class="report-total-badge">{{ filteredReports.length }} resultado{{ filteredReports.length === 1 ? '' : 's' }}</span>
       </div>
@@ -1372,7 +1378,7 @@
               <option *ngFor="let option of reportStatusOptions" [value]="option.value">{{ option.label }}</option>
             </select>
           </label>
-          <label>
+          <label *ngIf="!engineerReportsOnlyCorrectives">
             Tipo
             <select [(ngModel)]="reportTypeFilter" (ngModelChange)="resetReportPage()">
               <option value="">Todos</option>
@@ -1423,7 +1429,7 @@
           [class.active]="reportSubView === 'pendientes_firma'"
           (click)="setReportSubView('pendientes_firma')"
         >
-          Reportes por firmar
+          {{ engineerReportsOnlyCorrectives ? 'Correctivos por firmar' : 'Reportes por firmar' }}
           <strong>{{ pendingSignatureReports.length }}</strong>
         </button>
         <button
@@ -1431,7 +1437,7 @@
           [class.active]="reportSubView === 'historial'"
           (click)="setReportSubView('historial')"
         >
-          Historial y trazabilidad
+          {{ engineerReportsOnlyCorrectives ? 'Historial correctivo' : 'Historial y trazabilidad' }}
           <strong>{{ reportHistory.length }}</strong>
         </button>
       </div>
@@ -1478,10 +1484,18 @@
           </span>
         </div>
         <p class="empty" *ngIf="filteredReports.length === 0 && reportSubView === 'pendientes_firma'">
-          No hay reportes listos para firmar con esos filtros.
+          {{
+            engineerReportsOnlyCorrectives
+              ? 'No hay reportes correctivos pendientes con esos filtros.'
+              : 'No hay reportes listos para firmar con esos filtros.'
+          }}
         </p>
         <p class="empty" *ngIf="filteredReports.length === 0 && reportSubView === 'historial'">
-          No hay reportes en el historial o trazabilidad con esos filtros.
+          {{
+            engineerReportsOnlyCorrectives
+              ? 'No hay reportes correctivos en el historial con esos filtros.'
+              : 'No hay reportes en el historial o trazabilidad con esos filtros.'
+          }}
         </p>
       </div>
 

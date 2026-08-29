@@ -103,6 +103,48 @@ describe('maintenance report modal flow', () => {
     expect(component.canReopenOwnPreventiveReport({ ...report, type: 'correctivo' })).toBe(false);
   });
 
+  it('reserva la pestaña Reportes del ingeniero para mantenimientos correctivos', () => {
+    const auth = {
+      hasRole: (role: string | string[]) => Array.isArray(role)
+        ? role.includes('ingeniero_biomedico')
+        : role === 'ingeniero_biomedico',
+      hasPermission: (permission: string) => permission === 'maintenance:report:create',
+      currentUser: () => ({ id: 'engineer-1', clientId: 'client-1' })
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      auth as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { snapshot: { data: { assetCategory: 'biomedical' } } } as never
+    );
+    const baseReport = {
+      client_id: 'client-1',
+      request_id: 'request-1',
+      asset_id: 'asset-1',
+      created_by: 'engineer-1',
+      created_at: '2026-08-28T10:00:00.000Z',
+      request_status: 'reportado',
+      correction_requested: false
+    } as const;
+    component.reports = [
+      { ...baseReport, id: 'preventive-pending', type: 'preventivo', is_fully_signed: false },
+      { ...baseReport, id: 'corrective-pending', type: 'correctivo', is_fully_signed: false },
+      { ...baseReport, id: 'preventive-completed', type: 'preventivo', is_fully_signed: true },
+      { ...baseReport, id: 'corrective-completed', type: 'correctivo', is_fully_signed: true }
+    ];
+
+    expect(component.engineerReportsOnlyCorrectives).toBe(true);
+    expect(component.pendingSignatureReports.map((report) => report.id)).toEqual(['corrective-pending']);
+    expect(component.reportHistory.map((report) => report.id)).toEqual(['corrective-completed']);
+    expect(component.actionablePendingReportCount).toBe(1);
+    expect(component.filteredReports.map((report) => report.id)).toEqual(['corrective-pending']);
+
+    component.setReportSubView('historial');
+    expect(component.filteredReports.map((report) => report.id)).toEqual(['corrective-completed']);
+  });
+
   it('usa la autorización calculada por la API para mostrar la corrección', () => {
     const auth = {
       hasRole: () => false,
