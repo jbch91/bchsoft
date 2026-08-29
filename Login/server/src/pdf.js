@@ -133,10 +133,6 @@ function maintenanceAssetCategoryLabel(value) {
   return value === 'industrial' ? 'EQUIPO INDUSTRIAL' : 'EQUIPO BIOMÉDICO';
 }
 
-function maintenanceYesNo(value) {
-  return value ? 'SÍ' : 'NO';
-}
-
 const MAINTENANCE_CHECK_LABELS = {
   revision_visual: 'Revisión visual externa',
   revision_cables_conexiones: 'Revisión de cables y conexiones',
@@ -227,44 +223,6 @@ function maintenanceReportCode(report, isIndustrial) {
   const dateCode = `${part('year')}${part('month')}${part('day')}`;
   const reportCode = String(report.id || 'SIN-ID').replace(/-/g, '').slice(0, 8).toUpperCase();
   return `RM-${isIndustrial ? 'IND' : 'BIO'}-${dateCode}-${reportCode}`;
-}
-
-function maintenanceRange(minimum, maximum, unit) {
-  const hasMinimum = minimum !== null && minimum !== undefined && minimum !== '';
-  const hasMaximum = maximum !== null && maximum !== undefined && maximum !== '';
-  if (!hasMinimum && !hasMaximum) return 'NO REGISTRA';
-  if (hasMinimum && hasMaximum) return `${minimum} A ${maximum} ${unit}`;
-  return hasMinimum ? `DESDE ${minimum} ${unit}` : `HASTA ${maximum} ${unit}`;
-}
-
-function maintenanceWarrantyLabel(asset, referenceDate) {
-  const years = Number(asset.warranty_years);
-  if (!Number.isFinite(years)) return 'NO REGISTRA';
-  if (years <= 0) return 'SIN GARANTÍA';
-  if (!asset.acquisition_date) return `${years} AÑO${years === 1 ? '' : 'S'} - FECHA BASE NO REGISTRADA`;
-  if (typeof asset.acquisition_date === 'string') {
-    const dateOnly = asset.acquisition_date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (dateOnly) {
-      const releaseYear = Number(dateOnly[1]) + years;
-      const release = new Date(Date.UTC(releaseYear, Number(dateOnly[2]) - 1, Number(dateOnly[3]), 12));
-      const reference = referenceDate ? new Date(referenceDate) : new Date();
-      const status = !Number.isNaN(reference.getTime()) && reference < release ? 'VIGENTE' : 'VENCIDA';
-      return `${status} HASTA ${dateOnly[3]}/${dateOnly[2]}/${releaseYear}`;
-    }
-  }
-  const acquisition = new Date(asset.acquisition_date);
-  if (Number.isNaN(acquisition.getTime())) return `${years} AÑO${years === 1 ? '' : 'S'}`;
-  const release = new Date(acquisition);
-  release.setFullYear(release.getFullYear() + years);
-  const reference = referenceDate ? new Date(referenceDate) : new Date();
-  const status = !Number.isNaN(reference.getTime()) && reference < release ? 'VIGENTE' : 'VENCIDA';
-  return `${status} HASTA ${formatMaintenanceDate(release)}`;
-}
-
-function maintenanceUsefulLifeLabel(value) {
-  const years = Number(value);
-  if (!Number.isFinite(years) || years <= 0) return 'NO REGISTRA';
-  return `${years} AÑO${years === 1 ? '' : 'S'}`;
 }
 
 function maintenanceClientInitials(name) {
@@ -1821,7 +1779,7 @@ function drawMaintenanceReportHeader(doc, { client, report, signatures, isIndust
   const controlX = titleX + titleWidth;
   const controlRows = [
     ['CÓDIGO', code],
-    ['VERSIÓN', '03'],
+    ['VERSIÓN', '04'],
     ['ESTADO', documentStatus],
     ['EMISIÓN', formatMaintenanceDate(new Date())]
   ];
@@ -2279,7 +2237,7 @@ function drawMaintenanceSignatures(doc, signatures) {
       if (cursorY + signatureHeight > bottomLimit) {
         doc.addPage();
         paintPageBackground(doc);
-        drawMaintenanceSectionTitle(doc, 8, 'FIRMAS Y AVALES - CONTINUACIÓN', signatureHeight);
+        drawMaintenanceSectionTitle(doc, 6, 'FIRMAS Y AVALES - CONTINUACIÓN', signatureHeight);
         cursorY = doc.y;
       }
     }
@@ -2473,44 +2431,6 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
   );
   drawMaintenanceAssetIdentification(doc, asset);
 
-  const sanitaryClassification = asset.requires_sanitary_classification
-    ? maintenanceTokenLabel(asset.risk_class)
-    : 'NO REQUIERE CLASIFICACIÓN SANITARIA';
-  const electricalClassification = asset.requires_electrical_classification
-    ? maintenanceTokenLabel(asset.electrical_protection_class)
-    : 'NO REQUIERE CLASIFICACIÓN ELÉCTRICA';
-  const appliedPart = asset.requires_electrical_classification
-    ? maintenanceTokenLabel(asset.applied_part_type)
-    : 'NO APLICA';
-  const calibrationFrequency = asset.requires_calibration
-    ? maintenanceTokenLabel(asset.calibration_frequency)
-    : 'NO APLICA';
-  const technicalItems = [
-    { label: 'CLASIFICACIÓN DE RIESGO SANITARIO', value: sanitaryClassification, compact: true },
-    { label: 'CLASE DE PROTECCIÓN ELÉCTRICA', value: electricalClassification, compact: true },
-    { label: 'TIPO DE PARTE APLICADA', value: appliedPart },
-    { label: 'REGISTRO INVIMA', value: asset.invima_reg },
-    { label: 'FUENTE DE ALIMENTACIÓN', value: maintenanceTokenLabel(asset.power_type) },
-    { label: 'VOLTAJE DE OPERACIÓN', value: asset.voltage },
-    { label: 'CONDICIÓN DE MOVILIDAD', value: asset.is_mobile ? 'EQUIPO MÓVIL' : 'EQUIPO FIJO' },
-    { label: 'PERIODICIDAD DE MANTENIMIENTO', value: maintenanceTokenLabel(asset.maintenance_frequency) },
-    { label: 'REQUIERE CALIBRACIÓN', value: maintenanceYesNo(asset.requires_calibration) },
-    { label: 'PERIODICIDAD DE CALIBRACIÓN', value: calibrationFrequency },
-    { label: 'FECHA DE ADQUISICIÓN', value: formatMaintenanceDate(asset.acquisition_date) },
-    { label: 'VIDA ÚTIL ESTIMADA', value: maintenanceUsefulLifeLabel(asset.useful_life_years) },
-    { label: 'ESTADO DE GARANTÍA', value: maintenanceWarrantyLabel(asset, report.created_at), compact: true },
-    { label: 'RANGO DE TEMPERATURA', value: maintenanceRange(asset.temp_min, asset.temp_max, '°C') },
-    { label: 'RANGO DE HUMEDAD', value: maintenanceRange(asset.humidity_min, asset.humidity_max, '% HR') }
-  ];
-  const technicalHeight = maintenanceGridHeight(technicalItems.length, 3, 43, 6);
-  drawMaintenanceSectionTitle(
-    doc,
-    2,
-    'CLASIFICACIÓN Y CONDICIONES TÉCNICAS',
-    technicalHeight
-  );
-  drawMaintenanceInfoGrid(doc, technicalItems, { columns: 3, cellHeight: 43, gap: 6 });
-
   const engineerSignature = signatureList.find(
     (signature) => signature.role === 'ingeniero_biomedico'
   );
@@ -2531,7 +2451,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
   const interventionHeight = maintenanceGridHeight(interventionItems.length, 3, 48, 6);
   drawMaintenanceSectionTitle(
     doc,
-    3,
+    2,
     'DATOS DE LA INTERVENCIÓN',
     interventionHeight
   );
@@ -2568,7 +2488,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
   );
   drawMaintenanceSectionTitle(
     doc,
-    4,
+    3,
     'PROTOCOLO TÉCNICO EJECUTADO',
     checklistHeight
   );
@@ -2577,7 +2497,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
   const firstResultHeight = maintenanceNarrativeHeight(doc, report.summary, pageContentWidth);
   drawMaintenanceSectionTitle(
     doc,
-    5,
+    4,
     'RESULTADO TÉCNICO DE LA INTERVENCIÓN',
     firstResultHeight
   );
@@ -2592,7 +2512,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     report.actions_taken
   );
 
-  drawMaintenanceSectionTitle(doc, 6, 'ESTADO TÉCNICO DE CIERRE Y REPUESTOS', 66);
+  drawMaintenanceSectionTitle(doc, 5, 'ESTADO TÉCNICO DE CIERRE Y REPUESTOS', 66);
   drawMaintenanceStatusSummary(doc, report);
   drawMaintenanceNarrativeBox(
     doc,
@@ -2610,30 +2530,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     );
   }
 
-  const traceabilityItems = [
-    { label: 'CÓDIGO DOCUMENTAL', value: header.code },
-    { label: 'VERSIÓN DE PLANTILLA', value: '03' },
-    { label: 'IDENTIFICADOR DEL REPORTE', value: report.id, compact: true },
-    { label: 'IDENTIFICADOR DE LA SOLICITUD', value: request.id || report.request_id, compact: true },
-    { label: 'IDENTIFICADOR DEL CRONOGRAMA', value: request.schedule_id, compact: true },
-    { label: 'ÍTEM DEL CRONOGRAMA', value: request.schedule_item_id, compact: true },
-    { label: 'FECHA DE GENERACIÓN', value: formatMaintenanceDateTime(new Date()) },
-    { label: 'FIRMAS REGISTRADAS', value: String(signatureList.length) }
-  ];
-  const traceabilityHeight = maintenanceGridHeight(traceabilityItems.length, 2, 40, 6);
-  drawMaintenanceSectionTitle(
-    doc,
-    7,
-    'CONTROL DOCUMENTAL Y TRAZABILIDAD',
-    traceabilityHeight
-  );
-  drawMaintenanceInfoGrid(doc, traceabilityItems, {
-    columns: 2,
-    cellHeight: 40,
-    gap: 6
-  });
-
-  drawMaintenanceSectionTitle(doc, 8, 'FIRMAS Y AVALES', 171);
+  drawMaintenanceSectionTitle(doc, 6, 'FIRMAS Y AVALES', 171);
   drawMaintenanceSignatures(doc, signatureList);
 
   addMaintenanceReportPageChrome(doc, { client, code: header.code });

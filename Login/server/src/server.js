@@ -323,6 +323,7 @@ import {
   getMaintenanceReportWithOpenCorrectionByRequest,
   updateMaintenanceReport,
   signMaintenanceReport,
+  updateMaintenanceReportSignatureSnapshot,
   listMaintenanceReports,
   listMaintenanceReportsForReader,
   getMaintenanceReportById,
@@ -344,6 +345,11 @@ import {
   resolveMaintenanceReportCorrections,
   listUsersByRoleAndClient
 } from './maintenance.js';
+import {
+  createMaintenanceSignatureSnapshot,
+  isMaintenanceSignatureSnapshotPath,
+  removeMaintenanceSignatureSnapshot
+} from './maintenance-signature-snapshots.js';
 import {
   MAINTENANCE_REQUEST_CLAIMABLE_STATUSES,
   MAINTENANCE_REQUEST_REPORTABLE_STATUSES,
@@ -2915,7 +2921,67 @@ function resolveStoredFilePath(filePath) {
   return fs.existsSync(fullPath) ? fullPath : null;
 }
 
-const MAINTENANCE_REPORT_PDF_TEMPLATE_VERSION = 'v3';
+const MAINTENANCE_REPORT_PDF_TEMPLATE_VERSION = 'v4';
+
+async function signMaintenanceReportWithSnapshot({ reportId, clientId, user, role }) {
+  if (!user?.signature_path) return null;
+
+  const snapshot = await createMaintenanceSignatureSnapshot({
+    clientId,
+    reportId,
+    sourceSignaturePath: user.signature_path
+  });
+  try {
+    return await signMaintenanceReport({
+      reportId,
+      userId: user.id,
+      role,
+      signaturePath: snapshot.publicPath,
+      signerName: user.display_name || user.username || 'FIRMANTE AUTORIZADO',
+      signerInvimaRegistration: user.invima_registration,
+      signatureSha256: snapshot.sha256
+    });
+  } catch (error) {
+    await removeMaintenanceSignatureSnapshot(snapshot.fullPath).catch(() => {});
+    throw error;
+  }
+}
+
+async function ensureMaintenanceReportSignatureSnapshots(report) {
+  const signatures = await listReportSignatures(report.id);
+  for (const signature of signatures) {
+    if (isMaintenanceSignatureSnapshotPath(signature.signature_path, report.id)) continue;
+
+    let snapshot;
+    try {
+      snapshot = await createMaintenanceSignatureSnapshot({
+        clientId: report.client_id,
+        reportId: report.id,
+        sourceSignaturePath: signature.signature_path
+      });
+      const updated = await updateMaintenanceReportSignatureSnapshot({
+        signatureId: signature.id,
+        previousSignaturePath: signature.signature_path,
+        signaturePath: snapshot.publicPath,
+        signatureSha256: snapshot.sha256,
+        signerName: signature.display_name,
+        signerInvimaRegistration: signature.invima_registration
+      });
+      if (!updated) {
+        await removeMaintenanceSignatureSnapshot(snapshot.fullPath);
+      }
+    } catch (error) {
+      if (snapshot?.fullPath) {
+        await removeMaintenanceSignatureSnapshot(snapshot.fullPath).catch(() => {});
+      }
+      console.error(
+        `No se pudo inmovilizar la firma ${signature.id} del reporte ${report.id}`,
+        error
+      );
+    }
+  }
+  return listReportSignatures(report.id);
+}
 
 function maintenanceReportPdfFilename(reportId) {
   return `reporte-${reportId}-${MAINTENANCE_REPORT_PDF_TEMPLATE_VERSION}.pdf`;
@@ -7034,10 +7100,11 @@ async function signatureFileToImageBuffer(file) {
 async function saveUserSignature(userId, file) {
   const dir = path.join(process.cwd(), 'uploads', 'users', userId);
   await fs.promises.mkdir(dir, { recursive: true });
-  const filename = path.join(dir, 'signature.png');
+  const signatureFilename = `signature-${randomUUID()}.png`;
+  const filename = path.join(dir, signatureFilename);
   const imageBuffer = await signatureFileToImageBuffer(file);
   await processSignatureImage(imageBuffer, filename);
-  const publicPath = `/${path.join('uploads', 'users', userId, 'signature.png')}`;
+  const publicPath = `/${path.join('uploads', 'users', userId, signatureFilename)}`;
   return publicPath.replace(/\\/g, '/');
 }
 
@@ -11325,12 +11392,14 @@ app.post(
     });
 
     const engineer = await getUserById(req.user.sub);
-    if (engineer?.signature_path) {
-      await signMaintenanceReport({
+    if (engineer?.signature_path && resolveStoredFilePath(engineer.signature_path)) {
+      await signMaintenanceReportWithSnapshot({
         reportId: result.id,
-        userId: req.user.sub,
-        role: req.user.roles?.includes('ingeniero_biomedico') ? 'ingeniero_biomedico' : (req.user.roles?.[0] ?? 'ingeniero_biomedico'),
-        signaturePath: engineer.signature_path
+        clientId: request.client_id,
+        user: engineer,
+        role: req.user.roles?.includes('ingeniero_biomedico')
+          ? 'ingeniero_biomedico'
+          : (req.user.roles?.[0] ?? 'ingeniero_biomedico')
       });
     }
 
@@ -11549,17 +11618,22 @@ app.post(
     if (!user?.signature_path) {
       return res.status(400).json({ message: 'Firma no registrada para este usuario.' });
     }
+    if (!resolveStoredFilePath(user.signature_path)) {
+      return res.status(400).json({
+        message: 'La firma registrada no está disponible. Solicita al administrador volver a cargarla.'
+      });
+    }
 
     const existingSignatures = await listReportSignatures(report.id);
     if (existingSignatures.some((sig) => sig.user_id === req.user.sub)) {
       return res.status(409).json({ message: 'Ya firmaste este reporte.' });
     }
 
-    const result = await signMaintenanceReport({
+    const result = await signMaintenanceReportWithSnapshot({
       reportId: report.id,
-      userId: req.user.sub,
-      role: maintenanceAcceptanceRoleForUser(req.user),
-      signaturePath: user.signature_path
+      clientId: report.client_id,
+      user,
+      role: maintenanceAcceptanceRoleForUser(req.user)
     });
 
     const signedAsset = await getAssetById(report.client_id, report.asset_id);
@@ -11582,12 +11656,12 @@ app.post(
     const hasEngineer = signatures.some((sig) => sig.role === 'ingeniero_biomedico');
     if (!hasEngineer) {
       const engineerUser = await getUserById(report.created_by);
-      if (engineerUser?.signature_path) {
-        await signMaintenanceReport({
+      if (engineerUser?.signature_path && resolveStoredFilePath(engineerUser.signature_path)) {
+        await signMaintenanceReportWithSnapshot({
           reportId: report.id,
-          userId: report.created_by,
-          role: 'ingeniero_biomedico',
-          signaturePath: engineerUser.signature_path
+          clientId: report.client_id,
+          user: engineerUser,
+          role: 'ingeniero_biomedico'
         });
       }
     }
@@ -11616,24 +11690,7 @@ app.post(
       });
     }
 
-    const client = await getClientById(report.client_id);
-    const asset = await getAssetById(report.client_id, report.asset_id);
-    const request = await getMaintenanceRequestById(report.request_id);
-    const signaturesForPdf = await listReportSignatures(report.id);
-    if (client && asset && request) {
-      const dir = path.join(process.cwd(), 'uploads', 'clients', report.client_id, 'maintenance');
-      await fs.promises.mkdir(dir, { recursive: true });
-      const reportPdfFilename = maintenanceReportPdfFilename(report.id);
-      const filename = path.join(dir, reportPdfFilename);
-      const publicPath = `/${path.join('uploads', 'clients', report.client_id, 'maintenance', reportPdfFilename)}`.replace(/\\/g, '/');
-      const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
-      const stream = fs.createWriteStream(filename);
-      doc.pipe(stream);
-      buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures: signaturesForPdf });
-      doc.end();
-      await new Promise((resolve) => stream.on('finish', resolve));
-      await updateMaintenanceReportPdf(report.id, publicPath);
-    }
+    await writeMaintenanceReportPdfFile(report.id);
 
     if (report.created_by) {
       const title = 'Reporte firmado';
@@ -11771,8 +11828,8 @@ async function writeMaintenanceReportPdfFile(reportId) {
   const client = await getClientById(report.client_id);
   const asset = await getAssetById(report.client_id, report.asset_id);
   const request = await getMaintenanceRequestById(report.request_id);
-  const signaturesForPdf = await listReportSignatures(report.id);
   if (!client || !asset || !request) return null;
+  const signaturesForPdf = await ensureMaintenanceReportSignatureSnapshots(report);
 
   const dir = path.join(process.cwd(), 'uploads', 'clients', report.client_id, 'maintenance');
   await fs.promises.mkdir(dir, { recursive: true });

@@ -600,14 +600,70 @@ export async function resolveMaintenanceReportCorrections(reportId) {
 }
 
 export async function signMaintenanceReport(payload) {
-  const { reportId, userId, role, signaturePath } = payload;
+  const {
+    reportId,
+    userId,
+    role,
+    signaturePath,
+    signerName,
+    signerInvimaRegistration,
+    signatureSha256
+  } = payload;
   const { rows } = await query(
-    `INSERT INTO report_signatures (report_id, user_id, role, signature_path)
-     VALUES ($1,$2,$3,$4)
+    `INSERT INTO report_signatures (
+       report_id,
+       user_id,
+       role,
+       signature_path,
+       signer_name,
+       signer_invima_registration,
+       signature_sha256
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
      RETURNING id`,
-    [reportId, userId, role, signaturePath]
+    [
+      reportId,
+      userId,
+      role,
+      signaturePath,
+      signerName || null,
+      signerInvimaRegistration || null,
+      signatureSha256 || null
+    ]
   );
   return rows[0];
+}
+
+export async function updateMaintenanceReportSignatureSnapshot(payload) {
+  const {
+    signatureId,
+    previousSignaturePath,
+    signaturePath,
+    signatureSha256,
+    signerName,
+    signerInvimaRegistration
+  } = payload;
+  const { rows } = await query(
+    `UPDATE report_signatures
+     SET signature_path = $3,
+         signature_sha256 = $4,
+         signer_name = COALESCE(NULLIF(signer_name, ''), $5),
+         signer_invima_registration = COALESCE(
+           NULLIF(signer_invima_registration, ''),
+           $6
+         )
+     WHERE id = $1 AND signature_path = $2
+     RETURNING id`,
+    [
+      signatureId,
+      previousSignaturePath,
+      signaturePath,
+      signatureSha256,
+      signerName || null,
+      signerInvimaRegistration || null
+    ]
+  );
+  return rows[0] || null;
 }
 
 export async function listMaintenanceReports(
@@ -907,10 +963,11 @@ export async function updateMaintenanceReportPdf(reportId, pdfPath) {
 
 export async function listReportSignatures(reportId) {
   const { rows } = await query(
-    `SELECT s.id, s.user_id, s.role, s.signature_path, s.signed_at, u.display_name,
-            u.invima_registration
+    `SELECT s.id, s.user_id, s.role, s.signature_path, s.signature_sha256, s.signed_at,
+            COALESCE(NULLIF(s.signer_name, ''), u.display_name, u.username, 'FIRMANTE REGISTRADO') AS display_name,
+            COALESCE(NULLIF(s.signer_invima_registration, ''), u.invima_registration) AS invima_registration
      FROM report_signatures s
-     JOIN users u ON u.id = s.user_id
+     LEFT JOIN users u ON u.id = s.user_id
      WHERE s.report_id = $1
      ORDER BY s.signed_at ASC`,
     [reportId]
