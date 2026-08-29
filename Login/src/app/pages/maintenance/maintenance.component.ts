@@ -2829,11 +2829,19 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   canContinueSpareCase(report: MaintenanceReportDto): boolean {
     if (!this.auth.hasPermission('maintenance:report:create')) return false;
+    if (report.request_status === 'correccion') return false;
     const request = this.requests.find((item) => item.id === report.request_id);
     if (!request) return false;
     return this.auth.hasRole('superuser')
       || !request.assigned_to
       || request.assigned_to === this.auth.currentUser()?.id;
+  }
+
+  spareCaseActionNotice(report: MaintenanceReportDto): string {
+    if (report.request_status === 'correccion') {
+      return 'Completa primero la corrección pendiente del protocolo.';
+    }
+    return `Caso asignado a ${this.spareCaseAssignmentLabel(report)}.`;
   }
 
   canManagePreventiveWarranty(): boolean {

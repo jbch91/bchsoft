@@ -148,7 +148,7 @@ describe('maintenance report modal flow', () => {
   it('mantiene en Repuestos un preventivo en corrección mientras el repuesto siga pendiente', () => {
     const auth = {
       hasRole: () => false,
-      hasPermission: () => false,
+      hasPermission: (permission: string) => permission === 'maintenance:report:create',
       currentUser: () => ({ id: 'engineer-1', clientId: 'client-1' })
     };
     const component = new MaintenanceComponent(
@@ -183,6 +183,24 @@ describe('maintenance report modal flow', () => {
 
     expect(component.sparePartReports.map((report) => report.id)).toEqual(['report-1']);
     expect(component.pendingSpareCount).toBe(1);
+
+    component.requests = [{
+      id: 'request-1',
+      client_id: 'client-1',
+      asset_id: asset.id,
+      type: 'preventivo',
+      status: 'correccion',
+      description: 'Mantenimiento preventivo',
+      requested_by: 'user-1',
+      assigned_to: 'engineer-1',
+      created_at: '2026-08-28T09:00:00.000Z'
+    }];
+    expect(component.canContinueSpareCase(component.reports[0])).toBe(false);
+    expect(component.spareCaseActionNotice(component.reports[0])).toContain('corrección pendiente');
+    expect(component.canContinueSpareCase({
+      ...component.reports[0],
+      request_status: 'espera_repuesto'
+    })).toBe(true);
 
     component.reports = [{ ...component.reports[0], spare_parts_status: 'recibido' }];
     expect(component.sparePartReports).toEqual([]);

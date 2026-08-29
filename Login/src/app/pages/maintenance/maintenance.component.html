@@ -1686,37 +1686,81 @@
           <h2>Equipos pendientes por repuesto</h2>
           <p>El preventivo conserva su cierre documental; la instalación se registra en un correctivo independiente.</p>
         </div>
+        <span class="report-total-badge">
+          {{ pendingSpareCount }} equipo{{ pendingSpareCount === 1 ? '' : 's' }}
+        </span>
       </div>
 
-      <div class="spare-dashboard">
-        <div class="spare-card" *ngFor="let item of pendingSpareCases">
-          <div class="spare-card-head">
-            <span class="status-pill pending">
-              {{ item.report ? statusLabel(item.report.spare_parts_status) : 'Equipo pendiente' }}
+      <div class="table spare-list" *ngIf="pendingSpareCases.length">
+        <div class="row header">
+          <span>Equipo</span>
+          <span>Ubicación</span>
+          <span>Repuesto requerido</span>
+          <span>Estado</span>
+          <span>Acciones</span>
+        </div>
+
+        <div class="row spare-list-row" *ngFor="let item of pendingSpareCases">
+          <span data-label="Equipo" class="spare-equipment-cell">
+            <span class="spare-cell-content">
+              <strong>{{ item.asset.code }} - {{ item.asset.name }}</strong>
+              <small>{{ item.asset.brand || '-' }} · {{ item.asset.model || '-' }}</small>
+              <small>Serie {{ item.asset.serial || '-' }}</small>
             </span>
-            <small *ngIf="item.report">{{ item.report.created_at | date: 'dd/MM/yyyy' }}</small>
-          </div>
-          <strong>{{ item.asset.code }} - {{ item.asset.name }}</strong>
-          <small>Serie {{ item.asset.serial || '-' }}</small>
-          <small>{{ item.asset.siteName || '-' }} / {{ item.asset.areaName || '-' }} / {{ item.asset.locationName || '-' }}</small>
-          <ng-container *ngIf="item.report as report">
-            <div class="spare-detail">
-              <span>Repuesto requerido</span>
+          </span>
+
+          <span data-label="Ubicación" class="spare-location-cell">
+            <span class="spare-cell-content">
+              <strong>{{ item.asset.siteName || 'Sin sede' }}</strong>
+              <small>{{ item.asset.areaName || 'Sin área' }}</small>
+              <small>{{ item.asset.locationName || 'Sin ubicación' }}</small>
+            </span>
+          </span>
+
+          <span data-label="Repuesto requerido" class="spare-part-cell">
+            <span class="spare-cell-content" *ngIf="item.report as report">
               <strong>{{ report.spare_parts_needed || 'Repuesto no especificado' }}</strong>
               <small>{{ report.summary || report.findings || 'Sin detalle técnico registrado' }}</small>
-            </div>
-            <div class="spare-actions">
-              <button *ngIf="canContinueSpareCase(report)" type="button" (click)="startSpareInstallation(report)">Instalar repuesto</button>
-              <button *ngIf="canContinueSpareCase(report)" type="button" class="danger-soft" (click)="startAssetRetirement(report)">Dar de baja</button>
-              <button type="button" class="ghost" (click)="downloadReport(report.id)">Abrir reporte</button>
-            </div>
-            <small class="assignment-note" *ngIf="!canContinueSpareCase(report)">
-              Caso asignado a {{ spareCaseAssignmentLabel(report) }}.
-            </small>
-          </ng-container>
-          <div class="spare-detail warning-detail" *ngIf="!item.report">
-            No hay un reporte pendiente asociado. Revisa el historial del equipo antes de continuar.
-          </div>
+            </span>
+            <span class="spare-cell-content spare-missing-note" *ngIf="!item.report">
+              Sin reporte pendiente asociado. Revisa el historial del equipo.
+            </span>
+          </span>
+
+          <span data-label="Estado" class="spare-state-cell">
+            <span class="spare-cell-content" *ngIf="item.report as report">
+              <span class="status-pill" [ngClass]="statusClass(report.spare_parts_status)">
+                {{ statusLabel(report.spare_parts_status) }}
+              </span>
+              <span class="status-pill danger" *ngIf="report.request_status === 'correccion'">
+                En corrección
+              </span>
+              <small>{{ report.created_at | date: 'dd/MM/yyyy' }}</small>
+              <small class="assignment-note" *ngIf="!canContinueSpareCase(report)">
+                {{ spareCaseActionNotice(report) }}
+              </small>
+            </span>
+            <span class="spare-cell-content" *ngIf="!item.report">
+              <span class="status-pill pending">Equipo pendiente</span>
+            </span>
+          </span>
+
+          <span class="actions spare-actions-cell" data-label="Acciones">
+            <span class="spare-list-actions" *ngIf="item.report as report">
+              <button *ngIf="canContinueSpareCase(report)" type="button" (click)="startSpareInstallation(report)">
+                Instalar repuesto
+              </button>
+              <button *ngIf="canContinueSpareCase(report)" type="button" class="danger-soft" (click)="startAssetRetirement(report)">
+                Dar de baja
+              </button>
+              <button type="button" class="ghost spare-open-report" (click)="downloadReport(report.id)">
+                Abrir reporte
+              </button>
+            </span>
+            <span class="spare-cell-content spare-missing-note" *ngIf="!item.report">
+              Sin acciones disponibles
+            </span>
+          </span>
         </div>
       </div>
       <p class="empty" *ngIf="pendingSpareCases.length === 0">
