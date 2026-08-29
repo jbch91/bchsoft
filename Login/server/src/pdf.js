@@ -10,6 +10,12 @@ const PDF_BRAND_800 = '#7f1d1d';
 const PDF_INK = '#241416';
 const PDF_MUTED = '#6b4b4f';
 const PDF_DANGER = '#991b1b';
+const PDF_SUCCESS = '#166534';
+const PDF_SUCCESS_BG = '#ecfdf5';
+const PDF_WARNING = '#92400e';
+const PDF_WARNING_BG = '#fffbeb';
+const PDF_INFO = '#1e3a5f';
+const PDF_INFO_BG = '#eff6ff';
 const PDF_WHITE = '#ffffff';
 const PDF_SOFT_BG = '#fff7f7';
 const PDF_TABLE_BORDER = '#e7c8cb';
@@ -25,49 +31,110 @@ function safeText(value) {
 
 function maintenanceAssetStatusLabel(value) {
   const labels = {
-    operativo: 'Operativo',
-    operativo_observacion: 'Operativo con observación',
-    fuera_de_servicio: 'Fuera de servicio'
+    operativo: 'OPERATIVO',
+    operativo_observacion: 'OPERATIVO CON OBSERVACIÓN',
+    fuera_de_servicio: 'FUERA DE SERVICIO',
+    dado_de_baja: 'DADO DE BAJA',
+    activo: 'ACTIVO'
   };
-  return labels[value] || safeText(value);
+  return labels[value] || maintenanceTokenLabel(value);
 }
 
 function sparePartStatusLabel(value) {
   const labels = {
-    no_aplica: 'No aplica',
-    pendiente: 'Pendiente',
-    solicitado: 'Repuesto solicitado',
-    recibido: 'Repuesto instalado'
+    no_aplica: 'NO APLICA',
+    pendiente: 'PENDIENTE',
+    solicitado: 'REPUESTO SOLICITADO',
+    recibido: 'REPUESTO INSTALADO'
   };
-  return labels[value] || safeText(value);
+  return labels[value] || maintenanceTokenLabel(value);
 }
 
 function maintenanceSignerRoleLabel(value) {
   const labels = {
-    ingeniero_biomedico: 'Ingeniero biomédico',
-    responsable_area: 'Responsable de área',
-    almacenista: 'Almacenista',
-    lector: 'Lector',
-    viewer: 'Visor'
+    ingeniero_biomedico: 'INGENIERO BIOMÉDICO',
+    responsable_area: 'RESPONSABLE DE ÁREA',
+    almacenista: 'ALMACENISTA',
+    lector: 'LECTOR AUTORIZADO',
+    viewer: 'VISOR AUTORIZADO',
+    visor: 'VISOR AUTORIZADO',
+    superuser: 'ADMINISTRADOR DE PLATAFORMA'
   };
-  return labels[value] || safeText(value);
+  return labels[value] || maintenanceTokenLabel(value);
 }
 
 function maintenanceSignerDescription(value) {
   const descriptions = {
-    ingeniero_biomedico: 'Responsable técnico del mantenimiento',
-    responsable_area: 'Aval y recepción del servicio en el área',
-    almacenista: 'Validación de repuestos y suministros',
-    lector: 'Aval operativo del servicio',
-    viewer: 'Aval operativo del servicio'
+    ingeniero_biomedico: 'RESPONSABLE TÉCNICO DEL MANTENIMIENTO',
+    responsable_area: 'AVAL Y RECEPCIÓN DEL SERVICIO EN EL ÁREA',
+    almacenista: 'VALIDACIÓN DE REPUESTOS Y SUMINISTROS',
+    lector: 'AVAL OPERATIVO DEL SERVICIO',
+    viewer: 'AVAL OPERATIVO DEL SERVICIO',
+    visor: 'AVAL OPERATIVO DEL SERVICIO',
+    superuser: 'VALIDACIÓN ADMINISTRATIVA DEL DOCUMENTO'
   };
-  return descriptions[value] || 'Firmante autorizado del reporte';
+  return descriptions[value] || 'FIRMANTE AUTORIZADO DEL REPORTE';
 }
 
-function listLabels(values, labels) {
-  const list = Array.isArray(values) ? values : [];
-  if (!list.length) return 'No registrado';
-  return list.map((value) => labels[value] || value).join('\n');
+function maintenanceUpperText(value, fallback = 'NO REGISTRA') {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).replace(/\s+/g, ' ').trim();
+  return text ? text.toLocaleUpperCase('es-CO') : fallback;
+}
+
+function maintenanceTokenLabel(value, fallback = 'NO REGISTRA') {
+  if (value === null || value === undefined || value === '') return fallback;
+  return maintenanceUpperText(String(value).replace(/[_-]+/g, ' '), fallback);
+}
+
+function maintenanceTypeLabel(value) {
+  const labels = {
+    preventivo: 'MANTENIMIENTO PREVENTIVO',
+    correctivo: 'MANTENIMIENTO CORRECTIVO'
+  };
+  return labels[value] || maintenanceTokenLabel(value);
+}
+
+function maintenanceSourceLabel(value) {
+  const labels = {
+    cronograma: 'CRONOGRAMA APROBADO',
+    manual: 'SOLICITUD MANUAL',
+    qr: 'SOLICITUD DESDE CÓDIGO QR'
+  };
+  return labels[value] || maintenanceTokenLabel(value);
+}
+
+function maintenanceDocumentStatusLabel(report, signatures) {
+  const hasEngineer = signatures?.some((signature) => signature.role === 'ingeniero_biomedico');
+  const hasAcceptance = signatures?.some((signature) => [
+    'responsable_area',
+    'almacenista',
+    'lector',
+    'viewer',
+    'visor',
+    'superuser'
+  ].includes(signature.role));
+  if (report.correction_requested || report.request_status === 'correccion') {
+    return 'CORRECCIÓN SOLICITADA';
+  }
+  if (report.request_status === 'espera_repuesto') {
+    return hasEngineer && hasAcceptance
+      ? 'FIRMADO - EN ESPERA DE REPUESTO'
+      : 'EN ESPERA DE REPUESTO Y AVAL';
+  }
+  if (report.request_status === 'firmado' || (hasEngineer && hasAcceptance)) {
+    return 'FINALIZADO Y FIRMADO';
+  }
+  if (hasEngineer) return 'PENDIENTE DE AVAL';
+  return 'PENDIENTE DE FIRMA';
+}
+
+function maintenanceAssetCategoryLabel(value) {
+  return value === 'industrial' ? 'EQUIPO INDUSTRIAL' : 'EQUIPO BIOMÉDICO';
+}
+
+function maintenanceYesNo(value) {
+  return value ? 'SÍ' : 'NO';
 }
 
 const MAINTENANCE_CHECK_LABELS = {
@@ -119,6 +186,91 @@ function formatDate(value) {
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const yyyy = String(date.getFullYear());
   return `${dd}/${mm}/${yyyy}`;
+}
+
+export function formatMaintenanceDate(value) {
+  if (typeof value === 'string') {
+    const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) return `${dateOnly[3]}/${dateOnly[2]}/${dateOnly[1]}`;
+  }
+  const formatted = formatDate(value);
+  return formatted === '-' ? 'NO REGISTRA' : formatted;
+}
+
+function formatMaintenanceDateTime(value) {
+  if (!value) return 'NO REGISTRA';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return maintenanceUpperText(value);
+  const parts = new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(date);
+  const part = (type) => parts.find((item) => item.type === type)?.value || '';
+  return `${part('day')}/${part('month')}/${part('year')} ${part('hour')}:${part('minute')}`;
+}
+
+function maintenanceReportCode(report, isIndustrial) {
+  const date = report.created_at ? new Date(report.created_at) : new Date();
+  const validDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(validDate);
+  const part = (type) => parts.find((item) => item.type === type)?.value || '';
+  const dateCode = `${part('year')}${part('month')}${part('day')}`;
+  const reportCode = String(report.id || 'SIN-ID').replace(/-/g, '').slice(0, 8).toUpperCase();
+  return `RM-${isIndustrial ? 'IND' : 'BIO'}-${dateCode}-${reportCode}`;
+}
+
+function maintenanceRange(minimum, maximum, unit) {
+  const hasMinimum = minimum !== null && minimum !== undefined && minimum !== '';
+  const hasMaximum = maximum !== null && maximum !== undefined && maximum !== '';
+  if (!hasMinimum && !hasMaximum) return 'NO REGISTRA';
+  if (hasMinimum && hasMaximum) return `${minimum} A ${maximum} ${unit}`;
+  return hasMinimum ? `DESDE ${minimum} ${unit}` : `HASTA ${maximum} ${unit}`;
+}
+
+function maintenanceWarrantyLabel(asset, referenceDate) {
+  const years = Number(asset.warranty_years);
+  if (!Number.isFinite(years)) return 'NO REGISTRA';
+  if (years <= 0) return 'SIN GARANTÍA';
+  if (!asset.acquisition_date) return `${years} AÑO${years === 1 ? '' : 'S'} - FECHA BASE NO REGISTRADA`;
+  if (typeof asset.acquisition_date === 'string') {
+    const dateOnly = asset.acquisition_date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) {
+      const releaseYear = Number(dateOnly[1]) + years;
+      const release = new Date(Date.UTC(releaseYear, Number(dateOnly[2]) - 1, Number(dateOnly[3]), 12));
+      const reference = referenceDate ? new Date(referenceDate) : new Date();
+      const status = !Number.isNaN(reference.getTime()) && reference < release ? 'VIGENTE' : 'VENCIDA';
+      return `${status} HASTA ${dateOnly[3]}/${dateOnly[2]}/${releaseYear}`;
+    }
+  }
+  const acquisition = new Date(asset.acquisition_date);
+  if (Number.isNaN(acquisition.getTime())) return `${years} AÑO${years === 1 ? '' : 'S'}`;
+  const release = new Date(acquisition);
+  release.setFullYear(release.getFullYear() + years);
+  const reference = referenceDate ? new Date(referenceDate) : new Date();
+  const status = !Number.isNaN(reference.getTime()) && reference < release ? 'VIGENTE' : 'VENCIDA';
+  return `${status} HASTA ${formatMaintenanceDate(release)}`;
+}
+
+function maintenanceUsefulLifeLabel(value) {
+  const years = Number(value);
+  if (!Number.isFinite(years) || years <= 0) return 'NO REGISTRA';
+  return `${years} AÑO${years === 1 ? '' : 'S'}`;
+}
+
+function maintenanceClientInitials(name) {
+  const words = String(name || 'INBIHOSPITALARIO').trim().split(/\s+/).filter(Boolean);
+  const initials = words.slice(0, 3).map((word) => word[0]).join('');
+  return initials.toUpperCase() || 'IN';
 }
 
 function paintPageBackground(doc) {
@@ -1545,154 +1697,618 @@ export function buildBlankMaintenanceProtocolPdf(
     });
 }
 
-export function buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures }) {
-  const isIndustrial = asset.asset_category === 'industrial';
-  documentTitle(doc, isIndustrial ? 'Reporte de Mantenimiento Industrial' : 'Reporte de Mantenimiento Biomédico');
+function maintenanceStatusPalette(value) {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized.includes('operativo') && !normalized.includes('observ')) {
+    return { ink: PDF_SUCCESS, background: PDF_SUCCESS_BG, border: '#86efac' };
+  }
+  if (
+    normalized.includes('observ') ||
+    normalized.includes('pendiente') ||
+    normalized.includes('espera') ||
+    normalized.includes('repuesto')
+  ) {
+    return { ink: PDF_WARNING, background: PDF_WARNING_BG, border: '#fcd34d' };
+  }
+  if (normalized.includes('fuera') || normalized.includes('baja') || normalized.includes('corrección')) {
+    return { ink: PDF_DANGER, background: PDF_BRAND_50, border: PDF_BRAND_200 };
+  }
+  return { ink: PDF_INFO, background: PDF_INFO_BG, border: '#bfdbfe' };
+}
 
-  const headerY = doc.y;
-  const headerLeftX = doc.page.margins.left;
-  const headerWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const headerHeight = 72;
-  const logoCellWidth = 170;
+function drawMaintenanceReportHeader(doc, { client, report, signatures, isIndustrial }) {
+  paintPageBackground(doc);
+  const x = doc.page.margins.left;
+  const y = doc.page.margins.top;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const headerHeight = 104;
+  const logoWidth = 112;
+  const controlWidth = 144;
+  const titleWidth = width - logoWidth - controlWidth;
+  const code = maintenanceReportCode(report, isIndustrial);
+  const documentStatus = maintenanceDocumentStatusLabel(report, signatures);
 
   doc
-    .rect(headerLeftX, headerY, headerWidth, headerHeight)
+    .roundedRect(x, y, width, headerHeight, 5)
+    .fillColor(PDF_WHITE)
     .strokeColor(PDF_TABLE_BORDER)
-    .lineWidth(1)
+    .lineWidth(0.9)
+    .fillAndStroke();
+  doc.rect(x, y, width, 6).fillColor(PDF_BRAND_700).fill();
+  doc
+    .moveTo(x + logoWidth, y + 6)
+    .lineTo(x + logoWidth, y + headerHeight)
+    .strokeColor(PDF_TABLE_BORDER)
     .stroke();
   doc
-    .moveTo(headerLeftX + logoCellWidth, headerY)
-    .lineTo(headerLeftX + logoCellWidth, headerY + headerHeight)
+    .moveTo(x + logoWidth + titleWidth, y + 6)
+    .lineTo(x + logoWidth + titleWidth, y + headerHeight)
     .strokeColor(PDF_TABLE_BORDER)
     .stroke();
 
-  if (client.logo_path) {
-    const logoPath = path.join(process.cwd(), client.logo_path.replace(/^\//, ''));
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, headerLeftX + 10, headerY + 8, { fit: [150, 56] });
+  const logoPath = client.logo_path
+    ? path.join(process.cwd(), String(client.logo_path).replace(/^\//, ''))
+    : null;
+  let logoDrawn = false;
+  if (logoPath && fs.existsSync(logoPath)) {
+    try {
+      doc.image(logoPath, x + 11, y + 17, {
+        fit: [logoWidth - 22, 58],
+        align: 'center',
+        valign: 'center'
+      });
+      logoDrawn = true;
+    } catch {
+      logoDrawn = false;
     }
   }
-
-  const infoStartX = headerLeftX + logoCellWidth + 8;
-  const infoMaxWidth = headerWidth - logoCellWidth - 16;
-
+  if (!logoDrawn) {
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(25)
+      .fillColor(PDF_BRAND_700)
+      .text(maintenanceClientInitials(client.name), x + 10, y + 27, {
+        width: logoWidth - 20,
+        align: 'center'
+      });
+  }
   doc
     .font('Helvetica-Bold')
-    .fontSize(13)
-    .fillColor(PDF_INK)
-    .text(safeText(client.name), infoStartX, headerY + 8, { width: infoMaxWidth });
-
-  const infoLines = [
-    `NIT: ${safeText(client.nit)}`,
-    `Ciudad: ${safeText(client.city)}`,
-    `Dirección: ${safeText(client.address)}`,
-    `Correo: ${safeText(client.email)}`
-  ];
-  doc
-    .font('Helvetica')
-    .fontSize(8.5)
+    .fontSize(6.3)
     .fillColor(PDF_MUTED)
-    .text(infoLines.join('\n'), infoStartX, headerY + 26, { width: infoMaxWidth });
+    .text('IDENTIDAD INSTITUCIONAL', x + 8, y + 84, {
+      width: logoWidth - 16,
+      align: 'center'
+    });
 
-  doc.y = headerY + headerHeight + 10;
+  const titleX = x + logoWidth;
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7)
+    .fillColor(PDF_MUTED)
+    .text('INBIHOSPITALARIO', titleX + 12, y + 17, {
+      width: titleWidth - 24,
+      align: 'center'
+    });
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(13.5)
+    .fillColor(PDF_BRAND_700)
+    .text(
+      isIndustrial
+        ? 'REPORTE TÉCNICO DE\nMANTENIMIENTO INDUSTRIAL'
+        : 'REPORTE TÉCNICO DE\nMANTENIMIENTO BIOMÉDICO',
+      titleX + 12,
+      y + 33,
+      {
+        width: titleWidth - 24,
+        height: 36,
+        align: 'center',
+        lineGap: 2
+      }
+    );
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7.4)
+    .fillColor(PDF_INK)
+    .text(maintenanceUpperText(client.name), titleX + 10, y + 80, {
+      width: titleWidth - 20,
+      height: 17,
+      align: 'center',
+      ellipsis: true
+    });
 
-  sectionTitle(doc, 'DATOS DEL EQUIPO');
-  const assetRows = [
-    ['Categoría', isIndustrial ? 'Equipo industrial' : 'Equipo biomédico'],
-    ['Código', safeText(asset.code)],
-    ['Nombre', safeText(asset.name)],
-    ['Marca', safeText(asset.brand)],
-    ['Modelo', safeText(asset.model)],
-    ['Serie', safeText(asset.serial)],
-    ['Sede', safeText(asset.site_name)],
-    ['Área', safeText(asset.area_name)],
-    ['Ubicación', safeText(asset.location_name)]
+  const controlX = titleX + titleWidth;
+  const controlRows = [
+    ['CÓDIGO', code],
+    ['VERSIÓN', '03'],
+    ['ESTADO', documentStatus],
+    ['EMISIÓN', formatMaintenanceDate(new Date())]
   ];
-  drawTable(doc, assetRows, { colWidths: [140, 360] });
+  const controlRowHeight = (headerHeight - 6) / controlRows.length;
+  controlRows.forEach(([label, value], index) => {
+    const rowY = y + 6 + index * controlRowHeight;
+    if (index > 0) {
+      doc
+        .moveTo(controlX, rowY)
+        .lineTo(x + width, rowY)
+        .strokeColor(PDF_TABLE_BORDER)
+        .lineWidth(0.6)
+        .stroke();
+    }
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(5.8)
+      .fillColor(PDF_MUTED)
+      .text(label, controlX + 7, rowY + 4, { width: controlWidth - 14 });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(index === 2 ? 7.2 : 7.8)
+      .fillColor(index === 2 ? maintenanceStatusPalette(value).ink : PDF_INK)
+      .text(maintenanceUpperText(value), controlX + 7, rowY + 12, {
+        width: controlWidth - 14,
+        height: 10,
+        ellipsis: true
+      });
+  });
 
-  sectionTitle(doc, 'RESUMEN DEL REPORTE');
-  const reportRows = [
-    ['Tipo', safeText(report.type)],
-    ['Fecha reporte', formatDate(report.created_at)],
-    ['Solicitud', safeText(request.type)],
-    ['Fecha solicitud', formatDate(request.created_at)],
-    ['Resumen', safeText(report.summary)],
-    ['Hallazgos', safeText(report.findings)],
-    ['Acciones realizadas', safeText(report.actions_taken)],
-    ['Revisiones realizadas', listLabels(report.maintenance_checks, MAINTENANCE_CHECK_LABELS)],
-    ['Actividades técnicas', listLabels(report.maintenance_activities, MAINTENANCE_ACTIVITY_LABELS)],
-    ['Pruebas y verificaciones', listLabels(report.maintenance_tests, MAINTENANCE_TEST_LABELS)],
-    ['Estado final del equipo', maintenanceAssetStatusLabel(report.asset_status_after)],
-    [
-      'Observaciones del estado final',
-      report.asset_status_after === 'operativo'
-        ? 'No aplica'
-        : safeText(report.asset_status_observations)
-    ],
-    ['Requiere repuesto', report.requires_spare_parts ? 'Sí' : 'No'],
-    ['Repuesto requerido', report.requires_spare_parts ? safeText(report.spare_parts_needed) : 'No aplica'],
-    ['Estado del repuesto', report.requires_spare_parts ? sparePartStatusLabel(report.spare_parts_status) : 'No aplica']
+  const bandY = y + headerHeight + 8;
+  const bandHeight = 48;
+  const contact = [client.email, client.phone].filter((value) => value).join(' / ');
+  const institutionItems = [
+    { label: 'NIT', value: client.nit },
+    {
+      label: 'CIUDAD Y DIRECCIÓN',
+      value: [client.city, client.address].filter((value) => value).join(' - ')
+    },
+    { label: 'CONTACTO INSTITUCIONAL', value: contact }
   ];
-  drawTable(doc, reportRows, { colWidths: [140, 360], rowHeight: 24 });
+  const bandCellWidth = width / institutionItems.length;
+  doc
+    .roundedRect(x, bandY, width, bandHeight, 4)
+    .fillColor(PDF_SOFT_BG)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .fillAndStroke();
+  institutionItems.forEach((item, index) => {
+    const cellX = x + index * bandCellWidth;
+    if (index > 0) {
+      doc
+        .moveTo(cellX, bandY)
+        .lineTo(cellX, bandY + bandHeight)
+        .strokeColor(PDF_TABLE_BORDER)
+        .stroke();
+    }
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(6.5)
+      .fillColor(PDF_BRAND_700)
+      .text(item.label, cellX + 8, bandY + 7, { width: bandCellWidth - 16 });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(index === 2 ? 7.2 : 8.1)
+      .fillColor(PDF_INK)
+      .text(maintenanceUpperText(item.value), cellX + 8, bandY + 19, {
+        width: bandCellWidth - 16,
+        height: 22,
+        lineGap: 1,
+        ellipsis: true
+      });
+  });
 
-  ensureSpace(doc, 215);
-  sectionTitle(doc, 'FIRMAS');
-  if (!signatures?.length) {
-    doc.fontSize(10).fillColor(PDF_MUTED).text('Sin firmas registradas.');
-    return;
+  doc.y = bandY + bandHeight + 9;
+  return { code, documentStatus };
+}
+
+function maintenanceGridHeight(itemCount, columns, cellHeight, gap = 6) {
+  const rows = Math.ceil(itemCount / columns);
+  return rows ? rows * cellHeight + Math.max(0, rows - 1) * gap : 0;
+}
+
+function drawMaintenanceSectionTitle(doc, number, title, requiredHeight = 0) {
+  ensureSpace(doc, 38 + requiredHeight);
+  const x = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const y = doc.y + 5;
+  const numberWidth = 36;
+  const height = 23;
+  doc
+    .roundedRect(x, y, width, height, 4)
+    .fillColor(PDF_BRAND_50)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .fillAndStroke();
+  doc
+    .roundedRect(x, y, numberWidth, height, 4)
+    .fillColor(PDF_BRAND_700)
+    .fill();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(9.5)
+    .fillColor(PDF_WHITE)
+    .text(String(number).padStart(2, '0'), x, y + 6, {
+      width: numberWidth,
+      align: 'center'
+    });
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(10.2)
+    .fillColor(PDF_BRAND_700)
+    .text(maintenanceUpperText(title), x + numberWidth + 9, y + 6, {
+      width: width - numberWidth - 18,
+      height: 12,
+      ellipsis: true
+    });
+  doc.y = y + height + 7;
+}
+
+function drawMaintenanceInfoGrid(
+  doc,
+  items,
+  { x = doc.page.margins.left, width, columns = 3, cellHeight = 42, gap = 6 } = {}
+) {
+  const availableWidth = width ?? (doc.page.width - doc.page.margins.left - doc.page.margins.right);
+  const cellWidth = (availableWidth - gap * (columns - 1)) / columns;
+  const startY = doc.y;
+  items.forEach((item, index) => {
+    const row = Math.floor(index / columns);
+    const column = index % columns;
+    const cellX = x + column * (cellWidth + gap);
+    const cellY = startY + row * (cellHeight + gap);
+    doc
+      .roundedRect(cellX, cellY, cellWidth, cellHeight, 4)
+      .fillColor(row % 2 === 0 ? PDF_WHITE : PDF_TABLE_STRIPE_BG)
+      .strokeColor(PDF_TABLE_BORDER)
+      .lineWidth(0.65)
+      .fillAndStroke();
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(6.4)
+      .fillColor(PDF_BRAND_700)
+      .text(maintenanceUpperText(item.label), cellX + 7, cellY + 6, {
+        width: cellWidth - 14,
+        height: 8,
+        ellipsis: true
+      });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(item.compact ? 7.7 : 8.8)
+      .fillColor(item.ink || PDF_INK)
+      .text(maintenanceUpperText(item.value), cellX + 7, cellY + 17, {
+        width: cellWidth - 14,
+        height: cellHeight - 22,
+        lineGap: 1,
+        ellipsis: true
+      });
+  });
+  doc.y = startY + maintenanceGridHeight(items.length, columns, cellHeight, gap);
+}
+
+function drawMaintenanceAssetIdentification(doc, asset) {
+  const x = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const gap = 9;
+  const photoWidth = 116;
+  const identityHeight = 183;
+  const infoWidth = width - photoWidth - gap;
+  const startY = doc.y;
+
+  doc
+    .roundedRect(x, startY, photoWidth, identityHeight, 4)
+    .fillColor(PDF_SOFT_BG)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .fillAndStroke();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(6.5)
+    .fillColor(PDF_BRAND_700)
+    .text('FOTOGRAFÍA DEL EQUIPO', x + 6, startY + 7, {
+      width: photoWidth - 12,
+      align: 'center'
+    });
+  const photoPath = asset.photo_path
+    ? path.join(process.cwd(), String(asset.photo_path).replace(/^\//, ''))
+    : null;
+  let photoDrawn = false;
+  if (photoPath && fs.existsSync(photoPath)) {
+    try {
+      doc.image(photoPath, x + 8, startY + 25, {
+        fit: [photoWidth - 16, identityHeight - 34],
+        align: 'center',
+        valign: 'center'
+      });
+      photoDrawn = true;
+    } catch {
+      photoDrawn = false;
+    }
+  }
+  if (!photoDrawn) {
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(8)
+      .fillColor(PDF_MUTED)
+      .text('FOTOGRAFÍA\nNO REGISTRADA', x + 10, startY + 77, {
+        width: photoWidth - 20,
+        align: 'center',
+        lineGap: 2
+      });
   }
 
+  doc.y = startY;
+  drawMaintenanceInfoGrid(
+    doc,
+    [
+      { label: 'CÓDIGO INTERNO', value: asset.code },
+      { label: 'NOMBRE DEL EQUIPO', value: asset.name, compact: true },
+      { label: 'MARCA', value: asset.brand },
+      { label: 'MODELO', value: asset.model },
+      { label: 'NÚMERO DE SERIE', value: asset.serial },
+      { label: 'FABRICANTE', value: asset.manufacturer, compact: true },
+      { label: 'CATEGORÍA', value: maintenanceAssetCategoryLabel(asset.asset_category) },
+      { label: 'ESTADO EN INVENTARIO', value: maintenanceAssetStatusLabel(asset.status) }
+    ],
+    {
+      x: x + photoWidth + gap,
+      width: infoWidth,
+      columns: 2,
+      cellHeight: 42,
+      gap: 5
+    }
+  );
+
+  doc.y = startY + identityHeight + 7;
+  drawMaintenanceInfoGrid(
+    doc,
+    [
+      { label: 'SEDE', value: asset.site_name },
+      { label: 'ÁREA', value: asset.area_name },
+      { label: 'UBICACIÓN', value: asset.location_name || asset.location }
+    ],
+    { x, width, columns: 3, cellHeight: 43, gap: 6 }
+  );
+}
+
+function maintenanceChecklistGroupHeight(doc, group, width) {
+  let height = 31;
+  doc.font('Helvetica').fontSize(7.6);
+  Object.values(group.labels).forEach((label) => {
+    const textHeight = doc.heightOfString(maintenanceUpperText(label), {
+      width: width - 34,
+      lineGap: 1
+    });
+    height += Math.max(16, textHeight + 5);
+  });
+  return height + 7;
+}
+
+function drawMaintenanceChecklistColumns(doc, groups) {
+  const x = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const gap = 7;
+  const columnWidth = (width - gap * (groups.length - 1)) / groups.length;
+  const columnHeight = Math.max(
+    ...groups.map((group) => maintenanceChecklistGroupHeight(doc, group, columnWidth))
+  );
+  const startY = doc.y;
+
+  groups.forEach((group, groupIndex) => {
+    const columnX = x + groupIndex * (columnWidth + gap);
+    const selected = new Set(Array.isArray(group.selected) ? group.selected : []);
+    doc
+      .roundedRect(columnX, startY, columnWidth, columnHeight, 4)
+      .fillColor(PDF_WHITE)
+      .strokeColor(PDF_TABLE_BORDER)
+      .lineWidth(0.7)
+      .fillAndStroke();
+    doc
+      .rect(columnX + 1, startY + 1, columnWidth - 2, 25)
+      .fillColor(PDF_BRAND_50)
+      .fill();
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(8.1)
+      .fillColor(PDF_BRAND_700)
+      .text(maintenanceUpperText(group.title), columnX + 7, startY + 8, {
+        width: columnWidth - 14,
+        align: 'center'
+      });
+
+    let itemY = startY + 31;
+    Object.entries(group.labels).forEach(([key, label], itemIndex) => {
+      const labelText = maintenanceUpperText(label);
+      doc.font('Helvetica').fontSize(7.6);
+      const textHeight = doc.heightOfString(labelText, {
+        width: columnWidth - 34,
+        lineGap: 1
+      });
+      const rowHeight = Math.max(16, textHeight + 5);
+      if (itemIndex % 2 === 1) {
+        doc.rect(columnX + 1, itemY - 2, columnWidth - 2, rowHeight).fillColor(PDF_TABLE_STRIPE_BG).fill();
+      }
+      const markerX = columnX + 8;
+      const markerY = itemY + 1;
+      if (selected.has(key)) {
+        doc.rect(markerX, markerY, 9, 9).fillColor(PDF_BRAND_700).fill();
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(6.7)
+          .fillColor(PDF_WHITE)
+          .text('X', markerX, markerY + 1, { width: 9, align: 'center' });
+      } else {
+        doc.rect(markerX, markerY, 9, 9).strokeColor(PDF_TABLE_BORDER).lineWidth(0.7).stroke();
+      }
+      doc
+        .font(selected.has(key) ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(7.6)
+        .fillColor(selected.has(key) ? PDF_INK : PDF_MUTED)
+        .text(labelText, columnX + 23, itemY, {
+          width: columnWidth - 31,
+          height: rowHeight - 2,
+          lineGap: 1,
+          ellipsis: true
+        });
+      itemY += rowHeight;
+    });
+  });
+
+  doc.y = startY + columnHeight + 2;
+  return columnHeight;
+}
+
+function maintenanceNarrativeHeight(doc, value, width) {
+  doc.font('Helvetica').fontSize(8.8);
+  const textHeight = doc.heightOfString(maintenanceUpperText(value), {
+    width: width - 18,
+    lineGap: 2
+  });
+  return Math.max(58, textHeight + 35);
+}
+
+function drawMaintenanceNarrativeBox(doc, label, value, { ink = PDF_INK } = {}) {
+  const x = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const height = maintenanceNarrativeHeight(doc, value, width);
+  ensureSpace(doc, height + 8);
+  const y = doc.y;
+  doc
+    .roundedRect(x, y, width, height, 4)
+    .fillColor(PDF_WHITE)
+    .strokeColor(PDF_TABLE_BORDER)
+    .lineWidth(0.7)
+    .fillAndStroke();
+  doc
+    .rect(x + 1, y + 1, width - 2, 21)
+    .fillColor(PDF_BRAND_50)
+    .fill();
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(7.5)
+    .fillColor(PDF_BRAND_700)
+    .text(maintenanceUpperText(label), x + 8, y + 7, { width: width - 16 });
+  doc
+    .font('Helvetica')
+    .fontSize(8.8)
+    .fillColor(ink)
+    .text(maintenanceUpperText(value), x + 9, y + 29, {
+      width: width - 18,
+      height: height - 35,
+      lineGap: 2,
+      ellipsis: true
+    });
+  doc.y = y + height + 6;
+}
+
+function drawMaintenanceStatusSummary(doc, report) {
+  const x = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const gap = 7;
+  const cardWidth = (width - gap * 2) / 3;
+  const y = doc.y;
+  const cardHeight = 59;
+  const status = maintenanceAssetStatusLabel(report.asset_status_after);
+  const statusPalette = maintenanceStatusPalette(status);
+  const spareRequired = report.requires_spare_parts ? 'SÍ REQUIERE' : 'NO REQUIERE';
+  const sparePalette = maintenanceStatusPalette(report.requires_spare_parts ? 'REPUESTO PENDIENTE' : 'OPERATIVO');
+  const cards = [
+    { label: 'ESTADO FINAL DEL EQUIPO', value: status, palette: statusPalette },
+    { label: 'REQUERIMIENTO DE REPUESTO', value: spareRequired, palette: sparePalette },
+    {
+      label: 'ESTADO DEL REPUESTO',
+      value: report.requires_spare_parts ? sparePartStatusLabel(report.spare_parts_status) : 'NO APLICA',
+      palette: maintenanceStatusPalette(report.requires_spare_parts ? report.spare_parts_status : 'OPERATIVO')
+    }
+  ];
+  cards.forEach((card, index) => {
+    const cardX = x + index * (cardWidth + gap);
+    doc
+      .roundedRect(cardX, y, cardWidth, cardHeight, 4)
+      .fillColor(card.palette.background)
+      .strokeColor(card.palette.border)
+      .lineWidth(0.75)
+      .fillAndStroke();
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(6.3)
+      .fillColor(card.palette.ink)
+      .text(card.label, cardX + 7, y + 8, {
+        width: cardWidth - 14,
+        align: 'center'
+      });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(9.2)
+      .fillColor(card.palette.ink)
+      .text(card.value, cardX + 7, y + 27, {
+        width: cardWidth - 14,
+        height: 24,
+        align: 'center',
+        lineGap: 1,
+        ellipsis: true
+      });
+  });
+  doc.y = y + cardHeight + 7;
+}
+
+function maintenanceSignerCredential(signature) {
+  if (signature.role === 'ingeniero_biomedico' && signature.invima_registration) {
+    return `REGISTRO PROFESIONAL / INVIMA: ${signature.invima_registration}`;
+  }
+  return 'USUARIO AUTORIZADO DEL CLIENTE';
+}
+
+function drawMaintenanceSignatures(doc, signatures) {
+  if (!signatures?.length) {
+    drawMaintenanceNarrativeBox(doc, 'ESTADO DE FIRMAS', 'SIN FIRMAS REGISTRADAS');
+    return;
+  }
   const signaturesPerRow = 2;
   const gap = 24;
-  const rowGap = 22;
+  const rowGap = 18;
   const availableWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const signatureWidth = (availableWidth - gap) / signaturesPerRow;
-  const signatureHeight = 158;
+  const signatureHeight = 171;
   const left = doc.page.margins.left;
   const bottomLimit = doc.page.height - doc.page.margins.bottom;
   let cursorY = doc.y;
 
-  signatures.forEach((sig, index) => {
+  signatures.forEach((signature, index) => {
     const column = index % signaturesPerRow;
     if (index > 0 && column === 0) {
       cursorY += signatureHeight + rowGap;
       if (cursorY + signatureHeight > bottomLimit) {
         doc.addPage();
         paintPageBackground(doc);
-        sectionTitle(doc, 'FIRMAS (CONTINUACIÓN)');
+        drawMaintenanceSectionTitle(doc, 8, 'FIRMAS Y AVALES - CONTINUACIÓN', signatureHeight);
         cursorY = doc.y;
       }
     }
     const cursorX = left + column * (signatureWidth + gap);
-
     doc
       .roundedRect(cursorX, cursorY, signatureWidth, signatureHeight, 5)
       .fillColor(PDF_WHITE)
       .strokeColor(PDF_TABLE_BORDER)
       .lineWidth(0.8)
       .fillAndStroke();
-
     doc
-      .rect(cursorX + 1, cursorY + 1, signatureWidth - 2, 37)
+      .rect(cursorX + 1, cursorY + 1, signatureWidth - 2, 38)
       .fillColor(PDF_BRAND_50)
       .fill();
-
     doc
       .font('Helvetica-Bold')
-      .fontSize(10.5)
+      .fontSize(10.6)
       .fillColor(PDF_BRAND_700)
-      .text(maintenanceSignerRoleLabel(sig.role), cursorX + 10, cursorY + 6, {
+      .text(maintenanceSignerRoleLabel(signature.role), cursorX + 10, cursorY + 7, {
         width: signatureWidth - 20,
         height: 13,
         align: 'center',
         ellipsis: true
       });
-
     doc
       .font('Helvetica')
-      .fontSize(8.8)
+      .fontSize(9)
       .fillColor(PDF_MUTED)
-      .text(maintenanceSignerDescription(sig.role), cursorX + 10, cursorY + 21, {
+      .text(maintenanceSignerDescription(signature.role), cursorX + 10, cursorY + 23, {
         width: signatureWidth - 20,
         height: 12,
         align: 'center',
@@ -1708,12 +2324,11 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
       .strokeColor(PDF_TABLE_DIVIDER)
       .lineWidth(0.7)
       .stroke();
-
-    const sigPath = sig.signature_path
-      ? path.join(process.cwd(), sig.signature_path.replace(/^\//, ''))
+    const signaturePath = signature.signature_path
+      ? path.join(process.cwd(), String(signature.signature_path).replace(/^\//, ''))
       : null;
-    if (sigPath && fs.existsSync(sigPath)) {
-      doc.image(sigPath, signatureBoxX + 6, signatureBoxY + 4, {
+    if (signaturePath && fs.existsSync(signaturePath)) {
+      doc.image(signaturePath, signatureBoxX + 6, signatureBoxY + 4, {
         fit: [signatureBoxWidth - 12, signatureBoxHeight - 8],
         align: 'center',
         valign: 'center'
@@ -1721,46 +2336,308 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     } else {
       doc
         .font('Helvetica')
-        .fontSize(8.4)
+        .fontSize(8.1)
         .fillColor(PDF_MUTED)
-        .text('Firma digital no disponible', signatureBoxX + 6, signatureBoxY + 16, {
+        .text('FIRMA DIGITAL NO DISPONIBLE', signatureBoxX + 6, signatureBoxY + 19, {
           width: signatureBoxWidth - 12,
           align: 'center'
         });
     }
-
     doc
       .font('Helvetica')
-      .fontSize(7.8)
+      .fontSize(7.5)
       .fillColor(PDF_MUTED)
-      .text('NOMBRE DEL FIRMANTE', cursorX + 10, cursorY + 97, {
+      .text('NOMBRE DEL FIRMANTE', cursorX + 10, cursorY + 96, {
         width: signatureWidth - 20,
         align: 'center'
       });
     doc
       .font('Helvetica-Bold')
-      .fontSize(10.2)
+      .fontSize(10)
       .fillColor(PDF_INK)
-      .text(safeText(sig.display_name), cursorX + 10, cursorY + 109, {
+      .text(maintenanceUpperText(signature.display_name), cursorX + 10, cursorY + 108, {
         width: signatureWidth - 20,
-        height: 27,
+        height: 26,
         lineGap: 1,
         align: 'center',
         ellipsis: true
       });
     doc
       .font('Helvetica')
-      .fontSize(9)
+      .fontSize(7.8)
       .fillColor(PDF_MUTED)
-      .text(`Firmado el ${formatDate(sig.signed_at)}`, cursorX + 10, cursorY + 141, {
-        width: signatureWidth - 20,
+      .text(maintenanceUpperText(maintenanceSignerCredential(signature)), cursorX + 9, cursorY + 137, {
+        width: signatureWidth - 18,
+        height: 12,
+        align: 'center',
+        ellipsis: true
+      });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(8.5)
+      .fillColor(PDF_MUTED)
+      .text(`FIRMADO EL ${formatMaintenanceDateTime(signature.signed_at)}`, cursorX + 9, cursorY + 154, {
+        width: signatureWidth - 18,
         align: 'center'
       });
   });
-
-  doc.y = cursorY + signatureHeight + 10;
+  doc.y = cursorY + signatureHeight + 8;
 }
 
+function addMaintenanceReportPageChrome(doc, { client, code }) {
+  if (typeof doc.bufferedPageRange !== 'function') return;
+  const range = doc.bufferedPageRange();
+  if (!range.count) return;
+  for (let pageIndex = range.start; pageIndex < range.start + range.count; pageIndex += 1) {
+    doc.switchToPage(pageIndex);
+    const left = doc.page.margins.left;
+    const right = doc.page.width - doc.page.margins.right;
+    const bottomMargin = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
+    doc.save();
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(6.2)
+      .fillColor(PDF_MUTED)
+      .text('INBIHOSPITALARIO', left, 24, { width: 120, lineBreak: false });
+    doc
+      .font('Helvetica')
+      .fontSize(6.2)
+      .fillColor(PDF_MUTED)
+      .text(maintenanceUpperText(client.name), left + 125, 24, {
+        width: right - left - 250,
+        align: 'center',
+        ellipsis: true,
+        lineBreak: false
+      });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(6.2)
+      .fillColor(PDF_MUTED)
+      .text(code, right - 120, 24, { width: 120, align: 'right', lineBreak: false });
+    doc
+      .moveTo(left, 39)
+      .lineTo(right, 39)
+      .strokeColor(PDF_TABLE_DIVIDER)
+      .lineWidth(0.6)
+      .stroke();
+
+    const footerLineY = doc.page.height - 39;
+    const footerTextY = doc.page.height - 31;
+    doc
+      .moveTo(left, footerLineY)
+      .lineTo(right, footerLineY)
+      .strokeColor(PDF_TABLE_DIVIDER)
+      .lineWidth(0.6)
+      .stroke();
+    doc
+      .font('Helvetica')
+      .fontSize(6.1)
+      .fillColor(PDF_MUTED)
+      .text('DOCUMENTO TÉCNICO GENERADO POR INBIHOSPITALARIO', left, footerTextY, {
+        width: 245,
+        lineBreak: false
+      });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(6.3)
+      .fillColor(PDF_MUTED)
+      .text(`PÁGINA ${pageIndex - range.start + 1} DE ${range.count}`, right - 100, footerTextY, {
+        width: 100,
+        align: 'right',
+        lineBreak: false
+      });
+    doc.restore();
+    doc.page.margins.bottom = bottomMargin;
+  }
+  doc.switchToPage(range.start + range.count - 1);
+}
+
+export function buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures }) {
+  const isIndustrial = asset.asset_category === 'industrial';
+  const signatureList = Array.isArray(signatures) ? signatures : [];
+  const header = drawMaintenanceReportHeader(doc, {
+    client,
+    report,
+    signatures: signatureList,
+    isIndustrial
+  });
+  const pageContentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+  const identificationHeight = 183 + 7 + 43;
+  drawMaintenanceSectionTitle(
+    doc,
+    1,
+    'IDENTIFICACIÓN Y LOCALIZACIÓN DEL EQUIPO',
+    identificationHeight
+  );
+  drawMaintenanceAssetIdentification(doc, asset);
+
+  const sanitaryClassification = asset.requires_sanitary_classification
+    ? maintenanceTokenLabel(asset.risk_class)
+    : 'NO REQUIERE CLASIFICACIÓN SANITARIA';
+  const electricalClassification = asset.requires_electrical_classification
+    ? maintenanceTokenLabel(asset.electrical_protection_class)
+    : 'NO REQUIERE CLASIFICACIÓN ELÉCTRICA';
+  const appliedPart = asset.requires_electrical_classification
+    ? maintenanceTokenLabel(asset.applied_part_type)
+    : 'NO APLICA';
+  const calibrationFrequency = asset.requires_calibration
+    ? maintenanceTokenLabel(asset.calibration_frequency)
+    : 'NO APLICA';
+  const technicalItems = [
+    { label: 'CLASIFICACIÓN DE RIESGO SANITARIO', value: sanitaryClassification, compact: true },
+    { label: 'CLASE DE PROTECCIÓN ELÉCTRICA', value: electricalClassification, compact: true },
+    { label: 'TIPO DE PARTE APLICADA', value: appliedPart },
+    { label: 'REGISTRO INVIMA', value: asset.invima_reg },
+    { label: 'FUENTE DE ALIMENTACIÓN', value: maintenanceTokenLabel(asset.power_type) },
+    { label: 'VOLTAJE DE OPERACIÓN', value: asset.voltage },
+    { label: 'CONDICIÓN DE MOVILIDAD', value: asset.is_mobile ? 'EQUIPO MÓVIL' : 'EQUIPO FIJO' },
+    { label: 'PERIODICIDAD DE MANTENIMIENTO', value: maintenanceTokenLabel(asset.maintenance_frequency) },
+    { label: 'REQUIERE CALIBRACIÓN', value: maintenanceYesNo(asset.requires_calibration) },
+    { label: 'PERIODICIDAD DE CALIBRACIÓN', value: calibrationFrequency },
+    { label: 'FECHA DE ADQUISICIÓN', value: formatMaintenanceDate(asset.acquisition_date) },
+    { label: 'VIDA ÚTIL ESTIMADA', value: maintenanceUsefulLifeLabel(asset.useful_life_years) },
+    { label: 'ESTADO DE GARANTÍA', value: maintenanceWarrantyLabel(asset, report.created_at), compact: true },
+    { label: 'RANGO DE TEMPERATURA', value: maintenanceRange(asset.temp_min, asset.temp_max, '°C') },
+    { label: 'RANGO DE HUMEDAD', value: maintenanceRange(asset.humidity_min, asset.humidity_max, '% HR') }
+  ];
+  const technicalHeight = maintenanceGridHeight(technicalItems.length, 3, 43, 6);
+  drawMaintenanceSectionTitle(
+    doc,
+    2,
+    'CLASIFICACIÓN Y CONDICIONES TÉCNICAS',
+    technicalHeight
+  );
+  drawMaintenanceInfoGrid(doc, technicalItems, { columns: 3, cellHeight: 43, gap: 6 });
+
+  const engineerSignature = signatureList.find(
+    (signature) => signature.role === 'ingeniero_biomedico'
+  );
+  const interventionItems = [
+    { label: 'TIPO DE INTERVENCIÓN', value: maintenanceTypeLabel(report.type) },
+    { label: 'ORIGEN DE LA SOLICITUD', value: maintenanceSourceLabel(request.source) },
+    { label: 'ESTADO DOCUMENTAL', value: header.documentStatus, compact: true },
+    { label: 'FECHA DE SOLICITUD', value: formatMaintenanceDateTime(request.created_at) },
+    { label: 'FECHA PROGRAMADA', value: formatMaintenanceDate(request.planned_date) },
+    { label: 'FECHA LÍMITE', value: formatMaintenanceDate(request.deadline_date) },
+    { label: 'SOLICITADO POR', value: request.requester_name },
+    {
+      label: 'RESPONSABLE TÉCNICO',
+      value: engineerSignature?.display_name || request.assigned_name
+    },
+    { label: 'FECHA DE INTERVENCIÓN', value: formatMaintenanceDateTime(report.created_at) }
+  ];
+  const interventionHeight = maintenanceGridHeight(interventionItems.length, 3, 48, 6);
+  drawMaintenanceSectionTitle(
+    doc,
+    3,
+    'DATOS DE LA INTERVENCIÓN',
+    interventionHeight
+  );
+  drawMaintenanceInfoGrid(doc, interventionItems, { columns: 3, cellHeight: 48, gap: 6 });
+  doc.y += 7;
+  drawMaintenanceNarrativeBox(
+    doc,
+    'SOLICITUD, NECESIDAD O FALLA REPORTADA',
+    request.description
+  );
+
+  const checklistGroups = [
+    {
+      title: 'REVISIONES',
+      labels: MAINTENANCE_CHECK_LABELS,
+      selected: report.maintenance_checks
+    },
+    {
+      title: 'ACTIVIDADES TÉCNICAS',
+      labels: MAINTENANCE_ACTIVITY_LABELS,
+      selected: report.maintenance_activities
+    },
+    {
+      title: 'PRUEBAS Y VERIFICACIONES',
+      labels: MAINTENANCE_TEST_LABELS,
+      selected: report.maintenance_tests
+    }
+  ];
+  const checklistColumnWidth = (pageContentWidth - 14) / 3;
+  const checklistHeight = Math.max(
+    ...checklistGroups.map((group) =>
+      maintenanceChecklistGroupHeight(doc, group, checklistColumnWidth)
+    )
+  );
+  drawMaintenanceSectionTitle(
+    doc,
+    4,
+    'PROTOCOLO TÉCNICO EJECUTADO',
+    checklistHeight
+  );
+  drawMaintenanceChecklistColumns(doc, checklistGroups);
+
+  const firstResultHeight = maintenanceNarrativeHeight(doc, report.summary, pageContentWidth);
+  drawMaintenanceSectionTitle(
+    doc,
+    5,
+    'RESULTADO TÉCNICO DE LA INTERVENCIÓN',
+    firstResultHeight
+  );
+  drawMaintenanceNarrativeBox(doc, 'RESUMEN TÉCNICO', report.summary);
+  drawMaintenanceNarrativeBox(doc, 'HALLAZGOS Y DIAGNÓSTICO', report.findings);
+  if (report.failure_cause) {
+    drawMaintenanceNarrativeBox(doc, 'CAUSA DE FALLA IDENTIFICADA', report.failure_cause);
+  }
+  drawMaintenanceNarrativeBox(
+    doc,
+    'ACCIONES REALIZADAS Y RECOMENDACIONES',
+    report.actions_taken
+  );
+
+  drawMaintenanceSectionTitle(doc, 6, 'ESTADO TÉCNICO DE CIERRE Y REPUESTOS', 66);
+  drawMaintenanceStatusSummary(doc, report);
+  drawMaintenanceNarrativeBox(
+    doc,
+    'OBSERVACIONES DEL ESTADO FINAL',
+    report.asset_status_after === 'operativo'
+      ? 'NO APLICA'
+      : report.asset_status_observations
+  );
+  if (report.requires_spare_parts) {
+    drawMaintenanceNarrativeBox(
+      doc,
+      'REPUESTO REQUERIDO O INSTALADO',
+      report.spare_parts_needed,
+      { ink: PDF_WARNING }
+    );
+  }
+
+  const traceabilityItems = [
+    { label: 'CÓDIGO DOCUMENTAL', value: header.code },
+    { label: 'VERSIÓN DE PLANTILLA', value: '03' },
+    { label: 'IDENTIFICADOR DEL REPORTE', value: report.id, compact: true },
+    { label: 'IDENTIFICADOR DE LA SOLICITUD', value: request.id || report.request_id, compact: true },
+    { label: 'IDENTIFICADOR DEL CRONOGRAMA', value: request.schedule_id, compact: true },
+    { label: 'ÍTEM DEL CRONOGRAMA', value: request.schedule_item_id, compact: true },
+    { label: 'FECHA DE GENERACIÓN', value: formatMaintenanceDateTime(new Date()) },
+    { label: 'FIRMAS REGISTRADAS', value: String(signatureList.length) }
+  ];
+  const traceabilityHeight = maintenanceGridHeight(traceabilityItems.length, 2, 40, 6);
+  drawMaintenanceSectionTitle(
+    doc,
+    7,
+    'CONTROL DOCUMENTAL Y TRAZABILIDAD',
+    traceabilityHeight
+  );
+  drawMaintenanceInfoGrid(doc, traceabilityItems, {
+    columns: 2,
+    cellHeight: 40,
+    gap: 6
+  });
+
+  drawMaintenanceSectionTitle(doc, 8, 'FIRMAS Y AVALES', 171);
+  drawMaintenanceSignatures(doc, signatureList);
+
+  addMaintenanceReportPageChrome(doc, { client, code: header.code });
+}
 export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
   const isIndustrial = schedule.asset_category === 'industrial';
   documentTitle(

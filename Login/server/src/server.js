@@ -2915,7 +2915,7 @@ function resolveStoredFilePath(filePath) {
   return fs.existsSync(fullPath) ? fullPath : null;
 }
 
-const MAINTENANCE_REPORT_PDF_TEMPLATE_VERSION = 'v2';
+const MAINTENANCE_REPORT_PDF_TEMPLATE_VERSION = 'v3';
 
 function maintenanceReportPdfFilename(reportId) {
   return `reporte-${reportId}-${MAINTENANCE_REPORT_PDF_TEMPLATE_VERSION}.pdf`;
@@ -11626,7 +11626,7 @@ app.post(
       const reportPdfFilename = maintenanceReportPdfFilename(report.id);
       const filename = path.join(dir, reportPdfFilename);
       const publicPath = `/${path.join('uploads', 'clients', report.client_id, 'maintenance', reportPdfFilename)}`.replace(/\\/g, '/');
-      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
       const stream = fs.createWriteStream(filename);
       doc.pipe(stream);
       buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures: signaturesForPdf });
@@ -11779,7 +11779,7 @@ async function writeMaintenanceReportPdfFile(reportId) {
   const reportPdfFilename = maintenanceReportPdfFilename(report.id);
   const filename = path.join(dir, reportPdfFilename);
   const publicPath = `/${path.join('uploads', 'clients', report.client_id, 'maintenance', reportPdfFilename)}`.replace(/\\/g, '/');
-  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
   const stream = fs.createWriteStream(filename);
   doc.pipe(stream);
   buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures: signaturesForPdf });

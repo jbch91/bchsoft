@@ -907,7 +907,8 @@ export async function updateMaintenanceReportPdf(reportId, pdfPath) {
 
 export async function listReportSignatures(reportId) {
   const { rows } = await query(
-    `SELECT s.id, s.user_id, s.role, s.signature_path, s.signed_at, u.display_name
+    `SELECT s.id, s.user_id, s.role, s.signature_path, s.signed_at, u.display_name,
+            u.invima_registration
      FROM report_signatures s
      JOIN users u ON u.id = s.user_id
      WHERE s.report_id = $1

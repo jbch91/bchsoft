@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PDFDocument as PdfReaderDocument } from 'pdf-lib';
 import PDFDocument from 'pdfkit';
-import { buildMaintenanceReportPdf } from './pdf.js';
+import { buildMaintenanceReportPdf, formatMaintenanceDate } from './pdf.js';
 
 function buildReportBuffer(signatures) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -56,6 +56,11 @@ function buildReportBuffer(signatures) {
   });
 }
 
+test('conserva sin desplazamiento las fechas de calendario del cronograma', () => {
+  assert.equal(formatMaintenanceDate('2026-08-20'), '20/08/2026');
+  assert.equal(formatMaintenanceDate('2026-08-31'), '31/08/2026');
+});
+
 test('genera firmas legibles con nombres largos y más de una fila', async () => {
   const buffer = await buildReportBuffer([
     {
@@ -80,5 +85,6 @@ test('genera firmas legibles con nombres largos y más de una fila', async () =>
 
   assert.equal(buffer.subarray(0, 4).toString(), '%PDF');
   const pdf = await PdfReaderDocument.load(buffer);
-  assert.ok(pdf.getPageCount() >= 2);
+  assert.ok(pdf.getPageCount() >= 3);
+  assert.ok(pdf.getPageCount() <= 5);
 });
