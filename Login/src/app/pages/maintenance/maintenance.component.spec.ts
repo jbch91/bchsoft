@@ -320,6 +320,77 @@ describe('maintenance report modal flow', () => {
     expect(component.preventiveProgressPeriodLabel).toBe('Vigencia 2026');
   });
 
+  it('abre el PDF preventivo final en una pestaña nueva usando el visor del navegador', async () => {
+    vi.useFakeTimers();
+    const maintenance = {
+      downloadReportPdf: vi.fn().mockResolvedValue(
+        new Blob(['pdf'], { type: 'application/pdf' })
+      )
+    };
+    const popupDocument = document.implementation.createHTMLDocument('');
+    const popup = {
+      opener: window,
+      document: popupDocument,
+      location: { href: '' },
+      close: vi.fn()
+    } as unknown as Window;
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(popup);
+    const createObjectUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const revokeObjectUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn().mockReturnValue('blob:preventive-report')
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn()
+    });
+    const component = new MaintenanceComponent(
+      {} as never,
+      {} as never,
+      {} as never,
+      maintenance as never,
+      { detectChanges: vi.fn() } as never,
+      { snapshot: { data: { assetCategory: 'biomedical' } } } as never
+    );
+
+    try {
+      await component.openPreventiveFinalPdf({
+        id: 'item-1',
+        asset_id: 'asset-1',
+        asset_code: 'EQ-001',
+        asset_name: 'Monitor',
+        planned_date: '2026-08-20',
+        deadline_date: '2026-08-31',
+        phase: 'completed',
+        is_overdue: false,
+        report_id: 'report-1',
+        pdf_available: true
+      });
+
+      expect(openSpy).toHaveBeenCalledWith('', '_blank');
+      expect(maintenance.downloadReportPdf).toHaveBeenCalledWith('report-1');
+      expect(popup.location.href).toBe('blob:preventive-report');
+      expect(popup.opener).toBeNull();
+      expect(component.preventivePdfLoadingId).toBe('');
+      vi.runAllTimers();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preventive-report');
+    } finally {
+      openSpy.mockRestore();
+      if (createObjectUrlDescriptor) {
+        Object.defineProperty(URL, 'createObjectURL', createObjectUrlDescriptor);
+      } else {
+        delete (URL as { createObjectURL?: typeof URL.createObjectURL }).createObjectURL;
+      }
+      if (revokeObjectUrlDescriptor) {
+        Object.defineProperty(URL, 'revokeObjectURL', revokeObjectUrlDescriptor);
+      } else {
+        delete (URL as { revokeObjectURL?: typeof URL.revokeObjectURL }).revokeObjectURL;
+      }
+      vi.useRealTimers();
+    }
+  });
+
   it('aplica resultados rápidos coherentes al reporte preventivo', () => {
     const component = new MaintenanceComponent(
       {} as never,

@@ -362,39 +362,6 @@ const PREVENTIVE_OUTCOME_PRESETS: readonly PreventiveOutcomePreset[] = [
   }
 ];
 
-interface PreventivePdfViewport {
-  width: number;
-  height: number;
-}
-
-interface PreventivePdfRenderTask {
-  promise: Promise<void>;
-  cancel(): void;
-}
-
-interface PreventivePdfPage {
-  getViewport(options: { scale: number }): PreventivePdfViewport;
-  render(options: {
-    canvas: HTMLCanvasElement;
-    viewport: PreventivePdfViewport;
-  }): PreventivePdfRenderTask;
-}
-
-interface PreventivePdfDocument {
-  numPages: number;
-  getPage(pageNumber: number): Promise<PreventivePdfPage>;
-  destroy(): Promise<void>;
-}
-
-interface PreventivePdfJsModule {
-  GlobalWorkerOptions: { workerSrc: string };
-  getDocument(options: { data: Uint8Array }): { promise: Promise<PreventivePdfDocument> };
-}
-
-interface PreventivePdfWindow extends Window {
-  __inbihospitalarioPdfJs?: PreventivePdfJsModule;
-}
-
 @Component({
   selector: 'app-maintenance',
   standalone: true,
@@ -406,7 +373,6 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   @ViewChild('qrVideo') qrVideo?: ElementRef<HTMLVideoElement>;
   @ViewChild('reportFormCard') reportFormCard?: ElementRef<HTMLElement>;
   @ViewChild('preventiveProgrammedCard') preventiveProgrammedCard?: ElementRef<HTMLElement>;
-  @ViewChild('preventivePdfCanvas') preventivePdfCanvas?: ElementRef<HTMLCanvasElement>;
 
   private readonly publicBase = getPublicBase();
   private qrStream: MediaStream | null = null;
@@ -466,19 +432,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   preventiveProgress: PreventiveMaintenanceProgressDto | null = null;
   preventiveProgressScope: 'month' | 'year' = 'month';
   preventivePhaseView: PreventivePhaseView = 'work';
-  preventivePdfOpen = false;
-  preventivePdfTitle = '';
-  preventivePdfAsset: AssetLite | null = null;
   preventivePdfLoadingId = '';
   preventiveWarrantyLoadingId = '';
-  preventivePdfPage = 1;
-  preventivePdfPageCount = 0;
-  preventivePdfZoom = 1;
-  preventivePdfRendering = false;
   failedAssetPhotoIds = new Set<string>();
-  private preventivePdfDocument: PreventivePdfDocument | null = null;
-  private preventivePdfRenderTask: PreventivePdfRenderTask | null = null;
-  private preventivePdfJsPromise: Promise<PreventivePdfJsModule> | null = null;
   assetSearchTerm = '';
   protocolSearchTerm = '';
   protocolSiteFilter = '';
@@ -660,7 +616,6 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.destroyed = true;
     this.stopQrScan();
-    this.closePreventivePdf();
     this.routeSub?.unsubscribe();
   }
 
@@ -1285,24 +1240,42 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   async downloadReport(reportId: string): Promise<void> {
-    const previewWindow = window.open('', '_blank');
+    const previewWindow = this.preparePdfTab('Reporte de mantenimiento');
     try {
       const blob = await this.maintenance.downloadReportPdf(reportId);
-      const url = URL.createObjectURL(blob);
-      if (previewWindow) {
-        previewWindow.location.href = url;
-      } else {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `reporte-${reportId}.pdf`;
-        link.click();
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      this.presentPdfBlob(blob, previewWindow, `reporte-${reportId}.pdf`);
     } catch (error: any) {
       previewWindow?.close();
       console.error(error);
       this.errorMessage = error?.error?.message ?? 'No se pudo abrir el PDF.';
     }
+  }
+
+  private preparePdfTab(title: string): Window | null {
+    const previewWindow = window.open('', '_blank');
+    if (!previewWindow) return null;
+    previewWindow.opener = null;
+    previewWindow.document.title = title;
+    previewWindow.document.body.textContent = 'Preparando PDF...';
+    return previewWindow;
+  }
+
+  private presentPdfBlob(blob: Blob, previewWindow: Window | null, filename: string): void {
+    const pdfBlob = blob.type === 'application/pdf'
+      ? blob
+      : new Blob([blob], { type: 'application/pdf' });
+    const url = URL.createObjectURL(pdfBlob);
+    if (previewWindow) {
+      previewWindow.location.href = url;
+    } else {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      link.remove();
+      this.successMessage = 'El navegador bloqueó la pestaña nueva; el PDF se descargó automáticamente.';
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   async refreshCurrentPermissions(force = true): Promise<void> {
@@ -1971,6 +1944,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.errorMessage = 'Este mantenimiento finalizado no tiene un PDF disponible.';
       return;
     }
+    const previewWindow = this.preparePdfTab(
+      `${item.asset_code} - ${item.asset_name}`
+    );
     this.preventivePdfLoadingId = item.id;
     this.errorMessage = '';
     try {
@@ -1980,136 +1956,17 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
             this.selectedClientId,
             item.legacy_history_file_id as string
           );
-      this.closePreventivePdf();
-      const pdfjs = await this.loadPreventivePdfJs();
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-        'assets/pdf.worker.min.mjs',
-        document.baseURI
-      ).href;
-      const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) });
-      this.preventivePdfDocument = await loadingTask.promise;
-      this.preventivePdfOpen = true;
-      this.preventivePdfTitle = `${item.asset_code} - ${item.asset_name}`;
-      this.preventivePdfAsset = this.assetMap.get(item.asset_id) ?? null;
-      this.preventivePdfPage = 1;
-      this.preventivePdfPageCount = this.preventivePdfDocument.numPages;
-      this.preventivePdfZoom = 1;
-      this.refreshViewSoon();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await this.renderPreventivePdfPage();
+      this.presentPdfBlob(
+        blob,
+        previewWindow,
+        `mantenimiento-${item.asset_code || item.id}.pdf`
+      );
     } catch (error: any) {
+      previewWindow?.close();
       console.error(error);
       this.errorMessage = error?.error?.message ?? 'No se pudo abrir el PDF del mantenimiento.';
     } finally {
       this.preventivePdfLoadingId = '';
-      this.refreshViewSoon();
-    }
-  }
-
-  closePreventivePdf(): void {
-    this.preventivePdfRenderTask?.cancel();
-    this.preventivePdfRenderTask = null;
-    void this.preventivePdfDocument?.destroy();
-    this.preventivePdfDocument = null;
-    this.preventivePdfOpen = false;
-    this.preventivePdfTitle = '';
-    this.preventivePdfAsset = null;
-    this.preventivePdfPage = 1;
-    this.preventivePdfPageCount = 0;
-    this.preventivePdfZoom = 1;
-    this.preventivePdfRendering = false;
-  }
-
-  async changePreventivePdfPage(delta: number): Promise<void> {
-    const nextPage = Math.min(
-      this.preventivePdfPageCount,
-      Math.max(1, this.preventivePdfPage + delta)
-    );
-    if (nextPage === this.preventivePdfPage) return;
-    this.preventivePdfPage = nextPage;
-    await this.renderPreventivePdfPage();
-  }
-
-  async changePreventivePdfZoom(delta: number): Promise<void> {
-    const nextZoom = Math.min(2, Math.max(0.7, Number((this.preventivePdfZoom + delta).toFixed(1))));
-    if (nextZoom === this.preventivePdfZoom) return;
-    this.preventivePdfZoom = nextZoom;
-    await this.renderPreventivePdfPage();
-  }
-
-  get preventivePdfZoomLabel(): string {
-    return `${Math.round(this.preventivePdfZoom * 100)}%`;
-  }
-
-  private loadPreventivePdfJs(): Promise<PreventivePdfJsModule> {
-    const pdfWindow = window as PreventivePdfWindow;
-    if (pdfWindow.__inbihospitalarioPdfJs) {
-      return Promise.resolve(pdfWindow.__inbihospitalarioPdfJs);
-    }
-    if (this.preventivePdfJsPromise) return this.preventivePdfJsPromise;
-
-    this.preventivePdfJsPromise = new Promise<PreventivePdfJsModule>((resolve, reject) => {
-      const finish = () => {
-        if (pdfWindow.__inbihospitalarioPdfJs) {
-          resolve(pdfWindow.__inbihospitalarioPdfJs);
-        } else {
-          reject(new Error('El visor PDF no quedó disponible.'));
-        }
-      };
-      const fail = (event: Event) => {
-        (event.currentTarget as HTMLScriptElement | null)?.remove();
-        reject(new Error('No se pudo cargar el visor PDF.'));
-      };
-      const existing = document.querySelector<HTMLScriptElement>('script[data-pdfjs-loader]');
-      if (existing) {
-        existing.addEventListener('load', finish, { once: true });
-        existing.addEventListener('error', fail, { once: true });
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.type = 'module';
-      script.src = new URL('pdfjs-loader.mjs', document.baseURI).href;
-      script.dataset['pdfjsLoader'] = 'true';
-      script.addEventListener('load', finish, { once: true });
-      script.addEventListener('error', fail, { once: true });
-      document.head.appendChild(script);
-    }).catch((error) => {
-      this.preventivePdfJsPromise = null;
-      throw error;
-    });
-    return this.preventivePdfJsPromise;
-  }
-
-  private async renderPreventivePdfPage(): Promise<void> {
-    const pdf = this.preventivePdfDocument;
-    const canvas = this.preventivePdfCanvas?.nativeElement;
-    if (!pdf || !canvas) return;
-
-    this.preventivePdfRenderTask?.cancel();
-    this.preventivePdfRendering = true;
-    this.refreshViewSoon();
-    try {
-      const page = await pdf.getPage(this.preventivePdfPage);
-      const baseViewport = page.getViewport({ scale: 1 });
-      const availableWidth = Math.max(280, (canvas.parentElement?.clientWidth ?? 800) - 32);
-      const fitScale = availableWidth / baseViewport.width;
-      const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
-      const viewport = page.getViewport({ scale: fitScale * this.preventivePdfZoom * pixelRatio });
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      canvas.style.width = `${Math.floor(viewport.width / pixelRatio)}px`;
-      canvas.style.height = `${Math.floor(viewport.height / pixelRatio)}px`;
-      this.preventivePdfRenderTask = page.render({ canvas, viewport });
-      await this.preventivePdfRenderTask.promise;
-    } catch (error: any) {
-      if (error?.name !== 'RenderingCancelledException') {
-        console.error(error);
-        this.errorMessage = 'No se pudo dibujar esta página del PDF.';
-      }
-    } finally {
-      this.preventivePdfRenderTask = null;
-      this.preventivePdfRendering = false;
       this.refreshViewSoon();
     }
   }
