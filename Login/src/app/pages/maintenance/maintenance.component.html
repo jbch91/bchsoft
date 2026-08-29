@@ -1289,6 +1289,16 @@
               <span class="spare-note" *ngIf="report.requires_spare_parts">Repuesto registrado</span>
             </div>
             <div class="area-report-actions">
+              <button
+                type="button"
+                class="ghost"
+                title="Abrir protocolo en PDF"
+                aria-label="Abrir protocolo de mantenimiento en PDF"
+                [disabled]="reportPdfLoadingId === report.id"
+                (click)="downloadReport(report.id)"
+              >
+                {{ reportPdfLoadingId === report.id ? 'Abriendo...' : 'Abrir PDF' }}
+              </button>
               <button type="button" (click)="openReportDetail(report)">Revisar y firmar</button>
             </div>
           </div>
@@ -1929,7 +1939,14 @@
 
       <div class="modal-actions report-detail-actions">
         <button type="button" class="ghost" (click)="closeReportDetail()">Cerrar</button>
-        <button type="button" class="ghost" (click)="downloadReport(report.id)">Abrir PDF</button>
+        <button
+          type="button"
+          class="ghost"
+          [disabled]="reportPdfLoadingId === report.id"
+          (click)="downloadReport(report.id)"
+        >
+          {{ reportPdfLoadingId === report.id ? 'Abriendo...' : 'Abrir PDF' }}
+        </button>
         <button *ngIf="canSignReport(report)" type="button" (click)="openSignConfirmation(report)">
           {{ isAreaResponsible ? 'Firmar y avalar' : 'Firmar' }}
         </button>

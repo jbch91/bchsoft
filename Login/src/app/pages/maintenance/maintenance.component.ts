@@ -476,6 +476,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportSubView: 'pendientes_firma' | 'historial' = 'pendientes_firma';
   viewMode: MaintenanceViewMode = 'crear_solicitud';
   reportDetail: MaintenanceReportDto | null = null;
+  reportPdfLoadingId = '';
   signConfirmationReport: MaintenanceReportDto | null = null;
   signingReport = false;
   correctionDialogReport: MaintenanceReportDto | null = null;
@@ -1240,7 +1241,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   async downloadReport(reportId: string): Promise<void> {
+    if (this.reportPdfLoadingId) return;
     const previewWindow = this.preparePdfTab('Reporte de mantenimiento');
+    this.reportPdfLoadingId = reportId;
+    this.errorMessage = '';
     try {
       const blob = await this.maintenance.downloadReportPdf(reportId);
       this.presentPdfBlob(blob, previewWindow, `reporte-${reportId}.pdf`);
@@ -1248,6 +1252,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       previewWindow?.close();
       console.error(error);
       this.errorMessage = error?.error?.message ?? 'No se pudo abrir el PDF.';
+    } finally {
+      this.reportPdfLoadingId = '';
+      this.refreshViewSoon();
     }
   }
 

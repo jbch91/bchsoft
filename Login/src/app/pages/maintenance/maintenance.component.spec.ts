@@ -391,6 +391,44 @@ describe('maintenance report modal flow', () => {
     }
   });
 
+  it('abre el PDF desde la bandeja del jefe de área sin entrar al modal de firma', async () => {
+    const reportBlob = new Blob(['pdf'], { type: 'application/pdf' });
+    const maintenance = {
+      downloadReportPdf: vi.fn().mockResolvedValue(reportBlob)
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      {} as never,
+      {} as never,
+      maintenance as never,
+      { detectChanges: vi.fn() } as never,
+      { snapshot: { data: { assetCategory: 'biomedical' } } } as never
+    );
+    const previewWindow = { close: vi.fn() } as unknown as Window;
+    const pdfPreview = component as unknown as {
+      preparePdfTab: (title: string) => Window | null;
+      presentPdfBlob: (blob: Blob, previewWindow: Window | null, filename: string) => void;
+    };
+    const prepareSpy = vi
+      .spyOn(pdfPreview, 'preparePdfTab')
+      .mockReturnValue(previewWindow);
+    const presentSpy = vi
+      .spyOn(pdfPreview, 'presentPdfBlob')
+      .mockImplementation(() => {});
+
+    await component.downloadReport('report-1');
+
+    expect(prepareSpy).toHaveBeenCalledWith('Reporte de mantenimiento');
+    expect(maintenance.downloadReportPdf).toHaveBeenCalledWith('report-1');
+    expect(presentSpy).toHaveBeenCalledWith(
+      reportBlob,
+      previewWindow,
+      'reporte-report-1.pdf'
+    );
+    expect(component.reportDetail).toBeNull();
+    expect(component.reportPdfLoadingId).toBe('');
+  });
+
   it('aplica resultados rápidos coherentes al reporte preventivo', () => {
     const component = new MaintenanceComponent(
       {} as never,

@@ -1837,7 +1837,7 @@ button:disabled {
 
 .area-report-card {
   display: grid;
-  grid-template-columns: 104px minmax(0, 1fr) minmax(172px, 204px);
+  grid-template-columns: 104px minmax(0, 1fr) minmax(224px, 250px);
   gap: 12px;
   width: 100%;
   min-width: 0;
@@ -1993,16 +1993,21 @@ button:disabled {
 }
 
 .area-report-actions {
-  display: flex;
-  justify-content: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 6px;
+  align-items: stretch;
 }
 
 .area-report-actions button {
   width: 100%;
-  min-height: 34px;
+  min-width: 0;
+  min-height: 40px;
   padding: 7px 11px;
   border-radius: 6px;
   font-size: 11px;
+  line-height: 1.2;
+  white-space: normal;
 }
 
 .area-approval-empty {
@@ -2915,7 +2920,7 @@ button:disabled {
 
   .area-report-review {
     grid-column: 2;
-    grid-template-columns: minmax(0, 1fr) minmax(150px, 190px);
+    grid-template-columns: minmax(0, 1fr) minmax(210px, 240px);
     align-items: end;
     padding: 8px 0 0;
     border-top: 1px solid var(--border);
