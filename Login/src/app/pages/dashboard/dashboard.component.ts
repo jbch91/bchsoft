@@ -10,6 +10,7 @@ import {
   BiomedicalFeatureKey,
   canOpenBiomedicalFeature
 } from '../../core/biomedical-access-policy';
+import { automaticSoftwareSuiteKey } from '../../core/software-suite-navigation';
 
 interface SoftwareSuite {
   key: 'biomedico' | 'odontologico' | 'laboratorio' | string;
@@ -51,12 +52,13 @@ interface ClientModuleCard extends ClientModuleAccess {
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss'
 })
-export class DashboardComponent {
+export class DashboardComponent implements OnInit {
   private readonly apiBase = getApiBase();
   private readonly publicBase = getPublicBase();
   enabledModules: Set<string> | null = null;
   enabledModuleRows: ClientModuleAccess[] = [];
   softwareSuites: SoftwareSuite[] = [];
+  softwareSuitesLoaded = false;
   selectedSuiteKey: string | null = null;
   subscription: ClientSubscription | null = null;
   clientInfo: { name: string; nit: string; city: string; address?: string | null; email: string; logo_path?: string | null } | null = null;
@@ -161,9 +163,14 @@ export class DashboardComponent {
       this.softwareSuites = await firstValueFrom(
         this.http.get<SoftwareSuite[]>(`${this.apiBase}/software-suites/me`, { headers })
       );
+      this.applySoftwareLandingRule();
+      this.softwareSuitesLoaded = true;
       this.cdr.detectChanges();
     } catch {
       this.softwareSuites = [];
+      this.selectedSuiteKey = null;
+      this.softwareSuitesLoaded = true;
+      this.cdr.detectChanges();
     }
   }
 
@@ -239,6 +246,10 @@ export class DashboardComponent {
     return this.softwareSuites.find((suite) => suite.key === this.selectedSuiteKey) ?? null;
   }
 
+  get canChangeSoftware(): boolean {
+    return this.visibleSoftwareSuites.length > 1;
+  }
+
   get enabledModulesForSelectedSuite(): ClientModuleCard[] {
     if (!this.selectedSuiteKey) {
       return [];
@@ -257,12 +268,24 @@ export class DashboardComponent {
   }
 
   selectSuite(suiteKey: string): void {
+    if (!this.visibleSoftwareSuites.some((suite) => suite.key === suiteKey)) {
+      return;
+    }
     this.selectedSuiteKey = suiteKey;
     this.cdr.detectChanges();
   }
 
   backToSuites(): void {
-    this.selectedSuiteKey = null;
+    if (this.canChangeSoftware) {
+      this.selectedSuiteKey = null;
+    }
+  }
+
+  private applySoftwareLandingRule(): void {
+    if (this.visibleSoftwareSuites.some((suite) => suite.key === this.selectedSuiteKey)) {
+      return;
+    }
+    this.selectedSuiteKey = automaticSoftwareSuiteKey(this.softwareSuites);
   }
 
   suiteStatusLabel(suite: SoftwareSuite): string {

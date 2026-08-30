@@ -1,6 +1,11 @@
 <section class="dashboard">
   <section class="suite-context" *ngIf="selectedSuite">
-    <button type="button" class="suite-context-back" (click)="backToSuites()">Menú principal</button>
+    <button
+      *ngIf="canChangeSoftware"
+      type="button"
+      class="suite-context-back"
+      (click)="backToSuites()"
+    >Cambiar software</button>
     <div>
       <span>Software activo</span>
       <h2>{{ selectedSuite.name }}</h2>
@@ -20,7 +25,7 @@
 
   <section
     class="admin-shortcuts"
-    *ngIf="!selectedSuite && (canOpenSaasAdministration() || auth.hasPermission('users:manage') || canManageBiomedicalCatalog() || canOpenAuditAdministration())"
+    *ngIf="(!selectedSuite || visibleSoftwareSuites.length === 1) && (canOpenSaasAdministration() || auth.hasPermission('users:manage') || canManageBiomedicalCatalog() || canOpenAuditAdministration())"
   >
     <a routerLink="/administracion-saas" class="ui-card module-card" *ngIf="canOpenSaasAdministration()">
       <h2>Administración SaaS</h2>
@@ -48,7 +53,10 @@
     </a>
   </section>
 
-  <section class="suite-section" *ngIf="!selectedSuite && auth.currentUser()?.clientId">
+  <section
+    class="suite-section"
+    *ngIf="!selectedSuite && auth.currentUser()?.clientId && softwareSuitesLoaded"
+  >
     <div class="section-heading compact-heading">
       <span>Softwares disponibles</span>
     </div>
