@@ -942,18 +942,23 @@ export async function updateAssetMovementPdf(clientId, movementId, pdfPath) {
   await query(`UPDATE "${schema}".asset_movements SET pdf_path = $1 WHERE id = $2`, [pdfPath, movementId]);
 }
 
-export async function listAssetMovements(clientId, assetId, limit = 4, offset = 0) {
+export async function listAssetMovements(clientId, assetId, options = {}) {
   const schema = await getSchemaByClientId(clientId);
   if (!schema) {
     throw new Error('Cliente no encontrado');
   }
+  const limit = Math.min(Math.max(Number(options.limit) || 10, 1), 25);
+  const offset = Math.max(Number(options.offset) || 0, 0);
+  const order = String(options.order || '').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
   const { rows } = await query(
-    `SELECT *
+    `SELECT *, COUNT(*) OVER ()::int AS total_count
      FROM "${schema}".asset_movements
      WHERE asset_id = $1
-     ORDER BY created_at DESC
-     LIMIT $2 OFFSET $3`,
-    [assetId, limit, offset]
+       AND ($2::date IS NULL OR (created_at AT TIME ZONE 'America/Bogota')::date >= $2::date)
+       AND ($3::date IS NULL OR (created_at AT TIME ZONE 'America/Bogota')::date <= $3::date)
+     ORDER BY created_at ${order}
+     LIMIT $4 OFFSET $5`,
+    [assetId, options.from || null, options.to || null, limit, offset]
   );
   return rows;
 }

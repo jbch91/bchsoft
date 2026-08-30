@@ -4,22 +4,21 @@
 
 .inventory-actions {
   display: flex;
-  min-height: 38px;
   align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  margin: 14px 0 0;
+  gap: 8px;
+  margin: 0;
 }
 
 .inventory-actions .success {
-  margin-right: auto;
+  max-width: 360px;
 }
 
 .qr-button {
-  min-height: 36px;
-  padding: 7px 12px;
+  min-height: 100%;
+  padding: 7px 11px;
   border-radius: 6px;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .inventory-modal-backdrop {
@@ -337,6 +336,19 @@
 }
 
 @media (max-width: 700px) {
+  .inventory-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .inventory-actions .success {
+    max-width: none;
+  }
+
+  .qr-button {
+    min-height: 36px;
+  }
+
   .qr-head,
   .qr-tools {
     grid-template-columns: 1fr;

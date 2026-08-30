@@ -369,6 +369,10 @@ export class AdminService {
     return firstValueFrom(this.http.get<ClientDto[]>(`${this.apiBase}/admin/clients`));
   }
 
+  async getMyClient(): Promise<ClientDto> {
+    return firstValueFrom(this.http.get<ClientDto>(`${this.apiBase}/clients/me`));
+  }
+
   async getClientSubscription(clientId: string): Promise<ClientSubscriptionDto> {
     return firstValueFrom(
       this.http.get<ClientSubscriptionDto>(`${this.apiBase}/admin/clients/${clientId}/subscription`)

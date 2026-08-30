@@ -1,8 +1,12 @@
-<div class="card filters-card">
-  <div class="filters-grid" [class.life-sheet-filters]="conditionFilterEnabled">
-    <label>
+<div class="card filters-card" [class.inventory-filter-card]="!isLifeSheetMode">
+  <div
+    class="filters-grid"
+    [class.life-sheet-filters]="isLifeSheetMode"
+    [class.inventory-filters]="!isLifeSheetMode"
+  >
+    <label class="search-filter">
       Búsqueda
-      <input type="text" [(ngModel)]="searchTerm" placeholder="Código, nombre, marca, serie..." />
+      <input type="text" [(ngModel)]="searchTerm" placeholder="Código, equipo, marca o serie..." />
     </label>
     <label>
       Sede
@@ -32,7 +36,7 @@
         <option *ngFor="let status of statusOptions" [value]="status">{{ status }}</option>
       </select>
     </label>
-    <label *ngIf="conditionFilterEnabled">
+    <label class="condition-filter" *ngIf="conditionFilterEnabled">
       Condición
       <select [(ngModel)]="filterCondition">
         <option value="">Todas ({{ lifeSheetConditionCount('') }})</option>
@@ -41,17 +45,12 @@
         </option>
       </select>
     </label>
-    <label *ngIf="!isLifeSheetMode">
-      Exportar como
-      <select [(ngModel)]="exportFormat">
-        <option value="xlsx">Excel (.xlsx)</option>
-        <option value="csv">CSV (.csv)</option>
-        <option value="pdf">PDF (.pdf)</option>
-      </select>
-    </label>
-    <button type="button" class="ghost" (click)="clearFilters()">Limpiar</button>
-    <button type="button" class="ghost" *ngIf="!isLifeSheetMode" (click)="exportInventory(true)">Exportar filtrado</button>
-    <button type="button" class="ghost" *ngIf="!isLifeSheetMode" (click)="exportInventory(false)">Exportar todo</button>
+    <div class="filter-actions">
+      <button type="button" class="ghost" (click)="clearFilters()">Limpiar</button>
+      <button type="button" class="ghost export-trigger" *ngIf="!isLifeSheetMode" (click)="openExportModal()">
+        Exportar
+      </button>
+    </div>
   </div>
 
   <div class="filter-summary">
@@ -72,20 +71,193 @@
   </div>
 </div>
 
+<div
+  class="saas-modal-backdrop export-modal-backdrop"
+  *ngIf="exportModalOpen"
+  (click)="closeExportModal()"
+>
+  <section
+    #exportDialog
+    class="export-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="inventory-export-title"
+    aria-describedby="inventory-export-summary"
+    (click)="$event.stopPropagation()"
+  >
+    <header class="export-modal-heading">
+      <div>
+        <span>Control de inventario</span>
+        <h2 id="inventory-export-title">Exportar inventario</h2>
+      </div>
+      <button
+        type="button"
+        class="export-close"
+        title="Cerrar"
+        aria-label="Cerrar exportación"
+        [disabled]="exportLoading"
+        (click)="closeExportModal()"
+      >
+        ×
+      </button>
+    </header>
+
+    <div class="export-modal-body">
+      <div class="export-toolbar">
+        <div class="export-available">
+          <strong>{{ totalCount }}</strong>
+          <span>equipos disponibles para este usuario</span>
+        </div>
+        <button
+          type="button"
+          class="export-reset"
+          [disabled]="!hasExportFilters || exportLoading"
+          (click)="clearExportFilters()"
+        >
+          Limpiar filtros
+        </button>
+      </div>
+
+      <div class="export-filter-grid">
+        <label class="export-search-field">
+          Buscar equipo
+          <input
+            data-export-autofocus
+            type="search"
+            [(ngModel)]="exportSearchTerm"
+            [disabled]="exportLoading"
+            placeholder="Código, equipo, marca, modelo o serie"
+          />
+        </label>
+        <label>
+          Sede
+          <select
+            [(ngModel)]="exportSite"
+            [disabled]="exportLoading"
+            (change)="onExportSiteChange()"
+          >
+            <option value="">Todas</option>
+            <option *ngFor="let site of exportSiteOptions" [value]="site">{{ site }}</option>
+          </select>
+        </label>
+        <label>
+          Área habilitada
+          <select
+            [(ngModel)]="exportArea"
+            [disabled]="exportLoading"
+            (change)="onExportAreaChange()"
+          >
+            <option value="">Todas las habilitadas</option>
+            <option *ngFor="let area of exportAreaOptions" [value]="area">{{ area }}</option>
+          </select>
+        </label>
+        <label>
+          Ubicación
+          <select [(ngModel)]="exportLocation" [disabled]="exportLoading">
+            <option value="">Todas</option>
+            <option *ngFor="let location of exportLocationOptions" [value]="location">
+              {{ location }}
+            </option>
+          </select>
+        </label>
+        <label>
+          Condición
+          <select [(ngModel)]="exportCondition" [disabled]="exportLoading">
+            <option value="">Todas</option>
+            <option *ngFor="let condition of lifeSheetConditions" [value]="condition.value">
+              {{ condition.label }}
+            </option>
+          </select>
+        </label>
+      </div>
+
+      <fieldset class="export-format-group">
+        <legend>Formato</legend>
+        <div class="export-format-options">
+          <label>
+            <input
+              type="radio"
+              name="inventoryExportFormat"
+              value="xlsx"
+              [(ngModel)]="exportFormat"
+              [disabled]="exportLoading"
+            />
+            <span>Excel</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="inventoryExportFormat"
+              value="pdf"
+              [(ngModel)]="exportFormat"
+              [disabled]="exportLoading"
+            />
+            <span>PDF</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="inventoryExportFormat"
+              value="csv"
+              [(ngModel)]="exportFormat"
+              [disabled]="exportLoading"
+            />
+            <span>CSV</span>
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="export-confirmation" id="inventory-export-summary">
+        <span><strong>{{ exportItemCount }}</strong> de {{ totalCount }} equipos</span>
+        <strong>{{ exportFormat.toUpperCase() }}</strong>
+      </div>
+
+      <p class="error export-error" *ngIf="exportError" aria-live="polite">{{ exportError }}</p>
+    </div>
+
+    <footer class="export-modal-actions">
+      <button
+        type="button"
+        class="ghost"
+        [disabled]="exportLoading"
+        (click)="closeExportModal()"
+      >
+        Cancelar
+      </button>
+      <button
+        type="button"
+        class="export-primary"
+        [disabled]="exportLoading || exportItemCount === 0"
+        (click)="confirmExport()"
+      >
+        {{ exportLoading ? 'Generando...' : 'Descargar ' + exportFormat.toUpperCase() }}
+      </button>
+    </footer>
+  </section>
+</div>
+
 <p *ngIf="loading">Cargando...</p>
 <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
 <p class="success movement-feedback" *ngIf="moveSuccess && !movingAssetId">{{ moveSuccess }}</p>
 
-<div class="inventory-summary" *ngIf="!loading && !isLifeSheetMode">
-  <div><span>Operativos</span><strong>{{ inventoryOperationalCount }}</strong></div>
-  <div><span>En garantía</span><strong>{{ inventoryWarrantyCount }}</strong></div>
-  <div><span>Repuesto pendiente</span><strong>{{ inventoryPendingSpareCount }}</strong></div>
-  <div><span>Con observaciones</span><strong>{{ inventoryObservationCount }}</strong></div>
-  <div><span>Fuera de servicio</span><strong>{{ inventoryOutOfServiceCount }}</strong></div>
+<div class="inventory-overview" *ngIf="!loading && !isLifeSheetMode">
+  <div class="inventory-summary">
+    <div><span>Operativos</span><strong>{{ inventoryOperationalCount }}</strong></div>
+    <div><span>En garantía</span><strong>{{ inventoryWarrantyCount }}</strong></div>
+    <div><span>Repuesto pendiente</span><strong>{{ inventoryPendingSpareCount }}</strong></div>
+    <div><span>Con observaciones</span><strong>{{ inventoryObservationCount }}</strong></div>
+    <div><span>Fuera de servicio</span><strong>{{ inventoryOutOfServiceCount }}</strong></div>
+  </div>
+  <ng-content select="[inventory-toolbar]"></ng-content>
 </div>
 
 <div class="card table-card" *ngIf="!loading">
-  <h2>{{ title }}</h2>
+  <div class="table-heading">
+    <h2>{{ title }}</h2>
+    <span>
+      {{ filteredCount }} {{ isLifeSheetMode ? 'hojas de vida visibles' : 'equipos visibles' }}
+    </span>
+  </div>
   <p class="muted" *ngIf="!filteredItems.length">{{ emptyMessage }}</p>
   <div class="table" *ngIf="filteredItems.length">
     <div class="row header life-sheet-row" *ngIf="isLifeSheetMode">
@@ -153,7 +325,7 @@
           >
             Solicitar revisión
           </button>
-          <button type="button" (click)="toggleHistory(item)">Trazabilidad</button>
+          <button type="button" (click)="openTraceability(item)">Trazabilidad</button>
           <button type="button" *ngIf="canMove" (click)="startMove(item)">Mover</button>
         </span>
       </div>
@@ -204,112 +376,230 @@
         <p class="success" *ngIf="moveSuccess">{{ moveSuccess }}</p>
       </div>
 
-      <div class="history-inline" *ngIf="expandedAssetId === item.id" [attr.id]="'history-' + item.id">
-        <div class="history-inline-header">
-          <div class="history-inline-title">
-            <div>
-              <strong>{{ isLifeSheetMode ? 'Historial documental' : 'Trazabilidad de ubicación' }}</strong>
-              <p class="muted">
-                {{ item.code }} · {{ item.name }} · Serie {{ item.serial || '-' }}
-              </p>
-            </div>
-            <button type="button" class="hide-btn" (click)="toggleHistory(item)">Ocultar</button>
-          </div>
-
-          <div class="history-summary-card">
-            <div>
-              <span class="summary-label">Equipo</span>
-              <strong>{{ item.name }}</strong>
-            </div>
-            <div>
-              <span class="summary-label">Ubicación actual</span>
-              <strong>{{ item.siteName || '-' }} / {{ item.areaName || '-' }} / {{ item.locationName || '-' }}</strong>
-            </div>
-            <div>
-              <span class="summary-label">Código</span>
-              <strong>{{ item.code }}</strong>
-            </div>
-          </div>
-
-          <div class="history-inline-filters" *ngIf="isLifeSheetMode">
-            <label>
-              Desde
-              <input type="date" [(ngModel)]="historyFrom" (change)="loadHistory()" />
-            </label>
-            <label>
-              Hasta
-              <input type="date" [(ngModel)]="historyTo" (change)="loadHistory()" />
-            </label>
-            <label>
-              Orden
-              <select [(ngModel)]="historyOrder" (change)="loadHistory()">
-                <option value="asc">Más antiguo a reciente</option>
-                <option value="desc">Más reciente a antiguo</option>
-              </select>
-            </label>
-            <button type="button" class="ghost" (click)="loadHistory()">Buscar</button>
-          </div>
-        </div>
-
-        <div class="history-list">
-          <p class="muted" *ngIf="historyLoading">Cargando historial del equipo...</p>
-
-          <div class="history-row header">
-            <span>Tipo</span>
-            <span>Fecha</span>
-            <span>Descripción</span>
-            <span>Acciones</span>
-          </div>
-
-          <div class="history-row pinned" *ngIf="isLifeSheetMode">
-            <span class="history-badge">Hoja de vida</span>
-            <span>-</span>
-            <span>PDF principal de la hoja de vida del equipo seleccionado</span>
-            <span><button type="button" class="history-btn" (click)="openHistoryHv()">VER</button></span>
-          </div>
-
-          <div class="history-row pinned guide-pinned" *ngIf="isLifeSheetMode">
-            <span class="history-badge">Guía rápida</span>
-            <span>-</span>
-            <span>Guía práctica de uso seguro por marca y modelo del equipo</span>
-            <span><button type="button" class="history-btn" (click)="openQuickGuideForAsset()">VER</button></span>
-          </div>
-
-          <div class="history-row" *ngFor="let event of historyItems">
-            <span class="history-badge">{{ historyTypeLabel(event) }}</span>
-            <span>{{ event.event_date | date: 'dd/MM/yyyy' }}</span>
-            <span>
-              <strong>{{ event.title || 'Evento del equipo' }}</strong>
-              <small *ngIf="event.description">{{ event.description }}</small>
-              <small *ngIf="event.maintenance_schedule_item_id">Cronograma conciliado</small>
-            </span>
-            <span class="history-actions">
-              <button type="button" class="history-btn" [disabled]="!event.pdf_path" (click)="openHistoryItem(event)">VER</button>
-              <button
-                type="button"
-                class="danger small"
-                *ngIf="isLifeSheetMode && canEdit && event.item_type === 'legacy_pdf' && !event.maintenance_schedule_item_id"
-                (click)="deleteHistoryFile(event)"
-              >
-                Eliminar
-              </button>
-            </span>
-          </div>
-
-          <p class="muted" *ngIf="!historyLoading && historyItems.length === 0">
-            {{ isLifeSheetMode ? 'Sin reportes o PDFs históricos en el rango seleccionado.' : 'Sin movimientos registrados para este equipo.' }}
-          </p>
-          <div class="history-more">
-            <button type="button" class="ghost" [disabled]="historyLoading || historyOffset === 0" (click)="prevHistoryPage()">
-              Anterior
-            </button>
-            <button type="button" class="ghost" [disabled]="historyLoading || !historyHasMore" (click)="nextHistoryPage()">
-              Siguiente
-            </button>
-          </div>
-        </div>
-      </div>
-
     </ng-container>
   </div>
+</div>
+
+<div
+  class="saas-modal-backdrop traceability-modal-backdrop"
+  *ngIf="traceabilityModalOpen && selectedHistoryAsset as asset"
+  (click)="closeTraceabilityModal()"
+>
+  <section
+    #traceabilityDialog
+    class="traceability-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="traceability-title"
+    aria-describedby="traceability-description"
+    (click)="$event.stopPropagation()"
+  >
+    <header class="traceability-modal-heading">
+      <div>
+        <span>Control de inventario</span>
+        <h2 id="traceability-title">Trazabilidad del equipo</h2>
+        <p id="traceability-description">Cadena de custodia, ubicación y cambios de identificación.</p>
+      </div>
+      <button
+        data-traceability-autofocus
+        type="button"
+        class="traceability-close"
+        title="Cerrar"
+        aria-label="Cerrar trazabilidad"
+        (click)="closeTraceabilityModal()"
+      >
+        ×
+      </button>
+    </header>
+
+    <div class="traceability-modal-body">
+      <section class="traceability-identity" aria-label="Identificación del equipo">
+        <div class="traceability-equipment">
+          <span class="traceability-code">{{ asset.code || 'SIN CÓDIGO' }}</span>
+          <div>
+            <h3>{{ asset.name }}</h3>
+            <p>{{ asset.brand || 'Marca no registrada' }} · {{ asset.model || 'Modelo no registrado' }}</p>
+          </div>
+        </div>
+        <dl class="traceability-technical-data">
+          <div>
+            <dt>Serie</dt>
+            <dd>{{ asset.serial || 'No registrada' }}</dd>
+          </div>
+          <div>
+            <dt>Estado actual</dt>
+            <dd>
+              <span class="status-pill" [attr.data-status]="asset.status">
+                {{ assetStatusLabel(asset.status) }}
+              </span>
+            </dd>
+          </div>
+          <div>
+            <dt>Condición</dt>
+            <dd class="traceability-conditions">
+              <span class="condition-pill spare" *ngIf="asset.hasPendingSpare">Repuesto pendiente</span>
+              <span class="condition-pill warranty" *ngIf="isUnderWarranty(asset)">En garantía</span>
+              <span *ngIf="!asset.hasPendingSpare && !isUnderWarranty(asset)">Sin alertas registradas</span>
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="traceability-current" aria-label="Ubicación actual">
+        <span class="traceability-current-marker" aria-hidden="true"></span>
+        <div>
+          <span>Ubicación actual verificada en inventario</span>
+          <strong>{{ asset.siteName || 'Sede no registrada' }}</strong>
+          <p>{{ asset.areaName || 'Área no registrada' }} / {{ asset.locationName || 'Ubicación no registrada' }}</p>
+        </div>
+      </section>
+
+      <section class="traceability-filters" aria-label="Filtros de trazabilidad">
+        <div class="traceability-filter-grid">
+          <label>
+            Desde
+            <input type="date" [(ngModel)]="historyFrom" [disabled]="historyLoading" />
+          </label>
+          <label>
+            Hasta
+            <input type="date" [(ngModel)]="historyTo" [disabled]="historyLoading" />
+          </label>
+          <label>
+            Orden
+            <select [(ngModel)]="historyOrder" [disabled]="historyLoading">
+              <option value="desc">Más recientes primero</option>
+              <option value="asc">Más antiguos primero</option>
+            </select>
+          </label>
+        </div>
+        <div class="traceability-filter-actions">
+          <button
+            type="button"
+            class="traceability-reset"
+            [disabled]="historyLoading || !hasTraceabilityFilters"
+            (click)="clearTraceabilityFilters()"
+          >
+            Limpiar
+          </button>
+          <button
+            type="button"
+            class="traceability-apply"
+            [disabled]="historyLoading"
+            (click)="loadHistory(true)"
+          >
+            {{ historyLoading ? 'Consultando...' : 'Aplicar' }}
+          </button>
+        </div>
+      </section>
+
+      <section class="traceability-events" aria-labelledby="traceability-events-title">
+        <div class="traceability-events-heading">
+          <div>
+            <h3 id="traceability-events-title">Movimientos registrados</h3>
+            <p>El registro más reciente se presenta primero de forma predeterminada.</p>
+          </div>
+          <span *ngIf="!historyLoading && historyTotal">
+            {{ historyShowingFrom }}-{{ historyShowingTo }} de {{ historyTotal }}
+          </span>
+        </div>
+
+        <p class="traceability-loading" *ngIf="historyLoading" aria-live="polite">
+          Cargando trazabilidad del equipo...
+        </p>
+        <p class="error traceability-error" *ngIf="historyError" aria-live="assertive">
+          {{ historyError }}
+        </p>
+
+        <ol class="traceability-timeline" *ngIf="!historyLoading && historyMovements.length">
+          <li *ngFor="let movement of historyMovements">
+            <span class="traceability-node" aria-hidden="true"></span>
+            <article class="traceability-event">
+              <header>
+                <span class="traceability-event-type">{{ movementTypeLabel(movement) }}</span>
+                <time [attr.datetime]="movement.created_at">
+                  {{ movement.created_at | date: 'dd/MM/yyyy, h:mm a' }}
+                </time>
+              </header>
+
+              <div class="traceability-route">
+                <div>
+                  <span>Origen</span>
+                  <strong>{{ movementOrigin(movement) }}</strong>
+                  <small>Código {{ movement.from_code || 'no registrado' }}</small>
+                </div>
+                <span class="traceability-route-arrow" aria-hidden="true">→</span>
+                <div>
+                  <span>Destino</span>
+                  <strong>{{ movementDestination(movement) }}</strong>
+                  <small>Código {{ movement.to_code || 'no registrado' }}</small>
+                </div>
+              </div>
+
+              <div class="traceability-code-change" *ngIf="movementCodeChanged(movement)">
+                <span>Cambio de identificación</span>
+                <strong>{{ movement.from_code || 'Sin código' }} → {{ movement.to_code || 'Sin código' }}</strong>
+              </div>
+
+              <footer class="traceability-event-footer">
+                <div class="traceability-responsible">
+                  <span>Registrado por</span>
+                  <strong>{{ movementActor(movement) }}</strong>
+                  <small>{{ movementRoleLabel(movement.moved_by_role) }}</small>
+                </div>
+                <p *ngIf="movement.notes">
+                  <span>Observación</span>
+                  {{ movement.notes }}
+                </p>
+                <button
+                  type="button"
+                  class="traceability-document"
+                  *ngIf="movement.pdf_path"
+                  (click)="openMovementPdf(movement.id)"
+                >
+                  Abrir soporte PDF
+                </button>
+                <span class="traceability-no-document" *ngIf="!movement.pdf_path">Sin soporte PDF</span>
+              </footer>
+            </article>
+          </li>
+        </ol>
+
+        <div
+          class="traceability-empty"
+          *ngIf="!historyLoading && !historyError && historyMovements.length === 0"
+        >
+          <strong>Sin movimientos en el rango consultado</strong>
+          <p>
+            La ubicación actual permanece como punto de referencia. Los próximos traslados o cambios
+            de código quedarán registrados aquí con fecha y responsable.
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <footer class="traceability-modal-actions">
+      <span>Página {{ historyPageNumber }}</span>
+      <div>
+        <button
+          type="button"
+          class="ghost"
+          [disabled]="historyLoading || historyOffset === 0"
+          (click)="prevHistoryPage()"
+        >
+          Anterior
+        </button>
+        <button
+          type="button"
+          class="ghost"
+          [disabled]="historyLoading || !historyHasMore"
+          (click)="nextHistoryPage()"
+        >
+          Siguiente
+        </button>
+        <button type="button" class="traceability-done" (click)="closeTraceabilityModal()">
+          Cerrar
+        </button>
+      </div>
+    </footer>
+  </section>
 </div>

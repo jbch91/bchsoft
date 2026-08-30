@@ -9410,10 +9410,32 @@ app.get(
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
       }
     }
-    const limit = Math.min(Number(req.query.limit || 4), 25);
-    const offset = Math.max(Number(req.query.offset || 0), 0);
-    const rows = await listAssetMovements(clientId, assetId, limit, offset);
-    return res.json(rows);
+    const from = String(req.query.from || '').trim();
+    const to = String(req.query.to || '').trim();
+    const validDate = (value) => {
+      if (!value) return true;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+      const parsed = new Date(`${value}T00:00:00.000Z`);
+      return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+    };
+    if (!validDate(from) || !validDate(to) || (from && to && from > to)) {
+      return res.status(400).json({ message: 'El rango de fechas de trazabilidad no es válido.' });
+    }
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 25);
+      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      const rows = await listAssetMovements(clientId, assetId, {
+        from: from || null,
+        to: to || null,
+        order: req.query.order,
+        limit,
+        offset
+      });
+      return res.json(rows);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo cargar la trazabilidad del equipo.' });
+    }
   }
 );
 

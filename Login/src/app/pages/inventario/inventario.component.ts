@@ -29,6 +29,7 @@ interface ClientOption {
 export class InventarioComponent {
   private readonly publicBase = getPublicBase();
   clients: ClientOption[] = [];
+  private assignedClientInfo: ClientOption | null = null;
   clientSearchTerm = '';
   selectedClientId = '';
   items: InventoryPanelItem[] = [];
@@ -63,7 +64,10 @@ export class InventarioComponent {
     const userClient = this.auth.currentUser()?.clientId ?? '';
     if (userClient) {
       this.selectedClientId = userClient;
-      await this.loadItems();
+      await Promise.all([
+        this.loadItems(),
+        this.loadAssignedClientInfo()
+      ]);
       return;
     }
 
@@ -94,7 +98,8 @@ export class InventarioComponent {
   }
 
   get selectedClientInfo(): ClientOption | null {
-    return this.clients.find((client) => client.id === this.selectedClientId) ?? null;
+    return this.clients.find((client) => client.id === this.selectedClientId)
+      ?? (this.assignedClientInfo?.id === this.selectedClientId ? this.assignedClientInfo : null);
   }
 
   get isAreaResponsible(): boolean {
@@ -113,6 +118,25 @@ export class InventarioComponent {
     if (!client?.logoPath) return null;
     if (client.logoPath.startsWith('http')) return client.logoPath;
     return joinBase(this.publicBase, client.logoPath);
+  }
+
+  private async loadAssignedClientInfo(): Promise<void> {
+    try {
+      const client = await this.admin.getMyClient();
+      this.assignedClientInfo = {
+        id: client.id,
+        name: client.name,
+        nit: client.nit,
+        city: client.city,
+        email: client.email,
+        address: client.address,
+        logoPath: client.logo_path
+      };
+    } catch (error) {
+      console.warn('No se pudo cargar la identificación del cliente para el inventario.', error);
+    } finally {
+      this.cdr.detectChanges();
+    }
   }
 
   async loadItems(): Promise<void> {

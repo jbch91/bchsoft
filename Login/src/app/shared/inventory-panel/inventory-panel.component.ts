@@ -1,5 +1,15 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, Output } from '@angular/core';
+import {
+  ChangeDetectorRef,
+  Component,
+  ElementRef,
+  EventEmitter,
+  HostListener,
+  Input,
+  OnDestroy,
+  Output,
+  ViewChild
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
   AssetHistoryItemDto,
@@ -58,6 +68,20 @@ interface MoveLocationOption {
 }
 
 export type InventoryPanelMode = 'life_sheets' | 'inventory';
+type InventoryExportFormat = 'csv' | 'xlsx' | 'pdf';
+
+interface InventoryExportContext {
+  title: string;
+  clientName: string;
+  clientNit: string;
+  clientCity: string;
+  generatedAt: string;
+  generatedDate: Date;
+  exportedBy: string;
+  scope: string;
+  itemCount: number;
+  filenameBase: string;
+}
 
 @Component({
   selector: 'app-inventory-panel',
@@ -67,6 +91,9 @@ export type InventoryPanelMode = 'life_sheets' | 'inventory';
   styleUrl: './inventory-panel.component.scss'
 })
 export class InventoryPanelComponent implements OnDestroy {
+  @ViewChild('exportDialog') private exportDialog?: ElementRef<HTMLElement>;
+  @ViewChild('traceabilityDialog') private traceabilityDialog?: ElementRef<HTMLElement>;
+
   readonly lifeSheetConditions: readonly {
     value: Exclude<LifeSheetCondition, ''>;
     label: string;
@@ -81,6 +108,10 @@ export class InventoryPanelComponent implements OnDestroy {
   ];
   @Input() items: InventoryPanelItem[] = [];
   @Input() selectedClientId = '';
+  @Input() clientName = '';
+  @Input() clientNit = '';
+  @Input() clientCity = '';
+  @Input() exportedBy = '';
   @Input() loading = false;
   @Input() errorMessage = '';
   @Input() canEdit = false;
@@ -106,18 +137,29 @@ export class InventoryPanelComponent implements OnDestroy {
   filterLocation = '';
   filterStatus = '';
   filterCondition: LifeSheetCondition = '';
-  exportFormat: 'csv' | 'xlsx' | 'pdf' = 'xlsx';
+  exportFormat: InventoryExportFormat = 'xlsx';
+  exportSearchTerm = '';
+  exportSite = '';
+  exportArea = '';
+  exportLocation = '';
+  exportCondition: LifeSheetCondition = '';
+  exportModalOpen = false;
+  exportLoading = false;
+  exportError = '';
 
   historyAssetId = '';
   historyFrom = '';
   historyTo = '';
-  historyOrder: 'asc' | 'desc' = 'asc';
+  historyOrder: 'asc' | 'desc' = 'desc';
   historyItems: AssetHistoryItemDto[] = [];
-  expandedAssetId: string | null = null;
+  historyMovements: AssetMovementDto[] = [];
+  traceabilityModalOpen = false;
   historyLoading = false;
+  historyError = '';
   historyLoadToken = 0;
-  historyLimit = 4;
+  historyLimit = 10;
   historyOffset = 0;
+  historyTotal = 0;
   historyHasMore = true;
   movingAssetId: string | null = null;
   moveLoading = false;
@@ -146,6 +188,8 @@ export class InventoryPanelComponent implements OnDestroy {
     notes: ''
   };
   private destroyed = false;
+  private exportTriggerElement: HTMLElement | null = null;
+  private traceabilityTriggerElement: HTMLElement | null = null;
   private readonly currentDateInBogota = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Bogota'
   }).format(new Date());
@@ -160,6 +204,44 @@ export class InventoryPanelComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     this.destroyed = true;
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  onDocumentKeydown(event: KeyboardEvent): void {
+    if (!this.exportModalOpen && !this.traceabilityModalOpen) return;
+    if (event.key === 'Escape') {
+      if (this.exportModalOpen) {
+        this.closeExportModal();
+      } else {
+        this.closeTraceabilityModal();
+      }
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const dialog = this.exportModalOpen
+      ? this.exportDialog?.nativeElement
+      : this.traceabilityDialog?.nativeElement;
+    if (!dialog) return;
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter((element) => element.getClientRects().length > 0);
+    if (!focusable.length) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!dialog.contains(document.activeElement)) {
+      event.preventDefault();
+      first.focus();
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   get areaOptions(): string[] {
@@ -253,6 +335,71 @@ export class InventoryPanelComponent implements OnDestroy {
     return this.visibleItems.length;
   }
 
+  get exportItemCount(): number {
+    return this.exportFilteredItems.length;
+  }
+
+  get exportSiteOptions(): string[] {
+    return this.uniqueExportValues(this.exportSourceItems.map((item) => item.siteName));
+  }
+
+  get exportAreaOptions(): string[] {
+    return this.uniqueExportValues(
+      this.exportSourceItems
+        .filter((item) => !this.exportSite || item.siteName === this.exportSite)
+        .map((item) => item.areaName)
+    );
+  }
+
+  get exportLocationOptions(): string[] {
+    return this.uniqueExportValues(
+      this.exportSourceItems
+        .filter((item) => !this.exportSite || item.siteName === this.exportSite)
+        .filter((item) => !this.exportArea || item.areaName === this.exportArea)
+        .map((item) => item.locationName)
+    );
+  }
+
+  get exportFilteredItems(): InventoryPanelItem[] {
+    const term = this.normalize(this.exportSearchTerm);
+    return this.exportSourceItems.filter((item) => {
+      if (this.exportSite && item.siteName !== this.exportSite) return false;
+      if (this.exportArea && item.areaName !== this.exportArea) return false;
+      if (this.exportLocation && item.locationName !== this.exportLocation) return false;
+      if (this.exportCondition && !this.matchesLifeSheetCondition(item, this.exportCondition)) {
+        return false;
+      }
+      if (!term) return true;
+      const haystack = [
+        item.code,
+        item.name,
+        item.brand,
+        item.model,
+        item.serial,
+        item.siteName,
+        item.areaName,
+        item.locationName
+      ]
+        .map((value) => this.normalize(value))
+        .join(' ');
+      return haystack.includes(term);
+    });
+  }
+
+  get hasExportFilters(): boolean {
+    return Boolean(
+      this.exportSearchTerm.trim()
+      || this.exportSite
+      || this.exportArea
+      || this.exportLocation
+      || this.exportCondition
+    );
+  }
+
+  private get exportSourceItems(): InventoryPanelItem[] {
+    return this.visibleItems;
+  }
+
   get visibleItems(): InventoryPanelItem[] {
     if (this.showRetired) return this.items;
     return this.items.filter((item) => item.status !== 'dado_de_baja');
@@ -260,6 +407,22 @@ export class InventoryPanelComponent implements OnDestroy {
 
   get selectedHistoryAsset(): InventoryPanelItem | null {
     return this.items.find((item) => item.id === this.historyAssetId) ?? null;
+  }
+
+  get historyPageNumber(): number {
+    return Math.floor(this.historyOffset / this.historyLimit) + 1;
+  }
+
+  get historyShowingFrom(): number {
+    return this.historyMovements.length ? this.historyOffset + 1 : 0;
+  }
+
+  get historyShowingTo(): number {
+    return this.historyOffset + this.historyMovements.length;
+  }
+
+  get hasTraceabilityFilters(): boolean {
+    return Boolean(this.historyFrom || this.historyTo || this.historyOrder !== 'desc');
   }
 
   assetStatusLabel(status: string | null | undefined): string {
@@ -330,6 +493,25 @@ export class InventoryPanelComponent implements OnDestroy {
     this.filterCondition = '';
   }
 
+  onExportSiteChange(): void {
+    if (this.exportArea && !this.exportAreaOptions.includes(this.exportArea)) {
+      this.exportArea = '';
+    }
+    this.validateExportLocation();
+  }
+
+  onExportAreaChange(): void {
+    this.validateExportLocation();
+  }
+
+  clearExportFilters(): void {
+    this.exportSearchTerm = '';
+    this.exportSite = '';
+    this.exportArea = '';
+    this.exportLocation = '';
+    this.exportCondition = '';
+  }
+
   private matchesBaseFilters(item: InventoryPanelItem): boolean {
     if (this.filterArea && item.areaName !== this.filterArea) return false;
     if (this.filterSite && item.siteName !== this.filterSite) return false;
@@ -379,9 +561,66 @@ export class InventoryPanelComponent implements OnDestroy {
     return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`;
   }
 
+  openExportModal(): void {
+    this.exportTriggerElement = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    this.exportError = '';
+    this.exportSearchTerm = this.searchTerm;
+    this.exportSite = this.filterSite;
+    this.exportArea = this.filterArea;
+    this.exportLocation = this.filterLocation;
+    this.exportCondition = this.conditionFilterEnabled ? this.filterCondition : '';
+    this.onExportSiteChange();
+    this.exportModalOpen = true;
+    setTimeout(() => {
+      const dialog = this.exportDialog?.nativeElement;
+      dialog?.querySelector<HTMLInputElement>('[data-export-autofocus]')?.focus();
+    });
+  }
+
+  closeExportModal(): void {
+    if (this.exportLoading) return;
+    this.hideExportModal();
+  }
+
+  async confirmExport(): Promise<void> {
+    if (this.exportLoading || this.exportItemCount === 0) return;
+    this.exportLoading = true;
+    this.exportError = '';
+    try {
+      await this.exportSelectedInventory();
+      this.hideExportModal();
+    } catch (error) {
+      console.error('No se pudo generar la exportación del inventario.', error);
+      this.exportError = `No se pudo generar el archivo ${this.exportFormat.toUpperCase()}. Intenta nuevamente.`;
+    } finally {
+      this.exportLoading = false;
+    }
+  }
+
+  private hideExportModal(): void {
+    this.exportModalOpen = false;
+    this.exportError = '';
+    const trigger = this.exportTriggerElement;
+    this.exportTriggerElement = null;
+    setTimeout(() => trigger?.focus());
+  }
+
   async exportInventory(useFiltered: boolean): Promise<void> {
     const items = useFiltered ? this.filteredItems : this.items;
-    const filenameBase = useFiltered ? 'inventario-filtrado' : 'inventario-completo';
+    await this.downloadInventory(items, this.createExportContext(items.length, false));
+  }
+
+  async exportSelectedInventory(): Promise<void> {
+    const items = this.exportFilteredItems;
+    await this.downloadInventory(items, this.createExportContext(items.length, true));
+  }
+
+  private async downloadInventory(
+    items: InventoryPanelItem[],
+    context: InventoryExportContext
+  ): Promise<void> {
     const headers = ['Código', 'Equipo', 'Marca', 'Modelo', 'Serie', 'Sede', 'Área', 'Ubicación', 'Estado operativo'];
     const rows = items.map((item) => [
       item.code,
@@ -392,51 +631,270 @@ export class InventoryPanelComponent implements OnDestroy {
       item.siteName || '',
       item.areaName || '',
       item.locationName || '',
-      item.status || ''
+      this.assetStatusLabel(item.status).toUpperCase()
     ]);
 
     if (this.exportFormat === 'csv') {
-      const csv = this.toCsv(headers, rows);
+      const metadataHeaders = [
+        'Institución',
+        'NIT',
+        'Ciudad',
+        'Generado',
+        'Generado por',
+        'Alcance',
+        'Software'
+      ];
+      const metadataValues = [
+        context.clientName,
+        context.clientNit,
+        context.clientCity,
+        context.generatedAt,
+        context.exportedBy,
+        context.scope,
+        'INBIHOSPITALARIO'
+      ];
+      const csv = `\uFEFF${this.toCsv(
+        [...metadataHeaders, ...headers],
+        rows.map((row) => [...metadataValues, ...row])
+      )}`;
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${filenameBase}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      this.downloadBlob(blob, `${context.filenameBase}.csv`);
       return;
     }
 
     if (this.exportFormat === 'xlsx') {
-      const XLSX = await import('xlsx');
-      const data = rows.map((row) => ({
-        [headers[0]]: row[0],
-        [headers[1]]: row[1],
-        [headers[2]]: row[2],
-        [headers[3]]: row[3],
-        [headers[4]]: row[4],
-        [headers[5]]: row[5],
-        [headers[6]]: row[6],
-        [headers[7]]: row[7],
-        [headers[8]]: row[8]
-      }));
-      const worksheet = XLSX.utils.json_to_sheet(data);
+      const xlsxModule = await import('xlsx');
+      const XLSX = (
+        (xlsxModule as any).utils
+          ? xlsxModule
+          : (xlsxModule as any).default
+      ) as typeof import('xlsx');
+      if (!XLSX?.utils || typeof XLSX.write !== 'function') {
+        throw new Error('El módulo de Excel no está disponible.');
+      }
+      const worksheet = XLSX.utils.aoa_to_sheet([
+        [context.title],
+        [
+          'INSTITUCIÓN', context.clientName, '', '',
+          'NIT', context.clientNit,
+          'CIUDAD', context.clientCity, ''
+        ],
+        [
+          'GENERADO', context.generatedAt, '', '',
+          'GENERADO POR', context.exportedBy, '', '', ''
+        ],
+        ['ALCANCE', context.scope, '', '', '', '', '', '', ''],
+        ['TOTAL DE EQUIPOS', String(context.itemCount), '', '', '', '', '', '', ''],
+        [],
+        headers,
+        ...rows,
+        [],
+        ['SOFTWARE UTILIZADO', 'INBIHOSPITALARIO', '', '', '', '', '', '', '']
+      ]);
+      worksheet['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } },
+        { s: { r: 1, c: 1 }, e: { r: 1, c: 3 } },
+        { s: { r: 1, c: 7 }, e: { r: 1, c: 8 } },
+        { s: { r: 2, c: 1 }, e: { r: 2, c: 3 } },
+        { s: { r: 2, c: 5 }, e: { r: 2, c: 8 } },
+        { s: { r: 3, c: 1 }, e: { r: 3, c: 8 } },
+        { s: { r: 4, c: 1 }, e: { r: 4, c: 8 } },
+        { s: { r: 8 + rows.length, c: 1 }, e: { r: 8 + rows.length, c: 8 } }
+      ];
+      worksheet['!cols'] = [
+        { wch: 18 },
+        { wch: 28 },
+        { wch: 20 },
+        { wch: 20 },
+        { wch: 20 },
+        { wch: 22 },
+        { wch: 24 },
+        { wch: 24 },
+        { wch: 26 }
+      ];
+      worksheet['!autofilter'] = {
+        ref: `A7:I${Math.max(7, 7 + rows.length)}`
+      };
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventario');
-      XLSX.writeFile(workbook, `${filenameBase}.xlsx`);
+      workbook.Props = {
+        Title: context.title,
+        Subject: context.scope,
+        Author: context.exportedBy,
+        Company: context.clientName,
+        CreatedDate: context.generatedDate
+      };
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventario biomédico');
+      const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([content], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      this.downloadBlob(blob, `${context.filenameBase}.xlsx`);
       return;
     }
 
-    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    const [jsPdfModule, autoTableModule] = await Promise.all([
       import('jspdf'),
       import('jspdf-autotable')
     ]);
-    const doc = new jsPDF({ orientation: 'landscape' });
+    const JsPdfConstructor = (
+      (jsPdfModule as any).jsPDF
+      || (jsPdfModule as any).default?.jsPDF
+      || (jsPdfModule as any).default
+    );
+    const autoTable = (
+      (autoTableModule as any).autoTable
+      || (autoTableModule as any).default?.default
+      || (autoTableModule as any).default
+    );
+    if (typeof JsPdfConstructor !== 'function' || typeof autoTable !== 'function') {
+      throw new Error('El módulo de PDF no está disponible.');
+    }
+    const doc = new JsPdfConstructor({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const drawHeader = () => {
+      doc.setFillColor(15, 118, 110);
+      doc.rect(0, 0, pageWidth, 15, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11.5);
+      doc.text('INVENTARIO BIOMÉDICO', 10, 9.5);
+
+      doc.setTextColor(31, 41, 55);
+      doc.setFontSize(7.5);
+      doc.text(`INSTITUCIÓN: ${context.clientName}`, 10, 21);
+      doc.text(`NIT: ${context.clientNit}  |  CIUDAD: ${context.clientCity}`, 10, 26);
+      doc.text(`GENERADO: ${context.generatedAt}  |  GENERADO POR: ${context.exportedBy}`, 10, 31);
+      const scopeLines = doc.splitTextToSize(`ALCANCE: ${context.scope}`, pageWidth - 44);
+      doc.text(scopeLines, 10, 36);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`TOTAL: ${context.itemCount} EQUIPOS`, pageWidth - 10, 21, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+    };
+    doc.setProperties({
+      title: context.title,
+      subject: `${context.clientName} - ${context.scope}`,
+      author: context.exportedBy,
+      creator: 'INBIHOSPITALARIO'
+    });
     autoTable(doc, {
       head: [headers],
-      body: rows
+      body: rows,
+      startY: 43,
+      margin: { top: 43, right: 10, bottom: 13, left: 10 },
+      theme: 'grid',
+      styles: {
+        cellPadding: 1.8,
+        fontSize: 7,
+        overflow: 'ellipsize',
+        textColor: [31, 41, 55]
+      },
+      headStyles: {
+        fillColor: [15, 118, 110],
+        fontStyle: 'bold',
+        textColor: [255, 255, 255]
+      },
+      alternateRowStyles: { fillColor: [244, 247, 249] },
+      willDrawPage: drawHeader,
+      didDrawPage: () => {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.setTextColor(100, 116, 139);
+        doc.text(
+          `GENERADO CON INBIHOSPITALARIO  |  ${context.clientName}  |  ${context.itemCount} EQUIPOS`,
+          10,
+          pageHeight - 5
+        );
+        doc.text(
+          `PÁGINA ${doc.getCurrentPageInfo().pageNumber}`,
+          pageWidth - 10,
+          pageHeight - 5,
+          { align: 'right' }
+        );
+      }
     });
-    doc.save(`${filenameBase}.pdf`);
+    this.downloadBlob(doc.output('blob'), `${context.filenameBase}.pdf`);
+  }
+
+  private createExportContext(itemCount: number, useModalFilters: boolean): InventoryExportContext {
+    const generatedDate = new Date();
+    const generatedAt = new Intl.DateTimeFormat('es-CO', {
+      timeZone: 'America/Bogota',
+      dateStyle: 'long',
+      timeStyle: 'short'
+    }).format(generatedDate);
+    const fileDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota'
+    }).format(generatedDate);
+    const clientName = this.clientName.trim()
+      || `CLIENTE ${this.selectedClientId.slice(0, 8).toUpperCase() || 'ASIGNADO'}`;
+    const site = useModalFilters ? this.exportSite : this.filterSite;
+    const area = useModalFilters ? this.exportArea : this.filterArea;
+    const location = useModalFilters ? this.exportLocation : this.filterLocation;
+    const condition = useModalFilters ? this.exportCondition : this.filterCondition;
+    const search = (useModalFilters ? this.exportSearchTerm : this.searchTerm).trim();
+    const scopeParts = [
+      site ? `Sede: ${site}` : '',
+      area ? `Área: ${area}` : '',
+      location ? `Ubicación: ${location}` : '',
+      condition ? `Condición: ${this.lifeSheetConditionLabel(condition)}` : '',
+      search ? `Búsqueda: ${search}` : ''
+    ].filter(Boolean);
+    const scope = scopeParts.join(' | ') || 'Inventario completo autorizado';
+    const scopeToken = location || area || site || (scopeParts.length ? 'filtrado' : 'completo');
+    return {
+      title: 'INVENTARIO BIOMÉDICO',
+      clientName,
+      clientNit: this.clientNit.trim() || 'NO REGISTRA',
+      clientCity: this.clientCity.trim() || 'NO REGISTRA',
+      generatedAt,
+      generatedDate,
+      exportedBy: this.exportedBy.trim() || 'USUARIO DEL CLIENTE',
+      scope,
+      itemCount,
+      filenameBase: [
+        'inventario-biomedico',
+        this.filenameToken(clientName),
+        this.filenameToken(scopeToken),
+        fileDate
+      ].filter(Boolean).join('-')
+    };
+  }
+
+  private filenameToken(value: string): string {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 42);
+  }
+
+  private downloadBlob(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const revokeObjectUrl = URL.revokeObjectURL.bind(URL);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = 'noopener';
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => revokeObjectUrl(url), 1000);
+  }
+
+  private validateExportLocation(): void {
+    if (this.exportLocation && !this.exportLocationOptions.includes(this.exportLocation)) {
+      this.exportLocation = '';
+    }
+  }
+
+  private uniqueExportValues(values: Array<string | null | undefined>): string[] {
+    return Array.from(new Set(values.map((value) => value || '').filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b, 'es', { sensitivity: 'base' })
+    );
   }
 
   async downloadPdf(item: InventoryPanelItem): Promise<void> {
@@ -531,39 +989,68 @@ export class InventoryPanelComponent implements OnDestroy {
   async loadHistory(reset = true): Promise<void> {
     if (!this.selectedClientId || !this.historyAssetId) {
       this.historyItems = [];
+      this.historyMovements = [];
+      this.historyTotal = 0;
+      return;
+    }
+    if (this.historyFrom && this.historyTo && this.historyFrom > this.historyTo) {
+      this.historyItems = [];
+      this.historyMovements = [];
+      this.historyTotal = 0;
+      this.historyHasMore = false;
+      this.historyError = 'La fecha inicial no puede ser posterior a la fecha final.';
       return;
     }
     if (reset) {
       this.historyOffset = 0;
       this.historyItems = [];
+      this.historyMovements = [];
+      this.historyTotal = 0;
       this.historyHasMore = true;
     }
     const token = ++this.historyLoadToken;
     this.historyLoading = true;
+    this.historyError = '';
     try {
-      const result = this.isLifeSheetMode
-        ? await this.biomed.listAssetHistory(this.selectedClientId, this.historyAssetId, {
+      if (this.isLifeSheetMode) {
+        const result = await this.biomed.listAssetHistory(this.selectedClientId, this.historyAssetId, {
             from: this.historyFrom || undefined,
             to: this.historyTo || undefined,
             order: this.historyOrder,
             limit: this.historyLimit,
             offset: this.historyOffset
-          })
-        : this.mapMovementHistory(
-            await this.biomed.listAssetMovements(
-              this.selectedClientId,
-              this.historyAssetId,
-              this.historyLimit,
-              this.historyOffset
-            )
-          );
-      if (token !== this.historyLoadToken) return;
-      this.historyItems = result;
-      this.historyHasMore = result.length === this.historyLimit;
+          });
+        if (token !== this.historyLoadToken) return;
+        this.historyItems = result;
+        this.historyMovements = [];
+        this.historyTotal = this.historyOffset + result.length + (result.length === this.historyLimit ? 1 : 0);
+        this.historyHasMore = result.length === this.historyLimit;
+      } else {
+        const movements = await this.biomed.listAssetMovements(
+          this.selectedClientId,
+          this.historyAssetId,
+          {
+            from: this.historyFrom || undefined,
+            to: this.historyTo || undefined,
+            order: this.historyOrder,
+            limit: this.historyLimit,
+            offset: this.historyOffset
+          }
+        );
+        if (token !== this.historyLoadToken) return;
+        this.historyMovements = movements;
+        this.historyItems = this.mapMovementHistory(movements);
+        this.historyTotal = Number(movements[0]?.total_count || 0);
+        this.historyHasMore = this.historyOffset + movements.length < this.historyTotal;
+      }
       this.refreshViewSoon();
     } catch (error) {
       console.error(error);
       this.historyItems = [];
+      this.historyMovements = [];
+      this.historyTotal = 0;
+      this.historyHasMore = false;
+      this.historyError = 'No se pudo cargar la trazabilidad del equipo. Intenta nuevamente.';
       this.refreshViewSoon();
     } finally {
       if (token === this.historyLoadToken) {
@@ -585,22 +1072,48 @@ export class InventoryPanelComponent implements OnDestroy {
     await this.loadHistory(false);
   }
 
-  async toggleHistory(item: InventoryPanelItem): Promise<void> {
-    if (this.expandedAssetId === item.id) {
-      this.expandedAssetId = null;
-      return;
-    }
-    this.expandedAssetId = item.id;
+  async openTraceability(item: InventoryPanelItem): Promise<void> {
+    this.traceabilityTriggerElement = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     this.historyAssetId = item.id;
     this.movingAssetId = null;
     this.historyFrom = '';
     this.historyTo = '';
-    this.historyOrder = 'asc';
+    this.historyOrder = 'desc';
+    this.historyError = '';
+    this.traceabilityModalOpen = true;
+    this.refreshViewSoon();
     await this.loadHistory(true);
     setTimeout(() => {
-      const el = document.getElementById(`history-${item.id}`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 0);
+      this.traceabilityDialog?.nativeElement
+        .querySelector<HTMLElement>('[data-traceability-autofocus]')
+        ?.focus();
+    });
+  }
+
+  closeTraceabilityModal(): void {
+    this.traceabilityModalOpen = false;
+    this.historyLoadToken += 1;
+    this.historyLoading = false;
+    const trigger = this.traceabilityTriggerElement;
+    this.traceabilityTriggerElement = null;
+    setTimeout(() => trigger?.focus());
+  }
+
+  async clearTraceabilityFilters(): Promise<void> {
+    this.historyFrom = '';
+    this.historyTo = '';
+    this.historyOrder = 'desc';
+    await this.loadHistory(true);
+  }
+
+  async toggleHistory(item: InventoryPanelItem): Promise<void> {
+    if (this.traceabilityModalOpen && this.historyAssetId === item.id) {
+      this.closeTraceabilityModal();
+      return;
+    }
+    await this.openTraceability(item);
   }
 
   async deleteHistoryFile(item: AssetHistoryItemDto): Promise<void> {
@@ -617,7 +1130,7 @@ export class InventoryPanelComponent implements OnDestroy {
 
   async startMove(item: InventoryPanelItem): Promise<void> {
     if (!this.selectedClientId) return;
-    this.expandedAssetId = null;
+    this.traceabilityModalOpen = false;
     this.movingAssetId = item.id;
     this.moveError = '';
     this.moveSuccess = '';
@@ -713,18 +1226,86 @@ export class InventoryPanelComponent implements OnDestroy {
     return ` El cronograma aprobado se alineó con el área y ubicación de destino: ${sync.itemsRemoved} fecha(s) anterior(es) reemplazada(s) por ${sync.itemsAdded} fecha(s)${firstDate ? ` desde el ${firstDate}` : ''}.${active}`;
   }
 
+  movementTypeLabel(movement: AssetMovementDto): string {
+    const codeChanged = this.movementCodeChanged(movement);
+    const siteChanged = this.movementValueChanged(movement.from_site_name, movement.to_site_name);
+    const areaChanged = this.movementValueChanged(movement.from_area_name, movement.to_area_name);
+    const locationChanged = this.movementValueChanged(
+      movement.from_location_name,
+      movement.to_location_name
+    );
+    if (codeChanged && (siteChanged || areaChanged || locationChanged)) {
+      return 'Traslado y cambio de código';
+    }
+    if (codeChanged) return 'Cambio de código';
+    if (siteChanged) return 'Traslado entre sedes';
+    if (areaChanged) return 'Cambio de área';
+    if (locationChanged) return 'Cambio de ubicación';
+    return 'Actualización de inventario';
+  }
+
+  movementCodeChanged(movement: AssetMovementDto): boolean {
+    return this.movementValueChanged(movement.from_code, movement.to_code);
+  }
+
+  movementOrigin(movement: AssetMovementDto): string {
+    return this.movementPlace(
+      movement.from_site_name,
+      movement.from_area_name,
+      movement.from_location_name,
+      'Sin ubicación anterior registrada'
+    );
+  }
+
+  movementDestination(movement: AssetMovementDto): string {
+    return this.movementPlace(
+      movement.to_site_name,
+      movement.to_area_name,
+      movement.to_location_name,
+      'Sin ubicación de destino registrada'
+    );
+  }
+
+  movementActor(movement: AssetMovementDto): string {
+    return movement.moved_by_name?.trim() || 'Usuario no identificado';
+  }
+
+  movementRoleLabel(role: string | null | undefined): string {
+    const normalized = String(role || '').trim().toLowerCase();
+    const labels: Record<string, string> = {
+      admin_cliente: 'Administrador del cliente',
+      administrador_cliente: 'Administrador del cliente',
+      ingeniero_biomedico: 'Ingeniero biomédico',
+      jefe_area: 'Jefe o responsable de área',
+      almacenista: 'Almacenista',
+      superadmin: 'Administrador de la plataforma'
+    };
+    return labels[normalized] || String(role || '').replace(/_/g, ' ') || 'Rol no registrado';
+  }
+
+  private movementValueChanged(
+    fromValue: string | null | undefined,
+    toValue: string | null | undefined
+  ): boolean {
+    return this.normalize(fromValue) !== this.normalize(toValue);
+  }
+
+  private movementPlace(
+    site: string | null | undefined,
+    area: string | null | undefined,
+    location: string | null | undefined,
+    fallback: string
+  ): string {
+    return [site, area, location]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .join(' / ') || fallback;
+  }
+
   private mapMovementHistory(rows: AssetMovementDto[]): AssetHistoryItemDto[] {
     return rows.map((movement) => {
-      const origin = [
-        movement.from_site_name,
-        movement.from_area_name,
-        movement.from_location_name
-      ].filter(Boolean).join(' / ') || 'Sin ubicación anterior';
-      const destination = [
-        movement.to_site_name,
-        movement.to_area_name,
-        movement.to_location_name
-      ].filter(Boolean).join(' / ') || 'Sin ubicación de destino';
+      const origin = this.movementOrigin(movement);
+      const destination = this.movementDestination(movement);
       const details = [
         movement.notes,
         movement.moved_by_name ? `Responsable: ${movement.moved_by_name}` : ''
@@ -744,7 +1325,7 @@ export class InventoryPanelComponent implements OnDestroy {
 
   private toCsv(headers: string[], rows: string[][]): string {
     const escape = (value: string) => `"${String(value).replace(/\"/g, '""')}"`;
-    const lines = [headers.join(','), ...rows.map((row) => row.map((cell) => escape(cell)).join(','))];
+    const lines = [headers, ...rows].map((row) => row.map((cell) => escape(cell)).join(','));
     return lines.join('\n');
   }
 

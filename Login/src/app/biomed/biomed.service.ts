@@ -231,6 +231,7 @@ export interface AssetMovementDto {
   notes?: string | null;
   pdf_path?: string | null;
   created_at: string;
+  total_count?: number | string;
 }
 
 export interface AssetHistoryItemDto {
@@ -546,10 +547,20 @@ export class BiomedService {
     );
   }
 
-  async listAssetMovements(clientId: string, assetId: string, limit = 4, offset = 0): Promise<AssetMovementDto[]> {
+  async listAssetMovements(
+    clientId: string,
+    assetId: string,
+    params?: { from?: string; to?: string; order?: 'asc' | 'desc'; limit?: number; offset?: number }
+  ): Promise<AssetMovementDto[]> {
+    const query = new URLSearchParams();
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    if (params?.order) query.set('order', params.order);
+    query.set('limit', String(params?.limit ?? 10));
+    query.set('offset', String(params?.offset ?? 0));
     return firstValueFrom(
       this.http.get<AssetMovementDto[]>(
-        `${this.apiBase}/biomed/${clientId}/assets/${assetId}/movements?limit=${limit}&offset=${offset}`
+        `${this.apiBase}/biomed/${clientId}/assets/${assetId}/movements?${query.toString()}`
       )
     );
   }

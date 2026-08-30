@@ -23,6 +23,17 @@ describe('InventarioComponent area responsible flow', () => {
         has_pending_spare: true
       }])
     };
+    const admin = {
+      getMyClient: vi.fn().mockResolvedValue({
+        id: 'client-1',
+        name: 'ESE CENTRO DE SALUD SAN JUAN DE DIOS',
+        nit: '891234567-1',
+        city: 'TIMANÁ',
+        email: 'contacto@example.test',
+        address: 'CALLE 1',
+        logo_path: null
+      })
+    };
     const maintenance = { createRequest: vi.fn().mockResolvedValue(undefined) };
     const auth = {
       currentUser: () => ({ id: 'responsable-1', clientId: 'client-1' }),
@@ -33,7 +44,7 @@ describe('InventarioComponent area responsible flow', () => {
     };
     const component = new InventarioComponent(
       biomed as never,
-      {} as never,
+      admin as never,
       maintenance as never,
       auth as never,
       { detectChanges: vi.fn() } as never
@@ -41,6 +52,7 @@ describe('InventarioComponent area responsible flow', () => {
     await component.init();
 
     expect(component.items).toHaveLength(1);
+    expect(component.selectedClientInfo?.name).toBe('ESE CENTRO DE SALUD SAN JUAN DE DIOS');
     expect(component.canManageQr).toBe(false);
     expect(component.items[0]).toMatchObject({
       acquisitionDate: '2026-01-01',

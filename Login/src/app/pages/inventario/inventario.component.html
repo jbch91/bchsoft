@@ -28,16 +28,13 @@
     </div>
   </div>
 
-  <div class="inventory-actions" *ngIf="canManageQr || requestSuccess">
-    <p class="success" *ngIf="requestSuccess">{{ requestSuccess }}</p>
-    <button type="button" class="ghost qr-button" *ngIf="canManageQr" (click)="openQrModal()">
-      Códigos QR
-    </button>
-  </div>
-
   <app-inventory-panel
     [items]="items"
     [selectedClientId]="selectedClientId"
+    [clientName]="selectedClientInfo?.name || ''"
+    [clientNit]="selectedClientInfo?.nit || ''"
+    [clientCity]="selectedClientInfo?.city || ''"
+    [exportedBy]="auth.currentUser()?.displayName || auth.currentUser()?.username || ''"
     [loading]="loading"
     [errorMessage]="errorMessage"
     [canMove]="auth.hasPermission('inventory:move')"
@@ -47,7 +44,14 @@
     [title]="isAreaResponsible ? 'Equipos bajo tu responsabilidad' : 'Control de inventario'"
     (requestMaintenance)="openMaintenanceRequest($event)"
     (movedItem)="loadItems()"
-  ></app-inventory-panel>
+  >
+    <div inventory-toolbar class="inventory-actions" *ngIf="canManageQr || requestSuccess">
+      <p class="success" *ngIf="requestSuccess">{{ requestSuccess }}</p>
+      <button type="button" class="ghost qr-button" *ngIf="canManageQr" (click)="openQrModal()">
+        Códigos QR
+      </button>
+    </div>
+  </app-inventory-panel>
 
   <div class="inventory-modal-backdrop" *ngIf="qrModalOpen" role="dialog" aria-modal="true" aria-labelledby="qr-modal-title" (click)="closeQrModal()">
     <section class="inventory-modal qr-modal" (click)="$event.stopPropagation()">
