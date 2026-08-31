@@ -2,6 +2,52 @@
   min-height: 100dvh;
 }
 
+.module-load-notice {
+  position: fixed;
+  inset: auto 16px 80px;
+  z-index: var(--z-toast, 2000);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  max-width: 720px;
+  margin-inline: auto;
+  padding: 14px 16px;
+  color: #243b47;
+  background: #f4fafe;
+  border: 1px solid #b9d6e4;
+  border-radius: 8px;
+  box-shadow: 0 4px 18px #182f4324;
+  font-size: 13px;
+  letter-spacing: 0;
+
+  div {
+    flex: 1 1 280px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  strong { font-size: 14px; }
+  p { margin: 4px 0 0; line-height: 1.5; }
+
+  button {
+    flex: 0 0 auto;
+    max-width: 100%;
+    min-height: 36px;
+    padding: 7px 12px;
+    border: 1px solid #12628a;
+    border-radius: 6px;
+    background: #12628a;
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover { background: #0e4f70; }
+    &:focus-visible { outline: 3px solid #83bcd6; outline-offset: 3px; }
+  }
+}
+
 .app-shell-header,
 .app-shell-footer {
   position: fixed;
@@ -252,6 +298,8 @@
 }
 
 @media (max-width: 900px) {
+  .module-load-notice { bottom: 124px; }
+
   .app-shell-header,
   .app-shell-footer {
     right: 12px;
@@ -320,6 +368,8 @@
 }
 
 @media (max-width: 560px) {
+  .module-load-notice { bottom: 16px; }
+
   .app-shell {
     display: flex;
     flex-direction: column;

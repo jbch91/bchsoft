@@ -38,6 +38,7 @@ export class QuickGuidesComponent {
   equipmentCatalog: EquipmentCatalogItemDto[] = [];
   clientsLoading = true;
   loading = false;
+  guidesLoadFailed = false;
   saving = false;
   message = '';
   messageType: 'success' | 'error' | 'info' = 'info';
@@ -199,11 +200,13 @@ export class QuickGuidesComponent {
   async loadGuides(): Promise<void> {
     if (!this.selectedClientId) return;
     this.loading = true;
+    this.guidesLoadFailed = false;
     this.message = '';
     try {
       this.guides = await this.quickGuides.list(this.selectedClientId);
     } catch (error) {
       console.error(error);
+      this.guidesLoadFailed = true;
       this.setMessage('No se pudieron cargar las guías rápidas.', 'error');
     } finally {
       this.loading = false;

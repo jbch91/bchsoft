@@ -75,3 +75,11 @@
 <ng-template #publicPage>
   <router-outlet></router-outlet>
 </ng-template>
+
+<section *ngIf="moduleLoadFailed()" class="module-load-notice" role="alert" aria-labelledby="module-load-title">
+  <div>
+    <strong id="module-load-title">No se pudo abrir el módulo</strong>
+    <p>Puede haber una actualización o un problema de conexión. Guarda los cambios pendientes antes de recargar.</p>
+  </div>
+  <button type="button" (click)="reloadApplication()">Recargar página</button>
+</section>

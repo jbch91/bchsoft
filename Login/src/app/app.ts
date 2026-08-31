@@ -1,8 +1,9 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, effect, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
-import { filter, firstValueFrom } from 'rxjs';
+import { NavigationEnd, NavigationError, Router, RouterOutlet } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { AuthService } from './auth/auth.service';
 import { SessionTimeoutService } from './auth/session-timeout.service';
 import { getApiBase, getPublicBase, joinBase } from './core/api-base';
@@ -40,6 +41,7 @@ export class App {
   private readonly apiBase = getApiBase();
   private readonly publicBase = getPublicBase();
   protected readonly title = signal('Login');
+  readonly moduleLoadFailed = signal(false);
   currentPath = '/login';
   clientInfo: ShellClientInfo | null = null;
   softwareSuites: ShellSoftwareSuite[] = [];
@@ -168,10 +170,18 @@ export class App {
   ) {
     this.currentPath = this.router.url.split('?')[0];
     this.router.events
-      .pipe(filter((event): event is NavigationEnd => event instanceof NavigationEnd))
+      .pipe(takeUntilDestroyed())
       .subscribe((event) => {
-        this.currentPath = event.urlAfterRedirects.split('?')[0];
-        this.scheduleShellDataLoad();
+        if (event instanceof NavigationError) {
+          const message = typeof event.error === 'string' ? event.error : event.error?.message;
+          if (typeof message === 'string' && /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|loading chunk .+ failed/i.test(message)) {
+            this.moduleLoadFailed.set(true);
+          }
+        } else if (event instanceof NavigationEnd) {
+          this.moduleLoadFailed.set(false);
+          this.currentPath = event.urlAfterRedirects.split('?')[0];
+          this.scheduleShellDataLoad();
+        }
       });
 
     effect(() => {
@@ -186,6 +196,10 @@ export class App {
       this.sessionTimeout.start();
       this.scheduleShellDataLoad();
     });
+  }
+
+  reloadApplication(): void {
+    window.location.reload();
   }
 
   shellVisible(): boolean {
