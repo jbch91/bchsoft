@@ -64,6 +64,7 @@ type MaintenanceViewMode =
   | 'equipos';
 
 type PreventivePhaseView = 'work' | 'warranty' | 'pending_signature' | 'waiting_spare' | 'completed';
+type AreaResponsibleReportView = 'pending' | 'correction' | 'completed';
 type ReportAssetStatus = 'operativo' | 'operativo_observacion' | 'fuera_de_servicio';
 type ReportNarrativeField = 'summary' | 'findings' | 'actions' | 'statusObservations' | 'spareParts';
 type PreventiveOutcomeValue = 'conforme' | 'observacion' | 'hallazgo' | 'fuera_de_servicio';
@@ -418,6 +419,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportTypeFilter = '';
   reportSiteFilter = '';
   reportAreaFilter = '';
+  reportLocationFilter = '';
   reportDateFrom = '';
   reportDateTo = '';
   reportPage = 1;
@@ -474,6 +476,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportCorrectionMode = false;
   reportFormActive = false;
   reportSubView: 'pendientes_firma' | 'historial' = 'pendientes_firma';
+  areaResponsibleReportView: AreaResponsibleReportView = 'pending';
   viewMode: MaintenanceViewMode = 'crear_solicitud';
   reportDetail: MaintenanceReportDto | null = null;
   reportPdfLoadingId = '';
@@ -608,6 +611,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (this.isAreaResponsible) {
       this.viewMode = 'reportes';
       this.reportSubView = 'pendientes_firma';
+      this.areaResponsibleReportView = 'pending';
     } else if (!this.auth.hasPermission('maintenance:request:create') && this.auth.hasPermission('maintenance:report:create')) {
       this.viewMode = 'preventivos';
     } else if (!this.auth.hasPermission('maintenance:request:create')) {
@@ -724,6 +728,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       }
       const report = this.reports.find((item) => item.id === reportId);
       if (report) {
+        if (this.isAreaResponsible) {
+          this.areaResponsibleReportView = this.areaResponsibleViewForReport(report);
+        }
         this.openReportDetail(report);
       } else {
         this.errorMessage = 'El reporte ya no está disponible o no corresponde a tus áreas asignadas.';
@@ -1114,7 +1121,12 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       await this.maintenance.signReport(report.id);
       await this.loadData();
       this.signConfirmationReport = null;
-      this.showAlert('Reporte firmado correctamente.', 'success');
+      this.showAlert(
+        this.isAreaResponsible
+          ? 'Reporte firmado y avalado correctamente.'
+          : 'Reporte firmado correctamente.',
+        'success'
+      );
     } catch (error: any) {
       console.error(error);
       this.errorMessage = error?.error?.message ?? 'No se pudo firmar el reporte.';
@@ -1151,6 +1163,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       await this.loadData();
       this.correctionDialogReport = null;
       this.correctionReason = '';
+      if (this.isAreaResponsible) {
+        this.areaResponsibleReportView = 'correction';
+        this.reportPage = 1;
+      }
       this.showAlert('Corrección solicitada. El ingeniero recibió una notificación con el motivo.', 'success');
     } catch (error: any) {
       console.error(error);
@@ -2018,6 +2034,29 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     }
   }
 
+  setAreaResponsibleReportView(view: AreaResponsibleReportView): void {
+    this.areaResponsibleReportView = view;
+    this.reportDetail = null;
+    this.reportStatusFilter = '';
+    this.reportPage = 1;
+  }
+
+  setAreaResponsibleReportType(type: '' | 'preventivo' | 'correctivo'): void {
+    this.reportTypeFilter = type;
+    this.reportDetail = null;
+    this.resetReportPage();
+  }
+
+  areaResponsibleReportCount(view: AreaResponsibleReportView): number {
+    const source = view === 'correction'
+      ? this.areaResponsibleCorrectionReports
+      : view === 'completed'
+        ? this.areaResponsibleCompletedReports
+        : this.areaResponsiblePendingReports;
+    const term = this.normalize(this.reportSearchTerm);
+    return source.filter((report) => this.reportMatchesFilters(report, term, this.reportTypeFilter)).length;
+  }
+
   get reportStatusOptions(): Array<{ value: string; label: string }> {
     if (this.reportSubView === 'historial') {
       return [
@@ -2050,8 +2089,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       typeFilter,
       this.reportSiteFilter,
       this.reportAreaFilter,
+      this.reportLocationFilter,
       this.reportDateFrom,
-      this.reportDateTo
+      this.reportDateTo,
+      this.areaResponsibleReportView
     ].join('|');
     if (
       this.reportFilterCacheReports === this.reports
@@ -2062,53 +2103,56 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     }
 
     const source = this.isAreaResponsible
-      ? this.areaResponsiblePendingReports
+      ? this.areaResponsibleActiveReports
       : this.reportSubView === 'pendientes_firma'
         ? this.pendingSignatureReports
         : this.reportHistory;
 
-    const filtered = source.filter((report) => {
-      const reportState = this.reportWorkflowStatus(report);
-      if (this.reportStatusFilter && reportState !== this.reportStatusFilter) return false;
-      if (this.reportSpareFilter === 'con_repuesto' && !report.requires_spare_parts) return false;
-      if (this.reportSpareFilter === 'sin_repuesto' && report.requires_spare_parts) return false;
-      if (typeFilter && report.type !== typeFilter) return false;
-      const asset = this.assetMap.get(report.asset_id);
-      if (this.reportSiteFilter && asset?.siteName !== this.reportSiteFilter) return false;
-      if (this.reportAreaFilter && asset?.areaName !== this.reportAreaFilter) return false;
-      const reportDate = report.created_at.slice(0, 10);
-      if (this.reportDateFrom && reportDate < this.reportDateFrom) return false;
-      if (this.reportDateTo && reportDate > this.reportDateTo) return false;
-      if (!term) return true;
-      const haystack = [
-        report.type,
-        reportState,
-        report.engineer_name,
-        report.summary,
-        report.findings,
-        report.actions_taken,
-        report.asset_status_after,
-        report.asset_status_observations,
-        report.spare_parts_needed,
-        report.correction_reason,
-        asset?.code,
-        asset?.name,
-        asset?.brand,
-        asset?.model,
-        asset?.serial,
-        asset?.siteName,
-        asset?.areaName,
-        asset?.locationName
-      ]
-        .map((value) => this.normalize(value))
-        .join(' ');
-      return haystack.includes(term);
-    });
+    const filtered = source.filter((report) => this.reportMatchesFilters(report, term, typeFilter));
     this.reportFilterCacheReports = this.reports;
     this.reportFilterCacheAssets = this.assetMap;
     this.reportFilterCacheKey = filterKey;
     this.reportFilterCacheItems = filtered;
     return filtered;
+  }
+
+  private reportMatchesFilters(report: MaintenanceReportDto, term: string, typeFilter: string): boolean {
+    const reportState = this.reportWorkflowStatus(report);
+    if (this.reportStatusFilter && reportState !== this.reportStatusFilter) return false;
+    if (this.reportSpareFilter === 'con_repuesto' && !report.requires_spare_parts) return false;
+    if (this.reportSpareFilter === 'sin_repuesto' && report.requires_spare_parts) return false;
+    if (typeFilter && report.type !== typeFilter) return false;
+    const asset = this.assetMap.get(report.asset_id);
+    if (this.reportSiteFilter && asset?.siteName !== this.reportSiteFilter) return false;
+    if (this.reportAreaFilter && asset?.areaName !== this.reportAreaFilter) return false;
+    if (this.reportLocationFilter && asset?.locationName !== this.reportLocationFilter) return false;
+    const reportDate = report.created_at.slice(0, 10);
+    if (this.reportDateFrom && reportDate < this.reportDateFrom) return false;
+    if (this.reportDateTo && reportDate > this.reportDateTo) return false;
+    if (!term) return true;
+    const haystack = [
+      report.type,
+      reportState,
+      report.engineer_name,
+      report.summary,
+      report.findings,
+      report.actions_taken,
+      report.asset_status_after,
+      report.asset_status_observations,
+      report.spare_parts_needed,
+      report.correction_reason,
+      asset?.code,
+      asset?.name,
+      asset?.brand,
+      asset?.model,
+      asset?.serial,
+      asset?.siteName,
+      asset?.areaName,
+      asset?.locationName
+    ]
+      .map((value) => this.normalize(value))
+      .join(' ');
+    return haystack.includes(term);
   }
 
   get reportSiteOptions(): string[] {
@@ -2131,6 +2175,22 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       new Set(
         source
           .map((report) => this.assetMap.get(report.asset_id)?.areaName)
+          .filter(Boolean) as string[]
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }
+
+  get reportLocationOptions(): string[] {
+    const source = this.reportWorkspaceReports.filter((report) => {
+      const asset = this.assetMap.get(report.asset_id);
+      if (this.reportSiteFilter && asset?.siteName !== this.reportSiteFilter) return false;
+      if (this.reportAreaFilter && asset?.areaName !== this.reportAreaFilter) return false;
+      return true;
+    });
+    return Array.from(
+      new Set(
+        source
+          .map((report) => this.assetMap.get(report.asset_id)?.locationName)
           .filter(Boolean) as string[]
       )
     ).sort((a, b) => a.localeCompare(b));
@@ -2160,6 +2220,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       || this.reportSpareFilter
       || this.reportSiteFilter
       || this.reportAreaFilter
+      || this.reportLocationFilter
       || this.reportDateFrom
       || this.reportDateTo
     );
@@ -2173,6 +2234,16 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (this.reportAreaFilter && !this.reportAreaOptions.includes(this.reportAreaFilter)) {
       this.reportAreaFilter = '';
     }
+    if (this.reportLocationFilter && !this.reportLocationOptions.includes(this.reportLocationFilter)) {
+      this.reportLocationFilter = '';
+    }
+    this.resetReportPage();
+  }
+
+  onReportAreaFilterChange(): void {
+    if (this.reportLocationFilter && !this.reportLocationOptions.includes(this.reportLocationFilter)) {
+      this.reportLocationFilter = '';
+    }
     this.resetReportPage();
   }
 
@@ -2183,6 +2254,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportTypeFilter = '';
     this.reportSiteFilter = '';
     this.reportAreaFilter = '';
+    this.reportLocationFilter = '';
     this.reportDateFrom = '';
     this.reportDateTo = '';
     this.resetReportPage();
@@ -2222,6 +2294,39 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   get areaResponsiblePendingReports(): MaintenanceReportDto[] {
     return this.reports.filter((report) => this.canSignReport(report));
+  }
+
+  get areaResponsibleCorrectionReports(): MaintenanceReportDto[] {
+    return this.reports.filter((report) =>
+      Boolean(report.correction_requested || report.request_status === 'correccion')
+    );
+  }
+
+  get areaResponsibleCompletedReports(): MaintenanceReportDto[] {
+    return this.reports.filter((report) =>
+      !report.correction_requested
+      && Boolean(report.is_fully_signed || report.signed_by_me || report.request_status === 'firmado')
+    );
+  }
+
+  private get areaResponsibleActiveReports(): MaintenanceReportDto[] {
+    if (this.areaResponsibleReportView === 'correction') {
+      return this.areaResponsibleCorrectionReports;
+    }
+    if (this.areaResponsibleReportView === 'completed') {
+      return this.areaResponsibleCompletedReports;
+    }
+    return this.areaResponsiblePendingReports;
+  }
+
+  areaResponsibleViewForReport(report: MaintenanceReportDto): AreaResponsibleReportView {
+    if (report.correction_requested || report.request_status === 'correccion') {
+      return 'correction';
+    }
+    if (report.is_fully_signed || report.signed_by_me || report.request_status === 'firmado') {
+      return 'completed';
+    }
+    return 'pending';
   }
 
   get actionablePendingReportCount(): number {

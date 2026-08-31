@@ -1,5 +1,182 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NO_ERRORS_SCHEMA } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { ActivatedRoute } from '@angular/router';
+import { AdminService } from '../../admin/admin.service';
+import { AuthService } from '../../auth/auth.service';
+import { BiomedService } from '../../biomed/biomed.service';
+import { MaintenanceService } from '../../maintenance/maintenance.service';
+import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 import { MaintenanceComponent } from './maintenance.component';
+
+describe('area responsible maintenance type selector', () => {
+  const auth = {
+    hasRole: (role: string | string[]) => Array.isArray(role)
+      ? role.includes('responsable_area')
+      : role === 'responsable_area',
+    hasPermission: (permission: string) => permission === 'maintenance:report:sign',
+    currentUser: () => ({ id: 'responsable-1', clientId: 'client-1' })
+  };
+  const route = { snapshot: { data: { assetCategory: 'biomedical' } } };
+
+  function createComponent(): MaintenanceComponent {
+    const component = new MaintenanceComponent(
+      {} as never, auth as never, {} as never, {} as never, {} as never, route as never
+    );
+    component.viewMode = 'reportes';
+    component.reports = (['preventivo', 'correctivo'] as const).flatMap((type) =>
+      (['pending', 'correction', 'completed'] as const).map((state) => ({
+        id: `${type}-${state}`,
+        client_id: 'client-1',
+        request_id: `${type}-${state}-request`,
+        asset_id: 'asset-a',
+        created_by: 'engineer-1',
+        created_at: '2026-08-27T10:00:00.000Z',
+        area_responsible_required: true,
+        type,
+        request_status: state === 'completed' ? 'firmado' : state === 'correction' ? 'correccion' : 'reportado',
+        correction_requested: state === 'correction',
+        is_fully_signed: state === 'completed',
+        asset_status_after: 'operativo'
+      }))
+    );
+    component.reports = [
+      ...component.reports,
+      { ...component.reports[0], id: 'other-area', asset_id: 'asset-b' }
+    ];
+    component.assetMap = new Map([
+      ['asset-a', {
+        id: 'asset-a', code: 'A-1', name: 'Monitor', brand: 'Marca', model: 'Modelo', serial: 'Serie A',
+        siteName: 'Sede Norte', areaName: 'Urgencias', locationName: 'Observación'
+      }],
+      ['asset-b', {
+        id: 'asset-b', code: 'B-1', name: 'Bomba', siteName: 'Sede Sur',
+        areaName: 'Hospitalización', locationName: 'Piso 2'
+      }]
+    ]);
+    return component;
+  }
+
+  afterEach(() => {
+    TestBed.resetTestingModule();
+    vi.restoreAllMocks();
+  });
+
+  it('filtra todos los estados y sus contadores por el tipo seleccionado', () => {
+    const component = createComponent();
+    expect(component.areaResponsibleReportCount('pending')).toBe(3);
+    component.setAreaResponsibleReportType('preventivo');
+    expect(component.filteredReports.map((report) => report.id)).toEqual(['preventivo-pending', 'other-area']);
+    expect(component.areaResponsibleReportCount('pending')).toBe(2);
+    expect(component.areaResponsibleReportCount('correction')).toBe(1);
+    expect(component.areaResponsibleReportCount('completed')).toBe(1);
+
+    component.setAreaResponsibleReportType('correctivo');
+    expect(component.filteredReports.map((report) => report.id)).toEqual(['correctivo-pending']);
+    for (const state of ['pending', 'correction', 'completed'] as const) {
+      component.setAreaResponsibleReportView(state);
+      expect(component.filteredReports.map((report) => report.id)).toEqual([`correctivo-${state}`]);
+      expect(component.areaResponsibleReportCount(state)).toBe(component.filteredReports.length);
+    }
+  });
+
+  it('conserva búsqueda, alcance y estado al cambiar el tipo, reiniciando solo la página', () => {
+    const component = createComponent();
+    component.reportSearchTerm = 'móNITOR';
+    component.reportSiteFilter = 'Sede Norte';
+    component.reportAreaFilter = 'Urgencias';
+    component.reportLocationFilter = 'Observación';
+    component.setAreaResponsibleReportView('completed');
+    component.reportPage = 5;
+    component.setAreaResponsibleReportType('preventivo');
+
+    expect(component.reportPage).toBe(1);
+    expect(component.areaResponsibleReportView).toBe('completed');
+    expect(component.reportSearchTerm).toBe('móNITOR');
+    expect(component.reportSiteFilter).toBe('Sede Norte');
+    expect(component.reportAreaFilter).toBe('Urgencias');
+    expect(component.reportLocationFilter).toBe('Observación');
+    expect(component.filteredReports.map((report) => report.id)).toEqual(['preventivo-completed']);
+    expect(component.areaResponsibleReportCount('pending')).toBe(1);
+
+    component.setAreaResponsibleReportView('correction');
+    expect(component.reportTypeFilter).toBe('preventivo');
+    expect(component.reportLocationFilter).toBe('Observación');
+    expect(component.filteredReports.map((report) => report.id)).toEqual(['preventivo-correction']);
+  });
+
+  it('mantiene coherentes los ceros y permite limpiar filtros sin cambiar de estado', () => {
+    const component = createComponent();
+    component.setAreaResponsibleReportType('correctivo');
+    component.setAreaResponsibleReportView('correction');
+    component.reportAreaFilter = 'Hospitalización';
+    expect(component.filteredReports).toEqual([]);
+    expect(component.areaResponsibleReportCount('pending')).toBe(0);
+    expect(component.areaResponsibleReportCount('correction')).toBe(0);
+    expect(component.areaResponsibleReportCount('completed')).toBe(0);
+
+    component.clearReportFilters();
+    expect(component.reportTypeFilter).toBe('');
+    expect(component.areaResponsibleReportView).toBe('correction');
+    expect(component.filteredReports).toHaveLength(2);
+    expect(component.hasActiveReportFilters).toBe(false);
+  });
+
+  it('actualiza los contadores y la lista cuando llegan nuevos reportes', () => {
+    const component = createComponent();
+    component.setAreaResponsibleReportType('correctivo');
+    expect(component.filteredReports).toHaveLength(1);
+    component.reports = [...component.reports, {
+      ...component.reports.find((report) => report.id === 'correctivo-pending')!,
+      id: 'new-corrective'
+    }];
+    expect(component.filteredReports).toHaveLength(2);
+    expect(component.areaResponsibleReportCount('pending')).toBe(2);
+  });
+
+  it('muestra el selector compacto sin duplicar Tipo y permite cambiarlo desde la plantilla', async () => {
+    vi.spyOn(MaintenanceComponent.prototype, 'ngOnInit').mockResolvedValue();
+    await TestBed.configureTestingModule({
+      imports: [MaintenanceComponent],
+      providers: [
+        { provide: AdminService, useValue: {} },
+        { provide: AuthService, useValue: auth },
+        { provide: BiomedService, useValue: {} },
+        { provide: MaintenanceService, useValue: {} },
+        { provide: ActivatedRoute, useValue: route }
+      ]
+    }).overrideComponent(MaintenanceComponent, {
+      remove: { imports: [ModuleTabsComponent] },
+      add: { schemas: [NO_ERRORS_SCHEMA] }
+    }).compileComponents();
+    const fixture = TestBed.createComponent(MaintenanceComponent);
+    const data = createComponent();
+    fixture.componentInstance.viewMode = 'reportes';
+    fixture.componentInstance.reports = data.reports;
+    fixture.componentInstance.assetMap = data.assetMap;
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const element = fixture.nativeElement as HTMLElement;
+    const typeButtons = element.querySelectorAll<HTMLButtonElement>('.area-report-types button');
+    expect(Array.from(typeButtons, (button) => button.textContent?.trim())).toEqual(['Todos', 'Preventivos', 'Correctivos']);
+    expect(element.querySelector('.area-approval-heading h2')?.textContent).toBe('Mantenimiento');
+    expect(element.querySelectorAll('.area-approval-toolbar select')).toHaveLength(3);
+    expect(element.querySelector('.maintenance-workspace-bar')).toBeNull();
+    expect(element.querySelectorAll('.area-report-card')).toHaveLength(3);
+
+    typeButtons[2].click();
+    fixture.detectChanges();
+    expect(typeButtons[2].getAttribute('aria-pressed')).toBe('true');
+    expect(typeButtons[0].getAttribute('aria-pressed')).toBe('false');
+    expect(element.querySelectorAll('.area-report-card')).toHaveLength(1);
+    const states = element.querySelectorAll<HTMLButtonElement>('.area-approval-tabs button');
+    states[2].click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.areaResponsibleReportView).toBe('completed');
+    expect(typeButtons[2].getAttribute('aria-pressed')).toBe('true');
+    expect(element.querySelectorAll('.area-report-card')).toHaveLength(1);
+  });
+});
 
 describe('maintenance report modal flow', () => {
   it('muestra al jefe de área solo reportes que todavía puede firmar', () => {
@@ -42,7 +219,77 @@ describe('maintenance report modal flow', () => {
       'preventive',
       'corrective'
     ]);
+    expect(component.areaResponsibleCorrectionReports.map((report) => report.id)).toEqual([
+      'correction'
+    ]);
+    expect(component.areaResponsibleCompletedReports.map((report) => report.id)).toEqual([
+      'already-signed',
+      'completed'
+    ]);
     expect(component.actionablePendingReportCount).toBe(2);
+    expect(component.areaResponsibleReportCount('pending')).toBe(2);
+    expect(component.areaResponsibleReportCount('correction')).toBe(1);
+    expect(component.areaResponsibleReportCount('completed')).toBe(2);
+
+    component.setAreaResponsibleReportView('correction');
+    expect(component.filteredReports.map((report) => report.id)).toEqual(['correction']);
+    component.setAreaResponsibleReportView('completed');
+    expect(component.filteredReports.map((report) => report.id)).toEqual([
+      'already-signed',
+      'completed'
+    ]);
+  });
+
+  it('encadena sede, área y ubicación dentro del alcance del responsable', () => {
+    const auth = {
+      hasRole: (role: string | string[]) => Array.isArray(role)
+        ? role.includes('responsable_area')
+        : role === 'responsable_area',
+      hasPermission: (permission: string) => permission === 'maintenance:report:sign',
+      currentUser: () => ({ id: 'responsable-1' })
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      auth as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { snapshot: { data: { assetCategory: 'biomedical' } } } as never
+    );
+    const reportBase = {
+      client_id: 'client-1',
+      request_id: 'request-1',
+      type: 'preventivo',
+      created_by: 'engineer-1',
+      created_at: '2026-08-27T10:00:00.000Z',
+      request_status: 'firmado',
+      is_fully_signed: true
+    } as const;
+    component.reports = [
+      { ...reportBase, id: 'report-a', asset_id: 'asset-a' },
+      { ...reportBase, id: 'report-b', asset_id: 'asset-b' }
+    ];
+    component.assetMap = new Map([
+      ['asset-a', {
+        id: 'asset-a', code: 'A-1', name: 'Monitor', siteName: 'Sede Norte',
+        areaName: 'Urgencias', locationName: 'Observación'
+      }],
+      ['asset-b', {
+        id: 'asset-b', code: 'B-1', name: 'Bomba', siteName: 'Sede Sur',
+        areaName: 'Hospitalización', locationName: 'Piso 2'
+      }]
+    ]);
+    component.setAreaResponsibleReportView('completed');
+
+    expect(component.reportSiteOptions).toEqual(['Sede Norte', 'Sede Sur']);
+    component.reportSiteFilter = 'Sede Norte';
+    component.onReportSiteFilterChange();
+    expect(component.reportAreaOptions).toEqual(['Urgencias']);
+    component.reportAreaFilter = 'Urgencias';
+    component.onReportAreaFilterChange();
+    expect(component.reportLocationOptions).toEqual(['Observación']);
+    component.reportLocationFilter = 'Observación';
+    expect(component.filteredReports.map((report) => report.id)).toEqual(['report-a']);
   });
 
   it('mantiene al jefe de área en la bandeja de avales aunque reciba una ruta operativa', async () => {
@@ -268,9 +515,16 @@ describe('maintenance report modal flow', () => {
   });
 
   it('abre directamente el reporte indicado por una notificación de aval', async () => {
+    const auth = {
+      hasRole: (role: string | string[]) => Array.isArray(role)
+        ? role.includes('responsable_area')
+        : role === 'responsable_area',
+      hasPermission: (permission: string) => permission === 'maintenance:report:sign',
+      currentUser: () => ({ id: 'responsable-1', clientId: 'client-1' })
+    };
     const component = new MaintenanceComponent(
       {} as never,
-      {} as never,
+      auth as never,
       {} as never,
       {} as never,
       {} as never,
@@ -284,7 +538,9 @@ describe('maintenance report modal flow', () => {
         asset_id: 'asset-1',
         type: 'preventivo',
         created_by: 'engineer-1',
-        created_at: '2026-08-26T10:00:00.000Z'
+        created_at: '2026-08-26T10:00:00.000Z',
+        correction_requested: true,
+        request_status: 'correccion'
       }
     ];
     const values: Record<string, string> = { view: 'reportes', reportId: 'report-1' };
@@ -295,6 +551,7 @@ describe('maintenance report modal flow', () => {
     await component.applyRouteIntent(params as never);
 
     expect(component.viewMode).toBe('reportes');
+    expect(component.areaResponsibleReportView).toBe('correction');
     expect(component.reportDetail?.id).toBe('report-1');
   });
 

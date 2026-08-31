@@ -28,9 +28,9 @@
     </div>
   </div>
 
-  <div class="maintenance-workspace-bar" [class.area-responsible-workspace]="isAreaResponsible">
+  <div class="maintenance-workspace-bar" *ngIf="!isAreaResponsible">
     <div class="maintenance-workspace-title" [title]="maintenanceModuleTitle">
-      <strong>{{ isAreaResponsible ? 'Avales' : (isIndustrialMaintenanceModule ? 'Industrial' : 'Biomédico') }}</strong>
+      <strong>{{ isIndustrialMaintenanceModule ? 'Industrial' : 'Biomédico' }}</strong>
     </div>
 
     <div class="tab-bar" *ngIf="!isAreaResponsible" role="tablist" aria-label="Secciones de mantenimiento">
@@ -82,11 +82,6 @@
       <button type="button" role="tab" class="tab" [class.active]="viewMode === 'equipos'" [attr.aria-selected]="viewMode === 'equipos'" (click)="switchView('equipos')">
         Equipos <strong>{{ activeAssets.length }}</strong>
       </button>
-    </div>
-
-    <div class="area-responsible-workspace-copy" *ngIf="isAreaResponsible">
-      <strong>Pendientes de firma</strong>
-      <span>{{ actionablePendingReportCount }} reporte{{ actionablePendingReportCount === 1 ? '' : 's' }} por revisar</span>
     </div>
 
     <div class="maintenance-workspace-actions">
@@ -1210,14 +1205,54 @@
 
   <ng-container *ngIf="viewMode === 'reportes'">
 
-    <section class="area-approval-queue" *ngIf="isAreaResponsible">
+    <section class="area-approval-queue" *ngIf="isAreaResponsible" aria-label="Reportes de mantenimiento del área">
       <div class="area-approval-heading">
-        <div>
-          <span>Aval operativo</span>
-          <h2>Mantenimientos por revisar</h2>
-          <p>Preventivos y correctivos pendientes de tu firma en las áreas o ubicaciones asignadas.</p>
+        <h2>Mantenimiento</h2>
+        <div class="area-report-types" role="group" aria-label="Tipo de mantenimiento">
+          <button type="button" [attr.aria-pressed]="reportTypeFilter === ''" (click)="setAreaResponsibleReportType('')">Todos</button>
+          <button type="button" [attr.aria-pressed]="reportTypeFilter === 'preventivo'" (click)="setAreaResponsibleReportType('preventivo')">Preventivos</button>
+          <button type="button" [attr.aria-pressed]="reportTypeFilter === 'correctivo'" (click)="setAreaResponsibleReportType('correctivo')">Correctivos</button>
         </div>
-        <strong>{{ filteredReports.length }}</strong>
+        <button
+          type="button"
+          class="icon-action ghost area-approval-refresh"
+          title="Actualizar datos"
+          aria-label="Actualizar información de mantenimiento"
+          [disabled]="loading"
+          (click)="refreshMaintenanceData()"
+        >
+          ↻
+        </button>
+      </div>
+
+      <div class="area-approval-tabs" role="group" aria-label="Estados de revisión de mantenimiento">
+        <button
+          type="button"
+          [class.active]="areaResponsibleReportView === 'pending'"
+          [attr.aria-pressed]="areaResponsibleReportView === 'pending'"
+          (click)="setAreaResponsibleReportView('pending')"
+        >
+          <span>Por revisar</span>
+          <strong>{{ areaResponsibleReportCount('pending') }}</strong>
+        </button>
+        <button
+          type="button"
+          [class.active]="areaResponsibleReportView === 'correction'"
+          [attr.aria-pressed]="areaResponsibleReportView === 'correction'"
+          (click)="setAreaResponsibleReportView('correction')"
+        >
+          <span>En corrección</span>
+          <strong>{{ areaResponsibleReportCount('correction') }}</strong>
+        </button>
+        <button
+          type="button"
+          [class.active]="areaResponsibleReportView === 'completed'"
+          [attr.aria-pressed]="areaResponsibleReportView === 'completed'"
+          (click)="setAreaResponsibleReportView('completed')"
+        >
+          <span>Finalizados</span>
+          <strong>{{ areaResponsibleReportCount('completed') }}</strong>
+        </button>
       </div>
 
       <div class="area-approval-toolbar">
@@ -1231,11 +1266,24 @@
           />
         </label>
         <label>
-          Tipo de mantenimiento
-          <select [(ngModel)]="reportTypeFilter" (ngModelChange)="resetReportPage()">
-            <option value="">Todos</option>
-            <option value="preventivo">Preventivo</option>
-            <option value="correctivo">Correctivo</option>
+          Sede
+          <select [(ngModel)]="reportSiteFilter" (ngModelChange)="onReportSiteFilterChange()">
+            <option value="">Todas</option>
+            <option *ngFor="let site of reportSiteOptions" [value]="site">{{ site }}</option>
+          </select>
+        </label>
+        <label>
+          Área
+          <select [(ngModel)]="reportAreaFilter" (ngModelChange)="onReportAreaFilterChange()">
+            <option value="">Todas</option>
+            <option *ngFor="let area of reportAreaOptions" [value]="area">{{ area }}</option>
+          </select>
+        </label>
+        <label>
+          Ubicación
+          <select [(ngModel)]="reportLocationFilter" (ngModelChange)="resetReportPage()">
+            <option value="">Todas</option>
+            <option *ngFor="let location of reportLocationOptions" [value]="location">{{ location }}</option>
           </select>
         </label>
         <button type="button" class="ghost" [disabled]="!hasActiveReportFilters" (click)="clearReportFilters()">
@@ -1244,52 +1292,65 @@
       </div>
 
       <div class="area-report-grid" *ngIf="paginatedReports.length; else noAreaApprovals">
+        <div class="area-report-header" aria-hidden="true">
+          <span>Equipo</span>
+          <span>Ubicación y servicio</span>
+          <span>Estado</span>
+          <span>Acciones</span>
+        </div>
         <article class="area-report-card" *ngFor="let report of paginatedReports">
-          <div class="area-report-photo" *ngIf="assetForReport(report) as asset">
-            <img
-              *ngIf="assetPhotoAvailable(asset)"
-              [src]="assetPhotoUrl(asset) || ''"
-              [alt]="'Fotografía de ' + asset.code + ' - ' + asset.name"
-              loading="lazy"
-              decoding="async"
-              (error)="onAssetPhotoError(asset.id)"
-            />
-            <span *ngIf="!assetPhotoAvailable(asset)">Sin fotografía</span>
-          </div>
+          <ng-container *ngIf="assetForReport(report) as asset">
+            <div class="area-report-content">
+              <div class="area-report-title">
+                <div>
+                  <span>{{ report.type === 'preventivo' ? 'Preventivo' : 'Correctivo' }}</span>
+                  <h3>{{ asset.code }} - {{ asset.name }}</h3>
+                </div>
+              </div>
+              <p class="area-report-identifiers">
+                {{ asset.brand || 'Sin marca' }} · {{ asset.model || 'Sin modelo' }} · Serie {{ asset.serial || '-' }}
+              </p>
+              <p class="area-report-summary">{{ report.summary || 'Reporte técnico disponible para revisión.' }}</p>
+            </div>
 
-          <div class="area-report-content" *ngIf="assetForReport(report) as asset">
-            <div class="area-report-title">
-              <div>
-                <span>{{ report.type === 'preventivo' ? 'Preventivo' : 'Correctivo' }}</span>
-                <h3>{{ asset.code }} - {{ asset.name }}</h3>
+            <div class="area-report-service">
+              <p class="area-report-location">
+                {{ asset.siteName || 'Sin sede' }} / {{ asset.areaName || 'Sin área' }} / {{ asset.locationName || 'Sin ubicación' }}
+              </p>
+              <div class="area-report-meta">
+                <span>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</span>
+                <span>{{ report.engineer_name || 'Ingeniero no registrado' }}</span>
+              </div>
+              <p class="area-report-correction" *ngIf="report.correction_requested">
+                <strong>Corrección:</strong> {{ report.correction_reason || 'Pendiente de ajuste por el ingeniero.' }}
+              </p>
+            </div>
+
+            <div class="area-report-review">
+              <div class="area-report-review-status">
+                <span>{{ areaResponsibleReportView === 'pending' ? 'Estado del equipo' : 'Estado del reporte' }}</span>
+                <span
+                  class="status-pill"
+                  [ngClass]="
+                    areaResponsibleReportView === 'correction'
+                      ? 'area-correction'
+                      : areaResponsibleReportView === 'completed'
+                        ? reportSignatureClass(report)
+                        : statusClass(report.asset_status_after)
+                  "
+                >
+                  {{
+                    areaResponsibleReportView === 'correction'
+                      ? 'Corrección solicitada'
+                      : areaResponsibleReportView === 'completed'
+                        ? reportSignedDate(report)
+                        : statusLabel(report.asset_status_after || 'operativo')
+                  }}
+                </span>
+                <span class="spare-note" *ngIf="report.requires_spare_parts">Repuesto registrado</span>
               </div>
             </div>
 
-            <dl class="area-report-technical-data">
-              <div><dt>Marca</dt><dd>{{ asset.brand || '-' }}</dd></div>
-              <div><dt>Modelo</dt><dd>{{ asset.model || '-' }}</dd></div>
-              <div><dt>Serie</dt><dd>{{ asset.serial || '-' }}</dd></div>
-            </dl>
-
-            <p class="area-report-location">
-              {{ asset.siteName || 'Sin sede' }} / {{ asset.areaName || 'Sin área' }} / {{ asset.locationName || 'Sin ubicación' }}
-            </p>
-            <p class="area-report-summary">{{ report.summary || 'Reporte técnico disponible para revisión.' }}</p>
-
-            <div class="area-report-meta">
-              <span>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</span>
-              <span>{{ report.engineer_name || 'Ingeniero no registrado' }}</span>
-            </div>
-          </div>
-
-          <div class="area-report-review">
-            <div class="area-report-review-status">
-              <span>Estado del equipo</span>
-              <span class="status-pill" [ngClass]="statusClass(report.asset_status_after)">
-                {{ statusLabel(report.asset_status_after || 'operativo') }}
-              </span>
-              <span class="spare-note" *ngIf="report.requires_spare_parts">Repuesto registrado</span>
-            </div>
             <div class="area-report-actions">
               <button
                 type="button"
@@ -1301,16 +1362,17 @@
               >
                 {{ reportPdfLoadingId === report.id ? 'Abriendo...' : 'Abrir PDF' }}
               </button>
-              <button type="button" (click)="openReportDetail(report)">Revisar y firmar</button>
+              <button type="button" (click)="openReportDetail(report)">
+                {{ canSignReport(report) ? 'Revisar y firmar' : 'Ver detalle' }}
+              </button>
             </div>
-          </div>
+          </ng-container>
         </article>
       </div>
 
       <ng-template #noAreaApprovals>
-        <div class="area-approval-empty">
-          <strong>No tienes reportes pendientes de firma.</strong>
-          <span *ngIf="hasActiveReportFilters">Prueba limpiando la búsqueda o el filtro de tipo.</span>
+        <div class="area-approval-empty" role="status">
+          <strong>No hay reportes con esta selección.</strong>
         </div>
       </ng-template>
 
