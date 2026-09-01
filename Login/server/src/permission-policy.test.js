@@ -27,6 +27,7 @@ test('excluye permisos temporales de la configuracion permanente del rol', () =>
   assert.equal(permissions.has('hb:import'), false);
   assert.equal(permissions.has('asset_history:upload'), false);
   assert.equal(permissions.has('maintenance:protocol:print_blank'), false);
+  assert.equal(permissions.has('maintenance:preventive:late_execution'), false);
 });
 
 test('el protocolo físico solo se habilita temporalmente con mantenimiento contratado', () => {
@@ -42,6 +43,7 @@ test('el protocolo físico solo se habilita temporalmente con mantenimiento cont
   ]);
 
   assert.equal(enabled.has('maintenance:protocol:print_blank'), true);
+  assert.equal(enabled.has('maintenance:preventive:late_execution'), true);
   assert.equal(permanent.has('maintenance:protocol:print_blank'), false);
   assert.equal(unrelated.has('maintenance:protocol:print_blank'), false);
 });

@@ -117,7 +117,8 @@ const MIGRATIONS = [
   'maintenance_periodicity_reconciliation.sql',
   'maintenance_preventive_spare_split.sql',
   'maintenance_warranty_workflow.sql',
-  'maintenance_signature_snapshots.sql'
+  'maintenance_signature_snapshots.sql',
+  'maintenance_late_execution.sql'
 ];
 
 async function ensureMigrationsTable() {

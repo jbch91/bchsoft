@@ -1,7 +1,8 @@
 export const TEMPORARY_ONLY_PERMISSIONS = Object.freeze([
   'hb:import',
   'asset_history:upload',
-  'maintenance:protocol:print_blank'
+  'maintenance:protocol:print_blank',
+  'maintenance:preventive:late_execution'
 ]);
 
 export const SUITE_BASE_PERMISSIONS = Object.freeze({
@@ -43,6 +44,7 @@ export const CLIENT_MODULE_PERMISSION_POLICY = Object.freeze({
     'maintenance:report:create',
     'maintenance:report:sign',
     'maintenance:protocol:print_blank',
+    'maintenance:preventive:late_execution',
     'maintenance:order:create',
     'maintenance:order:close',
     'service:order:create',

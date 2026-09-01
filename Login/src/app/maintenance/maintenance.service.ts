@@ -65,6 +65,12 @@ export interface PreventiveProgressItemDto {
   warranty_release_date?: string | null;
   is_under_warranty?: boolean;
   can_perform_protocol?: boolean;
+  is_late_execution?: boolean;
+  late_execution_authorized_at?: string | null;
+  late_execution_authorized_until?: string | null;
+  late_execution_authorized_by_name?: string | null;
+  late_execution_reason?: string | null;
+  late_execution_authorization_active?: boolean;
   request_id?: string | null;
   request_status?: string | null;
   assigned_to?: string | null;
@@ -169,6 +175,35 @@ export class MaintenanceService {
       this.http.post<{ ok: boolean; decision: 'covered' | 'perform'; message: string }>(
         `${this.apiBase}/maintenance/preventive-progress/${clientId}/items/${itemId}/warranty`,
         { decision }
+      )
+    );
+  }
+
+  async openLatePreventivePeriod(
+    clientId: string,
+    payload: {
+      year: number;
+      month: number;
+      assetCategory: AssetCategory;
+      reason: string;
+    }
+  ): Promise<{
+    ok: boolean;
+    opened: number;
+    period: string;
+    authorizedUntil: string;
+    message: string;
+  }> {
+    return firstValueFrom(
+      this.http.post<{
+        ok: boolean;
+        opened: number;
+        period: string;
+        authorizedUntil: string;
+        message: string;
+      }>(
+        `${this.apiBase}/maintenance/preventive-progress/${clientId}/late-execution`,
+        payload
       )
     );
   }

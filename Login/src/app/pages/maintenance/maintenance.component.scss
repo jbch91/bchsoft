@@ -2145,6 +2145,31 @@ button:disabled {
   font-size: 13px;
 }
 
+.preventive-period-controls {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.preventive-period-picker {
+  display: grid;
+  gap: 2px;
+  width: 138px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.preventive-period-picker input {
+  min-height: 31px;
+  padding: 4px 7px;
+  border-color: var(--border);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .preventive-progress-scope {
   display: grid;
   grid-template-columns: repeat(2, minmax(54px, 1fr));
@@ -2152,6 +2177,48 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #f1f5f9;
+}
+
+.late-opening-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid #d8c58e;
+  border-radius: 6px;
+  background: #fffdf4;
+  color: #654f17;
+}
+
+.late-opening-toolbar > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.late-opening-toolbar strong {
+  font-size: 12px;
+}
+
+.late-opening-toolbar span,
+.late-opening-toolbar small {
+  color: #77601e;
+  font-size: 11px;
+}
+
+.late-opening-toolbar button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-color: #b28b27;
+  color: #765b16;
+  font-size: 11px;
+}
+
+.late-execution-note {
+  color: #765b16 !important;
+  font-weight: 800;
 }
 
 .preventive-progress-scope button {
@@ -2646,6 +2713,40 @@ button:disabled {
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+}
+
+.late-opening-modal {
+  width: min(100%, 620px);
+}
+
+.late-opening-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.late-opening-summary > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.late-opening-summary span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.late-opening-summary strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 13px;
 }
 
 .report-editor-modal {
@@ -3228,6 +3329,24 @@ button:disabled {
 
   .preventive-progress-scope {
     width: min(100%, 180px);
+  }
+
+  .preventive-period-controls,
+  .late-opening-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .preventive-period-picker {
+    width: min(100%, 180px);
+  }
+
+  .late-opening-toolbar button {
+    width: 100%;
+  }
+
+  .late-opening-summary {
+    grid-template-columns: 1fr;
   }
 
   .preventive-completion-value {

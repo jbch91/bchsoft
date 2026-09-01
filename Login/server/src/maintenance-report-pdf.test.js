@@ -4,7 +4,7 @@ import { PDFDocument as PdfReaderDocument } from 'pdf-lib';
 import PDFDocument from 'pdfkit';
 import { buildMaintenanceReportPdf, formatMaintenanceDate } from './pdf.js';
 
-function buildReportBuffer(signatures) {
+function buildReportBuffer(signatures, requestOverrides = {}) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
     const chunks = [];
@@ -33,7 +33,10 @@ function buildReportBuffer(signatures) {
       },
       request: {
         type: 'preventivo',
-        created_at: '2026-08-20T12:00:00.000Z'
+        created_at: '2026-08-20T12:00:00.000Z',
+        planned_date: '2026-08-20',
+        deadline_date: '2026-08-31',
+        ...requestOverrides
       },
       report: {
         type: 'preventivo',
@@ -86,5 +89,19 @@ test('genera firmas legibles con nombres largos y más de una fila', async () =>
   assert.equal(buffer.subarray(0, 4).toString(), '%PDF');
   const pdf = await PdfReaderDocument.load(buffer);
   assert.ok(pdf.getPageCount() >= 3);
+  assert.ok(pdf.getPageCount() <= 5);
+});
+
+test('documenta la ejecución extemporánea sin alterar el periodo programado', async () => {
+  const buffer = await buildReportBuffer([], {
+    assigned_name: 'INGENIERO DE PRUEBA',
+    late_execution_authorized_at: '2026-09-01T14:00:00.000Z',
+    late_execution_authorized_by_name: 'ADMINISTRADOR DEL CLIENTE',
+    late_execution_reason: 'El cierre operativo de agosto fue autorizado de forma excepcional para completar la trazabilidad pendiente sin modificar las fechas del cronograma original.'.repeat(3)
+  });
+
+  assert.equal(buffer.subarray(0, 4).toString(), '%PDF');
+  const pdf = await PdfReaderDocument.load(buffer);
+  assert.ok(pdf.getPageCount() >= 2);
   assert.ok(pdf.getPageCount() <= 5);
 });

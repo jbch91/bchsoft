@@ -866,3 +866,133 @@ describe('maintenance report modal flow', () => {
     expect(component.reportFindings).not.toContain('No se identificaron hallazgos');
   });
 });
+
+describe('late preventive period opening', () => {
+  function createLateOpeningComponent(hasTemporaryPermission = true) {
+    const maintenance = {
+      openLatePreventivePeriod: vi.fn().mockResolvedValue({
+        ok: true,
+        opened: 1,
+        period: '2026-08',
+        authorizedUntil: '2026-09-06T12:00:00.000Z',
+        message: '1 preventivo de 2026-08 quedó habilitado temporalmente.'
+      })
+    };
+    const auth = {
+      hasRole: (role: string | string[]) => Array.isArray(role)
+        ? role.includes('ingeniero_biomedico')
+        : role === 'ingeniero_biomedico',
+      hasPermission: (permission: string) => hasTemporaryPermission
+        && permission === 'maintenance:preventive:late_execution',
+      currentUser: () => ({ id: 'engineer-1', clientId: 'client-1' })
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      auth as never,
+      {} as never,
+      maintenance as never,
+      { detectChanges: vi.fn() } as never,
+      { snapshot: { data: { assetCategory: 'biomedical' } } } as never
+    );
+    component.selectedClientId = 'client-1';
+    component.preventivePeriod = '2026-08';
+    component.preventiveProgress = {
+      schedule_id: 'schedule-1',
+      schedule_status: 'approved',
+      asset_category: 'biomedical',
+      year: 2026,
+      month: 8,
+      monthly: {
+        total: 4, not_started: 2, in_progress: 0, pending_signature: 0,
+        waiting_spare: 0, warranty: 1, completed: 1, overdue: 2, completion_percent: 25
+      },
+      annual: {
+        total: 4, not_started: 2, in_progress: 0, pending_signature: 0,
+        waiting_spare: 0, warranty: 1, completed: 1, overdue: 2, completion_percent: 25
+      },
+      items: [
+        {
+          id: 'expired-available', asset_id: 'asset-1', asset_code: 'EQ-001',
+          asset_name: 'Monitor', planned_date: '2026-08-05', deadline_date: '2026-08-31',
+          phase: 'not_started', is_overdue: true, can_perform_protocol: false,
+          pdf_available: false
+        },
+        {
+          id: 'already-authorized', asset_id: 'asset-2', asset_code: 'EQ-002',
+          asset_name: 'Bomba', planned_date: '2026-08-10', deadline_date: '2026-08-31',
+          phase: 'not_started', is_overdue: true, can_perform_protocol: true,
+          is_late_execution: true, late_execution_authorization_active: true,
+          pdf_available: false
+        },
+        {
+          id: 'warranty', asset_id: 'asset-3', asset_code: 'EQ-003',
+          asset_name: 'Ventilador', planned_date: '2026-08-15', deadline_date: '2026-08-31',
+          phase: 'warranty', is_overdue: false, can_perform_protocol: false,
+          pdf_available: false
+        },
+        {
+          id: 'completed', asset_id: 'asset-4', asset_code: 'EQ-004',
+          asset_name: 'Desfibrilador', planned_date: '2026-08-20', deadline_date: '2026-08-31',
+          phase: 'completed', is_overdue: false, can_perform_protocol: false,
+          report_id: 'report-1', pdf_available: true
+        }
+      ],
+      generated_at: '2026-09-01T12:00:00.000Z'
+    };
+    return { component, maintenance };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('identifica agosto como periodo anterior y cuenta solo vencidos disponibles', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-01T15:00:00.000Z'));
+    const { component } = createLateOpeningComponent();
+
+    expect(component.currentPreventivePeriodValue).toBe('2026-09');
+    expect(component.isPreviousPreventivePeriod).toBe(true);
+    expect(component.latePreventiveCandidateCount).toBe(1);
+    expect(component.canOpenLatePreventivePeriod).toBe(true);
+
+    component.preventivePeriod = '2026-07';
+    expect(component.isPreviousPreventivePeriod).toBe(false);
+    expect(component.latePreventiveCandidateCount).toBe(0);
+    expect(component.canOpenLatePreventivePeriod).toBe(false);
+  });
+
+  it('no habilita la apertura sin el permiso temporal', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-01T15:00:00.000Z'));
+    const { component } = createLateOpeningComponent(false);
+
+    component.openLatePreventiveDialog();
+
+    expect(component.canOpenLatePreventivePeriod).toBe(false);
+    expect(component.lateOpeningDialog).toBe(false);
+  });
+
+  it('envía periodo, categoría y justificación sin cambiar las fechas originales', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-01T15:00:00.000Z'));
+    const { component, maintenance } = createLateOpeningComponent();
+    const loadData = vi.spyOn(component, 'loadData').mockResolvedValue();
+    component.openLatePreventiveDialog();
+    component.lateOpeningReason = 'Cierre operativo de agosto autorizado por el cliente.';
+
+    await component.submitLatePreventiveOpening();
+
+    expect(maintenance.openLatePreventivePeriod).toHaveBeenCalledWith('client-1', {
+      year: 2026,
+      month: 8,
+      assetCategory: 'biomedical',
+      reason: 'Cierre operativo de agosto autorizado por el cliente.'
+    });
+    expect(loadData).toHaveBeenCalledOnce();
+    expect(component.lateOpeningDialog).toBe(false);
+    expect(component.preventivePeriod).toBe('2026-08');
+    expect(component.successMessage).toContain('habilitado temporalmente');
+  });
+});

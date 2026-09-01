@@ -2446,7 +2446,16 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
       label: 'RESPONSABLE TÉCNICO',
       value: engineerSignature?.display_name || request.assigned_name
     },
-    { label: 'FECHA DE INTERVENCIÓN', value: formatMaintenanceDateTime(report.created_at) }
+    { label: 'FECHA DE INTERVENCIÓN', value: formatMaintenanceDateTime(report.created_at) },
+    ...(request.late_execution_authorized_at
+      ? [
+          { label: 'CONDICIÓN', value: 'EJECUCIÓN EXTEMPORÁNEA AUTORIZADA' },
+          {
+            label: 'AUTORIZACIÓN',
+            value: `${safeText(request.late_execution_authorized_by_name)} · ${formatMaintenanceDateTime(request.late_execution_authorized_at)}`
+          }
+        ]
+      : [])
   ];
   const interventionHeight = maintenanceGridHeight(interventionItems.length, 3, 48, 6);
   drawMaintenanceSectionTitle(
@@ -2462,6 +2471,13 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     'SOLICITUD, NECESIDAD O FALLA REPORTADA',
     request.description
   );
+  if (request.late_execution_authorized_at) {
+    drawMaintenanceNarrativeBox(
+      doc,
+      'JUSTIFICACIÓN DE EJECUCIÓN EXTEMPORÁNEA',
+      request.late_execution_reason
+    );
+  }
 
   const checklistGroups = [
     {

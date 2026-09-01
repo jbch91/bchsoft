@@ -433,6 +433,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   preventivePageSize = 10;
   preventiveProgress: PreventiveMaintenanceProgressDto | null = null;
   preventiveProgressScope: 'month' | 'year' = 'month';
+  preventivePeriod = '';
+  lateOpeningDialog = false;
+  lateOpeningReason = '';
+  lateOpeningSubmitting = false;
   preventivePhaseView: PreventivePhaseView = 'work';
   preventivePdfLoadingId = '';
   preventiveWarrantyLoadingId = '';
@@ -570,6 +574,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.assetCategory = this.route.snapshot.data['assetCategory'] === 'industrial'
       ? 'industrial'
       : 'biomedical';
+    this.preventivePeriod = this.currentPreventivePeriod();
   }
 
   get isIndustrialMaintenanceModule(): boolean {
@@ -840,18 +845,125 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     ) {
       return null;
     }
+    const [year, month] = this.preventivePeriod.split('-').map(Number);
     const now = new Date();
     try {
       return await this.maintenance.getPreventiveProgress(
         this.selectedClientId,
-        now.getFullYear(),
-        now.getMonth() + 1,
+        Number.isInteger(year) ? year : now.getFullYear(),
+        Number.isInteger(month) ? month : now.getMonth() + 1,
         this.assetCategory
       );
     } catch (error) {
       console.error('No se pudo cargar el avance preventivo.', error);
       return null;
     }
+  }
+
+  async changePreventivePeriod(): Promise<void> {
+    if (!/^\d{4}-\d{2}$/.test(this.preventivePeriod)) return;
+    this.preventiveProgressScope = 'month';
+    this.preventivePhaseView = 'work';
+    this.preventivePage = 1;
+    await this.loadData();
+  }
+
+  get currentPreventivePeriodValue(): string {
+    return this.currentPreventivePeriod();
+  }
+
+  get minimumPreventivePeriodValue(): string {
+    const [year] = this.currentPreventivePeriod().split('-').map(Number);
+    return `${year - 1}-12`;
+  }
+
+  get isPreviousPreventivePeriod(): boolean {
+    const [year, month] = this.currentPreventivePeriod().split('-').map(Number);
+    const previous = month === 1
+      ? `${year - 1}-12`
+      : `${year}-${String(month - 1).padStart(2, '0')}`;
+    return this.preventivePeriod === previous;
+  }
+
+  get canOpenLatePreventivePeriod(): boolean {
+    return Boolean(
+      this.auth.hasRole('ingeniero_biomedico')
+      && this.auth.hasPermission('maintenance:preventive:late_execution')
+      && this.isPreviousPreventivePeriod
+    );
+  }
+
+  get latePreventiveCandidateCount(): number {
+    if (!this.preventiveProgress || !this.isPreviousPreventivePeriod) return 0;
+    return this.preventiveProgress.items.filter((item) =>
+      String(item.planned_date || '').startsWith(this.preventivePeriod)
+      && item.phase === 'not_started'
+      && item.is_overdue
+      && !item.can_perform_protocol
+    ).length;
+  }
+
+  openLatePreventiveDialog(): void {
+    if (!this.canOpenLatePreventivePeriod || !this.latePreventiveCandidateCount) return;
+    this.lateOpeningReason = '';
+    this.lateOpeningDialog = true;
+  }
+
+  closeLatePreventiveDialog(): void {
+    if (this.lateOpeningSubmitting) return;
+    this.lateOpeningDialog = false;
+    this.lateOpeningReason = '';
+  }
+
+  async submitLatePreventiveOpening(): Promise<void> {
+    const reason = this.lateOpeningReason.replace(/\s+/g, ' ').trim();
+    const [year, month] = this.preventivePeriod.split('-').map(Number);
+    if (
+      !this.selectedClientId
+      || !this.canOpenLatePreventivePeriod
+      || reason.length < 15
+      || !Number.isInteger(year)
+      || !Number.isInteger(month)
+    ) return;
+    this.lateOpeningSubmitting = true;
+    this.errorMessage = '';
+    this.successMessage = '';
+    try {
+      const result = await this.maintenance.openLatePreventivePeriod(
+        this.selectedClientId,
+        { year, month, assetCategory: this.assetCategory, reason }
+      );
+      this.lateOpeningDialog = false;
+      this.lateOpeningReason = '';
+      await this.loadData();
+      this.successMessage = result.message;
+    } catch (error: any) {
+      this.errorMessage = error?.error?.message
+        ?? 'No se pudo abrir excepcionalmente el periodo.';
+    } finally {
+      this.lateOpeningSubmitting = false;
+      this.refreshViewSoon();
+    }
+  }
+
+  lateExecutionExpiryLabel(item: PreventiveProgressItemDto): string {
+    if (!item.late_execution_authorized_until) return '';
+    return new Date(item.late_execution_authorized_until).toLocaleString('es-CO', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  private currentPreventivePeriod(): string {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit'
+    }).formatToParts(new Date());
+    const value = (type: string) => parts.find((part) => part.type === type)?.value;
+    return `${value('year')}-${value('month')}`;
   }
 
   activateReportForm(requestId: string, message = ''): void {

@@ -135,6 +135,7 @@ export class UsersComponent implements OnInit {
     'maintenance:report:create': 'Crear reportes de mantenimiento',
     'maintenance:report:sign': 'Firmar reportes de mantenimiento',
     'maintenance:protocol:print_blank': 'Imprimir protocolos físicos en blanco',
+    'maintenance:preventive:late_execution': 'Abrir preventivos vencidos del mes anterior',
     'calibration:report:upload': 'Subir reportes de calibración',
     'inventory:move': 'Mover equipos y generar reportes de movimiento',
     'inventory:request': 'Solicitudes de inventario',
@@ -210,6 +211,11 @@ export class UsersComponent implements OnInit {
       value: 'maintenance:protocol:print_blank',
       label: 'Protocolos físicos en blanco',
       description: 'Permite imprimir temporalmente formatos de mantenimiento para equipos vigentes.'
+    },
+    {
+      value: 'maintenance:preventive:late_execution',
+      label: 'Apertura excepcional de preventivos vencidos',
+      description: 'Permite abrir por máximo siete días los preventivos del mes inmediatamente anterior, conservando su periodo y auditoría.'
     }
   ];
   private readonly temporaryOnlyPermissions = new Set(
@@ -1118,6 +1124,18 @@ export class UsersComponent implements OnInit {
       this.errorMessage = 'La fecha de vencimiento debe ser futura.';
       return;
     }
+    if (permissionsToGrant.includes('maintenance:preventive:late_execution')) {
+      const reason = this.temporaryPermissionForm.reason.replace(/\s+/g, ' ').trim();
+      if (reason.length < 15) {
+        this.errorMessage = 'Registra un motivo de autorización de al menos 15 caracteres.';
+        return;
+      }
+      if (expiresAt.getTime() > Date.now() + 7 * 24 * 60 * 60 * 1000 + 60_000) {
+        this.errorMessage = 'La apertura excepcional puede autorizarse por máximo siete días.';
+        return;
+      }
+      this.temporaryPermissionForm.reason = reason;
+    }
 
     this.temporaryPermissionLoading = true;
     this.errorMessage = '';
@@ -1143,9 +1161,9 @@ export class UsersComponent implements OnInit {
       this.temporaryPanelUserId = user.id;
       this.selectedTemporaryPermissions.clear();
       this.resetTemporaryPermissionForm();
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      this.errorMessage = 'No se pudo activar el permiso temporal.';
+      this.errorMessage = error?.error?.message ?? 'No se pudo activar el permiso temporal.';
     } finally {
       this.temporaryPermissionLoading = false;
       this.cdr.detectChanges();

@@ -308,28 +308,57 @@
             <span>Avance operativo</span>
             <strong>{{ preventiveProgressPeriodLabel }}</strong>
           </div>
-          <div class="preventive-progress-scope" role="group" aria-label="Periodo del avance preventivo">
-            <button
-              type="button"
-              [class.active]="preventiveProgressScope === 'month'"
-              [attr.aria-pressed]="preventiveProgressScope === 'month'"
-              (click)="setPreventiveProgressScope('month')"
-            >
-              Mes
-            </button>
-            <button
-              type="button"
-              [class.active]="preventiveProgressScope === 'year'"
-              [attr.aria-pressed]="preventiveProgressScope === 'year'"
-              (click)="setPreventiveProgressScope('year')"
-            >
-              Año
-            </button>
+          <div class="preventive-period-controls">
+            <label class="preventive-period-picker">
+              Periodo
+              <input
+                type="month"
+                [(ngModel)]="preventivePeriod"
+                [min]="minimumPreventivePeriodValue"
+                [max]="currentPreventivePeriodValue"
+                (change)="changePreventivePeriod()"
+              />
+            </label>
+            <div class="preventive-progress-scope" role="group" aria-label="Alcance del avance preventivo">
+              <button
+                type="button"
+                [class.active]="preventiveProgressScope === 'month'"
+                [attr.aria-pressed]="preventiveProgressScope === 'month'"
+                (click)="setPreventiveProgressScope('month')"
+              >
+                Mes
+              </button>
+              <button
+                type="button"
+                [class.active]="preventiveProgressScope === 'year'"
+                [attr.aria-pressed]="preventiveProgressScope === 'year'"
+                (click)="setPreventiveProgressScope('year')"
+              >
+                Año
+              </button>
+            </div>
           </div>
         </div>
 
         <ng-container *ngIf="scheduleProgress.schedule_id; else noPreventiveSchedule">
           <ng-container *ngIf="activePreventiveProgress as progress">
+            <div class="late-opening-toolbar" *ngIf="isPreviousPreventivePeriod && latePreventiveCandidateCount">
+              <div>
+                <strong>{{ latePreventiveCandidateCount }} preventivo(s) con ventana cerrada</strong>
+                <span>Conservarán este periodo y registrarán la fecha real de intervención.</span>
+              </div>
+              <button
+                *ngIf="canOpenLatePreventivePeriod; else latePermissionRequired"
+                type="button"
+                class="ghost"
+                (click)="openLatePreventiveDialog()"
+              >
+                Apertura excepcional
+              </button>
+              <ng-template #latePermissionRequired>
+                <small>Requiere permiso temporal de apertura excepcional.</small>
+              </ng-template>
+            </div>
             <div class="preventive-completion-row">
               <div class="preventive-completion-value">
                 <strong>{{ preventiveManagedPercent(progress) }}%</strong>
@@ -507,6 +536,10 @@
             </small>
             <small *ngIf="item.phase === 'warranty'">
               {{ item.warranty_resolution === 'covered' ? 'Exención registrada' : 'Garantía detectada' }}
+            </small>
+            <small class="late-execution-note" *ngIf="item.is_late_execution">
+              {{ item.late_execution_authorization_active ? 'Apertura excepcional hasta' : 'Apertura excepcional cerrada el' }}
+              {{ lateExecutionExpiryLabel(item) }}
             </small>
           </span>
           <span class="actions preventive-phase-actions" data-label="Acción">
@@ -2184,6 +2217,56 @@
           <button type="button" class="ghost" [disabled]="correctionSubmitting" (click)="closeCorrectionDialog()">Cancelar</button>
           <button type="submit" [disabled]="correctionSubmitting || correctionReason.trim().length < 10">
             {{ correctionSubmitting ? 'Enviando...' : 'Enviar corrección' }}
+          </button>
+        </div>
+      </form>
+    </article>
+  </div>
+
+  <div
+    class="maintenance-modal-backdrop"
+    *ngIf="lateOpeningDialog"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="late-opening-title"
+    (click)="closeLatePreventiveDialog()"
+  >
+    <article class="maintenance-modal late-opening-modal" (click)="$event.stopPropagation()">
+      <div class="modal-heading">
+        <div>
+          <span>Operación excepcional auditada</span>
+          <h2 id="late-opening-title">Abrir preventivos de {{ preventiveProgressPeriodLabel }}</h2>
+        </div>
+        <button type="button" class="icon-action ghost" aria-label="Cerrar" title="Cerrar" (click)="closeLatePreventiveDialog()">×</button>
+      </div>
+      <div class="late-opening-summary">
+        <div><span>Actividades</span><strong>{{ latePreventiveCandidateCount }}</strong></div>
+        <div><span>Periodo original</span><strong>{{ preventivePeriod }}</strong></div>
+        <div><span>Vigencia máxima</span><strong>7 días</strong></div>
+      </div>
+      <p class="modal-notice">
+        Las fechas programadas y límite no cambiarán. El PDF mostrará el periodo original,
+        la fecha real de intervención y esta autorización. Solo se habilitan actividades
+        vencidas, sin reporte y correspondientes al mes inmediatamente anterior.
+      </p>
+      <form (ngSubmit)="submitLatePreventiveOpening()">
+        <label>
+          Justificación excepcional
+          <textarea
+            [(ngModel)]="lateOpeningReason"
+            name="lateOpeningReason"
+            rows="4"
+            minlength="15"
+            maxlength="600"
+            placeholder="Describe por qué el periodo no pudo cerrarse dentro de la ventana programada."
+            autofocus
+          ></textarea>
+          <small class="field-help">Mínimo 15 caracteres · {{ lateOpeningReason.trim().length }}/600</small>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="ghost" [disabled]="lateOpeningSubmitting" (click)="closeLatePreventiveDialog()">Cancelar</button>
+          <button type="submit" [disabled]="lateOpeningSubmitting || lateOpeningReason.trim().length < 15">
+            {{ lateOpeningSubmitting ? 'Abriendo...' : 'Confirmar apertura' }}
           </button>
         </div>
       </form>

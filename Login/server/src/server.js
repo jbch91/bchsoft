@@ -35,6 +35,12 @@ import {
 import { validateAndNormalizeHvImportAsset } from './hv-import-validation.js';
 import { assetCategoryLabel, normalizeAssetCategory } from './asset-category.js';
 import {
+  LATE_MAINTENANCE_EXECUTION_PERMISSION,
+  normalizeLateMaintenanceOpening,
+  openLateMaintenancePeriod,
+  validateLateExecutionTemporaryGrant
+} from './late-maintenance-execution.js';
+import {
   createUser,
   getClientRolePermissions,
   grantTemporaryPermission,
@@ -1442,6 +1448,18 @@ app.post(
     if (parsedExpiresAt.getTime() <= Date.now()) {
       return res.status(400).json({ message: 'La fecha de vencimiento debe ser futura.' });
     }
+    let normalizedReason = reason;
+    if (permission === LATE_MAINTENANCE_EXECUTION_PERMISSION) {
+      try {
+        const authorization = validateLateExecutionTemporaryGrant({
+          expiresAt: parsedExpiresAt,
+          reason
+        });
+        normalizedReason = authorization.reason;
+      } catch (error) {
+        return res.status(400).json({ message: error.message });
+      }
+    }
     if (!(await requireActionConfirmation(req, res, 'USER_TEMPORARY_PERMISSION_GRANT'))) return;
 
     const result = await grantTemporaryPermission({
@@ -1449,7 +1467,7 @@ app.post(
       permission,
       expiresAt: parsedExpiresAt,
       grantedBy: req.user.sub,
-      reason
+      reason: normalizedReason
     });
     if (result?.error === 'USER_NOT_FOUND') {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
@@ -1468,7 +1486,7 @@ app.post(
         clientId: target.client_id ?? null,
         permission,
         expiresAt: parsedExpiresAt.toISOString(),
-        reason: reason || null
+        reason: normalizedReason || null
       }
     });
 
@@ -10597,6 +10615,60 @@ app.get(
 );
 
 app.post(
+  '/maintenance/preventive-progress/:clientId/late-execution',
+  requireAuth,
+  requirePermission(LATE_MAINTENANCE_EXECUTION_PERMISSION),
+  requireActiveTemporaryPermission(LATE_MAINTENANCE_EXECUTION_PERMISSION),
+  async (req, res) => {
+    const { clientId } = req.params;
+    if (
+      !req.user.clientId
+      || req.user.clientId !== clientId
+      || !req.user.roles?.includes('ingeniero_biomedico')
+    ) {
+      return res.status(403).json({
+        message: 'Solo el ingeniero biomédico del cliente puede abrir este periodo.'
+      });
+    }
+    try {
+      const normalized = normalizeLateMaintenanceOpening(req.body, todayInBogota());
+      const result = await openLateMaintenancePeriod({
+        clientId,
+        actorUserId: req.user.sub,
+        actorUsername: req.user.username,
+        actorDisplayName: req.user.displayName ?? req.user.username,
+        actorRoles: req.user.roles ?? [],
+        temporaryPermissionId: req.temporaryPermission.id,
+        permissionExpiresAt: req.temporaryPermission.expiresAt,
+        permissionGrantedBy: req.temporaryPermission.grantedBy,
+        permissionReason: req.temporaryPermission.reason,
+        ...normalized
+      });
+      return res.json({
+        ok: true,
+        ...result,
+        message: `${result.opened} preventivo(s) de ${result.period} quedaron habilitados temporalmente sin cambiar sus fechas programadas.`
+      });
+    } catch (error) {
+      if (error?.statusCode) {
+        return res.status(error.statusCode).json({ message: error.message });
+      }
+      if (
+        /no es válid|mes inmediatamente anterior|justificación|permiso temporal/i.test(
+          String(error?.message || '')
+        )
+      ) {
+        return res.status(400).json({ message: error.message });
+      }
+      console.error(error);
+      return res.status(500).json({
+        message: 'No se pudo abrir excepcionalmente el periodo de mantenimiento.'
+      });
+    }
+  }
+);
+
+app.post(
   '/maintenance/preventive-progress/:clientId/items/:itemId/warranty',
   requireAuth,
   requirePermission('maintenance:report:create'),
@@ -10973,6 +11045,18 @@ app.post(
     const assignedTo = req.body?.assignedTo ?? req.user.sub;
     if (!req.user.roles?.includes('superuser') && assignedTo !== req.user.sub) {
       return res.status(403).json({ message: 'Solo puedes asignarte a ti mismo.' });
+    }
+    if (
+      request.type === 'preventivo'
+      && request.source === 'cronograma'
+      && request.deadline_date
+      && String(request.deadline_date).slice(0, 10) < todayInBogota()
+      && !request.late_execution_authorization_active
+    ) {
+      await updateMaintenanceRequestStatus(request.id, 'vencido');
+      return res.status(409).json({
+        message: 'La ventana del preventivo ya cerró. Solicita una apertura excepcional temporal.'
+      });
     }
     const assignment = await assignMaintenanceRequest(requestId, assignedTo, {
       allowedStatuses: MAINTENANCE_REQUEST_CLAIMABLE_STATUSES,
@@ -12198,6 +12282,15 @@ async function performDueScheduleRequestSync(clientId, fallbackUserId) {
        AND type = 'preventivo'
        AND source = 'cronograma'
        AND status = 'abierto'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM maintenance_schedule_items item
+         JOIN user_temporary_permissions permission
+           ON permission.id = item.late_execution_temporary_permission_id
+         WHERE item.id = maintenance_requests.schedule_item_id
+           AND item.late_execution_authorized_until > NOW()
+           AND permission.expires_at > NOW()
+       )
        AND (
          deadline_date < $2
          OR schedule_id IN (
@@ -12218,6 +12311,13 @@ async function performDueScheduleRequestSync(clientId, fallbackUserId) {
        AND s.client_id = $1
        AND s.status = 'approved'
        AND i.status IN ('pending', 'active')
+       AND NOT EXISTS (
+         SELECT 1
+         FROM user_temporary_permissions permission
+         WHERE permission.id = i.late_execution_temporary_permission_id
+           AND i.late_execution_authorized_until > NOW()
+           AND permission.expires_at > NOW()
+       )
        AND (
          i.deadline_date < $2
          OR s.year < EXTRACT(YEAR FROM $2::date)::int
@@ -12249,8 +12349,18 @@ async function performDueScheduleRequestSync(clientId, fallbackUserId) {
            AND i.planned_date >= (a.acquisition_date + make_interval(years => a.warranty_years))::date
          )
        )
-       AND i.planned_date <= $2
-       AND i.deadline_date >= $2`,
+       AND (
+         (i.planned_date <= $2 AND i.deadline_date >= $2)
+         OR (
+           i.late_execution_authorized_until > NOW()
+           AND EXISTS (
+             SELECT 1
+             FROM user_temporary_permissions permission
+             WHERE permission.id = i.late_execution_temporary_permission_id
+               AND permission.expires_at > NOW()
+           )
+         )
+       )`,
     [clientId, today]
   );
 

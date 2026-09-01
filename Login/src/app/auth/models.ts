@@ -78,6 +78,7 @@ export type Permission =
   | 'maintenance:request:create'
   | 'maintenance:report:sign'
   | 'maintenance:protocol:print_blank'
+  | 'maintenance:preventive:late_execution'
   | 'spareparts:order:create'
   | 'calibration:report:upload'
   | 'odontology:patients:manage'

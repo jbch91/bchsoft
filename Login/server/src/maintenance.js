@@ -93,6 +93,15 @@ export async function getPreventiveMaintenanceProgress(
             item.legacy_history_file_id,
             item.historical_resolution,
             item.non_execution_reason,
+            item.late_execution_authorized_at,
+            item.late_execution_authorized_until,
+            item.late_execution_reason,
+            late_authorizer.display_name AS late_execution_authorized_by_name,
+            (
+              item.late_execution_authorized_until > NOW()
+              AND late_permission.id IS NOT NULL
+              AND late_permission.expires_at > NOW()
+            ) AS late_execution_authorization_active,
             item.warranty_resolution,
             item.warranty_resolved_at,
             item.warranty_resolved_by,
@@ -143,9 +152,16 @@ export async function getPreventiveMaintenanceProgress(
             item.deadline_date < (
               CURRENT_TIMESTAMP AT TIME ZONE 'America/Bogota'
             )::date AS is_overdue,
-            item.deadline_date >= (
-              CURRENT_TIMESTAMP AT TIME ZONE 'America/Bogota'
-            )::date AS can_perform_protocol
+            (
+              item.deadline_date >= (
+                CURRENT_TIMESTAMP AT TIME ZONE 'America/Bogota'
+              )::date
+              OR (
+                item.late_execution_authorized_until > NOW()
+                AND late_permission.id IS NOT NULL
+                AND late_permission.expires_at > NOW()
+              )
+            ) AS can_perform_protocol
      FROM maintenance_schedule_items item
      JOIN "${schema}".assets a ON a.id = item.asset_id
      LEFT JOIN "${schema}".sites site ON site.id = a.site_id
@@ -162,6 +178,9 @@ export async function getPreventiveMaintenanceProgress(
        LIMIT 1
      ) request ON TRUE
      LEFT JOIN users assigned ON assigned.id = request.assigned_to
+     LEFT JOIN users late_authorizer ON late_authorizer.id = item.late_execution_authorized_by
+     LEFT JOIN user_temporary_permissions late_permission
+       ON late_permission.id = item.late_execution_temporary_permission_id
      LEFT JOIN LATERAL (
        SELECT maintenance_report.id,
               maintenance_report.area_responsible_required,
@@ -226,6 +245,12 @@ export async function getPreventiveMaintenanceProgress(
       warranty_release_date: item.warranty_release_date,
       is_under_warranty: Boolean(item.is_under_warranty),
       can_perform_protocol: Boolean(item.can_perform_protocol),
+      is_late_execution: Boolean(item.late_execution_authorized_at),
+      late_execution_authorized_at: item.late_execution_authorized_at,
+      late_execution_authorized_until: item.late_execution_authorized_until,
+      late_execution_authorized_by_name: item.late_execution_authorized_by_name,
+      late_execution_reason: item.late_execution_reason,
+      late_execution_authorization_active: Boolean(item.late_execution_authorization_active),
       request_id: item.request_id,
       request_status: item.request_status,
       assigned_to: item.assigned_to,
@@ -404,10 +429,23 @@ export async function listMaintenanceRequestsForReader(
 export async function getMaintenanceRequestById(requestId) {
   const { rows } = await query(
     `SELECT r.*, u.display_name AS requester_name, u.email AS requester_email,
-            assigned.display_name AS assigned_name
+            assigned.display_name AS assigned_name,
+            item.late_execution_authorized_at,
+            item.late_execution_authorized_until,
+            item.late_execution_reason,
+            late_authorizer.display_name AS late_execution_authorized_by_name,
+            (
+              item.late_execution_authorized_until > NOW()
+              AND late_permission.id IS NOT NULL
+              AND late_permission.expires_at > NOW()
+            ) AS late_execution_authorization_active
      FROM maintenance_requests r
      LEFT JOIN users u ON u.id = r.requested_by
      LEFT JOIN users assigned ON assigned.id = r.assigned_to
+     LEFT JOIN maintenance_schedule_items item ON item.id = r.schedule_item_id
+     LEFT JOIN users late_authorizer ON late_authorizer.id = item.late_execution_authorized_by
+     LEFT JOIN user_temporary_permissions late_permission
+       ON late_permission.id = item.late_execution_temporary_permission_id
      WHERE r.id = $1`,
     [requestId]
   );
