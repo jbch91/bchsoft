@@ -68,3 +68,54 @@ describe('UsersComponent user creation', () => {
     expect(component.errorMessage).toBe('Ese usuario ya está registrado.');
   });
 });
+
+describe('UsersComponent temporary permission renewal', () => {
+  it('permite extender a veinte días y comunica las actividades ya abiertas', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-01T12:00:00.000Z'));
+    const grantTemporaryPermission = vi.fn().mockResolvedValue({
+      updatedLateActivities: 79,
+      lateAuthorizationUntil: '2026-09-21T12:00:00.000Z'
+    });
+    const component = new UsersComponent(
+      { grantTemporaryPermission } as never,
+      {
+        hasRole: () => false,
+        currentUser: () => ({ clientId: 'client-1', roles: ['client_admin'] })
+      } as never,
+      { url: '/usuarios' } as never,
+      { detectChanges: vi.fn() } as never
+    );
+    const user = {
+      id: 'engineer-1',
+      username: 'ingeniero',
+      displayName: 'Ingeniero',
+      email: 'ingeniero@example.test',
+      isActive: true,
+      roles: ['ingeniero_biomedico'],
+      clientId: 'client-1',
+      temporaryPermissions: [{
+        permission: 'maintenance:preventive:late_execution',
+        expiresAt: '2026-09-08T12:00:00.000Z',
+        reason: 'Autorización institucional para cierre de agosto.'
+      }]
+    };
+    component.users = [user] as never;
+    component.load = vi.fn().mockResolvedValue(undefined);
+    (component as unknown as { requestSecurityCode: ReturnType<typeof vi.fn> })
+      .requestSecurityCode = vi.fn().mockResolvedValue('123456');
+
+    component.prepareTemporaryPermissionRenewal(user.temporaryPermissions[0]);
+    const selectedExpiry = new Date(component.temporaryPermissionForm.expiresAt).getTime();
+    expect(selectedExpiry - Date.now()).toBe(20 * 24 * 60 * 60 * 1000);
+
+    await component.grantTemporaryPermission(user as never);
+
+    expect(grantTemporaryPermission).toHaveBeenCalledOnce();
+    expect(grantTemporaryPermission.mock.calls[0][1].permission)
+      .toBe('maintenance:preventive:late_execution');
+    expect(component.successMessage).toContain('79 actividades abiertas');
+    expect(component.temporaryPermissionRenewal).toBeNull();
+    vi.useRealTimers();
+  });
+});

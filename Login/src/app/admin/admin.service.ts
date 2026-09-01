@@ -248,10 +248,10 @@ export class AdminService {
     expiresAt: string;
     reason?: string | null;
     securityCode?: string;
-  }): Promise<void> {
-    await firstValueFrom(
+  }): Promise<{ updatedLateActivities?: number; lateAuthorizationUntil?: string | null }> {
+    return await firstValueFrom(
       this.http.post(`${this.apiBase}/admin/users/${userId}/temporary-permissions`, payload)
-    );
+    ) as { updatedLateActivities?: number; lateAuthorizationUntil?: string | null };
   }
 
   async revokeTemporaryPermission(userId: string, permission: string, securityCode?: string): Promise<void> {

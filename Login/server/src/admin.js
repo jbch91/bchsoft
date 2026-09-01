@@ -408,14 +408,18 @@ export async function grantTemporaryPermission({
   permission,
   expiresAt,
   grantedBy,
-  reason
+  reason,
+  queryRunner = query
 }) {
-  const { rows: userRows } = await query('SELECT id, username FROM users WHERE id = $1', [userId]);
+  const { rows: userRows } = await queryRunner(
+    'SELECT id, username FROM users WHERE id = $1',
+    [userId]
+  );
   if (!userRows.length) {
     return { error: 'USER_NOT_FOUND' };
   }
 
-  const { rows: permissionRows } = await query(
+  const { rows: permissionRows } = await queryRunner(
     'SELECT id, name, description FROM permissions WHERE name = $1',
     [permission]
   );
@@ -424,7 +428,7 @@ export async function grantTemporaryPermission({
   }
 
   const cleanReason = String(reason || '').trim() || null;
-  const { rows } = await query(
+  const { rows } = await queryRunner(
     `INSERT INTO user_temporary_permissions (
        user_id, permission_id, expires_at, granted_by, reason
      )

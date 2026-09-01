@@ -90,6 +90,8 @@ export class UsersComponent implements OnInit {
     reason: 'Autorización temporal para operación excepcional del cliente'
   };
   selectedTemporaryPermissions = new Set<string>();
+  temporaryPermissionRenewal: string | null = null;
+  readonly lateMaintenanceMaxDays = 20;
 
   username = '';
   displayName = '';
@@ -215,7 +217,7 @@ export class UsersComponent implements OnInit {
     {
       value: 'maintenance:preventive:late_execution',
       label: 'Apertura excepcional de preventivos vencidos',
-      description: 'Permite abrir por máximo siete días los preventivos del mes inmediatamente anterior, conservando su periodo y auditoría.'
+      description: 'Permite abrir o extender por máximo veinte días los preventivos del mes inmediatamente anterior, conservando su periodo y auditoría.'
     }
   ];
   private readonly temporaryOnlyPermissions = new Set(
@@ -798,6 +800,7 @@ export class UsersComponent implements OnInit {
     this.temporaryPanelUserId = user.id;
     this.resetTemporaryPermissionForm();
     this.selectedTemporaryPermissions.clear();
+    this.temporaryPermissionRenewal = null;
     this.errorMessage = '';
     this.successMessage = '';
   }
@@ -805,6 +808,7 @@ export class UsersComponent implements OnInit {
   cancelTemporaryAccess(): void {
     this.temporaryPanelUserId = null;
     this.selectedTemporaryPermissions.clear();
+    this.temporaryPermissionRenewal = null;
     this.temporaryPermissionLoading = false;
   }
 
@@ -1084,11 +1088,36 @@ export class UsersComponent implements OnInit {
     return this.activeTemporaryPermissions(user).some((item) => item.permission === permission);
   }
 
+  prepareTemporaryPermissionRenewal(permission: TemporaryPermissionView): void {
+    if (this.temporaryPermissionLoading) return;
+    this.temporaryPermissionRenewal = permission.permission;
+    this.selectedTemporaryPermissions.clear();
+    this.temporaryPermissionForm = {
+      expiresAt: this.toDatetimeLocal(
+        new Date(Date.now() + this.lateMaintenanceMaxDays * 24 * 60 * 60 * 1000)
+      ),
+      reason: permission.reason?.trim() || 'Extensión temporal de la operación excepcional del cliente'
+    };
+    this.errorMessage = '';
+    this.successMessage = '';
+  }
+
+  cancelTemporaryPermissionRenewal(): void {
+    this.temporaryPermissionRenewal = null;
+    this.resetTemporaryPermissionForm();
+  }
+
   isTemporaryPermissionSelected(permission: string): boolean {
     return this.selectedTemporaryPermissions.has(permission);
   }
 
   selectedTemporaryPermissionCount(user: UserView): number {
+    if (
+      this.temporaryPermissionRenewal &&
+      this.hasActiveTemporaryPermission(user, this.temporaryPermissionRenewal)
+    ) {
+      return 1;
+    }
     return Array.from(this.selectedTemporaryPermissions).filter(
       (permission) => !this.hasActiveTemporaryPermission(user, permission)
     ).length;
@@ -1096,11 +1125,17 @@ export class UsersComponent implements OnInit {
 
   toggleTemporaryPermissionSelection(user: UserView, permission: string): void {
     if (this.hasActiveTemporaryPermission(user, permission) || this.temporaryPermissionLoading) return;
+    this.temporaryPermissionRenewal = null;
     if (this.selectedTemporaryPermissions.has(permission)) {
       this.selectedTemporaryPermissions.delete(permission);
       return;
     }
     this.selectedTemporaryPermissions.add(permission);
+    if (permission === 'maintenance:preventive:late_execution') {
+      this.temporaryPermissionForm.expiresAt = this.toDatetimeLocal(
+        new Date(Date.now() + this.lateMaintenanceMaxDays * 24 * 60 * 60 * 1000)
+      );
+    }
   }
 
   async grantTemporaryPermission(user: UserView): Promise<void> {
@@ -1110,9 +1145,15 @@ export class UsersComponent implements OnInit {
       return;
     }
 
-    const permissionsToGrant = Array.from(this.selectedTemporaryPermissions).filter(
-      (permission) => !this.hasActiveTemporaryPermission(user, permission)
+    const isRenewal = Boolean(
+      this.temporaryPermissionRenewal &&
+      this.hasActiveTemporaryPermission(user, this.temporaryPermissionRenewal)
     );
+    const permissionsToGrant = isRenewal
+      ? [this.temporaryPermissionRenewal as string]
+      : Array.from(this.selectedTemporaryPermissions).filter(
+          (permission) => !this.hasActiveTemporaryPermission(user, permission)
+        );
 
     if (permissionsToGrant.length === 0 || !this.temporaryPermissionForm.expiresAt) {
       this.errorMessage = 'Selecciona al menos un permiso y la fecha de vencimiento.';
@@ -1130,8 +1171,11 @@ export class UsersComponent implements OnInit {
         this.errorMessage = 'Registra un motivo de autorización de al menos 15 caracteres.';
         return;
       }
-      if (expiresAt.getTime() > Date.now() + 7 * 24 * 60 * 60 * 1000 + 60_000) {
-        this.errorMessage = 'La apertura excepcional puede autorizarse por máximo siete días.';
+      if (
+        expiresAt.getTime() >
+        Date.now() + this.lateMaintenanceMaxDays * 24 * 60 * 60 * 1000 + 60_000
+      ) {
+        this.errorMessage = 'La apertura excepcional puede autorizarse por máximo veinte días.';
         return;
       }
       this.temporaryPermissionForm.reason = reason;
@@ -1141,25 +1185,34 @@ export class UsersComponent implements OnInit {
     this.errorMessage = '';
     this.successMessage = '';
     try {
+      let updatedLateActivities = 0;
       for (const permission of permissionsToGrant) {
         const securityCode = await this.requestSecurityCode(
           'USER_TEMPORARY_PERMISSION_GRANT',
-          `Activar permiso temporal ${this.permissionLabel(permission)} para ${user.username}`
+          `${isRenewal ? 'Extender' : 'Activar'} permiso temporal ${this.permissionLabel(permission)} para ${user.username}`
         );
         if (!securityCode) return;
-        await this.admin.grantTemporaryPermission(user.id, {
+        const result = await this.admin.grantTemporaryPermission(user.id, {
           permission,
           expiresAt: expiresAt.toISOString(),
           reason: this.temporaryPermissionForm.reason.trim() || null,
           securityCode
         });
+        updatedLateActivities += Number(result?.updatedLateActivities || 0);
       }
-      this.successMessage = permissionsToGrant.length === 1
-        ? 'Permiso temporal activado. Si el usuario está conectado, puede usar Actualizar permisos dentro del módulo correspondiente.'
-        : 'Permisos temporales activados. Si el usuario está conectado, puede usar Actualizar permisos dentro del módulo correspondiente.';
+      if (isRenewal) {
+        this.successMessage = updatedLateActivities > 0
+          ? `Vigencia actualizada. ${updatedLateActivities} actividades abiertas conservarán la nueva fecha límite.`
+          : 'Vigencia actualizada correctamente.';
+      } else {
+        this.successMessage = permissionsToGrant.length === 1
+          ? 'Permiso temporal activado. Si el usuario está conectado, puede usar Actualizar permisos dentro del módulo correspondiente.'
+          : 'Permisos temporales activados. Si el usuario está conectado, puede usar Actualizar permisos dentro del módulo correspondiente.';
+      }
       await this.load();
       this.temporaryPanelUserId = user.id;
       this.selectedTemporaryPermissions.clear();
+      this.temporaryPermissionRenewal = null;
       this.resetTemporaryPermissionForm();
     } catch (error: any) {
       console.error(error);
@@ -1184,6 +1237,10 @@ export class UsersComponent implements OnInit {
       await this.admin.revokeTemporaryPermission(user.id, permission, securityCode);
       this.successMessage = 'Permiso temporal revocado. Si el usuario está conectado, debe volver a iniciar sesión para actualizar sus accesos.';
       this.selectedTemporaryPermissions.delete(permission);
+      if (this.temporaryPermissionRenewal === permission) {
+        this.temporaryPermissionRenewal = null;
+        this.resetTemporaryPermissionForm();
+      }
       await this.load();
       this.temporaryPanelUserId = user.id;
     } catch (error) {

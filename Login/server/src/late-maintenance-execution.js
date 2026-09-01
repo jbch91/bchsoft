@@ -1,8 +1,9 @@
-import { withTransaction } from './db.js';
+import { query, withTransaction } from './db.js';
 import { normalizeAssetCategory } from './asset-category.js';
 
 export const LATE_MAINTENANCE_EXECUTION_PERMISSION =
   'maintenance:preventive:late_execution';
+export const LATE_MAINTENANCE_EXECUTION_MAX_DAYS = 20;
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -54,8 +55,10 @@ export function lateExecutionAuthorizationExpiry(permissionExpiresAt, now = new 
   if (Number.isNaN(permissionExpiry.getTime()) || permissionExpiry <= now) {
     throw new Error('El permiso temporal no está activo.');
   }
-  const sevenDays = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  return new Date(Math.min(permissionExpiry.getTime(), sevenDays.getTime()));
+  const maximumExpiry = new Date(
+    now.getTime() + LATE_MAINTENANCE_EXECUTION_MAX_DAYS * 24 * 60 * 60 * 1000
+  );
+  return new Date(Math.min(permissionExpiry.getTime(), maximumExpiry.getTime()));
 }
 
 export function validateLateExecutionTemporaryGrant(
@@ -67,8 +70,11 @@ export function validateLateExecutionTemporaryGrant(
   if (Number.isNaN(expiry.getTime()) || expiry <= now) {
     throw new Error('La fecha de vencimiento debe ser futura.');
   }
-  if (expiry.getTime() > now.getTime() + 7 * 24 * 60 * 60 * 1000 + 60_000) {
-    throw new Error('La apertura excepcional puede autorizarse por máximo siete días.');
+  if (
+    expiry.getTime() >
+    now.getTime() + LATE_MAINTENANCE_EXECUTION_MAX_DAYS * 24 * 60 * 60 * 1000 + 60_000
+  ) {
+    throw new Error('La apertura excepcional puede autorizarse por máximo veinte días.');
   }
   if (normalizedReason.length < 15) {
     throw new Error('Registra un motivo de autorización de al menos 15 caracteres.');
@@ -77,6 +83,36 @@ export function validateLateExecutionTemporaryGrant(
     throw new Error('El motivo de autorización admite máximo 600 caracteres.');
   }
   return { expiry, reason: normalizedReason };
+}
+
+export async function extendLateMaintenanceAuthorizations({
+  clientId,
+  temporaryPermissionId,
+  permissionExpiresAt,
+  now = new Date(),
+  queryRunner = query
+}) {
+  const authorizedUntil = lateExecutionAuthorizationExpiry(permissionExpiresAt, now);
+  const { rows } = await queryRunner(
+    `WITH updated AS (
+       UPDATE maintenance_schedule_items item
+       SET late_execution_authorized_until = $3
+       FROM maintenance_schedules schedule
+       WHERE schedule.id = item.schedule_id
+         AND schedule.client_id = $1
+         AND item.late_execution_temporary_permission_id = $2
+         AND item.status = 'active'
+         AND item.report_id IS NULL
+         AND item.late_execution_authorized_at IS NOT NULL
+       RETURNING item.id
+     )
+     SELECT COUNT(*)::int AS updated_activities FROM updated`,
+    [clientId, temporaryPermissionId, authorizedUntil]
+  );
+  return {
+    updatedActivities: Number(rows[0]?.updated_activities || 0),
+    authorizedUntil: authorizedUntil.toISOString()
+  };
 }
 
 export async function openLateMaintenancePeriod({

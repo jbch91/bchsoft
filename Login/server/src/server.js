@@ -35,6 +35,7 @@ import {
 import { validateAndNormalizeHvImportAsset } from './hv-import-validation.js';
 import { assetCategoryLabel, normalizeAssetCategory } from './asset-category.js';
 import {
+  extendLateMaintenanceAuthorizations,
   LATE_MAINTENANCE_EXECUTION_PERMISSION,
   normalizeLateMaintenanceOpening,
   openLateMaintenancePeriod,
@@ -1462,13 +1463,41 @@ app.post(
     }
     if (!(await requireActionConfirmation(req, res, 'USER_TEMPORARY_PERMISSION_GRANT'))) return;
 
-    const result = await grantTemporaryPermission({
-      userId: req.params.id,
-      permission,
-      expiresAt: parsedExpiresAt,
-      grantedBy: req.user.sub,
-      reason: normalizedReason
-    });
+    let result;
+    let lateAuthorizationUpdate = { updatedActivities: 0, authorizedUntil: null };
+    if (permission === LATE_MAINTENANCE_EXECUTION_PERMISSION) {
+      const bundledResult = await withTransaction(async (client) => {
+        const queryRunner = (text, params) => client.query(text, params);
+        const permissionResult = await grantTemporaryPermission({
+          userId: req.params.id,
+          permission,
+          expiresAt: parsedExpiresAt,
+          grantedBy: req.user.sub,
+          reason: normalizedReason,
+          queryRunner
+        });
+        if (permissionResult?.error) {
+          return { permissionResult, authorizationUpdate: lateAuthorizationUpdate };
+        }
+        const authorizationUpdate = await extendLateMaintenanceAuthorizations({
+          clientId: target.client_id,
+          temporaryPermissionId: permissionResult.id,
+          permissionExpiresAt: parsedExpiresAt,
+          queryRunner
+        });
+        return { permissionResult, authorizationUpdate };
+      });
+      result = bundledResult.permissionResult;
+      lateAuthorizationUpdate = bundledResult.authorizationUpdate;
+    } else {
+      result = await grantTemporaryPermission({
+        userId: req.params.id,
+        permission,
+        expiresAt: parsedExpiresAt,
+        grantedBy: req.user.sub,
+        reason: normalizedReason
+      });
+    }
     if (result?.error === 'USER_NOT_FOUND') {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
@@ -1486,11 +1515,17 @@ app.post(
         clientId: target.client_id ?? null,
         permission,
         expiresAt: parsedExpiresAt.toISOString(),
-        reason: normalizedReason || null
+        reason: normalizedReason || null,
+        updatedLateActivities: lateAuthorizationUpdate.updatedActivities,
+        lateAuthorizationUntil: lateAuthorizationUpdate.authorizedUntil
       }
     });
 
-    return res.status(201).json(result);
+    return res.status(201).json({
+      ...result,
+      updatedLateActivities: lateAuthorizationUpdate.updatedActivities,
+      lateAuthorizationUntil: lateAuthorizationUpdate.authorizedUntil
+    });
   }
 );
 

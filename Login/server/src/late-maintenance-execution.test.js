@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  extendLateMaintenanceAuthorizations,
   lateExecutionAuthorizationExpiry,
   normalizeLateMaintenanceOpening,
   openLateMaintenancePeriod,
@@ -38,7 +39,7 @@ test('normaliza una apertura excepcional solo para el mes anterior', () => {
   );
 });
 
-test('exige una justificación útil y limita la autorización a siete días', () => {
+test('exige una justificación útil y limita la autorización a veinte días', () => {
   assert.throws(
     () => normalizeLateMaintenanceOpening({
       year: 2026, month: 8, reason: 'urgente', assetCategory: 'biomedical'
@@ -48,7 +49,7 @@ test('exige una justificación útil y limita la autorización a siete días', (
   const now = new Date('2026-09-01T12:00:00Z');
   assert.equal(
     lateExecutionAuthorizationExpiry('2026-10-01T00:00:00Z', now).toISOString(),
-    '2026-09-08T12:00:00.000Z'
+    '2026-09-21T12:00:00.000Z'
   );
   assert.equal(
     lateExecutionAuthorizationExpiry('2026-09-03T15:00:00Z', now).toISOString(),
@@ -70,10 +71,10 @@ test('limita también la autorización concedida por el administrador', () => {
   );
   assert.throws(
     () => validateLateExecutionTemporaryGrant({
-      expiresAt: '2026-09-09T12:00:00.000Z',
+      expiresAt: '2026-09-22T12:00:00.000Z',
       reason: 'Cierre excepcional aprobado por la institución.'
     }, now),
-    /máximo siete días/
+    /máximo veinte días/
   );
   assert.throws(
     () => validateLateExecutionTemporaryGrant({
@@ -82,6 +83,32 @@ test('limita también la autorización concedida por el administrador', () => {
     }, now),
     /15 caracteres/
   );
+});
+
+test('extiende las actividades abiertas vinculadas al mismo permiso temporal', async () => {
+  const calls = [];
+  const result = await extendLateMaintenanceAuthorizations({
+    clientId: '55555555-5555-4555-8555-555555555555',
+    temporaryPermissionId: '77777777-7777-4777-8777-777777777777',
+    permissionExpiresAt: '2026-09-21T12:00:00.000Z',
+    now: new Date('2026-09-01T12:00:00.000Z'),
+    queryRunner: async (sql, params) => {
+      calls.push({ sql, params });
+      return { rows: [{ updated_activities: 79 }] };
+    }
+  });
+
+  assert.deepEqual(result, {
+    updatedActivities: 79,
+    authorizedUntil: '2026-09-21T12:00:00.000Z'
+  });
+  assert.match(calls[0].sql, /item\.late_execution_temporary_permission_id = \$2/);
+  assert.match(calls[0].sql, /item\.status = 'active'/);
+  assert.deepEqual(calls[0].params, [
+    '55555555-5555-4555-8555-555555555555',
+    '77777777-7777-4777-8777-777777777777',
+    new Date('2026-09-21T12:00:00.000Z')
+  ]);
 });
 
 test('abre actividades y registra la auditoría dentro de la misma transacción', async () => {

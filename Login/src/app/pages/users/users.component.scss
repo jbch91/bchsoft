@@ -753,6 +753,12 @@ li span {
   margin-top: 2px;
 }
 
+.temporary-chip-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .temporary-grid {
   display: grid;
   gap: 10px;
@@ -829,6 +835,20 @@ li span {
   flex-wrap: wrap;
 }
 
+.temporary-renewal-note {
+  align-items: center;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  color: #1e3a8a;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
 .temporary-save {
   justify-self: start;
 }
@@ -836,6 +856,14 @@ li span {
 .danger.small {
   border: none;
   border-radius: 9px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 7px 10px;
+}
+
+.ghost.small {
+  border-radius: 8px;
   cursor: pointer;
   font-size: 11px;
   font-weight: 800;
@@ -1165,6 +1193,8 @@ li span {
   .list-tools,
   .temporary-grid,
   .temporary-chip,
+  .temporary-chip-actions,
+  .temporary-renewal-note,
   .temporary-permission-options {
     display: grid;
     grid-template-columns: 1fr;
