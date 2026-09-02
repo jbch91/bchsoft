@@ -23,6 +23,17 @@ interface QrCodeApi {
   toDataURL: typeof import('qrcode').toDataURL;
 }
 
+type QrExportFormatValue = 'a4' | 'brother-12' | 'brother-18' | 'brother-24';
+
+interface QrExportFormatOption {
+  value: QrExportFormatValue;
+  label: string;
+  description: string;
+  tapeWidthMm?: number;
+  labelLengthMm?: number;
+  qrSizeMm?: number;
+}
+
 @Component({
   selector: 'app-inventario',
   standalone: true,
@@ -43,6 +54,38 @@ export class InventarioComponent {
   qrSearchTerm = '';
   qrAreaFilter = '';
   qrStatusFilter = '';
+  readonly qrExportFormats: QrExportFormatOption[] = [
+    {
+      value: 'a4',
+      label: 'Hoja A4 · 15 etiquetas',
+      description: 'Para impresora convencional, 15 etiquetas por página.'
+    },
+    {
+      value: 'brother-12',
+      label: 'Brother TZe 12 mm · prueba',
+      description: 'Etiqueta mínima. Imprime una unidad y confirma la lectura antes de generar el lote.',
+      tapeWidthMm: 12,
+      labelLengthMm: 52,
+      qrSizeMm: 9.5
+    },
+    {
+      value: 'brother-18',
+      label: 'Brother TZe 18 mm · compacta',
+      description: 'Compatible con PT-P700. Incluye QR, código, equipo, marca, modelo y serie.',
+      tapeWidthMm: 18,
+      labelLengthMm: 68,
+      qrSizeMm: 14.5
+    },
+    {
+      value: 'brother-24',
+      label: 'Brother TZe 24 mm · recomendada',
+      description: 'Mayor tamaño de QR y mejor tolerancia de lectura para uso hospitalario.',
+      tapeWidthMm: 24,
+      labelLengthMm: 78,
+      qrSizeMm: 17.5
+    }
+  ];
+  qrExportFormat: QrExportFormatValue = 'brother-18';
   qrSelectedIds = new Set<string>();
   qrGenerating = false;
   qrGenerationMode: 'pdf' | 'png' | null = null;
@@ -329,6 +372,19 @@ export class InventarioComponent {
     return this.qrSelectedItems.length ? 'seleccionados' : 'filtrados';
   }
 
+  get selectedQrExportFormat(): QrExportFormatOption {
+    return this.qrExportFormats.find((format) => format.value === this.qrExportFormat)
+      ?? this.qrExportFormats[0];
+  }
+
+  get qrExportButtonLabel(): string {
+    const count = this.qrExportItems.length;
+    if (this.qrGenerationMode === 'pdf') return 'Generando PDF...';
+    return this.qrExportFormat === 'a4'
+      ? `Descargar PDF A4 (${count})`
+      : `Descargar etiquetas (${count})`;
+  }
+
   get qrAllFilteredSelected(): boolean {
     return this.qrFilteredItems.length > 0
       && this.qrFilteredItems.every((item) => this.qrSelectedIds.has(item.id));
@@ -453,6 +509,7 @@ export class InventarioComponent {
     this.qrProgressTotal = targets.length;
     this.qrError = '';
     this.qrSuccess = '';
+    const exportFormat = this.selectedQrExportFormat;
     try {
       const jsPdfModule = await import('jspdf');
       const JsPdfConstructor = (
@@ -464,82 +521,21 @@ export class InventarioComponent {
         throw new Error('El módulo PDF no está disponible.');
       }
 
-      const doc = new JsPdfConstructor({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 10;
-      const gap = 3;
-      const columns = 3;
-      const rowsPerPage = 5;
-      const cardsPerPage = columns * rowsPerPage;
-      const cardWidth = (pageWidth - margin * 2 - gap * (columns - 1)) / columns;
-      const cardHeight = 50;
-      const qrSize = 21;
-      const totalPages = Math.ceil(targets.length / cardsPerPage);
       const clientName = this.selectedClientInfo?.name || 'CLIENTE';
-
-      const drawPageFrame = (page: number) => {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor(143, 50, 55);
-        doc.text('CÓDIGOS QR DE INVENTARIO BIOMÉDICO', margin, 9);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7.5);
-        doc.setTextColor(71, 85, 105);
-        doc.text(this.truncate(clientName.toUpperCase(), 82), margin, 14);
-        doc.text(`PÁGINA ${page} DE ${totalPages}`, pageWidth - margin, pageHeight - 5, { align: 'right' });
-        doc.text('GENERADO POR INBIHOSPITALARIO', margin, pageHeight - 5);
-      };
-
-      drawPageFrame(1);
-      for (let index = 0; index < targets.length; index += 1) {
-        if (operationId !== this.qrOperationId) return;
-        const item = targets[index];
-        const position = index % cardsPerPage;
-        if (index > 0 && position === 0) {
-          doc.addPage();
-          drawPageFrame(Math.floor(index / cardsPerPage) + 1);
-        }
-
-        const col = position % columns;
-        const row = Math.floor(position / columns);
-        const x = margin + col * (cardWidth + gap);
-        const y = 18 + row * (cardHeight + gap);
-        const qr = await this.createQrDataUrl(item, 300);
-        if (operationId !== this.qrOperationId) return;
-
-        doc.setDrawColor(203, 213, 225);
-        doc.setFillColor(255, 255, 255);
-        doc.roundedRect(x, y, cardWidth, cardHeight, 2, 2, 'FD');
-        doc.addImage(qr, 'PNG', x + (cardWidth - qrSize) / 2, y + 2.5, qrSize, qrSize);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.setTextColor(15, 23, 42);
-        doc.text(this.truncate(item.code || '-', 25), x + 3.5, y + 28, { maxWidth: cardWidth - 7 });
-        doc.setFontSize(7);
-        doc.text(this.truncate((item.name || '-').toUpperCase(), 38), x + 3.5, y + 32.5, { maxWidth: cardWidth - 7 });
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(6.5);
-        doc.setTextColor(71, 85, 105);
-        doc.text(this.truncate(`${item.brand || '-'} / ${item.model || '-'}`, 42), x + 3.5, y + 36.5, { maxWidth: cardWidth - 7 });
-        doc.text(this.truncate(`SERIE: ${item.serial || '-'}`, 42), x + 3.5, y + 40.5, { maxWidth: cardWidth - 7 });
-        doc.text(this.truncate(`ÁREA: ${item.areaName || '-'}`, 42), x + 3.5, y + 44.5, { maxWidth: cardWidth - 7 });
-        doc.setFontSize(5.8);
-        doc.setTextColor(143, 50, 55);
-        doc.text('INBIHOSPITALARIO', x + 3.5, y + 48);
-
-        this.qrProgressCompleted = index + 1;
-        this.cdr.detectChanges();
-        if ((index + 1) % 8 === 0) {
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        }
-      }
+      const doc = exportFormat.value === 'a4'
+        ? await this.buildA4QrPdf(JsPdfConstructor, targets, operationId, clientName)
+        : await this.buildBrotherQrPdf(JsPdfConstructor, targets, operationId, clientName, exportFormat);
 
       if (operationId !== this.qrOperationId) return;
       const date = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota' }).format(new Date());
       const clientPart = this.safeFilename(clientName);
-      doc.save(`codigos-qr-${clientPart}-${date}.pdf`);
-      this.qrSuccess = `PDF generado con ${targets.length} código${targets.length === 1 ? '' : 's'} QR.`;
+      const formatPart = exportFormat.value === 'a4'
+        ? 'a4'
+        : `brother-${exportFormat.tapeWidthMm}mm`;
+      doc.save(`codigos-qr-${clientPart}-${formatPart}-${date}.pdf`);
+      this.qrSuccess = exportFormat.value === 'a4'
+        ? `PDF A4 generado con ${targets.length} código${targets.length === 1 ? '' : 's'} QR.`
+        : `${targets.length} etiqueta${targets.length === 1 ? '' : 's'} Brother de ${exportFormat.tapeWidthMm} mm generada${targets.length === 1 ? '' : 's'}.`;
     } catch (error) {
       console.error('No se pudo generar el PDF de códigos QR.', error);
       if (operationId === this.qrOperationId) {
@@ -551,6 +547,167 @@ export class InventarioComponent {
         this.qrGenerationMode = null;
         this.cdr.detectChanges();
       }
+    }
+  }
+
+  private async buildA4QrPdf(
+    JsPdfConstructor: any,
+    targets: InventoryPanelItem[],
+    operationId: number,
+    clientName: string
+  ): Promise<any> {
+    const doc = new JsPdfConstructor({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 10;
+    const gap = 3;
+    const columns = 3;
+    const rowsPerPage = 5;
+    const cardsPerPage = columns * rowsPerPage;
+    const cardWidth = (pageWidth - margin * 2 - gap * (columns - 1)) / columns;
+    const cardHeight = 50;
+    const qrSize = 21;
+    const totalPages = Math.ceil(targets.length / cardsPerPage);
+
+    const drawPageFrame = (page: number) => {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(143, 50, 55);
+      doc.text('CÓDIGOS QR DE INVENTARIO BIOMÉDICO', margin, 9);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text(this.truncate(clientName.toUpperCase(), 82), margin, 14);
+      doc.text(`PÁGINA ${page} DE ${totalPages}`, pageWidth - margin, pageHeight - 5, { align: 'right' });
+      doc.text('GENERADO POR INBIHOSPITALARIO', margin, pageHeight - 5);
+    };
+
+    drawPageFrame(1);
+    for (let index = 0; index < targets.length; index += 1) {
+      if (operationId !== this.qrOperationId) return doc;
+      const item = targets[index];
+      const position = index % cardsPerPage;
+      if (index > 0 && position === 0) {
+        doc.addPage();
+        drawPageFrame(Math.floor(index / cardsPerPage) + 1);
+      }
+
+      const col = position % columns;
+      const row = Math.floor(position / columns);
+      const x = margin + col * (cardWidth + gap);
+      const y = 18 + row * (cardHeight + gap);
+      const qr = await this.createQrDataUrl(item, 300);
+      if (operationId !== this.qrOperationId) return doc;
+
+      doc.setDrawColor(203, 213, 225);
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(x, y, cardWidth, cardHeight, 2, 2, 'FD');
+      doc.addImage(qr, 'PNG', x + (cardWidth - qrSize) / 2, y + 2.5, qrSize, qrSize);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(15, 23, 42);
+      doc.text(this.truncate(item.code || '-', 25), x + 3.5, y + 28, { maxWidth: cardWidth - 7 });
+      doc.setFontSize(7);
+      doc.text(this.truncate((item.name || '-').toUpperCase(), 38), x + 3.5, y + 32.5, { maxWidth: cardWidth - 7 });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text(this.truncate(`${item.brand || '-'} / ${item.model || '-'}`, 42), x + 3.5, y + 36.5, { maxWidth: cardWidth - 7 });
+      doc.text(this.truncate(`SERIE: ${item.serial || '-'}`, 42), x + 3.5, y + 40.5, { maxWidth: cardWidth - 7 });
+      doc.text(this.truncate(`CLIENTE: ${clientName.toUpperCase()}`, 42), x + 3.5, y + 44.5, { maxWidth: cardWidth - 7 });
+      doc.setFontSize(5.8);
+      doc.setTextColor(143, 50, 55);
+      doc.text('INBIHOSPITALARIO', x + 3.5, y + 48);
+
+      await this.reportQrProgress(index, targets.length);
+    }
+    return doc;
+  }
+
+  private async buildBrotherQrPdf(
+    JsPdfConstructor: any,
+    targets: InventoryPanelItem[],
+    operationId: number,
+    clientName: string,
+    format: QrExportFormatOption
+  ): Promise<any> {
+    const tapeWidth = format.tapeWidthMm;
+    const labelLength = format.labelLengthMm;
+    const qrSize = format.qrSizeMm;
+    if (!tapeWidth || !labelLength || !qrSize) {
+      throw new Error('El formato Brother seleccionado no es válido.');
+    }
+
+    const doc = new JsPdfConstructor({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: [labelLength, tapeWidth],
+      compress: true,
+      precision: 4
+    });
+    doc.setProperties({
+      title: `Etiquetas QR ${clientName}`,
+      subject: `Brother PT-P700 - cinta TZe ${tapeWidth} mm`,
+      creator: 'INBIHOSPITALARIO'
+    });
+
+    for (let index = 0; index < targets.length; index += 1) {
+      if (operationId !== this.qrOperationId) return doc;
+      if (index > 0) doc.addPage([labelLength, tapeWidth], 'landscape');
+
+      const item = targets[index];
+      const qr = await this.createQrDataUrl(item, 720, 'M', 2, '#000000');
+      if (operationId !== this.qrOperationId) return doc;
+
+      const qrX = 1.2;
+      const qrY = (tapeWidth - qrSize) / 2;
+      const textX = qrX + qrSize + (tapeWidth <= 12 ? 1.4 : 2.2);
+      const textWidth = labelLength - textX - 1.5;
+      const compact = tapeWidth <= 12;
+      const medium = tapeWidth === 18;
+
+      doc.setFillColor(255, 255, 255);
+      doc.rect(0, 0, labelLength, tapeWidth, 'F');
+      doc.setTextColor(0, 0, 0);
+      doc.addImage(qr, 'PNG', qrX, qrY, qrSize, qrSize);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.15);
+      doc.line(textX - (compact ? 0.7 : 1.1), 1.2, textX - (compact ? 0.7 : 1.1), tapeWidth - 1.2);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(compact ? 7.2 : medium ? 9 : 10.5);
+      doc.text(this.truncate((item.code || 'SIN CÓDIGO').toUpperCase(), compact ? 20 : 28), textX, compact ? 3.7 : medium ? 4.6 : 4.9, { maxWidth: textWidth });
+      doc.setFontSize(compact ? 5.1 : medium ? 6.5 : 7.3);
+      doc.text(this.truncate((item.name || 'EQUIPO SIN NOMBRE').toUpperCase(), compact ? 31 : 42), textX, compact ? 6.4 : medium ? 8.1 : 8.3, { maxWidth: textWidth });
+
+      doc.setFont('helvetica', 'normal');
+      if (!compact) {
+        doc.setFontSize(medium ? 5.3 : 6.1);
+        doc.text(this.truncate(`${item.brand || '-'} / ${item.model || '-'}`.toUpperCase(), medium ? 46 : 55), textX, medium ? 11.2 : 11.6, { maxWidth: textWidth });
+        doc.text(this.truncate(`SERIE: ${(item.serial || '-').toUpperCase()}`, medium ? 46 : 55), textX, medium ? 14 : 14.7, { maxWidth: textWidth });
+      } else {
+        doc.setFontSize(4.4);
+        doc.text(this.truncate(`SERIE: ${(item.serial || '-').toUpperCase()}`, 33), textX, 8.8, { maxWidth: textWidth });
+      }
+
+      if (tapeWidth >= 24) {
+        doc.setFontSize(4.8);
+        doc.text(this.truncate(clientName.toUpperCase(), 62), textX, 17.6, { maxWidth: textWidth });
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(compact ? 3.7 : medium ? 4.2 : 4.7);
+      doc.text('INBIHOSPITALARIO', textX, compact ? 10.4 : medium ? 16.5 : 20.4, { maxWidth: textWidth });
+
+      await this.reportQrProgress(index, targets.length);
+    }
+    return doc;
+  }
+
+  private async reportQrProgress(index: number, total: number): Promise<void> {
+    this.qrProgressCompleted = index + 1;
+    this.cdr.detectChanges();
+    if ((index + 1) % 8 === 0 && index + 1 < total) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   }
 
@@ -600,14 +757,20 @@ export class InventarioComponent {
     this.qrProgressTotal = 0;
   }
 
-  private async createQrDataUrl(item: InventoryPanelItem, width: number): Promise<string> {
+  private async createQrDataUrl(
+    item: InventoryPanelItem,
+    width: number,
+    errorCorrectionLevel: 'M' | 'Q' = 'Q',
+    margin = 3,
+    darkColor = '#0f172a'
+  ): Promise<string> {
     const qrCode = await this.loadQrCodeApi();
     return qrCode.toDataURL(this.qrPayload(item), {
-      errorCorrectionLevel: 'Q',
-      margin: 3,
+      errorCorrectionLevel,
+      margin,
       width,
       color: {
-        dark: '#0f172a',
+        dark: darkColor,
         light: '#ffffff'
       }
     });
@@ -633,13 +796,7 @@ export class InventarioComponent {
 
   private qrPayload(item: InventoryPanelItem): string {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const params = new URLSearchParams({
-      clientId: this.selectedClientId,
-      assetId: item.id,
-      code: item.code || '',
-      source: 'qr'
-    });
-    return `${origin}/mantenimiento?${params.toString()}`;
+    return `${origin}/q/${encodeURIComponent(item.id)}`;
   }
 
   private normalize(value: string | null | undefined): string {

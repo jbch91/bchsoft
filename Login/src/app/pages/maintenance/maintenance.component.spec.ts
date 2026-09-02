@@ -316,6 +316,43 @@ describe('maintenance report modal flow', () => {
     expect(component.viewMode).toBe('reportes');
   });
 
+  it('abre el equipo desde la ruta QR compacta', async () => {
+    const auth = {
+      hasRole: (role: string | string[]) => Array.isArray(role)
+        ? role.includes('ingeniero_biomedico')
+        : role === 'ingeniero_biomedico',
+      hasPermission: () => true,
+      currentUser: () => ({ id: 'engineer-1', clientId: 'client-1' })
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      auth as never,
+      {} as never,
+      {} as never,
+      { detectChanges: vi.fn() } as never,
+      {
+        snapshot: {
+          data: { assetCategory: 'biomedical' },
+          paramMap: { get: (name: string) => name === 'assetId' ? 'asset-qr' : null }
+        }
+      } as never
+    );
+    component.selectedClientId = 'client-1';
+    component.assets = [{
+      id: 'asset-qr',
+      code: 'EQ-QR-001',
+      name: 'MONITOR',
+      serial: 'SERIE-QR',
+      status: 'operativo'
+    }];
+
+    await component.applyRouteIntent({ get: () => null } as never);
+
+    expect(component.requestAssetId).toBe('asset-qr');
+    expect(component.viewMode).toBe('crear_solicitud');
+    expect(component.successMessage).toContain('EQ-QR-001');
+  });
+
   it('permite al ingeniero autor corregir un preventivo mientras sigue pendiente de firma', () => {
     const auth = {
       hasRole: (role: string) => role === 'ingeniero_biomedico',

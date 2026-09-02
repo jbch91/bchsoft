@@ -218,6 +218,15 @@
       </ng-template>
 
       <footer class="qr-modal-footer">
+        <div class="qr-export-control" *ngIf="!qrGenerating">
+          <label>
+            <span>Formato de impresión</span>
+            <select [(ngModel)]="qrExportFormat" aria-describedby="qr-format-description">
+              <option *ngFor="let format of qrExportFormats" [value]="format.value">{{ format.label }}</option>
+            </select>
+          </label>
+          <small id="qr-format-description">{{ selectedQrExportFormat.description }}</small>
+        </div>
         <div class="qr-progress" *ngIf="qrGenerating && qrGenerationMode === 'pdf'">
           <progress [value]="qrProgressCompleted" [max]="qrProgressTotal || 1"></progress>
           <span>{{ qrProgressCompleted }} de {{ qrProgressTotal }}</span>
@@ -235,7 +244,7 @@
             [disabled]="qrGenerating || qrExportItems.length === 0"
             (click)="downloadQrPdf()"
           >
-            {{ qrGenerationMode === 'pdf' ? 'Generando PDF...' : 'Descargar PDF (' + qrExportItems.length + ')' }}
+            {{ qrExportButtonLabel }}
           </button>
         </div>
       </footer>

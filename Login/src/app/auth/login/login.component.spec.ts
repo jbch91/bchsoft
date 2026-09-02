@@ -25,7 +25,7 @@ function createComponent(returnUrl: string | null) {
 
 describe('LoginComponent return URL', () => {
   it('conserva el equipo de un código QR después del inicio de sesión', () => {
-    const returnUrl = '/mantenimiento?clientId=client-1&assetId=asset-1&source=qr';
+    const returnUrl = '/q/asset-1';
     const component = createComponent(returnUrl);
 
     expect((component as any).postLoginRoute()).toBe(returnUrl);

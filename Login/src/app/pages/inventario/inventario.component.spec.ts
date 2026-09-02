@@ -2,10 +2,52 @@ import { describe, expect, it, vi } from 'vitest';
 import { InventarioComponent } from './inventario.component';
 
 const qrToDataUrl = vi.hoisted(() => vi.fn().mockResolvedValue('data:image/png;base64,qr'));
+const pdfMocks = vi.hoisted(() => {
+  const instances: any[] = [];
+  class FakePdf {
+    readonly options: any;
+    readonly texts: string[] = [];
+    readonly addedPages: any[] = [];
+    savedFilename = '';
+    internal: any;
+
+    constructor(options: any) {
+      this.options = options;
+      const [width, height] = Array.isArray(options.format) ? options.format : [210, 297];
+      this.internal = {
+        pageSize: {
+          getWidth: () => width,
+          getHeight: () => height
+        }
+      };
+      instances.push(this);
+    }
+
+    setFont() {}
+    setFontSize() {}
+    setTextColor() {}
+    setDrawColor() {}
+    setFillColor() {}
+    setLineWidth() {}
+    setProperties() {}
+    roundedRect() {}
+    rect() {}
+    addImage() {}
+    line() {}
+    text(value: string) { this.texts.push(value); }
+    addPage(...args: any[]) { this.addedPages.push(args); }
+    save(filename: string) { this.savedFilename = filename; }
+  }
+  return { FakePdf, instances };
+});
 
 vi.mock('qrcode', () => ({
   toDataURL: qrToDataUrl,
   default: { toDataURL: qrToDataUrl }
+}));
+
+vi.mock('jspdf', () => ({
+  jsPDF: pdfMocks.FakePdf
 }));
 
 function inventoryItem(id: string, areaName = 'URGENCIAS') {
@@ -171,10 +213,10 @@ describe('InventarioComponent QR flow', () => {
 
     const [payload, options] = qrToDataUrl.mock.calls[0];
     const url = new URL(payload);
-    expect(url.pathname).toBe('/mantenimiento');
-    expect(url.searchParams.get('clientId')).toBe('client-1');
-    expect(url.searchParams.get('assetId')).toBe('001');
-    expect(url.searchParams.get('source')).toBe('qr');
+    expect(url.pathname).toBe('/q/001');
+    expect(url.search).toBe('');
+    expect(url.searchParams.has('area')).toBe(false);
+    expect(url.searchParams.has('location')).toBe(false);
     expect(options).toMatchObject({
       errorCorrectionLevel: 'Q',
       margin: 3,
@@ -193,5 +235,49 @@ describe('InventarioComponent QR flow', () => {
     expect(component.qrSelectedItems).toHaveLength(65);
     component.setQrPage(3);
     expect(component.qrPagedItems).toHaveLength(5);
+  });
+
+  it('ofrece formatos Brother compatibles y prioriza la cinta de 18 mm', () => {
+    const component = createQrComponent();
+
+    expect(component.qrExportFormat).toBe('brother-18');
+    expect(component.qrExportFormats.map((format) => format.value)).toEqual([
+      'a4',
+      'brother-12',
+      'brother-18',
+      'brother-24'
+    ]);
+    expect(component.selectedQrExportFormat.tapeWidthMm).toBe(18);
+    expect(component.qrExportFormats.slice(1).map((format) => format.qrSizeMm)).toEqual([
+      9.5,
+      14.5,
+      17.5
+    ]);
+    expect(component.qrExportFormats.find((format) => format.value === 'brother-12')?.description)
+      .toContain('confirma la lectura');
+  });
+
+  it('genera etiquetas Brother con página exacta y sin ubicación impresa', async () => {
+    qrToDataUrl.mockClear();
+    pdfMocks.instances.length = 0;
+    const component = createQrComponent();
+    await component.init();
+    component.items = [inventoryItem('001'), inventoryItem('002')];
+    component.qrExportFormat = 'brother-18';
+
+    await component.downloadQrPdf();
+
+    const pdf = pdfMocks.instances[0];
+    expect(pdf.options).toMatchObject({ orientation: 'landscape', unit: 'mm', format: [68, 18] });
+    expect(pdf.addedPages).toEqual([[[68, 18], 'landscape']]);
+    expect(pdf.texts.join(' ')).toContain('EQ-001');
+    expect(pdf.texts.join(' ')).not.toContain('ÁREA');
+    expect(pdf.texts.join(' ')).not.toContain('CUBÍCULO');
+    expect(pdf.savedFilename).toContain('brother-18mm');
+    expect(qrToDataUrl).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: 720
+    }));
   });
 });

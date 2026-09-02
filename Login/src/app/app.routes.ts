@@ -128,6 +128,12 @@ export const routes: Routes = [
     data: biomedicalRouteData('guias_rapidas')
   },
   {
+    path: 'q/:assetId',
+    loadComponent: () => import('./pages/maintenance/maintenance.component').then((m) => m.MaintenanceComponent),
+    canActivate: [accessGuard],
+    data: biomedicalRouteData('reportes_mantenimiento')
+  },
+  {
     path: 'mantenimiento',
     loadComponent: () => import('./pages/maintenance/maintenance.component').then((m) => m.MaintenanceComponent),
     canActivate: [accessGuard],

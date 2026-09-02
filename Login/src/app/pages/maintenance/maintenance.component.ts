@@ -705,7 +705,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     const view = params.get('view');
     const requestId = params.get('requestId');
     const reportId = params.get('reportId');
-    const assetId = params.get('assetId');
+    const assetId = params.get('assetId') || this.route.snapshot.paramMap?.get('assetId');
     const assetCode = params.get('code');
     const clientId = params.get('clientId');
 
