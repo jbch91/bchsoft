@@ -56,7 +56,7 @@ export class LoginComponent implements OnInit, OnDestroy {
     this.sessionMessage = '';
     this.isSubmitting = true;
     try {
-      const result = await this.auth.login(this.username.trim(), this.password.trim());
+      const result = await this.auth.login(this.username.trim(), this.password);
 
       if (result.ok) {
         void this.router.navigateByUrl(this.postLoginRoute());

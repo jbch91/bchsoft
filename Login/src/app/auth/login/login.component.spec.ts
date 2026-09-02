@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LoginComponent } from './login.component';
 
-function createComponent(returnUrl: string | null) {
+function createComponent(returnUrl: string | null, login = vi.fn()) {
   const auth = {
+    login,
     currentUser: () => ({ clientId: 'client-1' }),
     hasRole: () => false,
     hasPermission: () => false,
@@ -41,5 +42,18 @@ describe('LoginComponent return URL', () => {
     const component = createComponent('/login?returnUrl=%2Flogin');
 
     expect((component as any).postLoginRoute()).toBe('/dashboard');
+  });
+});
+
+describe('LoginComponent credentials', () => {
+  it('limpia el usuario sin modificar la contraseña', async () => {
+    const login = vi.fn().mockResolvedValue({ ok: false, message: 'Credenciales inválidas' });
+    const component = createComponent(null, login);
+    component.username = '  LABORATORIO  ';
+    component.password = ' ClaveConEspacio1 ';
+
+    await component.onSubmit();
+
+    expect(login).toHaveBeenCalledWith('LABORATORIO', ' ClaveConEspacio1 ');
   });
 });

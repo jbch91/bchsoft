@@ -206,11 +206,17 @@ async function loadClientSubscription(clientId) {
 }
 
 export async function authenticateUser(username, password) {
+  const normalizedUsername = typeof username === 'string' ? username.trim() : '';
+  if (!normalizedUsername || typeof password !== 'string') {
+    return null;
+  }
+
   const { rows } = await query(
     `SELECT id, username, display_name, password_hash, is_active, client_id
      FROM users
-     WHERE username = $1`,
-    [username]
+     WHERE LOWER(username) = LOWER($1)
+     LIMIT 1`,
+    [normalizedUsername]
   );
 
   const user = rows[0];
