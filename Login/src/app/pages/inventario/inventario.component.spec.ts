@@ -7,8 +7,10 @@ const pdfMocks = vi.hoisted(() => {
   class FakePdf {
     readonly options: any;
     readonly texts: string[] = [];
+    readonly textEntries: Array<{ value: string; fontSize: number }> = [];
     readonly addedPages: any[] = [];
     savedFilename = '';
+    fontSize = 0;
     internal: any;
 
     constructor(options: any) {
@@ -24,7 +26,7 @@ const pdfMocks = vi.hoisted(() => {
     }
 
     setFont() {}
-    setFontSize() {}
+    setFontSize(value: number) { this.fontSize = value; }
     setTextColor() {}
     setDrawColor() {}
     setFillColor() {}
@@ -34,7 +36,10 @@ const pdfMocks = vi.hoisted(() => {
     rect() {}
     addImage() {}
     line() {}
-    text(value: string) { this.texts.push(value); }
+    text(value: string) {
+      this.texts.push(value);
+      this.textEntries.push({ value, fontSize: this.fontSize });
+    }
     addPage(...args: any[]) { this.addedPages.push(args); }
     save(filename: string) { this.savedFilename = filename; }
   }
@@ -271,6 +276,10 @@ describe('InventarioComponent QR flow', () => {
     expect(pdf.options).toMatchObject({ orientation: 'landscape', unit: 'mm', format: [68, 18] });
     expect(pdf.addedPages).toEqual([[[68, 18], 'landscape']]);
     expect(pdf.texts.join(' ')).toContain('EQ-001');
+    expect(pdf.texts.join(' ')).toContain('BIOMEDICAL SOLUTIONS BCH SAS');
+    expect(pdf.texts.join(' ')).toContain('SOFTWARE BIOMÉDICO INBIHOSPITALARIO');
+    expect(pdf.textEntries.find((entry: any) => entry.value === 'BIOMEDICAL SOLUTIONS BCH SAS')?.fontSize).toBe(4.2);
+    expect(pdf.textEntries.find((entry: any) => entry.value === 'SOFTWARE BIOMÉDICO INBIHOSPITALARIO')?.fontSize).toBe(3);
     expect(pdf.texts.join(' ')).not.toContain('ÁREA');
     expect(pdf.texts.join(' ')).not.toContain('CUBÍCULO');
     expect(pdf.savedFilename).toContain('brother-18mm');

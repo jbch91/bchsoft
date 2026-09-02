@@ -71,7 +71,7 @@ export class InventarioComponent {
     {
       value: 'brother-18',
       label: 'Brother TZe 18 mm · compacta',
-      description: 'Compatible con PT-P700. Incluye QR, código, equipo, marca, modelo y serie.',
+      description: 'Compatible con PT-P700. Incluye QR, equipo, datos técnicos y cliente.',
       tapeWidthMm: 18,
       labelLengthMm: 68,
       qrSizeMm: 14.5
@@ -579,7 +579,8 @@ export class InventarioComponent {
       doc.setTextColor(71, 85, 105);
       doc.text(this.truncate(clientName.toUpperCase(), 82), margin, 14);
       doc.text(`PÁGINA ${page} DE ${totalPages}`, pageWidth - margin, pageHeight - 5, { align: 'right' });
-      doc.text('GENERADO POR INBIHOSPITALARIO', margin, pageHeight - 5);
+      doc.setFontSize(5.5);
+      doc.text('SOFTWARE BIOMÉDICO INBIHOSPITALARIO', margin, pageHeight - 5);
     };
 
     drawPageFrame(1);
@@ -614,10 +615,14 @@ export class InventarioComponent {
       doc.setTextColor(71, 85, 105);
       doc.text(this.truncate(`${item.brand || '-'} / ${item.model || '-'}`, 42), x + 3.5, y + 36.5, { maxWidth: cardWidth - 7 });
       doc.text(this.truncate(`SERIE: ${item.serial || '-'}`, 42), x + 3.5, y + 40.5, { maxWidth: cardWidth - 7 });
-      doc.text(this.truncate(`CLIENTE: ${clientName.toUpperCase()}`, 42), x + 3.5, y + 44.5, { maxWidth: cardWidth - 7 });
-      doc.setFontSize(5.8);
-      doc.setTextColor(143, 50, 55);
-      doc.text('INBIHOSPITALARIO', x + 3.5, y + 48);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.2);
+      doc.setTextColor(15, 23, 42);
+      doc.text(this.truncate(clientName.toUpperCase(), 42), x + 3.5, y + 44.5, { maxWidth: cardWidth - 7 });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(4.4);
+      doc.setTextColor(100, 116, 139);
+      doc.text('SOFTWARE BIOMÉDICO INBIHOSPITALARIO', x + 3.5, y + 48, { maxWidth: cardWidth - 7 });
 
       await this.reportQrProgress(index, targets.length);
     }
@@ -665,6 +670,59 @@ export class InventarioComponent {
       const textWidth = labelLength - textX - 1.5;
       const compact = tapeWidth <= 12;
       const medium = tapeWidth === 18;
+      const layout = compact
+        ? {
+            codeY: 3.2,
+            codeSize: 6.5,
+            codeChars: 18,
+            nameY: 5.5,
+            nameSize: 4.6,
+            nameChars: 28,
+            detailsSize: 3.8,
+            detailsChars: 31,
+            brandY: 0,
+            serialY: 7.4,
+            clientY: 9,
+            clientSize: 3.4,
+            clientChars: 30,
+            softwareY: 10.4,
+            softwareSize: 2.4
+          }
+        : medium
+          ? {
+              codeY: 3.8,
+              codeSize: 8.3,
+              codeChars: 28,
+              nameY: 6.7,
+              nameSize: 5.8,
+              nameChars: 42,
+              detailsSize: 4.7,
+              detailsChars: 46,
+              brandY: 9.2,
+              serialY: 11.6,
+              clientY: 14.1,
+              clientSize: 4.2,
+              clientChars: 48,
+              softwareY: 16.2,
+              softwareSize: 3
+            }
+          : {
+              codeY: 4.7,
+              codeSize: 10,
+              codeChars: 28,
+              nameY: 7.7,
+              nameSize: 7,
+              nameChars: 42,
+              detailsSize: 5.8,
+              detailsChars: 55,
+              brandY: 10.8,
+              serialY: 13.7,
+              clientY: 17,
+              clientSize: 5.1,
+              clientChars: 62,
+              softwareY: 19.8,
+              softwareSize: 3.5
+            };
 
       doc.setFillColor(255, 255, 255);
       doc.rect(0, 0, labelLength, tapeWidth, 'F');
@@ -675,28 +733,25 @@ export class InventarioComponent {
       doc.line(textX - (compact ? 0.7 : 1.1), 1.2, textX - (compact ? 0.7 : 1.1), tapeWidth - 1.2);
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(compact ? 7.2 : medium ? 9 : 10.5);
-      doc.text(this.truncate((item.code || 'SIN CÓDIGO').toUpperCase(), compact ? 20 : 28), textX, compact ? 3.7 : medium ? 4.6 : 4.9, { maxWidth: textWidth });
-      doc.setFontSize(compact ? 5.1 : medium ? 6.5 : 7.3);
-      doc.text(this.truncate((item.name || 'EQUIPO SIN NOMBRE').toUpperCase(), compact ? 31 : 42), textX, compact ? 6.4 : medium ? 8.1 : 8.3, { maxWidth: textWidth });
+      doc.setFontSize(layout.codeSize);
+      doc.text(this.truncate((item.code || 'SIN CÓDIGO').toUpperCase(), layout.codeChars), textX, layout.codeY, { maxWidth: textWidth });
+      doc.setFontSize(layout.nameSize);
+      doc.text(this.truncate((item.name || 'EQUIPO SIN NOMBRE').toUpperCase(), layout.nameChars), textX, layout.nameY, { maxWidth: textWidth });
 
       doc.setFont('helvetica', 'normal');
       if (!compact) {
-        doc.setFontSize(medium ? 5.3 : 6.1);
-        doc.text(this.truncate(`${item.brand || '-'} / ${item.model || '-'}`.toUpperCase(), medium ? 46 : 55), textX, medium ? 11.2 : 11.6, { maxWidth: textWidth });
-        doc.text(this.truncate(`SERIE: ${(item.serial || '-').toUpperCase()}`, medium ? 46 : 55), textX, medium ? 14 : 14.7, { maxWidth: textWidth });
-      } else {
-        doc.setFontSize(4.4);
-        doc.text(this.truncate(`SERIE: ${(item.serial || '-').toUpperCase()}`, 33), textX, 8.8, { maxWidth: textWidth });
+        doc.setFontSize(layout.detailsSize);
+        doc.text(this.truncate(`${item.brand || '-'} / ${item.model || '-'}`.toUpperCase(), layout.detailsChars), textX, layout.brandY, { maxWidth: textWidth });
       }
+      doc.setFontSize(layout.detailsSize);
+      doc.text(this.truncate(`SERIE: ${(item.serial || '-').toUpperCase()}`, layout.detailsChars), textX, layout.serialY, { maxWidth: textWidth });
 
-      if (tapeWidth >= 24) {
-        doc.setFontSize(4.8);
-        doc.text(this.truncate(clientName.toUpperCase(), 62), textX, 17.6, { maxWidth: textWidth });
-      }
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(compact ? 3.7 : medium ? 4.2 : 4.7);
-      doc.text('INBIHOSPITALARIO', textX, compact ? 10.4 : medium ? 16.5 : 20.4, { maxWidth: textWidth });
+      doc.setFontSize(layout.clientSize);
+      doc.text(this.truncate(clientName.toUpperCase(), layout.clientChars), textX, layout.clientY, { maxWidth: textWidth });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(layout.softwareSize);
+      doc.text('SOFTWARE BIOMÉDICO INBIHOSPITALARIO', textX, layout.softwareY, { maxWidth: textWidth });
 
       await this.reportQrProgress(index, targets.length);
     }
