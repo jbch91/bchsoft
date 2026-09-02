@@ -1782,11 +1782,16 @@
           <p>El preventivo conserva su cierre documental; la instalación se registra en un correctivo independiente.</p>
         </div>
         <span class="report-total-badge">
-          {{ pendingSpareCount }} equipo{{ pendingSpareCount === 1 ? '' : 's' }}
+          {{ visiblePendingSpareCases.length }} equipo{{ visiblePendingSpareCases.length === 1 ? '' : 's' }}
         </span>
       </div>
 
-      <div class="table spare-list" *ngIf="pendingSpareCases.length">
+      <div class="spare-focus-bar" *ngIf="spareAssetFocusId">
+        <span>Mostrando el equipo identificado por QR</span>
+        <button type="button" class="ghost" (click)="clearSpareAssetFocus()">Ver todos ({{ pendingSpareCount }})</button>
+      </div>
+
+      <div class="table spare-list" *ngIf="visiblePendingSpareCases.length">
         <div class="row header">
           <span>Equipo</span>
           <span>Ubicación</span>
@@ -1795,7 +1800,7 @@
           <span>Acciones</span>
         </div>
 
-        <div class="row spare-list-row" *ngFor="let item of pendingSpareCases">
+        <div class="row spare-list-row" *ngFor="let item of visiblePendingSpareCases">
           <span data-label="Equipo" class="spare-equipment-cell">
             <span class="spare-cell-content">
               <strong>{{ item.asset.code }} - {{ item.asset.name }}</strong>
@@ -1858,8 +1863,8 @@
           </span>
         </div>
       </div>
-      <p class="empty" *ngIf="pendingSpareCases.length === 0">
-        No hay equipos pendientes por repuestos.
+      <p class="empty" *ngIf="visiblePendingSpareCases.length === 0">
+        {{ spareAssetFocusId ? 'Este equipo ya no tiene repuestos pendientes.' : 'No hay equipos pendientes por repuestos.' }}
       </p>
     </div>
   </ng-container>

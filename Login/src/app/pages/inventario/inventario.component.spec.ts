@@ -253,6 +253,8 @@ describe('InventarioComponent QR flow', () => {
       'brother-24'
     ]);
     expect(component.selectedQrExportFormat.tapeWidthMm).toBe(18);
+    expect(component.selectedQrExportFormat.minLabelLengthMm).toBe(52);
+    expect(component.selectedQrExportFormat.maxLabelLengthMm).toBe(92);
     expect(component.qrExportFormats.slice(1).map((format) => format.qrSizeMm)).toEqual([
       9.5,
       14.5,
@@ -273,8 +275,12 @@ describe('InventarioComponent QR flow', () => {
     await component.downloadQrPdf();
 
     const pdf = pdfMocks.instances[0];
-    expect(pdf.options).toMatchObject({ orientation: 'landscape', unit: 'mm', format: [68, 18] });
-    expect(pdf.addedPages).toEqual([[[68, 18], 'landscape']]);
+    const [labelLength, tapeWidth] = pdf.options.format;
+    expect(pdf.options).toMatchObject({ orientation: 'landscape', unit: 'mm' });
+    expect(tapeWidth).toBe(18);
+    expect(labelLength).toBeGreaterThanOrEqual(52);
+    expect(labelLength).toBeLessThan(68);
+    expect(pdf.addedPages).toEqual([[[labelLength, 18], 'landscape']]);
     expect(pdf.texts.join(' ')).toContain('EQ-001');
     expect(pdf.texts.join(' ')).toContain('BIOMEDICAL SOLUTIONS BCH SAS');
     expect(pdf.texts.join(' ')).toContain('SOFTWARE BIOMÉDICO INBIHOSPITALARIO');
@@ -288,5 +294,28 @@ describe('InventarioComponent QR flow', () => {
       margin: 2,
       width: 720
     }));
+  });
+
+  it('amplía solo la etiqueta que necesita espacio para un nombre extenso', async () => {
+    qrToDataUrl.mockClear();
+    pdfMocks.instances.length = 0;
+    const component = createQrComponent();
+    await component.init();
+    const shortItem = inventoryItem('001');
+    const longItem = {
+      ...inventoryItem('002'),
+      name: 'SISTEMA AUTOMATIZADO DE MONITORIZACIÓN MULTIPARAMÉTRICA PARA CUIDADO CRÍTICO'
+    };
+    component.items = [shortItem, longItem];
+    component.qrExportFormat = 'brother-18';
+
+    await component.downloadQrPdf();
+
+    const pdf = pdfMocks.instances[0];
+    const shortLength = pdf.options.format[0];
+    const longLength = pdf.addedPages[0][0][0];
+    expect(longLength).toBeGreaterThan(shortLength);
+    expect(longLength).toBeLessThanOrEqual(92);
+    expect(pdf.texts).toContain(longItem.name.slice(0, 67) + '…');
   });
 });

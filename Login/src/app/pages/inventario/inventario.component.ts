@@ -30,8 +30,31 @@ interface QrExportFormatOption {
   label: string;
   description: string;
   tapeWidthMm?: number;
-  labelLengthMm?: number;
+  minLabelLengthMm?: number;
+  maxLabelLengthMm?: number;
   qrSizeMm?: number;
+}
+
+interface BrotherLabelLayout {
+  codeY: number;
+  codeSize: number;
+  codeMinSize: number;
+  codeChars: number;
+  nameY: number;
+  nameSize: number;
+  nameMinSize: number;
+  nameChars: number;
+  detailsSize: number;
+  detailsMinSize: number;
+  detailsChars: number;
+  brandY: number;
+  serialY: number;
+  clientY: number;
+  clientSize: number;
+  clientMinSize: number;
+  clientChars: number;
+  softwareY: number;
+  softwareSize: number;
 }
 
 @Component({
@@ -63,25 +86,28 @@ export class InventarioComponent {
     {
       value: 'brother-12',
       label: 'Brother TZe 12 mm · prueba',
-      description: 'Etiqueta mínima. Imprime una unidad y confirma la lectura antes de generar el lote.',
+      description: 'Etiqueta mínima con largo automático. Imprime una unidad y confirma la lectura.',
       tapeWidthMm: 12,
-      labelLengthMm: 52,
+      minLabelLengthMm: 40,
+      maxLabelLengthMm: 72,
       qrSizeMm: 9.5
     },
     {
       value: 'brother-18',
       label: 'Brother TZe 18 mm · compacta',
-      description: 'Compatible con PT-P700. Incluye QR, equipo, datos técnicos y cliente.',
+      description: 'Compatible con PT-P700. El largo se ajusta al contenido de cada equipo.',
       tapeWidthMm: 18,
-      labelLengthMm: 68,
+      minLabelLengthMm: 52,
+      maxLabelLengthMm: 92,
       qrSizeMm: 14.5
     },
     {
       value: 'brother-24',
       label: 'Brother TZe 24 mm · recomendada',
-      description: 'Mayor tamaño de QR y mejor tolerancia de lectura para uso hospitalario.',
+      description: 'Mayor tamaño de QR y largo automático para nombres extensos.',
       tapeWidthMm: 24,
-      labelLengthMm: 78,
+      minLabelLengthMm: 58,
+      maxLabelLengthMm: 108,
       qrSizeMm: 17.5
     }
   ];
@@ -637,16 +663,31 @@ export class InventarioComponent {
     format: QrExportFormatOption
   ): Promise<any> {
     const tapeWidth = format.tapeWidthMm;
-    const labelLength = format.labelLengthMm;
+    const minLabelLength = format.minLabelLengthMm;
+    const maxLabelLength = format.maxLabelLengthMm;
     const qrSize = format.qrSizeMm;
-    if (!tapeWidth || !labelLength || !qrSize) {
+    if (!tapeWidth || !minLabelLength || !maxLabelLength || !qrSize) {
       throw new Error('El formato Brother seleccionado no es válido.');
     }
+
+    const compact = tapeWidth <= 12;
+    const layout = this.brotherLabelLayout(tapeWidth);
+    const qrX = 1.2;
+    const textX = qrX + qrSize + (compact ? 1.4 : 2.2);
+    const labelLengths = targets.map((item) => this.brotherLabelLength(
+      item,
+      clientName,
+      textX,
+      minLabelLength,
+      maxLabelLength,
+      layout,
+      compact
+    ));
 
     const doc = new JsPdfConstructor({
       orientation: 'landscape',
       unit: 'mm',
-      format: [labelLength, tapeWidth],
+      format: [labelLengths[0], tapeWidth],
       compress: true,
       precision: 4
     });
@@ -658,71 +699,27 @@ export class InventarioComponent {
 
     for (let index = 0; index < targets.length; index += 1) {
       if (operationId !== this.qrOperationId) return doc;
+      const labelLength = labelLengths[index];
       if (index > 0) doc.addPage([labelLength, tapeWidth], 'landscape');
 
       const item = targets[index];
       const qr = await this.createQrDataUrl(item, 720, 'M', 2, '#000000');
       if (operationId !== this.qrOperationId) return doc;
 
-      const qrX = 1.2;
       const qrY = (tapeWidth - qrSize) / 2;
-      const textX = qrX + qrSize + (tapeWidth <= 12 ? 1.4 : 2.2);
-      const textWidth = labelLength - textX - 1.5;
-      const compact = tapeWidth <= 12;
-      const medium = tapeWidth === 18;
-      const layout = compact
-        ? {
-            codeY: 3.2,
-            codeSize: 6.5,
-            codeChars: 18,
-            nameY: 5.5,
-            nameSize: 4.6,
-            nameChars: 28,
-            detailsSize: 3.8,
-            detailsChars: 31,
-            brandY: 0,
-            serialY: 7.4,
-            clientY: 9,
-            clientSize: 3.4,
-            clientChars: 30,
-            softwareY: 10.4,
-            softwareSize: 2.4
-          }
-        : medium
-          ? {
-              codeY: 3.8,
-              codeSize: 8.3,
-              codeChars: 28,
-              nameY: 6.7,
-              nameSize: 5.8,
-              nameChars: 42,
-              detailsSize: 4.7,
-              detailsChars: 46,
-              brandY: 9.2,
-              serialY: 11.6,
-              clientY: 14.1,
-              clientSize: 4.2,
-              clientChars: 48,
-              softwareY: 16.2,
-              softwareSize: 3
-            }
-          : {
-              codeY: 4.7,
-              codeSize: 10,
-              codeChars: 28,
-              nameY: 7.7,
-              nameSize: 7,
-              nameChars: 42,
-              detailsSize: 5.8,
-              detailsChars: 55,
-              brandY: 10.8,
-              serialY: 13.7,
-              clientY: 17,
-              clientSize: 5.1,
-              clientChars: 62,
-              softwareY: 19.8,
-              softwareSize: 3.5
-            };
+      const textWidth = labelLength - textX - 1.8;
+      const codeText = this.truncate((item.code || 'SIN CÓDIGO').toUpperCase(), layout.codeChars);
+      const nameText = this.truncate((item.name || 'EQUIPO SIN NOMBRE').toUpperCase(), layout.nameChars);
+      const brandModelText = this.truncate(
+        `${item.brand || '-'} / ${item.model || '-'}`.toUpperCase(),
+        layout.detailsChars
+      );
+      const serialText = this.truncate(
+        `SERIE: ${(item.serial || '-').toUpperCase()}`,
+        layout.detailsChars
+      );
+      const clientText = this.truncate(clientName.toUpperCase(), layout.clientChars);
+      const softwareText = 'SOFTWARE BIOMÉDICO INBIHOSPITALARIO';
 
       doc.setFillColor(255, 255, 255);
       doc.rect(0, 0, labelLength, tapeWidth, 'F');
@@ -733,29 +730,195 @@ export class InventarioComponent {
       doc.line(textX - (compact ? 0.7 : 1.1), 1.2, textX - (compact ? 0.7 : 1.1), tapeWidth - 1.2);
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(layout.codeSize);
-      doc.text(this.truncate((item.code || 'SIN CÓDIGO').toUpperCase(), layout.codeChars), textX, layout.codeY, { maxWidth: textWidth });
-      doc.setFontSize(layout.nameSize);
-      doc.text(this.truncate((item.name || 'EQUIPO SIN NOMBRE').toUpperCase(), layout.nameChars), textX, layout.nameY, { maxWidth: textWidth });
+      doc.setFontSize(this.brotherFittedFontSize(codeText, layout.codeSize, layout.codeMinSize, textWidth, true));
+      doc.text(codeText, textX, layout.codeY, { maxWidth: textWidth });
+      doc.setFontSize(this.brotherFittedFontSize(nameText, layout.nameSize, layout.nameMinSize, textWidth, true));
+      doc.text(nameText, textX, layout.nameY, { maxWidth: textWidth });
 
       doc.setFont('helvetica', 'normal');
       if (!compact) {
-        doc.setFontSize(layout.detailsSize);
-        doc.text(this.truncate(`${item.brand || '-'} / ${item.model || '-'}`.toUpperCase(), layout.detailsChars), textX, layout.brandY, { maxWidth: textWidth });
+        doc.setFontSize(this.brotherFittedFontSize(
+          brandModelText,
+          layout.detailsSize,
+          layout.detailsMinSize,
+          textWidth
+        ));
+        doc.text(brandModelText, textX, layout.brandY, { maxWidth: textWidth });
       }
-      doc.setFontSize(layout.detailsSize);
-      doc.text(this.truncate(`SERIE: ${(item.serial || '-').toUpperCase()}`, layout.detailsChars), textX, layout.serialY, { maxWidth: textWidth });
+      doc.setFontSize(this.brotherFittedFontSize(
+        serialText,
+        layout.detailsSize,
+        layout.detailsMinSize,
+        textWidth
+      ));
+      doc.text(serialText, textX, layout.serialY, { maxWidth: textWidth });
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(layout.clientSize);
-      doc.text(this.truncate(clientName.toUpperCase(), layout.clientChars), textX, layout.clientY, { maxWidth: textWidth });
+      doc.setFontSize(this.brotherFittedFontSize(
+        clientText,
+        layout.clientSize,
+        layout.clientMinSize,
+        textWidth,
+        true
+      ));
+      doc.text(clientText, textX, layout.clientY, { maxWidth: textWidth });
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(layout.softwareSize);
-      doc.text('SOFTWARE BIOMÉDICO INBIHOSPITALARIO', textX, layout.softwareY, { maxWidth: textWidth });
+      doc.setFontSize(this.brotherFittedFontSize(
+        softwareText,
+        layout.softwareSize,
+        Math.max(2, layout.softwareSize - 0.5),
+        textWidth
+      ));
+      doc.text(softwareText, textX, layout.softwareY, { maxWidth: textWidth });
 
       await this.reportQrProgress(index, targets.length);
     }
     return doc;
+  }
+
+  private brotherLabelLayout(tapeWidth: number): BrotherLabelLayout {
+    if (tapeWidth <= 12) {
+      return {
+        codeY: 3.2,
+        codeSize: 6.5,
+        codeMinSize: 5.4,
+        codeChars: 24,
+        nameY: 5.5,
+        nameSize: 4.6,
+        nameMinSize: 3.8,
+        nameChars: 42,
+        detailsSize: 3.8,
+        detailsMinSize: 3.2,
+        detailsChars: 40,
+        brandY: 0,
+        serialY: 7.4,
+        clientY: 9,
+        clientSize: 3.4,
+        clientMinSize: 2.8,
+        clientChars: 42,
+        softwareY: 10.4,
+        softwareSize: 2.4
+      };
+    }
+    if (tapeWidth === 18) {
+      return {
+        codeY: 3.8,
+        codeSize: 8.3,
+        codeMinSize: 7,
+        codeChars: 32,
+        nameY: 6.7,
+        nameSize: 5.8,
+        nameMinSize: 4.8,
+        nameChars: 68,
+        detailsSize: 4.7,
+        detailsMinSize: 4,
+        detailsChars: 62,
+        brandY: 9.2,
+        serialY: 11.6,
+        clientY: 14.1,
+        clientSize: 4.2,
+        clientMinSize: 3.5,
+        clientChars: 62,
+        softwareY: 16.2,
+        softwareSize: 3
+      };
+    }
+    return {
+      codeY: 4.7,
+      codeSize: 10,
+      codeMinSize: 8.5,
+      codeChars: 36,
+      nameY: 7.7,
+      nameSize: 7,
+      nameMinSize: 5.6,
+      nameChars: 76,
+      detailsSize: 5.8,
+      detailsMinSize: 4.8,
+      detailsChars: 72,
+      brandY: 10.8,
+      serialY: 13.7,
+      clientY: 17,
+      clientSize: 5.1,
+      clientMinSize: 4.3,
+      clientChars: 72,
+      softwareY: 19.8,
+      softwareSize: 3.5
+    };
+  }
+
+  private brotherLabelLength(
+    item: InventoryPanelItem,
+    clientName: string,
+    textX: number,
+    minLength: number,
+    maxLength: number,
+    layout: BrotherLabelLayout,
+    compact: boolean
+  ): number {
+    const lines = [
+      {
+        text: this.truncate((item.code || 'SIN CÓDIGO').toUpperCase(), layout.codeChars),
+        size: layout.codeSize,
+        bold: true
+      },
+      {
+        text: this.truncate((item.name || 'EQUIPO SIN NOMBRE').toUpperCase(), layout.nameChars),
+        size: layout.nameSize,
+        bold: true
+      },
+      ...(!compact
+        ? [{
+            text: this.truncate(`${item.brand || '-'} / ${item.model || '-'}`.toUpperCase(), layout.detailsChars),
+            size: layout.detailsSize,
+            bold: false
+          }]
+        : []),
+      {
+        text: this.truncate(`SERIE: ${(item.serial || '-').toUpperCase()}`, layout.detailsChars),
+        size: layout.detailsSize,
+        bold: false
+      },
+      {
+        text: this.truncate(clientName.toUpperCase(), layout.clientChars),
+        size: layout.clientSize,
+        bold: true
+      },
+      {
+        text: 'SOFTWARE BIOMÉDICO INBIHOSPITALARIO',
+        size: layout.softwareSize,
+        bold: false
+      }
+    ];
+    const contentWidth = Math.max(
+      ...lines.map((line) => this.estimatedPdfTextWidthMm(line.text, line.size, line.bold))
+    );
+    const desiredLength = textX + contentWidth + 1.8;
+    const clampedLength = Math.min(maxLength, Math.max(minLength, desiredLength));
+    return Math.ceil(clampedLength * 2) / 2;
+  }
+
+  private brotherFittedFontSize(
+    value: string,
+    preferredSize: number,
+    minimumSize: number,
+    availableWidth: number,
+    bold = false
+  ): number {
+    const preferredWidth = this.estimatedPdfTextWidthMm(value, preferredSize, bold);
+    if (!preferredWidth || preferredWidth <= availableWidth) return preferredSize;
+    const fitted = preferredSize * (availableWidth / preferredWidth);
+    return Math.round(Math.max(minimumSize, fitted) * 10) / 10;
+  }
+
+  private estimatedPdfTextWidthMm(value: string, fontSizePt: number, bold = false): number {
+    const units = Array.from(value).reduce((total, character) => {
+      if (/\s/.test(character)) return total + 0.28;
+      if (/[MW@%#ÁÉÍÓÚÜÑ]/i.test(character)) return total + 0.78;
+      if (/[I1l|.,:;!'`/\\\-]/.test(character)) return total + 0.32;
+      if (/[A-Z0-9]/i.test(character)) return total + 0.6;
+      return total + 0.52;
+    }, 0);
+    return units * fontSizePt * 0.352778 * (bold ? 1.03 : 1);
   }
 
   private async reportQrProgress(index: number, total: number): Promise<void> {

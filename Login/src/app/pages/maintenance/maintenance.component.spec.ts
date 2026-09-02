@@ -353,6 +353,77 @@ describe('maintenance report modal flow', () => {
     expect(component.successMessage).toContain('EQ-QR-001');
   });
 
+  it('abre desde el QR el preventivo exacto del equipo', async () => {
+    const auth = {
+      hasRole: (role: string | string[]) => Array.isArray(role)
+        ? role.includes('ingeniero_biomedico')
+        : role === 'ingeniero_biomedico',
+      hasPermission: (permission: string) => permission === 'maintenance:report:create',
+      currentUser: () => ({ id: 'engineer-1', clientId: 'client-1' })
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      auth as never,
+      {} as never,
+      {} as never,
+      { detectChanges: vi.fn() } as never,
+      { snapshot: { data: { assetCategory: 'biomedical' }, paramMap: { get: () => null } } } as never
+    );
+    component.selectedClientId = 'client-1';
+    component.assets = [{ id: 'asset-1', code: 'EQ-001', name: 'MONITOR', status: 'operativo' }];
+    component.assetMap = new Map([['asset-1', component.assets[0]]]);
+    component.requests = [{
+      id: 'preventive-1',
+      client_id: 'client-1',
+      asset_id: 'asset-1',
+      type: 'preventivo',
+      requested_by: 'system',
+      status: 'abierto',
+      source: 'cronograma',
+      created_at: '2026-09-01T10:00:00.000Z'
+    }];
+    const openPreventive = vi.spyOn(component, 'startPreventiveReport').mockResolvedValue();
+    const values: Record<string, string> = {
+      view: 'preventivos',
+      requestId: 'preventive-1',
+      assetId: 'asset-1',
+      qrAction: 'preventive'
+    };
+
+    await component.applyRouteIntent({ get: (name: string) => values[name] ?? null } as never);
+
+    expect(component.viewMode).toBe('preventivos');
+    expect(component.preventiveSearchTerm).toContain('EQ-001');
+    expect(openPreventive).toHaveBeenCalledWith(component.requests[0]);
+  });
+
+  it('muestra al responsable solo las solicitudes del equipo leído por QR', async () => {
+    const auth = {
+      hasRole: (role: string | string[]) => Array.isArray(role)
+        ? role.includes('responsable_area')
+        : role === 'responsable_area',
+      hasPermission: () => true,
+      currentUser: () => ({ id: 'responsable-1', clientId: 'client-1' })
+    };
+    const component = new MaintenanceComponent(
+      {} as never,
+      auth as never,
+      {} as never,
+      {} as never,
+      { detectChanges: vi.fn() } as never,
+      { snapshot: { data: { assetCategory: 'biomedical' }, paramMap: { get: () => null } } } as never
+    );
+    component.selectedClientId = 'client-1';
+    component.assets = [{ id: 'asset-1', code: 'EQ-001', name: 'MONITOR', status: 'operativo' }];
+    component.assetMap = new Map([['asset-1', component.assets[0]]]);
+    const values: Record<string, string> = { view: 'solicitudes', assetId: 'asset-1' };
+
+    await component.applyRouteIntent({ get: (name: string) => values[name] ?? null } as never);
+
+    expect(component.viewMode).toBe('solicitudes');
+    expect(component.requestSearchTerm).toBe('EQ-001 MONITOR');
+  });
+
   it('permite al ingeniero autor corregir un preventivo mientras sigue pendiente de firma', () => {
     const auth = {
       hasRole: (role: string) => role === 'ingeniero_biomedico',

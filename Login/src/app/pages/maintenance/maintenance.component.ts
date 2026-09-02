@@ -413,6 +413,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reports: MaintenanceReportDto[] = [];
   requestSearchTerm = '';
   requestStatusFilter = '';
+  spareAssetFocusId = '';
   reportSearchTerm = '';
   reportStatusFilter = '';
   reportSpareFilter = '';
@@ -705,6 +706,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     const view = params.get('view');
     const requestId = params.get('requestId');
     const reportId = params.get('reportId');
+    const qrAction = params.get('qrAction');
     const assetId = params.get('assetId') || this.route.snapshot.paramMap?.get('assetId');
     const assetCode = params.get('code');
     const clientId = params.get('clientId');
@@ -714,12 +716,46 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       await this.loadData();
     }
 
-    if ((assetId || assetCode) && !this.isAreaResponsible) {
+    if (assetId || assetCode) {
       if (!this.assets.length && this.selectedClientId) {
         await this.loadData();
       }
       const found = this.selectAssetFromCode(assetId || assetCode || '');
-      if (found) {
+      const routeAsset = found ? this.selectedRequestAsset : null;
+
+      if (routeAsset && view === 'solicitudes') {
+        this.viewMode = 'solicitudes';
+        this.requestSearchTerm = `${routeAsset.code} ${routeAsset.name}`;
+        this.scrollToTop();
+        return;
+      }
+
+      if (routeAsset && view === 'preventivos' && qrAction === 'preventive' && requestId) {
+        this.viewMode = 'preventivos';
+        this.preventivePhaseView = 'work';
+        this.preventiveSearchTerm = `${routeAsset.code} ${routeAsset.name}`;
+        const preventiveRequest = this.requests.find((request) =>
+          request.id === requestId
+          && request.asset_id === routeAsset.id
+          && request.type === 'preventivo'
+        );
+        if (!preventiveRequest) {
+          this.errorMessage = 'El preventivo ya no está disponible para este equipo.';
+          this.scrollToPreventiveProgrammed();
+          return;
+        }
+        if (!this.canTakeRequest(preventiveRequest)) {
+          this.errorMessage = preventiveRequest.assigned_name
+            ? `El preventivo está asignado a ${preventiveRequest.assigned_name}.`
+            : 'El preventivo no está disponible para iniciar en este momento.';
+          this.scrollToPreventiveProgrammed();
+          return;
+        }
+        await this.startPreventiveReport(preventiveRequest);
+        return;
+      }
+
+      if (routeAsset && !view && !this.isAreaResponsible) {
         this.viewMode = 'crear_solicitud';
         this.requestType = 'correctivo';
         this.scrollToTop();
@@ -765,6 +801,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     }
     if (view === 'repuestos' && !this.isAreaResponsible) {
       this.viewMode = 'repuestos';
+      this.spareAssetFocusId = assetId || '';
       if (requestId) {
         const report = this.sparePartReports.find((item) => item.request_id === requestId);
         if (report) {
@@ -2487,6 +2524,15 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   get pendingSpareCount(): number {
     return this.pendingSpareCases.length;
+  }
+
+  get visiblePendingSpareCases(): PendingSpareCase[] {
+    if (!this.spareAssetFocusId) return this.pendingSpareCases;
+    return this.pendingSpareCases.filter((item) => item.asset.id === this.spareAssetFocusId);
+  }
+
+  clearSpareAssetFocus(): void {
+    this.spareAssetFocusId = '';
   }
 
   assignedEngineerLabel(request: MaintenanceRequestDto): string {

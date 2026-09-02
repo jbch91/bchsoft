@@ -129,7 +129,7 @@ export const routes: Routes = [
   },
   {
     path: 'q/:assetId',
-    loadComponent: () => import('./pages/maintenance/maintenance.component').then((m) => m.MaintenanceComponent),
+    loadComponent: () => import('./pages/asset-qr/asset-qr.component').then((m) => m.AssetQrComponent),
     canActivate: [accessGuard],
     data: biomedicalRouteData('reportes_mantenimiento')
   },

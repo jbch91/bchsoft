@@ -1,0 +1,211 @@
+<section class="qr-action-page">
+  <div class="qr-toolbar">
+    <button type="button" class="quiet-button" (click)="openInventory()">Inventario</button>
+    <span>IDENTIFICACIÓN QR</span>
+    <button type="button" class="quiet-button" (click)="openMaintenance()">Mantenimiento</button>
+  </div>
+
+  <div class="qr-loading" *ngIf="loading" role="status">
+    <span></span>
+    Consultando equipo...
+  </div>
+
+  <div class="qr-error" *ngIf="!loading && errorMessage && !asset" role="alert">
+    <strong>No fue posible abrir este equipo</strong>
+    <p>{{ errorMessage }}</p>
+  </div>
+
+  <ng-container *ngIf="!loading && asset as currentAsset">
+    <header class="asset-identity-band">
+      <div class="asset-photo">
+        <img
+          *ngIf="photoUrl"
+          [src]="photoUrl!"
+          [alt]="'Fotografía de ' + currentAsset.code + ' - ' + currentAsset.name"
+          (error)="photoFailed = true"
+        />
+        <span *ngIf="!photoUrl">SIN FOTO</span>
+      </div>
+
+      <div class="asset-main-copy">
+        <span class="asset-code">{{ currentAsset.code }}</span>
+        <h1>{{ currentAsset.name }}</h1>
+        <p>{{ currentAsset.brand || 'SIN MARCA' }} · {{ currentAsset.model || 'SIN MODELO' }} · SERIE {{ currentAsset.serial || '-' }}</p>
+      </div>
+
+      <div class="asset-state" [attr.data-state]="currentAsset.status || 'sin_estado'">
+        <span>ESTADO ACTUAL</span>
+        <strong>{{ statusLabel(currentAsset.status) }}</strong>
+      </div>
+    </header>
+
+    <div class="asset-location-band">
+      <div><span>SEDE</span><strong>{{ currentAsset.siteName || 'SIN SEDE' }}</strong></div>
+      <div><span>ÁREA</span><strong>{{ currentAsset.areaName || 'SIN ÁREA' }}</strong></div>
+      <div><span>UBICACIÓN</span><strong>{{ currentAsset.locationName || 'SIN UBICACIÓN' }}</strong></div>
+    </div>
+
+    <div class="qr-success" *ngIf="successMessage" role="status">{{ successMessage }}</div>
+    <div class="qr-error compact" *ngIf="errorMessage" role="alert">{{ errorMessage }}</div>
+
+    <main class="qr-decision-workspace">
+      <div class="decision-heading">
+        <span>{{ roleLabel }}</span>
+        <h2>¿Qué necesitas hacer con este equipo?</h2>
+      </div>
+
+      <section class="role-action-panel" *ngIf="isEngineer">
+        <ng-container *ngIf="activeCorrectiveRequest as corrective; else engineerPreventive">
+          <div class="recommended-action corrective">
+            <div>
+              <span>ACCIÓN PRIORITARIA</span>
+              <h3>{{ requestStatusLabel(corrective.status) }}</h3>
+              <p>{{ corrective.description || 'Correctivo activo para este equipo.' }}</p>
+              <small *ngIf="corrective.assigned_name">ASIGNADO A {{ corrective.assigned_name }}</small>
+            </div>
+            <button type="button" (click)="openExistingCorrective()">
+              {{ corrective.status === 'espera_repuesto' ? 'Ver repuesto' : corrective.status === 'reportado' ? 'Ver reporte' : 'Abrir correctivo' }}
+            </button>
+          </div>
+        </ng-container>
+
+        <ng-template #engineerPreventive>
+          <div class="recommended-action preventive" *ngIf="actionablePreventiveItem as preventive; else engineerPendingPreventive">
+            <div>
+              <span>PREVENTIVO DEL PERIODO</span>
+              <h3>{{ preventiveStatusLabel(preventive) }}</h3>
+              <p>VENTANA {{ formatDate(preventive.planned_date) }} - {{ formatDate(preventive.deadline_date) }}</p>
+            </div>
+            <button type="button" (click)="openPreventive()">
+              {{ preventive.phase === 'in_progress' ? 'Continuar preventivo' : 'Realizar preventivo' }}
+            </button>
+          </div>
+        </ng-template>
+
+        <ng-template #engineerPendingPreventive>
+          <div class="recommended-action neutral" *ngIf="currentPreventiveItem as preventive; else engineerNoAction">
+            <div>
+              <span>PREVENTIVO DEL PERIODO</span>
+              <h3>{{ preventiveStatusLabel(preventive) }}</h3>
+              <p>Consulta el estado documental registrado para este equipo.</p>
+            </div>
+            <button
+              type="button"
+              class="secondary-button"
+              *ngIf="preventive.phase === 'waiting_spare'; else preventiveReportAction"
+              (click)="openSpareCase(currentPreventiveRequest)"
+            >Ver repuesto</button>
+            <ng-template #preventiveReportAction>
+              <button type="button" class="secondary-button" *ngIf="currentPreventiveReport" (click)="openPreventiveReport()">Ver reporte</button>
+            </ng-template>
+          </div>
+        </ng-template>
+
+        <ng-template #engineerNoAction>
+          <div class="recommended-action neutral">
+            <div>
+              <span>SIN ACCIÓN PENDIENTE</span>
+              <h3>Equipo disponible para consulta</h3>
+              <p>No hay correctivos activos ni un preventivo por realizar en el periodo actual.</p>
+            </div>
+            <button type="button" class="secondary-button" (click)="openMaintenance()">Abrir mantenimiento</button>
+          </div>
+        </ng-template>
+      </section>
+
+      <section class="role-action-panel" *ngIf="isAreaReporter">
+        <div class="recommended-action corrective" *ngIf="activeCorrectiveRequest as corrective; else areaCanReport">
+          <div>
+            <span>CASO YA REGISTRADO</span>
+            <h3>{{ requestStatusLabel(corrective.status) }}</h3>
+            <p>{{ corrective.description || 'Ya existe una solicitud correctiva para este equipo.' }}</p>
+          </div>
+          <button type="button" (click)="openExistingCorrective()">
+            {{ activeCorrectiveReport ? 'Ver reporte' : 'Ver solicitud' }}
+          </button>
+        </div>
+        <ng-template #areaCanReport>
+          <div class="recommended-action neutral" *ngIf="!requestFormOpen">
+            <div>
+              <span>REPORTE DEL ÁREA</span>
+              <h3>Reportar una falla</h3>
+              <p>La solicitud quedará asociada a este equipo, área y ubicación.</p>
+            </div>
+            <button type="button" [disabled]="!canCreateCorrective" (click)="openRequestForm()">Crear solicitud</button>
+          </div>
+        </ng-template>
+      </section>
+
+      <section class="role-action-panel" *ngIf="isWarehouse">
+        <div class="recommended-action spare" *ngIf="hasPendingSpare; else warehouseCorrective">
+          <div>
+            <span>REPUESTO PENDIENTE</span>
+            <h3>Consultar requerimiento</h3>
+            <p>Abre el caso técnico y el repuesto solicitado para este equipo.</p>
+          </div>
+          <button type="button" (click)="openSpareCase()">Ver repuesto</button>
+        </div>
+        <ng-template #warehouseCorrective>
+          <div class="recommended-action corrective" *ngIf="activeCorrectiveRequest as corrective; else warehouseCanReport">
+            <div>
+              <span>CASO YA REGISTRADO</span>
+              <h3>{{ requestStatusLabel(corrective.status) }}</h3>
+              <p>{{ corrective.description || 'Ya existe una solicitud correctiva para este equipo.' }}</p>
+            </div>
+            <button type="button" (click)="openExistingCorrective()">Ver solicitud</button>
+          </div>
+        </ng-template>
+        <ng-template #warehouseCanReport>
+          <div class="recommended-action neutral" *ngIf="!requestFormOpen">
+            <div>
+              <span>OPERACIÓN DE ALMACÉN</span>
+              <h3>Consultar o reportar el equipo</h3>
+              <p>Registra una falla si el equipo requiere revisión de ingeniería biomédica.</p>
+            </div>
+            <button type="button" [disabled]="!canCreateCorrective" (click)="openRequestForm()">Reportar falla</button>
+          </div>
+        </ng-template>
+      </section>
+
+      <form class="quick-request-form" *ngIf="requestFormOpen" (ngSubmit)="createCorrectiveRequest()">
+        <div>
+          <span>SOLICITUD CORRECTIVA</span>
+          <h3>Describe la falla encontrada</h3>
+        </div>
+        <label>
+          Falla o necesidad
+          <textarea
+            [(ngModel)]="requestDescription"
+            name="requestDescription"
+            rows="4"
+            maxlength="1000"
+            placeholder="Ejemplo: el equipo no enciende y presenta alarma al conectarlo..."
+          ></textarea>
+          <small>{{ requestDescription.trim().length }}/1000 · MÍNIMO 10 CARACTERES</small>
+        </label>
+        <div class="form-actions">
+          <button type="button" class="secondary-button" [disabled]="requestSaving" (click)="closeRequestForm()">Cancelar</button>
+          <button type="submit" [disabled]="!canSubmitCorrective">
+            {{ requestSaving ? 'Enviando...' : 'Enviar solicitud' }}
+          </button>
+        </div>
+      </form>
+
+      <section class="role-action-panel" *ngIf="!isEngineer && !isAreaReporter && !isWarehouse">
+        <div class="recommended-action neutral">
+          <div>
+            <span>CONSULTA</span>
+            <h3>Equipo identificado</h3>
+            <p>Abre el inventario o el módulo de mantenimiento según tu permiso.</p>
+          </div>
+          <button type="button" class="secondary-button" (click)="openInventory()">Ver inventario</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="qr-secondary-actions">
+      <button type="button" class="secondary-button" (click)="openInventory()">Ver en inventario</button>
+      <button type="button" class="secondary-button" (click)="openMaintenance()">Ir a mantenimiento</button>
+    </footer>
+  </ng-container>
+</section>

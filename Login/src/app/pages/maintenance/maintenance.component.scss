@@ -1269,6 +1269,27 @@ button:disabled {
   margin-top: 4px;
 }
 
+.spare-focus-bar {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 7px 10px 7px 12px;
+  border-left: 3px solid #8f3237;
+  background: #fff7f7;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.spare-focus-bar button {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+
 .spare-list .row {
   grid-template-columns:
     minmax(180px, 1.15fr)
@@ -3186,6 +3207,11 @@ button:disabled {
 
   .spare-list-actions .spare-open-report {
     grid-column: auto;
+  }
+
+  .spare-focus-bar {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .card {
