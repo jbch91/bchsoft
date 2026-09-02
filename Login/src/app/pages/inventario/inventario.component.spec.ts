@@ -7,10 +7,17 @@ const pdfMocks = vi.hoisted(() => {
   class FakePdf {
     readonly options: any;
     readonly texts: string[] = [];
-    readonly textEntries: Array<{ value: string; fontSize: number }> = [];
+    readonly textEntries: Array<{
+      value: string;
+      fontSize: number;
+      x: number;
+      y: number;
+      options: any;
+    }> = [];
     readonly addedPages: any[] = [];
     savedFilename = '';
     fontSize = 0;
+    fontStyle = 'normal';
     internal: any;
 
     constructor(options: any) {
@@ -25,8 +32,12 @@ const pdfMocks = vi.hoisted(() => {
       instances.push(this);
     }
 
-    setFont() {}
+    setFont(_: string, style = 'normal') { this.fontStyle = style; }
     setFontSize(value: number) { this.fontSize = value; }
+    getTextWidth(value: string) {
+      const weightFactor = this.fontStyle === 'bold' ? 1.04 : 1;
+      return Array.from(value).length * this.fontSize * 0.19 * weightFactor;
+    }
     setTextColor() {}
     setDrawColor() {}
     setFillColor() {}
@@ -36,9 +47,9 @@ const pdfMocks = vi.hoisted(() => {
     rect() {}
     addImage() {}
     line() {}
-    text(value: string) {
+    text(value: string, x: number, y: number, options?: any) {
       this.texts.push(value);
-      this.textEntries.push({ value, fontSize: this.fontSize });
+      this.textEntries.push({ value, fontSize: this.fontSize, x, y, options });
     }
     addPage(...args: any[]) { this.addedPages.push(args); }
     save(filename: string) { this.savedFilename = filename; }
@@ -274,7 +285,7 @@ describe('InventarioComponent QR flow', () => {
 
     await component.downloadQrPdf();
 
-    const pdf = pdfMocks.instances[0];
+    const pdf = pdfMocks.instances.at(-1);
     const [labelLength, tapeWidth] = pdf.options.format;
     expect(pdf.options).toMatchObject({ orientation: 'landscape', unit: 'mm' });
     expect(tapeWidth).toBe(18);
@@ -311,11 +322,37 @@ describe('InventarioComponent QR flow', () => {
 
     await component.downloadQrPdf();
 
-    const pdf = pdfMocks.instances[0];
+    const pdf = pdfMocks.instances.at(-1);
     const shortLength = pdf.options.format[0];
     const longLength = pdf.addedPages[0][0][0];
     expect(longLength).toBeGreaterThan(shortLength);
     expect(longLength).toBeLessThanOrEqual(92);
     expect(pdf.texts).toContain(longItem.name.slice(0, 67) + '…');
+  });
+
+  it('mantiene el nombre y la marca modelo en líneas independientes sin superposición', async () => {
+    qrToDataUrl.mockClear();
+    pdfMocks.instances.length = 0;
+    const component = createQrComponent();
+    await component.init();
+    const item = {
+      ...inventoryItem('003'),
+      name: 'EQUIPO DE ÓRGANOS DE PARED',
+      brand: 'WELCH ALLYN',
+      model: 'GREEN SERIES 777'
+    };
+    component.items = [item];
+    component.qrExportFormat = 'brother-18';
+
+    await component.downloadQrPdf();
+
+    const pdf = pdfMocks.instances.at(-1);
+    const nameLine = pdf.textEntries.find((entry: any) => entry.value === item.name);
+    const modelLine = pdf.textEntries.find((entry: any) => entry.value === 'WELCH ALLYN / GREEN SERIES 777');
+    expect(nameLine).toBeTruthy();
+    expect(modelLine).toBeTruthy();
+    expect(nameLine.options?.maxWidth).toBeUndefined();
+    expect(modelLine.options?.maxWidth).toBeUndefined();
+    expect(modelLine.y - nameLine.y).toBeGreaterThanOrEqual(2.4);
   });
 });

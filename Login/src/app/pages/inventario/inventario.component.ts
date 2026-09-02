@@ -57,6 +57,11 @@ interface BrotherLabelLayout {
   softwareSize: number;
 }
 
+interface PdfSingleLine {
+  text: string;
+  fontSize: number;
+}
+
 @Component({
   selector: 'app-inventario',
   standalone: true,
@@ -630,25 +635,58 @@ export class InventarioComponent {
       doc.setFillColor(255, 255, 255);
       doc.roundedRect(x, y, cardWidth, cardHeight, 2, 2, 'FD');
       doc.addImage(qr, 'PNG', x + (cardWidth - qrSize) / 2, y + 2.5, qrSize, qrSize);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8);
       doc.setTextColor(15, 23, 42);
-      doc.text(this.truncate(item.code || '-', 25), x + 3.5, y + 28, { maxWidth: cardWidth - 7 });
-      doc.setFontSize(7);
-      doc.text(this.truncate((item.name || '-').toUpperCase(), 38), x + 3.5, y + 32.5, { maxWidth: cardWidth - 7 });
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(6.5);
+      this.drawPdfSingleLine(doc, this.truncate(item.code || '-', 25), x + 3.5, y + 28, cardWidth - 7, 8, 6, true);
+      this.drawPdfSingleLine(
+        doc,
+        this.truncate((item.name || '-').toUpperCase(), 38),
+        x + 3.5,
+        y + 32.5,
+        cardWidth - 7,
+        7,
+        5.3,
+        true
+      );
       doc.setTextColor(71, 85, 105);
-      doc.text(this.truncate(`${item.brand || '-'} / ${item.model || '-'}`, 42), x + 3.5, y + 36.5, { maxWidth: cardWidth - 7 });
-      doc.text(this.truncate(`SERIE: ${item.serial || '-'}`, 42), x + 3.5, y + 40.5, { maxWidth: cardWidth - 7 });
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6.2);
+      this.drawPdfSingleLine(
+        doc,
+        this.truncate(`${item.brand || '-'} / ${item.model || '-'}`, 42),
+        x + 3.5,
+        y + 36.5,
+        cardWidth - 7,
+        6.5,
+        5
+      );
+      this.drawPdfSingleLine(
+        doc,
+        this.truncate(`SERIE: ${item.serial || '-'}`, 42),
+        x + 3.5,
+        y + 40.5,
+        cardWidth - 7,
+        6.5,
+        5
+      );
       doc.setTextColor(15, 23, 42);
-      doc.text(this.truncate(clientName.toUpperCase(), 42), x + 3.5, y + 44.5, { maxWidth: cardWidth - 7 });
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(4.4);
+      this.drawPdfSingleLine(
+        doc,
+        this.truncate(clientName.toUpperCase(), 42),
+        x + 3.5,
+        y + 44.5,
+        cardWidth - 7,
+        6.2,
+        4.8,
+        true
+      );
       doc.setTextColor(100, 116, 139);
-      doc.text('SOFTWARE BIOMÉDICO INBIHOSPITALARIO', x + 3.5, y + 48, { maxWidth: cardWidth - 7 });
+      this.drawPdfSingleLine(
+        doc,
+        'SOFTWARE BIOMÉDICO INBIHOSPITALARIO',
+        x + 3.5,
+        y + 48,
+        cardWidth - 7,
+        4.4,
+        3.6
+      );
 
       await this.reportQrProgress(index, targets.length);
     }
@@ -674,7 +712,15 @@ export class InventarioComponent {
     const layout = this.brotherLabelLayout(tapeWidth);
     const qrX = 1.2;
     const textX = qrX + qrSize + (compact ? 1.4 : 2.2);
+    const measurementDoc = new JsPdfConstructor({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: [maxLabelLength, tapeWidth],
+      compress: true,
+      precision: 4
+    });
     const labelLengths = targets.map((item) => this.brotherLabelLength(
+      measurementDoc,
       item,
       clientName,
       textX,
@@ -729,47 +775,67 @@ export class InventarioComponent {
       doc.setLineWidth(0.15);
       doc.line(textX - (compact ? 0.7 : 1.1), 1.2, textX - (compact ? 0.7 : 1.1), tapeWidth - 1.2);
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(this.brotherFittedFontSize(codeText, layout.codeSize, layout.codeMinSize, textWidth, true));
-      doc.text(codeText, textX, layout.codeY, { maxWidth: textWidth });
-      doc.setFontSize(this.brotherFittedFontSize(nameText, layout.nameSize, layout.nameMinSize, textWidth, true));
-      doc.text(nameText, textX, layout.nameY, { maxWidth: textWidth });
+      this.drawPdfSingleLine(
+        doc,
+        codeText,
+        textX,
+        layout.codeY,
+        textWidth,
+        layout.codeSize,
+        layout.codeMinSize,
+        true
+      );
+      this.drawPdfSingleLine(
+        doc,
+        nameText,
+        textX,
+        layout.nameY,
+        textWidth,
+        layout.nameSize,
+        layout.nameMinSize,
+        true
+      );
 
-      doc.setFont('helvetica', 'normal');
       if (!compact) {
-        doc.setFontSize(this.brotherFittedFontSize(
+        this.drawPdfSingleLine(
+          doc,
           brandModelText,
+          textX,
+          layout.brandY,
+          textWidth,
           layout.detailsSize,
-          layout.detailsMinSize,
-          textWidth
-        ));
-        doc.text(brandModelText, textX, layout.brandY, { maxWidth: textWidth });
+          layout.detailsMinSize
+        );
       }
-      doc.setFontSize(this.brotherFittedFontSize(
+      this.drawPdfSingleLine(
+        doc,
         serialText,
+        textX,
+        layout.serialY,
+        textWidth,
         layout.detailsSize,
-        layout.detailsMinSize,
-        textWidth
-      ));
-      doc.text(serialText, textX, layout.serialY, { maxWidth: textWidth });
+        layout.detailsMinSize
+      );
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(this.brotherFittedFontSize(
+      this.drawPdfSingleLine(
+        doc,
         clientText,
+        textX,
+        layout.clientY,
+        textWidth,
         layout.clientSize,
         layout.clientMinSize,
-        textWidth,
         true
-      ));
-      doc.text(clientText, textX, layout.clientY, { maxWidth: textWidth });
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(this.brotherFittedFontSize(
+      );
+      this.drawPdfSingleLine(
+        doc,
         softwareText,
+        textX,
+        layout.softwareY,
+        textWidth,
         layout.softwareSize,
-        Math.max(2, layout.softwareSize - 0.5),
-        textWidth
-      ));
-      doc.text(softwareText, textX, layout.softwareY, { maxWidth: textWidth });
+        Math.max(2, layout.softwareSize - 0.5)
+      );
 
       await this.reportQrProgress(index, targets.length);
     }
@@ -847,6 +913,7 @@ export class InventarioComponent {
   }
 
   private brotherLabelLength(
+    measurementDoc: any,
     item: InventoryPanelItem,
     clientName: string,
     textX: number,
@@ -890,24 +957,90 @@ export class InventarioComponent {
       }
     ];
     const contentWidth = Math.max(
-      ...lines.map((line) => this.estimatedPdfTextWidthMm(line.text, line.size, line.bold))
+      ...lines.map((line) => this.measuredPdfTextWidthMm(
+        measurementDoc,
+        line.text,
+        line.size,
+        line.bold
+      ))
     );
     const desiredLength = textX + contentWidth + 1.8;
     const clampedLength = Math.min(maxLength, Math.max(minLength, desiredLength));
     return Math.ceil(clampedLength * 2) / 2;
   }
 
-  private brotherFittedFontSize(
+  private drawPdfSingleLine(
+    doc: any,
+    value: string,
+    x: number,
+    y: number,
+    availableWidth: number,
+    preferredSize: number,
+    minimumSize: number,
+    bold = false
+  ): void {
+    const line = this.fitPdfSingleLine(
+      doc,
+      value,
+      preferredSize,
+      minimumSize,
+      availableWidth,
+      bold
+    );
+    doc.setFont('helvetica', bold ? 'bold' : 'normal');
+    doc.setFontSize(line.fontSize);
+    doc.text(line.text, x, y);
+  }
+
+  private fitPdfSingleLine(
+    doc: any,
     value: string,
     preferredSize: number,
     minimumSize: number,
     availableWidth: number,
+    bold: boolean
+  ): PdfSingleLine {
+    const preferredWidth = this.measuredPdfTextWidthMm(doc, value, preferredSize, bold);
+    let fontSize = preferredSize;
+    if (preferredWidth > availableWidth) {
+      fontSize = Math.max(minimumSize, preferredSize * (availableWidth / preferredWidth) * 0.98);
+      fontSize = Math.floor(fontSize * 10) / 10;
+    }
+
+    if (this.measuredPdfTextWidthMm(doc, value, fontSize, bold) <= availableWidth) {
+      return { text: value, fontSize };
+    }
+
+    const source = value.endsWith('…') ? value.slice(0, -1) : value;
+    let low = 0;
+    let high = source.length;
+    let fittedText = '…';
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const candidate = `${source.slice(0, middle).trimEnd()}…`;
+      if (this.measuredPdfTextWidthMm(doc, candidate, fontSize, bold) <= availableWidth) {
+        fittedText = candidate;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return { text: fittedText, fontSize };
+  }
+
+  private measuredPdfTextWidthMm(
+    doc: any,
+    value: string,
+    fontSizePt: number,
     bold = false
   ): number {
-    const preferredWidth = this.estimatedPdfTextWidthMm(value, preferredSize, bold);
-    if (!preferredWidth || preferredWidth <= availableWidth) return preferredSize;
-    const fitted = preferredSize * (availableWidth / preferredWidth);
-    return Math.round(Math.max(minimumSize, fitted) * 10) / 10;
+    doc.setFont('helvetica', bold ? 'bold' : 'normal');
+    doc.setFontSize(fontSizePt);
+    if (typeof doc.getTextWidth === 'function') {
+      const measured = Number(doc.getTextWidth(value));
+      if (Number.isFinite(measured) && measured >= 0) return measured;
+    }
+    return this.estimatedPdfTextWidthMm(value, fontSizePt, bold);
   }
 
   private estimatedPdfTextWidthMm(value: string, fontSizePt: number, bold = false): number {
