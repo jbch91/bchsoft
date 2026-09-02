@@ -58,13 +58,11 @@
       <div class="inventory-modal-heading qr-head">
         <div>
           <span>Identificación de equipos</span>
-          <h2 id="qr-modal-title">Códigos QR</h2>
+          <h2 id="qr-modal-title">Generar códigos QR</h2>
         </div>
         <div class="qr-heading-actions">
-          <div class="qr-counter">
-            <strong>{{ qrFilteredItems.length }}</strong>
-            <span>equipos visibles</span>
-          </div>
+          <div class="qr-heading-stat"><strong>{{ qrEligibleItems.length }}</strong><span>equipos</span></div>
+          <div class="qr-heading-stat is-selected"><strong>{{ qrSelectedItems.length }}</strong><span>seleccionados</span></div>
           <button type="button" class="icon-action ghost" title="Cerrar" aria-label="Cerrar códigos QR" (click)="closeQrModal()">×</button>
         </div>
       </div>
@@ -72,66 +70,175 @@
       <div class="qr-tools">
         <label>
           Buscar equipo
-          <input type="text" [(ngModel)]="qrSearchTerm" placeholder="Código, equipo, serie, área..." />
+          <input
+            type="search"
+            [(ngModel)]="qrSearchTerm"
+            (ngModelChange)="onQrFiltersChanged()"
+            placeholder="Código, equipo, marca o serie"
+          />
         </label>
         <label>
           Área
-          <select [(ngModel)]="qrAreaFilter">
+          <select [(ngModel)]="qrAreaFilter" (ngModelChange)="onQrFiltersChanged()">
             <option value="">Todas</option>
             <option *ngFor="let area of qrAreaOptions" [value]="area">{{ area }}</option>
           </select>
         </label>
         <label>
           Estado
-          <select [(ngModel)]="qrStatusFilter">
+          <select [(ngModel)]="qrStatusFilter" (ngModelChange)="onQrFiltersChanged()">
             <option value="">Todos</option>
-            <option *ngFor="let status of qrStatusOptions" [value]="status">{{ status }}</option>
+            <option *ngFor="let status of qrStatusOptions" [value]="status">{{ qrStatusLabel(status) }}</option>
           </select>
         </label>
-        <button type="button" class="ghost" (click)="clearQrFilters()">Limpiar</button>
-        <button type="button" class="ghost" [disabled]="qrGenerating" (click)="generateVisibleQrCodes()">
-          {{ qrGenerating ? 'Generando...' : 'Generar visibles' }}
-        </button>
-        <button type="button" class="ghost" (click)="selectAllQrFiltered()">Seleccionar visibles</button>
-        <button type="button" class="ghost" (click)="clearQrSelection()">Quitar selección</button>
-        <button type="button" class="primary" [disabled]="qrGenerating || qrFilteredItems.length === 0" (click)="downloadQrPdf()">
-          PDF {{ qrSelectedItems.length ? 'seleccionados' : 'visibles' }}
-        </button>
+        <button type="button" class="ghost qr-clear-button" (click)="clearQrFilters()">Limpiar filtros</button>
       </div>
 
-      <p class="error" *ngIf="qrError">{{ qrError }}</p>
-      <p class="success" *ngIf="qrSuccess">{{ qrSuccess }}</p>
-      <p class="muted" *ngIf="!qrFilteredItems.length">No hay equipos con esos filtros.</p>
+      <div class="qr-selection-bar">
+        <label class="qr-select-all">
+          <input type="checkbox" [checked]="qrAllFilteredSelected" (change)="toggleAllQrFiltered()" />
+          Seleccionar filtrados
+        </label>
+        <span>{{ qrFilteredItems.length }} resultados</span>
+        <span *ngIf="qrSelectedItems.length">{{ qrSelectedItems.length }} en la selección</span>
+        <button type="button" class="qr-text-action" *ngIf="qrSelectedItems.length" (click)="clearQrSelection()">Quitar selección</button>
+      </div>
 
-      <div class="qr-grid" *ngIf="qrFilteredItems.length">
-        <article class="qr-item" *ngFor="let item of qrFilteredItems">
-          <label class="qr-select">
-            <input type="checkbox" [checked]="isQrSelected(item)" (change)="toggleQrSelection(item)" />
-            Seleccionar
-          </label>
+      <div class="qr-feedback-region" [class.has-message]="qrError || qrSuccess">
+        <p class="error qr-feedback" *ngIf="qrError">{{ qrError }}</p>
+        <p class="success qr-feedback" *ngIf="qrSuccess">{{ qrSuccess }}</p>
+      </div>
 
-          <div class="qr-image">
-            <img *ngIf="qrCodes[item.id]" [src]="qrCodes[item.id]" [alt]="'QR ' + item.code" />
-            <button type="button" class="ghost" *ngIf="!qrCodes[item.id]" [disabled]="qrGenerating" (click)="generateQrCodes([item])">
-              Generar QR
-            </button>
+      <div class="qr-workspace" *ngIf="qrFilteredItems.length; else qrEmpty">
+        <section class="qr-list-panel" aria-label="Equipos disponibles para códigos QR">
+          <div class="qr-table-scroll">
+            <table class="qr-table">
+              <thead>
+                <tr>
+                  <th class="qr-check-column"><span class="sr-only">Seleccionar</span></th>
+                  <th>Equipo</th>
+                  <th class="qr-specs-column">Identificación</th>
+                  <th class="qr-location-column">Ubicación</th>
+                  <th>Estado</th>
+                  <th class="qr-action-column"><span class="sr-only">Vista previa</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  *ngFor="let item of qrPagedItems; trackBy: trackQrItem"
+                  [class.is-preview]="qrPreviewItemId === item.id"
+                >
+                  <td class="qr-check-column">
+                    <input
+                      type="checkbox"
+                      [checked]="isQrSelected(item)"
+                      [attr.aria-label]="'Seleccionar ' + item.code"
+                      (change)="toggleQrSelection(item)"
+                    />
+                  </td>
+                  <td>
+                    <button type="button" class="qr-equipment-button" (click)="previewQr(item)">
+                      <strong>{{ item.code || 'SIN CÓDIGO' }}</strong>
+                      <span>{{ item.name || 'Equipo sin nombre' }}</span>
+                    </button>
+                  </td>
+                  <td class="qr-specs-column">
+                    <span>{{ item.brand || '-' }} · {{ item.model || '-' }}</span>
+                    <small>Serie {{ item.serial || '-' }}</small>
+                  </td>
+                  <td class="qr-location-column">
+                    <span>{{ item.areaName || 'Sin área' }}</span>
+                    <small>{{ item.locationName || 'Sin ubicación' }}</small>
+                  </td>
+                  <td>
+                    <span class="qr-status" [ngClass]="qrStatusClass(item.status)">{{ qrStatusLabel(item.status) }}</span>
+                  </td>
+                  <td class="qr-action-column">
+                    <button
+                      type="button"
+                      class="ghost qr-preview-button"
+                      [class.is-active]="qrPreviewItemId === item.id"
+                      [disabled]="qrPreviewLoading && qrPreviewItemId === item.id"
+                      (click)="previewQr(item)"
+                    >
+                      {{ qrPreviewItemId === item.id ? 'Viendo' : 'Ver' }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
-          <div class="qr-info">
-            <strong>{{ item.code }}</strong>
-            <span>{{ item.name }}</span>
-            <small>{{ item.brand || '-' }} · {{ item.model || '-' }}</small>
-            <small>Serie: {{ item.serial || '-' }}</small>
-            <small>{{ item.areaName || '-' }} / {{ item.locationName || '-' }}</small>
-          </div>
+          <nav class="qr-pagination" *ngIf="qrPageCount > 1" aria-label="Paginación de equipos QR">
+            <button type="button" class="ghost" [disabled]="qrPage === 1" (click)="setQrPage(qrPage - 1)">Anterior</button>
+            <span>Página {{ qrPage }} de {{ qrPageCount }}</span>
+            <button type="button" class="ghost" [disabled]="qrPage === qrPageCount" (click)="setQrPage(qrPage + 1)">Siguiente</button>
+          </nav>
+        </section>
 
-          <div class="qr-actions">
-            <button type="button" class="ghost" [disabled]="qrGenerating" (click)="downloadQrPng(item)">
+        <aside class="qr-preview-panel" aria-live="polite">
+          <ng-container *ngIf="qrPreviewItem as item; else qrNoPreview">
+            <div class="qr-preview-heading">
+              <div>
+                <span>Vista previa</span>
+                <strong>{{ item.code || 'SIN CÓDIGO' }}</strong>
+              </div>
+              <span class="qr-status" [ngClass]="qrStatusClass(item.status)">{{ qrStatusLabel(item.status) }}</span>
+            </div>
+
+            <div class="qr-preview-image" [class.is-loading]="qrPreviewLoading">
+              <span *ngIf="qrPreviewLoading">Generando...</span>
+              <img *ngIf="qrPreviewUrl && !qrPreviewLoading" [src]="qrPreviewUrl" [alt]="'Código QR del equipo ' + item.code" />
+            </div>
+
+            <div class="qr-preview-details">
+              <strong>{{ item.name || 'Equipo sin nombre' }}</strong>
+              <span>{{ item.brand || '-' }} · {{ item.model || '-' }}</span>
+              <span>Serie {{ item.serial || '-' }}</span>
+              <small>{{ item.siteName || 'Sin sede' }} / {{ item.areaName || 'Sin área' }} / {{ item.locationName || 'Sin ubicación' }}</small>
+            </div>
+
+            <button
+              type="button"
+              class="ghost qr-download-png"
+              [disabled]="qrGenerating || qrPreviewLoading || !qrPreviewUrl"
+              (click)="downloadQrPng(item)"
+            >
               Descargar PNG
             </button>
-          </div>
-        </article>
+          </ng-container>
+          <ng-template #qrNoPreview>
+            <div class="qr-preview-empty">Sin equipo seleccionado.</div>
+          </ng-template>
+        </aside>
       </div>
+
+      <ng-template #qrEmpty>
+        <div class="qr-empty-state">No hay equipos con los filtros aplicados.</div>
+      </ng-template>
+
+      <footer class="qr-modal-footer">
+        <div class="qr-progress" *ngIf="qrGenerating && qrGenerationMode === 'pdf'">
+          <progress [value]="qrProgressCompleted" [max]="qrProgressTotal || 1"></progress>
+          <span>{{ qrProgressCompleted }} de {{ qrProgressTotal }}</span>
+        </div>
+        <span class="qr-export-summary" *ngIf="qrGenerating && qrGenerationMode === 'png'">Generando PNG...</span>
+        <span class="qr-export-summary" *ngIf="!qrGenerating">
+          {{ qrExportItems.length }} equipos {{ qrExportScopeLabel }}
+        </span>
+        <div class="qr-footer-actions">
+          <button type="button" class="ghost" *ngIf="qrGenerating" (click)="cancelQrGeneration()">Cancelar</button>
+          <button type="button" class="ghost" *ngIf="!qrGenerating" (click)="closeQrModal()">Cerrar</button>
+          <button
+            type="button"
+            class="primary"
+            [disabled]="qrGenerating || qrExportItems.length === 0"
+            (click)="downloadQrPdf()"
+          >
+            {{ qrGenerationMode === 'pdf' ? 'Generando PDF...' : 'Descargar PDF (' + qrExportItems.length + ')' }}
+          </button>
+        </div>
+      </footer>
     </section>
   </div>
 

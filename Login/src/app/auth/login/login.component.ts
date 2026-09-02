@@ -166,6 +166,9 @@ export class LoginComponent implements OnInit, OnDestroy {
   }
 
   private postLoginRoute(): string {
+    const returnUrl = this.safeReturnUrl(this.route.snapshot.queryParamMap.get('returnUrl'));
+    if (returnUrl) return returnUrl;
+
     const user = this.auth.currentUser();
     if (
       user
@@ -180,5 +183,16 @@ export class LoginComponent implements OnInit, OnDestroy {
       return '/administracion-saas';
     }
     return '/dashboard';
+  }
+
+  private safeReturnUrl(value: string | null): string | null {
+    if (!value || !value.startsWith('/') || value.startsWith('//')) return null;
+    try {
+      const target = new URL(value, window.location.origin);
+      if (target.origin !== window.location.origin || target.pathname === '/login') return null;
+      return `${target.pathname}${target.search}${target.hash}`;
+    } catch {
+      return null;
+    }
   }
 }

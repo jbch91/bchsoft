@@ -16,13 +16,15 @@ interface AccessData {
   moduleKey?: string;
 }
 
-export const accessGuard: CanActivateFn = async (route) => {
+export const accessGuard: CanActivateFn = async (route, state) => {
   const auth = inject(AuthService);
   const router = inject(Router);
   const http = inject(HttpClient);
 
   if (!auth.isAuthenticated()) {
-    return router.createUrlTree(['/login']);
+    return router.createUrlTree(['/login'], {
+      queryParams: { returnUrl: state.url }
+    });
   }
 
   const data = route.data as AccessData | undefined;
