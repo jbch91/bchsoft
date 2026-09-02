@@ -78,12 +78,16 @@ function createComponent(options: {
       : options.roles.includes(role),
     hasPermission: (permission: string) => options.permissions.includes(permission)
   };
-  const biomed = {
-    getAssetDetails: options.assetError
-      ? vi.fn().mockRejectedValue(options.assetError)
-      : vi.fn().mockResolvedValue(options.asset ?? assetDto())
+  const context = {
+    asset: options.asset ?? assetDto(),
+    requests: options.requests ?? [],
+    reports: options.reports ?? [],
+    preventive_progress: options.progress ?? null
   };
   const maintenance = {
+    getAssetQrContext: options.assetError
+      ? vi.fn().mockRejectedValue(options.assetError)
+      : vi.fn().mockResolvedValue(context),
     listRequests: vi.fn().mockResolvedValue(options.requests ?? []),
     listReports: vi.fn().mockResolvedValue(options.reports ?? []),
     getPreventiveProgress: vi.fn().mockResolvedValue(options.progress ?? null),
@@ -93,10 +97,9 @@ function createComponent(options: {
     route as never,
     router as never,
     auth as never,
-    biomed as never,
     maintenance as never
   );
-  return { component, router, biomed, maintenance };
+  return { component, router, maintenance };
 }
 
 describe('AssetQrComponent role-aware flow', () => {
@@ -236,9 +239,19 @@ describe('AssetQrComponent role-aware flow', () => {
       roles: ['responsable_area'],
       permissions: ['maintenance:request:create']
     });
-    maintenance.listRequests
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([createdRequest]);
+    maintenance.getAssetQrContext
+      .mockResolvedValueOnce({
+        asset: assetDto(),
+        requests: [],
+        reports: [],
+        preventive_progress: null
+      })
+      .mockResolvedValueOnce({
+        asset: assetDto(),
+        requests: [createdRequest],
+        reports: [],
+        preventive_progress: null
+      });
 
     await component.ngOnInit();
     component.openRequestForm();
@@ -297,5 +310,161 @@ describe('AssetQrComponent role-aware flow', () => {
 
     expect(component.asset).toBeNull();
     expect(component.errorMessage).toContain('áreas o ubicaciones autorizadas');
+  });
+
+  it('consulta un único contexto liviano sin cargar listados completos del cliente', async () => {
+    const { component, maintenance } = createComponent({
+      roles: ['ingeniero_biomedico'],
+      permissions: ['maintenance:report:create']
+    });
+
+    await component.ngOnInit();
+
+    expect(maintenance.getAssetQrContext).toHaveBeenCalledOnce();
+    expect(maintenance.getAssetQrContext).toHaveBeenCalledWith('client-1', 'asset-1');
+    expect(maintenance.listRequests).not.toHaveBeenCalled();
+    expect(maintenance.listReports).not.toHaveBeenCalled();
+    expect(maintenance.getPreventiveProgress).not.toHaveBeenCalled();
+    expect(component.loading).toBe(false);
+  });
+
+  it('sale del estado de consulta y permite reintentar cuando el servidor tarda demasiado', async () => {
+    vi.useFakeTimers();
+    try {
+      const { component, maintenance } = createComponent({
+        roles: ['ingeniero_biomedico'],
+        permissions: ['maintenance:report:create']
+      });
+      maintenance.getAssetQrContext.mockReturnValue(new Promise(() => {}));
+
+      const load = component.ngOnInit();
+      await vi.advanceTimersByTimeAsync(12000);
+      await load;
+
+      expect(component.loading).toBe(false);
+      expect(component.asset).toBeNull();
+      expect(component.errorMessage).toContain('Reintenta sin volver a escanear');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('prioriza un preventivo atrasado cuando conserva una apertura temporal activa', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-02T15:00:00.000Z'));
+    try {
+      const latePreventive = request('preventive-august', 'preventivo');
+      const { component, router } = createComponent({
+        roles: ['ingeniero_biomedico'],
+        permissions: ['maintenance:report:create'],
+        requests: [latePreventive],
+        progress: {
+          items: [{
+            id: 'item-august',
+            asset_id: 'asset-1',
+            planned_date: '2026-08-17',
+            deadline_date: '2026-08-31',
+            phase: 'not_started',
+            is_overdue: true,
+            can_perform_protocol: true,
+            late_execution_authorization_active: true,
+            late_execution_authorized_until: '2026-09-21T21:26:00.000Z',
+            request_id: latePreventive.id
+          }]
+        }
+      });
+
+      await component.ngOnInit();
+      component.openPreventive(component.actionablePreventiveItem);
+
+      expect(component.actionablePreventiveItem?.id).toBe('item-august');
+      expect(component.preventiveContextLabel(component.actionablePreventiveItem!))
+        .toBe('PREVENTIVO ATRASADO HABILITADO');
+      expect(router.navigate).toHaveBeenCalledWith(['/mantenimiento'], {
+        queryParams: {
+          view: 'preventivos',
+          requestId: latePreventive.id,
+          assetId: 'asset-1',
+          qrAction: 'preventive'
+        }
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('no permite abrir un preventivo vencido cuando la autorización ya no está activa', async () => {
+    const overdueRequest = request('preventive-expired', 'preventivo', 'vencido');
+    const { component } = createComponent({
+      roles: ['ingeniero_biomedico'],
+      permissions: ['maintenance:report:create'],
+      requests: [],
+      progress: {
+        items: [{
+          id: 'item-expired',
+          asset_id: 'asset-1',
+          planned_date: '2026-08-17',
+          deadline_date: '2026-08-31',
+          phase: 'not_started',
+          is_overdue: true,
+          can_perform_protocol: false,
+          late_execution_authorization_active: false,
+          request_id: overdueRequest.id
+        }]
+      }
+    });
+
+    await component.ngOnInit();
+
+    expect(component.actionablePreventiveItems).toHaveLength(0);
+    expect(component.informativePreventiveItem?.id).toBe('item-expired');
+    expect(component.preventiveStateActionLabel(component.informativePreventiveItem!))
+      .toBe('Revisar apertura');
+  });
+
+  it('no ofrece por QR un preventivo de un mes futuro', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-02T15:00:00.000Z'));
+    try {
+      const futurePreventive = request('preventive-october', 'preventivo');
+      const { component } = createComponent({
+        roles: ['ingeniero_biomedico'],
+        permissions: ['maintenance:report:create'],
+        requests: [futurePreventive],
+        progress: {
+          items: [{
+            id: 'item-october',
+            asset_id: 'asset-1',
+            planned_date: '2026-10-05',
+            deadline_date: '2026-10-31',
+            phase: 'not_started',
+            is_overdue: false,
+            can_perform_protocol: true,
+            request_id: futurePreventive.id
+          }]
+        }
+      });
+
+      await component.ngOnInit();
+
+      expect(component.actionablePreventiveItems).toHaveLength(0);
+      expect(component.informativePreventiveItem).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('abre la hoja de vida del equipo desde la salida segura del QR', async () => {
+    const { component, router } = createComponent({
+      roles: ['ingeniero_biomedico'],
+      permissions: ['hb:view']
+    });
+
+    await component.ngOnInit();
+    component.openAssetRecord();
+
+    expect(router.navigate).toHaveBeenCalledWith(['/hojas-de-vida'], {
+      queryParams: { assetId: 'asset-1', source: 'qr' }
+    });
   });
 });

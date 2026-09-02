@@ -14,7 +14,13 @@ async function clientSchema(clientId) {
 
 export async function getPreventiveMaintenanceProgress(
   clientId,
-  { year, month, assetCategory = 'biomedical', scopedUserId = null } = {}
+  {
+    year,
+    month,
+    assetCategory = 'biomedical',
+    scopedUserId = null,
+    assetId = null
+  } = {}
 ) {
   const category = normalizeAssetCategory(assetCategory);
   const schema = await clientSchema(clientId);
@@ -63,7 +69,12 @@ export async function getPreventiveMaintenanceProgress(
   }
 
   const params = [schedule.id, category];
+  let assetClause = '';
   let accessClause = '';
+  if (assetId) {
+    params.push(assetId);
+    assetClause = `AND item.asset_id = $${params.length}`;
+  }
   if (scopedUserId) {
     const { rows: accessRows } = await query(
       'SELECT area_id, location_id FROM reader_access WHERE user_id = $1 AND client_id = $2',
@@ -75,11 +86,14 @@ export async function getPreventiveMaintenanceProgress(
     const areaIds = Array.from(
       new Set(accessRows.filter((row) => row.area_id).map((row) => row.area_id))
     );
-    params.push(locationIds, areaIds);
+    params.push(locationIds);
+    const locationParam = `$${params.length}`;
+    params.push(areaIds);
+    const areaParam = `$${params.length}`;
     accessClause = `
       AND (
-        a.location_id = ANY($3::uuid[])
-        OR a.area_id = ANY($4::uuid[])
+        a.location_id = ANY(${locationParam}::uuid[])
+        OR a.area_id = ANY(${areaParam}::uuid[])
       )`;
   }
 
@@ -215,6 +229,7 @@ export async function getPreventiveMaintenanceProgress(
      ) signatures ON TRUE
      WHERE item.schedule_id = $1
        AND a.asset_category = $2
+       ${assetClause}
        ${accessClause}
      ORDER BY item.planned_date, site.name, area.name, location.name, a.code, item.id`,
     params
@@ -345,16 +360,24 @@ export async function createMaintenanceProtocolPrintBatch(payload) {
   return rows[0];
 }
 
-export async function listMaintenanceRequests(clientId, { assetCategory = null } = {}) {
+export async function listMaintenanceRequests(
+  clientId,
+  { assetCategory = null, assetId = null } = {}
+) {
   const params = [clientId];
   let assetJoin = '';
   let categoryClause = '';
+  let assetClause = '';
   if (assetCategory) {
     const schema = await clientSchema(clientId);
     if (!schema) return [];
     params.push(normalizeAssetCategory(assetCategory));
     assetJoin = `JOIN "${schema}".assets a ON a.id = r.asset_id`;
     categoryClause = `AND a.asset_category = $${params.length}`;
+  }
+  if (assetId) {
+    params.push(assetId);
+    assetClause = `AND r.asset_id = $${params.length}`;
   }
   const { rows } = await query(
     `SELECT r.*, u.display_name AS requester_name, u.email AS requester_email,
@@ -365,6 +388,7 @@ export async function listMaintenanceRequests(clientId, { assetCategory = null }
      LEFT JOIN users assigned ON assigned.id = r.assigned_to
      WHERE r.client_id = $1
        ${categoryClause}
+       ${assetClause}
        AND r.status NOT IN ('firmado', 'vencido', 'garantia')
      ORDER BY r.created_at DESC`,
     params

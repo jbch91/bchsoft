@@ -13,6 +13,7 @@
   <div class="qr-error" *ngIf="!loading && errorMessage && !asset" role="alert">
     <strong>No fue posible abrir este equipo</strong>
     <p>{{ errorMessage }}</p>
+    <button type="button" class="secondary-button retry-button" (click)="retryLoadContext()">Reintentar consulta</button>
   </div>
 
   <ng-container *ngIf="!loading && asset as currentAsset">
@@ -54,63 +55,70 @@
         <h2>¿Qué necesitas hacer con este equipo?</h2>
       </div>
 
-      <section class="role-action-panel" *ngIf="isEngineer">
-        <ng-container *ngIf="activeCorrectiveRequest as corrective; else engineerPreventive">
-          <div class="recommended-action corrective">
-            <div>
-              <span>ACCIÓN PRIORITARIA</span>
-              <h3>{{ requestStatusLabel(corrective.status) }}</h3>
-              <p>{{ corrective.description || 'Correctivo activo para este equipo.' }}</p>
-              <small *ngIf="corrective.assigned_name">ASIGNADO A {{ corrective.assigned_name }}</small>
-            </div>
-            <button type="button" (click)="openExistingCorrective()">
-              {{ corrective.status === 'espera_repuesto' ? 'Ver repuesto' : corrective.status === 'reportado' ? 'Ver reporte' : 'Abrir correctivo' }}
-            </button>
+      <section class="role-action-panel engineer-action-list" *ngIf="isEngineer">
+        <div class="recommended-action corrective" *ngIf="activeCorrectiveRequest as corrective">
+          <div>
+            <span>ACCIÓN PRIORITARIA · CORRECTIVO</span>
+            <h3>{{ requestStatusLabel(corrective.status) }}</h3>
+            <p>{{ corrective.description || 'Correctivo activo para este equipo.' }}</p>
+            <small *ngIf="corrective.assigned_name">ASIGNADO A {{ corrective.assigned_name }}</small>
           </div>
-        </ng-container>
+          <button type="button" (click)="openExistingCorrective()">
+            {{ corrective.status === 'espera_repuesto' ? 'Ver repuesto' : corrective.status === 'reportado' ? 'Ver reporte' : 'Abrir correctivo' }}
+          </button>
+        </div>
 
-        <ng-template #engineerPreventive>
-          <div class="recommended-action preventive" *ngIf="actionablePreventiveItem as preventive; else engineerPendingPreventive">
-            <div>
-              <span>PREVENTIVO DEL PERIODO</span>
-              <h3>{{ preventiveStatusLabel(preventive) }}</h3>
-              <p>VENTANA {{ formatDate(preventive.planned_date) }} - {{ formatDate(preventive.deadline_date) }}</p>
-            </div>
-            <button type="button" (click)="openPreventive()">
-              {{ preventive.phase === 'in_progress' ? 'Continuar preventivo' : 'Realizar preventivo' }}
-            </button>
+        <div
+          class="recommended-action preventive"
+          [class.late-preventive]="preventive.late_execution_authorization_active"
+          *ngFor="let preventive of actionablePreventiveItems"
+        >
+          <div>
+            <span>{{ preventiveContextLabel(preventive) }}</span>
+            <h3>{{ preventiveStatusLabel(preventive) }}</h3>
+            <p>{{ preventiveWindowLabel(preventive) }}</p>
+            <small *ngIf="preventive.late_execution_authorized_by_name">
+              APERTURA AUTORIZADA POR {{ preventive.late_execution_authorized_by_name }}
+            </small>
           </div>
-        </ng-template>
+          <button type="button" (click)="openPreventive(preventive)">
+            {{ preventive.phase === 'in_progress' ? 'Continuar preventivo' : 'Realizar preventivo' }}
+          </button>
+        </div>
 
-        <ng-template #engineerPendingPreventive>
-          <div class="recommended-action neutral" *ngIf="currentPreventiveItem as preventive; else engineerNoAction">
-            <div>
-              <span>PREVENTIVO DEL PERIODO</span>
-              <h3>{{ preventiveStatusLabel(preventive) }}</h3>
-              <p>Consulta el estado documental registrado para este equipo.</p>
-            </div>
-            <button
-              type="button"
-              class="secondary-button"
-              *ngIf="preventive.phase === 'waiting_spare'; else preventiveReportAction"
-              (click)="openSpareCase(currentPreventiveRequest)"
-            >Ver repuesto</button>
-            <ng-template #preventiveReportAction>
-              <button type="button" class="secondary-button" *ngIf="currentPreventiveReport" (click)="openPreventiveReport()">Ver reporte</button>
-            </ng-template>
+        <div class="recommended-action neutral" *ngIf="informativePreventiveItem as preventive">
+          <div>
+            <span>{{ preventiveContextLabel(preventive) }}</span>
+            <h3>{{ preventiveStatusLabel(preventive) }}</h3>
+            <p>{{ preventiveWindowLabel(preventive) }}</p>
+            <small *ngIf="preventive.is_overdue && !preventive.can_perform_protocol">
+              LA VENTANA ESTÁ CERRADA Y REQUIERE APERTURA TEMPORAL VIGENTE
+            </small>
           </div>
-        </ng-template>
+          <button type="button" class="secondary-button" (click)="openPreventiveState(preventive)">
+            {{ preventiveStateActionLabel(preventive) }}
+          </button>
+        </div>
 
-        <ng-template #engineerNoAction>
-          <div class="recommended-action neutral">
-            <div>
-              <span>SIN ACCIÓN PENDIENTE</span>
-              <h3>Equipo disponible para consulta</h3>
-              <p>No hay correctivos activos ni un preventivo por realizar en el periodo actual.</p>
-            </div>
-            <button type="button" class="secondary-button" (click)="openMaintenance()">Abrir mantenimiento</button>
+        <div
+          class="recommended-action neutral no-maintenance-action"
+          *ngIf="!activeCorrectiveRequest && !actionablePreventiveItems.length && !informativePreventiveItem"
+        >
+          <div>
+            <span>SIN MANTENIMIENTO PENDIENTE</span>
+            <h3>Equipo disponible para consulta</h3>
+            <p>No hay correctivos activos ni preventivos disponibles para realizar.</p>
           </div>
-        </ng-template>
+        </div>
+
+        <div class="recommended-action asset-record-action">
+          <div>
+            <span>INFORMACIÓN DEL EQUIPO</span>
+            <h3>Hoja de vida e historial documental</h3>
+            <p>Consulta la ficha técnica, documentos y trazabilidad registrada.</p>
+          </div>
+          <button type="button" class="secondary-button" (click)="openAssetRecord()">Ver hoja de vida</button>
+        </div>
       </section>
 
       <section class="role-action-panel" *ngIf="isAreaReporter">

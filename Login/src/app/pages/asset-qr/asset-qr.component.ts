@@ -3,7 +3,6 @@ import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../auth/auth.service';
-import { BiomedService } from '../../biomed/biomed.service';
 import type { AssetCategory } from '../../biomed/biomed.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import {
@@ -53,12 +52,13 @@ export class AssetQrComponent implements OnInit {
   requestDescription = '';
   requestSaving = false;
   photoFailed = false;
+  private contextLoadId = 0;
+  private readonly contextTimeoutMs = 12000;
 
   constructor(
     private readonly route: ActivatedRoute,
     private readonly router: Router,
     public readonly auth: AuthService,
-    private readonly biomed: BiomedService,
     private readonly maintenance: MaintenanceService
   ) {}
 
@@ -124,36 +124,80 @@ export class AssetQrComponent implements OnInit {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ?? null;
   }
 
-  get currentPreventiveItem(): PreventiveProgressItemDto | null {
-    const phasePriority: Record<string, number> = {
-      in_progress: 0,
-      not_started: 1,
-      pending_signature: 2,
-      waiting_spare: 3,
-      warranty: 4,
-      completed: 5
-    };
+  get preventiveItems(): PreventiveProgressItemDto[] {
     return (this.preventiveProgress?.items ?? [])
-      .filter((item) => item.asset_id === this.assetId)
-      .filter((item) => String(item.planned_date || '').startsWith(this.currentPeriod))
-      .sort((a, b) => phasePriority[a.phase] - phasePriority[b.phase])[0] ?? null;
+      .filter((item) => item.asset_id === this.assetId);
+  }
+
+  get actionablePreventiveItems(): PreventiveProgressItemDto[] {
+    const phasePriority: Record<string, number> = { in_progress: 0, not_started: 1 };
+    return this.preventiveItems
+      .filter((item) => ['not_started', 'in_progress'].includes(item.phase))
+      .filter((item) => Boolean(item.request_id))
+      .filter((item) =>
+        item.late_execution_authorization_active
+        || String(item.planned_date || '').startsWith(this.currentPeriod)
+      )
+      .filter((item) => this.preventiveCanBePerformed(item))
+      .sort((a, b) => {
+        const aLate = a.late_execution_authorization_active ? 0 : 1;
+        const bLate = b.late_execution_authorization_active ? 0 : 1;
+        if (aLate !== bLate) return aLate - bLate;
+        const byPhase = phasePriority[a.phase] - phasePriority[b.phase];
+        if (byPhase) return byPhase;
+        return String(a.planned_date).localeCompare(String(b.planned_date));
+      });
   }
 
   get actionablePreventiveItem(): PreventiveProgressItemDto | null {
-    const item = this.currentPreventiveItem;
-    return item && ['not_started', 'in_progress'].includes(item.phase) && item.request_id
-      ? item
-      : null;
+    return this.actionablePreventiveItems[0] ?? null;
   }
 
-  get currentPreventiveReport(): MaintenanceReportDto | null {
-    const reportId = this.currentPreventiveItem?.report_id;
+  get informativePreventiveItem(): PreventiveProgressItemDto | null {
+    const actionableIds = new Set(this.actionablePreventiveItems.map((item) => item.id));
+    const phasePriority: Record<string, number> = {
+      pending_signature: 0,
+      waiting_spare: 1,
+      warranty: 2,
+      not_started: 3,
+      in_progress: 4,
+      completed: 5
+    };
+    return this.preventiveItems
+      .filter((item) => !actionableIds.has(item.id))
+      .filter((item) =>
+        String(item.planned_date || '').startsWith(this.currentPeriod)
+        || item.phase === 'pending_signature'
+        || item.phase === 'waiting_spare'
+        || (item.is_overdue && !item.can_perform_protocol)
+      )
+      .sort((a, b) => {
+        const byPhase = phasePriority[a.phase] - phasePriority[b.phase];
+        if (byPhase) return byPhase;
+        return String(b.planned_date).localeCompare(String(a.planned_date));
+      })[0] ?? null;
+  }
+
+  get currentPreventiveItem(): PreventiveProgressItemDto | null {
+    return this.actionablePreventiveItem ?? this.informativePreventiveItem;
+  }
+
+  preventiveReportFor(item: PreventiveProgressItemDto | null): MaintenanceReportDto | null {
+    const reportId = item?.report_id;
     return reportId ? this.reports.find((report) => report.id === reportId) ?? null : null;
   }
 
-  get currentPreventiveRequest(): MaintenanceRequestDto | null {
-    const requestId = this.currentPreventiveItem?.request_id;
+  preventiveRequestFor(item: PreventiveProgressItemDto | null): MaintenanceRequestDto | null {
+    const requestId = item?.request_id;
     return requestId ? this.requests.find((request) => request.id === requestId) ?? null : null;
+  }
+
+  get currentPreventiveReport(): MaintenanceReportDto | null {
+    return this.preventiveReportFor(this.currentPreventiveItem);
+  }
+
+  get currentPreventiveRequest(): MaintenanceRequestDto | null {
+    return this.preventiveRequestFor(this.currentPreventiveItem);
   }
 
   get hasPendingSpare(): boolean {
@@ -200,41 +244,37 @@ export class AssetQrComponent implements OnInit {
   }
 
   async loadContext(): Promise<void> {
+    const loadId = ++this.contextLoadId;
     this.loading = true;
     this.errorMessage = '';
     try {
-      const rawAsset = await this.biomed.getAssetDetails(this.clientId, this.assetId);
-      this.asset = this.mapAsset(rawAsset);
-      const progressRequest = this.isEngineer
-        ? this.maintenance.getPreventiveProgress(
-            this.clientId,
-            Number(this.currentPeriod.slice(0, 4)),
-            Number(this.currentPeriod.slice(5, 7)),
-            this.asset.category
-          )
-        : Promise.resolve(null);
-      const [requests, reports, progress] = await Promise.all([
-        this.maintenance.listRequests(this.clientId, this.asset.category),
-        this.maintenance.listReports(this.clientId, {
-          assetId: this.assetId,
-          assetCategory: this.asset.category,
-          order: 'desc',
-          limit: 50
-        }),
-        progressRequest
-      ]);
-      this.requests = requests.filter((request) => request.asset_id === this.assetId);
-      this.reports = reports.filter((report) => report.asset_id === this.assetId);
-      this.preventiveProgress = progress;
+      const context = await this.withTimeout(
+        this.maintenance.getAssetQrContext(this.clientId, this.assetId),
+        this.contextTimeoutMs
+      );
+      if (loadId !== this.contextLoadId) return;
+      this.asset = this.mapAsset(context.asset);
+      this.requests = context.requests.filter((request) => request.asset_id === this.assetId);
+      this.reports = context.reports.filter((report) => report.asset_id === this.assetId);
+      this.preventiveProgress = this.isEngineer ? context.preventive_progress : null;
     } catch (error: any) {
+      if (loadId !== this.contextLoadId) return;
       const status = Number(error?.status || error?.error?.status || 0);
-      this.errorMessage = status === 403
-        ? 'Este equipo no corresponde a las áreas o ubicaciones autorizadas para tu usuario.'
-        : error?.error?.message || 'No se pudo consultar el equipo asociado al código QR.';
+      this.errorMessage = error?.code === 'QR_CONTEXT_TIMEOUT'
+        ? 'La consulta tardó más de lo esperado. Reintenta sin volver a escanear el código.'
+        : status === 403
+          ? 'Este equipo no corresponde a las áreas o ubicaciones autorizadas para tu usuario.'
+          : error?.error?.message || 'No se pudo consultar el equipo asociado al código QR.';
       this.asset = null;
     } finally {
-      this.loading = false;
+      if (loadId === this.contextLoadId) {
+        this.loading = false;
+      }
     }
+  }
+
+  retryLoadContext(): void {
+    void this.loadContext();
   }
 
   openRequestForm(): void {
@@ -300,8 +340,7 @@ export class AssetQrComponent implements OnInit {
     });
   }
 
-  openPreventive(): void {
-    const item = this.actionablePreventiveItem;
+  openPreventive(item: PreventiveProgressItemDto | null = this.actionablePreventiveItem): void {
     if (!item?.request_id) return;
     void this.router.navigate([this.maintenanceRoute], {
       queryParams: {
@@ -313,8 +352,8 @@ export class AssetQrComponent implements OnInit {
     });
   }
 
-  openPreventiveReport(): void {
-    const report = this.currentPreventiveReport;
+  openPreventiveReport(item: PreventiveProgressItemDto | null = this.currentPreventiveItem): void {
+    const report = this.preventiveReportFor(item);
     if (!report) return;
     void this.router.navigate([this.maintenanceRoute], {
       queryParams: { view: 'reportes', reportId: report.id, assetId: this.assetId, source: 'qr' }
@@ -338,6 +377,15 @@ export class AssetQrComponent implements OnInit {
 
   openInventory(): void {
     void this.router.navigate(['/inventario'], {
+      queryParams: { assetId: this.assetId, source: 'qr' }
+    });
+  }
+
+  openAssetRecord(): void {
+    const route = this.asset?.category === 'industrial'
+      ? '/hojas-de-vida-industriales'
+      : '/hojas-de-vida';
+    void this.router.navigate([route], {
       queryParams: { assetId: this.assetId, source: 'qr' }
     });
   }
@@ -378,9 +426,87 @@ export class AssetQrComponent implements OnInit {
     return labels[item.phase] || item.phase.replaceAll('_', ' ').toUpperCase();
   }
 
+  preventiveContextLabel(item: PreventiveProgressItemDto): string {
+    if (item.late_execution_authorization_active) {
+      return 'PREVENTIVO ATRASADO HABILITADO';
+    }
+    if (String(item.planned_date || '').startsWith(this.currentPeriod)) {
+      return 'PREVENTIVO DEL PERIODO';
+    }
+    return item.is_overdue ? 'PREVENTIVO VENCIDO' : 'PREVENTIVO PROGRAMADO';
+  }
+
+  preventiveWindowLabel(item: PreventiveProgressItemDto): string {
+    const window = `VENTANA ${this.formatDate(item.planned_date)} - ${this.formatDate(item.deadline_date)}`;
+    if (!item.late_execution_authorization_active || !item.late_execution_authorized_until) {
+      return window;
+    }
+    return `${window} · APERTURA HASTA ${this.formatDateTime(item.late_execution_authorized_until)}`;
+  }
+
+  preventiveStateActionLabel(item: PreventiveProgressItemDto): string {
+    if (item.phase === 'waiting_spare') return 'Ver repuesto';
+    if (this.preventiveReportFor(item)) return 'Ver reporte';
+    if (item.is_overdue && !item.can_perform_protocol) return 'Revisar apertura';
+    return 'Ver preventivos';
+  }
+
+  openPreventiveState(item: PreventiveProgressItemDto): void {
+    if (item.phase === 'waiting_spare') {
+      this.openSpareCase(this.preventiveRequestFor(item));
+      return;
+    }
+    if (this.preventiveReportFor(item)) {
+      this.openPreventiveReport(item);
+      return;
+    }
+    void this.router.navigate([this.maintenanceRoute], {
+      queryParams: {
+        view: 'preventivos',
+        assetId: this.assetId,
+        source: 'qr'
+      }
+    });
+  }
+
   formatDate(value?: string | null): string {
     const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
     return match ? `${match[3]}/${match[2]}/${match[1]}` : '-';
+  }
+
+  formatDateTime(value?: string | null): string {
+    const date = new Date(String(value || ''));
+    if (Number.isNaN(date.getTime())) return '-';
+    return new Intl.DateTimeFormat('es-CO', {
+      timeZone: 'America/Bogota',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(date);
+  }
+
+  private preventiveCanBePerformed(item: PreventiveProgressItemDto): boolean {
+    if (item.late_execution_authorization_active) return true;
+    if (item.can_perform_protocol === true) return true;
+    return item.can_perform_protocol !== false && !item.is_overdue;
+  }
+
+  private async withTimeout<T>(operation: Promise<T>, milliseconds: number): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        const error = new Error('QR context timeout') as Error & { code?: string };
+        error.code = 'QR_CONTEXT_TIMEOUT';
+        reject(error);
+      }, milliseconds);
+    });
+    try {
+      return await Promise.race([operation, timeout]);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
   }
 
   private mapAsset(asset: any): QrAssetView {

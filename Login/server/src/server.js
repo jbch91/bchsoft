@@ -10608,6 +10608,72 @@ app.get('/admin/audit', requireAuth, requireAnyPermission(['users:manage', 'audi
 });
 
 app.get(
+  '/maintenance/qr-context/:clientId/:assetId',
+  requireAuth,
+  requireAnyPermissionOrRole(
+    [
+      'maintenance:request:create',
+      'maintenance:report:create',
+      'maintenance:report:sign',
+      'hb:create',
+      'hb:view',
+      'read:all'
+    ],
+    MAINTENANCE_REPORT_ACCESS_ROLES
+  ),
+  async (req, res) => {
+    const { clientId, assetId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (isAreaScopedOperationalUser(req.user)) {
+      const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
+      if (!allowed) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+    }
+
+    try {
+      const asset = await getAssetById(clientId, assetId);
+      if (!asset) {
+        return res.status(404).json({ message: 'Equipo no encontrado.' });
+      }
+      const assetCategory = normalizeAssetCategory(asset.asset_category);
+      const [year, month] = todayInBogota().split('-').map(Number);
+      const [requests, reports, preventiveProgress] = await Promise.all([
+        listMaintenanceRequests(clientId, { assetCategory, assetId }),
+        listMaintenanceReports(clientId, {
+          assetId,
+          assetCategory,
+          order: 'desc',
+          limit: 50
+        }),
+        getPreventiveMaintenanceProgress(clientId, {
+          year,
+          month,
+          assetCategory,
+          assetId
+        })
+      ]);
+      return res.json({
+        asset,
+        requests,
+        reports,
+        preventive_progress: preventiveProgress
+      });
+    } catch (error) {
+      if (error?.code === 'INVALID_ASSET_CATEGORY') {
+        return res.status(400).json({ message: error.message });
+      }
+      console.error(error);
+      return res.status(500).json({
+        message: 'No se pudo consultar el contexto de mantenimiento del equipo.'
+      });
+    }
+  }
+);
+
+app.get(
   '/maintenance/preventive-progress/:clientId',
   requireAuth,
   requireAnyPermissionOrRole(

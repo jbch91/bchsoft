@@ -223,6 +223,24 @@ button:disabled {
   background: #f0fdfa;
 }
 
+.engineer-action-list .recommended-action + .recommended-action {
+  border-top: 1px solid #dbe3ec;
+}
+
+.recommended-action.late-preventive {
+  border-left-color: #b7791f;
+  background: #fffbeb;
+}
+
+.recommended-action.asset-record-action {
+  border-left-color: #4f6175;
+  background: #f8fafc;
+}
+
+.recommended-action.no-maintenance-action {
+  min-height: 82px;
+}
+
 .recommended-action.spare {
   border-left-color: #d97706;
   background: #fffbeb;
@@ -335,6 +353,10 @@ button:disabled {
 
 .qr-error p {
   margin: 4px 0 0;
+}
+
+.qr-error .retry-button {
+  margin-top: 12px;
 }
 
 .qr-error.compact,

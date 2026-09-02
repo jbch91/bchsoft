@@ -95,6 +95,13 @@ export interface PreventiveMaintenanceProgressDto {
   generated_at: string;
 }
 
+export interface AssetQrMaintenanceContextDto {
+  asset: unknown;
+  requests: MaintenanceRequestDto[];
+  reports: MaintenanceReportDto[];
+  preventive_progress: PreventiveMaintenanceProgressDto | null;
+}
+
 export interface MaintenanceReportDto {
   id: string;
   client_id: string;
@@ -147,6 +154,17 @@ export class MaintenanceService {
   private readonly apiBase = getApiBase();
 
   constructor(private readonly http: HttpClient) {}
+
+  async getAssetQrContext(
+    clientId: string,
+    assetId: string
+  ): Promise<AssetQrMaintenanceContextDto> {
+    return firstValueFrom(
+      this.http.get<AssetQrMaintenanceContextDto>(
+        `${this.apiBase}/maintenance/qr-context/${clientId}/${assetId}`
+      )
+    );
+  }
 
   async getPreventiveProgress(
     clientId: string,
