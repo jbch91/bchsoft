@@ -16,7 +16,26 @@
 
       <label>
         Contraseña
-        <input type="password" name="password" [(ngModel)]="password" autocomplete="current-password" required />
+        <span class="password-input">
+          <input
+            [type]="showPassword ? 'text' : 'password'"
+            name="password"
+            [(ngModel)]="password"
+            autocomplete="current-password"
+            required
+          />
+          <button
+            type="button"
+            class="password-visibility"
+            [attr.aria-label]="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+            [attr.title]="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+            [attr.aria-pressed]="showPassword"
+            (click)="togglePasswordVisibility()"
+          >
+            <svg *ngIf="!showPassword" lucideEye aria-hidden="true"></svg>
+            <svg *ngIf="showPassword" lucideEyeOff aria-hidden="true"></svg>
+          </button>
+        </span>
       </label>
 
       <button type="submit" [disabled]="isSubmitting">
@@ -105,14 +124,27 @@
 
         <label>
           Nueva contraseña
-          <input
-            type="password"
-            name="recoveryPassword"
-            [(ngModel)]="recoveryPassword"
-            minlength="10"
-            autocomplete="new-password"
-            [ngModelOptions]="{ standalone: true }"
-          />
+          <span class="password-input">
+            <input
+              [type]="showRecoveryPassword ? 'text' : 'password'"
+              name="recoveryPassword"
+              [(ngModel)]="recoveryPassword"
+              minlength="10"
+              autocomplete="new-password"
+              [ngModelOptions]="{ standalone: true }"
+            />
+            <button
+              type="button"
+              class="password-visibility"
+              [attr.aria-label]="showRecoveryPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+              [attr.title]="showRecoveryPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+              [attr.aria-pressed]="showRecoveryPassword"
+              (click)="toggleRecoveryPasswordVisibility()"
+            >
+              <svg *ngIf="!showRecoveryPassword" lucideEye aria-hidden="true"></svg>
+              <svg *ngIf="showRecoveryPassword" lucideEyeOff aria-hidden="true"></svg>
+            </button>
+          </span>
         </label>
       </div>
 

@@ -2,24 +2,27 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
+import { LucideEye, LucideEyeOff } from '@lucide/angular';
 import { AuthService } from '../auth.service';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, LucideEye, LucideEyeOff],
   templateUrl: './login.component.html',
   styleUrl: './login.component.scss'
 })
 export class LoginComponent implements OnInit, OnDestroy {
   username = '';
   password = '';
+  showPassword = false;
   errorMessage = '';
   isSubmitting = false;
   showRecovery = false;
   recoveryEmail = '';
   recoveryCode = '';
   recoveryPassword = '';
+  showRecoveryPassword = false;
   recoveryMessage = '';
   recoveryMessageType: 'info' | 'success' | 'error' = 'info';
   isSendingRecoveryCode = false;
@@ -86,11 +89,20 @@ export class LoginComponent implements OnInit, OnDestroy {
 
   closeRecovery(): void {
     this.showRecovery = false;
+    this.showRecoveryPassword = false;
     this.recoveryMessage = '';
     this.recoveryMessageType = 'info';
     this.recoveryCode = '';
     this.recoveryPassword = '';
     this.clearCloseRecoveryTimer();
+  }
+
+  togglePasswordVisibility(): void {
+    this.showPassword = !this.showPassword;
+  }
+
+  toggleRecoveryPasswordVisibility(): void {
+    this.showRecoveryPassword = !this.showRecoveryPassword;
   }
 
   async onRequestCode(): Promise<void> {
