@@ -57,7 +57,7 @@
         [attr.aria-selected]="viewMode === 'preventivos'"
         (click)="switchView('preventivos')"
       >
-        Preventivos <strong>{{ preventiveProgrammedRequests.length }}</strong>
+        Preventivos <strong>{{ preventiveNavigationCount }}</strong>
       </button>
       <button type="button" role="tab" class="tab" [class.active]="viewMode === 'reportes'" [attr.aria-selected]="viewMode === 'reportes'" (click)="switchView('reportes')">
         Reportes <strong>{{ actionablePendingReportCount }}</strong>

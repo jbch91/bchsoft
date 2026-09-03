@@ -766,6 +766,7 @@ describe('maintenance report modal flow', () => {
     };
 
     expect(component.activePreventiveProgress?.completion_percent).toBe(30);
+    expect(component.preventiveNavigationCount).toBe(11);
     expect(component.preventiveManagedTotal(component.preventiveProgress.monthly)).toBe(4);
     expect(component.preventiveManagedPercent(component.preventiveProgress.monthly)).toBe(36);
     expect(component.preventiveProgressShare(component.preventiveProgress.monthly, 'completed')).toBeCloseTo(27.27, 2);
@@ -785,6 +786,7 @@ describe('maintenance report modal flow', () => {
     expect(component.filteredPreventiveItems[0]?.pdf_available).toBe(true);
     component.preventiveProgressScope = 'year';
     expect(component.activePreventiveProgress?.completion_percent).toBe(18);
+    expect(component.preventiveNavigationCount).toBe(41);
     expect(component.preventiveProgressPeriodLabel).toBe('Vigencia 2026');
   });
 

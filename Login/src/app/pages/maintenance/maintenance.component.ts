@@ -385,9 +385,6 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   private reportFilterCacheAssets: Map<string, AssetLite> | null = null;
   private reportFilterCacheKey = '';
   private reportFilterCacheItems: MaintenanceReportDto[] = [];
-  private preventiveProgrammedCacheRequests: MaintenanceRequestDto[] | null = null;
-  private preventiveProgrammedCacheAssets: Map<string, AssetLite> | null = null;
-  private preventiveProgrammedCacheItems: MaintenanceRequestDto[] = [];
   private preventiveFilterCacheSource: PreventiveProgressItemDto[] | null = null;
   private preventiveFilterCacheAssets: Map<string, AssetLite> | null = null;
   private preventiveFilterCacheKey = '';
@@ -1759,6 +1756,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       : this.preventiveProgress.annual;
   }
 
+  get preventiveNavigationCount(): number {
+    return this.activePreventiveProgress?.total ?? 0;
+  }
+
   get preventiveProgressPeriodLabel(): string {
     const progress = this.preventiveProgress;
     if (!progress) return '';
@@ -1815,29 +1816,6 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         percent: percent(progress.completed)
       }
     ];
-  }
-
-  get preventiveProgrammedRequests(): MaintenanceRequestDto[] {
-    if (
-      this.preventiveProgrammedCacheRequests === this.requests
-      && this.preventiveProgrammedCacheAssets === this.assetMap
-    ) {
-      return this.preventiveProgrammedCacheItems;
-    }
-
-    const items = this.requests
-      .filter((request) => this.isScheduledPreventive(request) && ['abierto', 'en_proceso'].includes(request.status))
-      .sort((a, b) => {
-        const assetA = this.assetMap.get(a.asset_id);
-        const assetB = this.assetMap.get(b.asset_id);
-        return `${assetA?.siteName ?? ''} ${assetA?.areaName ?? ''} ${assetA?.locationName ?? ''} ${assetA?.code ?? ''}`.localeCompare(
-          `${assetB?.siteName ?? ''} ${assetB?.areaName ?? ''} ${assetB?.locationName ?? ''} ${assetB?.code ?? ''}`
-        );
-      });
-    this.preventiveProgrammedCacheRequests = this.requests;
-    this.preventiveProgrammedCacheAssets = this.assetMap;
-    this.preventiveProgrammedCacheItems = items;
-    return items;
   }
 
   get preventivePhaseTabs(): Array<{ value: PreventivePhaseView; label: string; count: number }> {
