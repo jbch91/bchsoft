@@ -593,6 +593,8 @@ export class InventoryPanelComponent implements OnDestroy {
     if (this.exportLoading || this.exportItemCount === 0) return;
     this.exportLoading = true;
     this.exportError = '';
+    this.refreshView();
+    await this.yieldToBrowser();
     try {
       await this.exportSelectedInventory();
       this.hideExportModal();
@@ -601,6 +603,7 @@ export class InventoryPanelComponent implements OnDestroy {
       this.exportError = `No se pudo generar el archivo ${this.exportFormat.toUpperCase()}. Intenta nuevamente.`;
     } finally {
       this.exportLoading = false;
+      this.refreshView();
     }
   }
 
@@ -1365,11 +1368,19 @@ export class InventoryPanelComponent implements OnDestroy {
     return (value || '').toLowerCase().trim();
   }
 
+  private refreshView(): void {
+    if (!this.destroyed) {
+      this.cdr.detectChanges();
+    }
+  }
+
+  private yieldToBrowser(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
   private refreshViewSoon(): void {
     setTimeout(() => {
-      if (!this.destroyed) {
-        this.cdr.detectChanges();
-      }
+      this.refreshView();
     }, 0);
   }
 }

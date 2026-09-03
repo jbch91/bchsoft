@@ -2,13 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { AssetMovementDto } from '../../biomed/biomed.service';
 import { InventoryPanelComponent, InventoryPanelItem } from './inventory-panel.component';
 
-function createComponent(biomed: Record<string, unknown> = {}): InventoryPanelComponent {
+function createComponent(
+  biomed: Record<string, unknown> = {},
+  changeDetector: Record<string, unknown> = { detectChanges: vi.fn() }
+): InventoryPanelComponent {
   return new InventoryPanelComponent(
     biomed as never,
     {} as never,
     {} as never,
     {} as never,
-    { detectChanges: vi.fn() } as never
+    changeDetector as never
   );
 }
 
@@ -175,7 +178,8 @@ describe('InventoryPanelComponent operational conditions', () => {
   });
 
   it('cierra el modal únicamente después de generar la exportación', async () => {
-    const component = createComponent();
+    const detectChanges = vi.fn();
+    const component = createComponent({}, { detectChanges });
     component.items = items;
     component.exportModalOpen = true;
     component.exportSearchTerm = 'Monitor';
@@ -186,6 +190,28 @@ describe('InventoryPanelComponent operational conditions', () => {
     expect(exportInventory).toHaveBeenCalledOnce();
     expect(component.exportModalOpen).toBe(false);
     expect(component.exportLoading).toBe(false);
+    expect(detectChanges).toHaveBeenCalledTimes(2);
+  });
+
+  it('reactiva el modal y muestra el error si la exportación falla', async () => {
+    const detectChanges = vi.fn();
+    const component = createComponent({}, { detectChanges });
+    component.items = items;
+    component.exportModalOpen = true;
+    component.exportFormat = 'xlsx';
+    vi.spyOn(component, 'exportSelectedInventory').mockRejectedValue(new Error('falló'));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      await component.confirmExport();
+
+      expect(component.exportModalOpen).toBe(true);
+      expect(component.exportLoading).toBe(false);
+      expect(component.exportError).toContain('XLSX');
+      expect(detectChanges).toHaveBeenCalledTimes(2);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('genera CSV, Excel y PDF con la interoperabilidad usada en el navegador', async () => {
