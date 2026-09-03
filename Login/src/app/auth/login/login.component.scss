@@ -339,9 +339,18 @@ input {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-100) 80%, transparent);
 }
 
-.password-visibility svg {
+.password-eye-icon {
+  display: block;
   width: 20px;
   height: 20px;
+  background: currentColor;
+  -webkit-mask: url('/assets/lucide-eye.svg') center / contain no-repeat;
+  mask: url('/assets/lucide-eye.svg') center / contain no-repeat;
+}
+
+.password-eye-icon.is-hidden {
+  -webkit-mask-image: url('/assets/lucide-eye-off.svg');
+  mask-image: url('/assets/lucide-eye-off.svg');
 }
 
 button {
