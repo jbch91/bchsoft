@@ -38,12 +38,15 @@ export interface InventoryPanelItem {
   acquisitionDate?: string | null;
   warrantyYears?: number | null;
   hasPendingSpare?: boolean;
+  requiresCalibration?: boolean | null;
+  calibrationFrequency?: string | null;
 }
 
 type LifeSheetCondition =
   | ''
   | 'attention_required'
   | 'pending_spare'
+  | 'requires_calibration'
   | 'under_warranty'
   | 'operational'
   | 'operational_observation'
@@ -100,6 +103,7 @@ export class InventoryPanelComponent implements OnDestroy {
   }[] = [
     { value: 'attention_required', label: 'Requieren atención' },
     { value: 'pending_spare', label: 'Con repuesto pendiente' },
+    { value: 'requires_calibration', label: 'Requieren calibración' },
     { value: 'under_warranty', label: 'En garantía' },
     { value: 'operational', label: 'Operativos' },
     { value: 'operational_observation', label: 'Operativos con observaciones' },
@@ -540,6 +544,7 @@ export class InventoryPanelComponent implements OnDestroy {
   ): boolean {
     const status = String(item.status || '').toLowerCase();
     if (condition === 'pending_spare') return Boolean(item.hasPendingSpare);
+    if (condition === 'requires_calibration') return Boolean(item.requiresCalibration);
     if (condition === 'under_warranty') return this.isUnderWarranty(item);
     if (condition === 'operational') return ['activo', 'operativo'].includes(status);
     if (condition === 'operational_observation') return status === 'operativo_observacion';
@@ -621,7 +626,19 @@ export class InventoryPanelComponent implements OnDestroy {
     items: InventoryPanelItem[],
     context: InventoryExportContext
   ): Promise<void> {
-    const headers = ['Código', 'Equipo', 'Marca', 'Modelo', 'Serie', 'Sede', 'Área', 'Ubicación', 'Estado operativo'];
+    const headers = [
+      'Código',
+      'Equipo',
+      'Marca',
+      'Modelo',
+      'Serie',
+      'Sede',
+      'Área',
+      'Ubicación',
+      'Estado operativo',
+      'Requiere calibración',
+      'Frecuencia calibración'
+    ];
     const rows = items.map((item) => [
       item.code,
       item.name,
@@ -631,7 +648,11 @@ export class InventoryPanelComponent implements OnDestroy {
       item.siteName || '',
       item.areaName || '',
       item.locationName || '',
-      this.assetStatusLabel(item.status).toUpperCase()
+      this.assetStatusLabel(item.status).toUpperCase(),
+      item.requiresCalibration ? 'SÍ' : 'NO',
+      item.requiresCalibration
+        ? String(item.calibrationFrequency || 'NO REGISTRA').toUpperCase()
+        : 'NO APLICA'
     ]);
 
     if (this.exportFormat === 'csv') {
@@ -692,14 +713,14 @@ export class InventoryPanelComponent implements OnDestroy {
         ['SOFTWARE UTILIZADO', 'INBIHOSPITALARIO', '', '', '', '', '', '', '']
       ]);
       worksheet['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } },
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 10 } },
         { s: { r: 1, c: 1 }, e: { r: 1, c: 3 } },
-        { s: { r: 1, c: 7 }, e: { r: 1, c: 8 } },
+        { s: { r: 1, c: 7 }, e: { r: 1, c: 10 } },
         { s: { r: 2, c: 1 }, e: { r: 2, c: 3 } },
-        { s: { r: 2, c: 5 }, e: { r: 2, c: 8 } },
-        { s: { r: 3, c: 1 }, e: { r: 3, c: 8 } },
-        { s: { r: 4, c: 1 }, e: { r: 4, c: 8 } },
-        { s: { r: 8 + rows.length, c: 1 }, e: { r: 8 + rows.length, c: 8 } }
+        { s: { r: 2, c: 5 }, e: { r: 2, c: 10 } },
+        { s: { r: 3, c: 1 }, e: { r: 3, c: 10 } },
+        { s: { r: 4, c: 1 }, e: { r: 4, c: 10 } },
+        { s: { r: 8 + rows.length, c: 1 }, e: { r: 8 + rows.length, c: 10 } }
       ];
       worksheet['!cols'] = [
         { wch: 18 },
@@ -710,10 +731,12 @@ export class InventoryPanelComponent implements OnDestroy {
         { wch: 22 },
         { wch: 24 },
         { wch: 24 },
-        { wch: 26 }
+        { wch: 26 },
+        { wch: 22 },
+        { wch: 24 }
       ];
       worksheet['!autofilter'] = {
-        ref: `A7:I${Math.max(7, 7 + rows.length)}`
+        ref: `A7:K${Math.max(7, 7 + rows.length)}`
       };
       const workbook = XLSX.utils.book_new();
       workbook.Props = {
@@ -841,7 +864,11 @@ export class InventoryPanelComponent implements OnDestroy {
       search ? `Búsqueda: ${search}` : ''
     ].filter(Boolean);
     const scope = scopeParts.join(' | ') || 'Inventario completo autorizado';
-    const scopeToken = location || area || site || (scopeParts.length ? 'filtrado' : 'completo');
+    const scopeToken = location
+      || area
+      || site
+      || (condition ? this.lifeSheetConditionLabel(condition) : '')
+      || (scopeParts.length ? 'filtrado' : 'completo');
     return {
       title: 'INVENTARIO BIOMÉDICO',
       clientName,

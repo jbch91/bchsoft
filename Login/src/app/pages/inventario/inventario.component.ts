@@ -251,7 +251,9 @@ export class InventarioComponent {
         status: row.status,
         acquisitionDate: row.acquisition_date ?? null,
         warrantyYears: row.warranty_years ?? null,
-        hasPendingSpare: Boolean(row.has_pending_spare)
+        hasPendingSpare: Boolean(row.has_pending_spare),
+        requiresCalibration: Boolean(row.requires_calibration),
+        calibrationFrequency: row.calibration_frequency ?? null
       }));
       this.qrSelectedIds.clear();
       if (this.qrModalOpen) {

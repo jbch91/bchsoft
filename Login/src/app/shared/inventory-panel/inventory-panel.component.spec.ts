@@ -42,7 +42,9 @@ describe('InventoryPanelComponent operational conditions', () => {
       siteName: 'SEDE CENTRAL',
       areaName: 'UCI',
       locationName: 'BOX 1',
-      status: 'operativo'
+      status: 'operativo',
+      requiresCalibration: true,
+      calibrationFrequency: 'semestral'
     },
     {
       id: 'warranty',
@@ -98,6 +100,20 @@ describe('InventoryPanelComponent operational conditions', () => {
     expect(component.inventoryWarrantyCount).toBe(1);
     expect(component.inventoryPendingSpareCount).toBe(1);
     expect(component.inventoryOutOfServiceCount).toBe(1);
+  });
+
+  it('filtra equipos que requieren calibración en la lista y en la exportación', () => {
+    const component = createComponent();
+    component.items = items;
+    component.showOperationalConditions = true;
+
+    component.filterCondition = 'requires_calibration';
+    expect(component.filteredItems.map((item) => item.id)).toEqual(['operational']);
+    expect(component.lifeSheetConditionCount('requires_calibration')).toBe(1);
+
+    component.exportCondition = 'requires_calibration';
+    expect(component.exportFilteredItems.map((item) => item.id)).toEqual(['operational']);
+    expect(component.exportItemCount).toBe(1);
   });
 
   it('emite el equipo seleccionado para solicitar revisión', () => {
@@ -217,6 +233,8 @@ describe('InventoryPanelComponent operational conditions', () => {
       const csv = await readBlobText(blobs[0]);
       expect(csv).toContain('ESE CENTRO DE SALUD SAN JUAN DE DIOS');
       expect(csv).toContain('Área: UCI');
+      expect(csv).toContain('Requiere calibración');
+      expect(csv).toContain('SEMESTRAL');
       expect(csv).toContain('INBIHOSPITALARIO');
 
       const xlsxModule = await import('xlsx');
@@ -226,6 +244,9 @@ describe('InventoryPanelComponent operational conditions', () => {
       expect(worksheet['A1'].v).toBe('INVENTARIO BIOMÉDICO');
       expect(worksheet['B2'].v).toBe('ESE CENTRO DE SALUD SAN JUAN DE DIOS');
       expect(worksheet['B4'].v).toContain('Área: UCI');
+      expect(worksheet['J7'].v).toBe('Requiere calibración');
+      expect(worksheet['J8'].v).toBe('SÍ');
+      expect(worksheet['K8'].v).toBe('SEMESTRAL');
       expect(worksheet['A10'].v).toBe('SOFTWARE UTILIZADO');
       expect(worksheet['B10'].v).toBe('INBIHOSPITALARIO');
       expect(blobs[2].type).toBe('application/pdf');

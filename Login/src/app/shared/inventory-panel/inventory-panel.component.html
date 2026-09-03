@@ -291,9 +291,10 @@
         <span class="status-stack" data-label="Estado">
           <span class="status-pill" [attr.data-status]="item.status">{{ assetStatusLabel(item.status) }}</span>
           <span class="condition-pill spare" *ngIf="item.hasPendingSpare">Repuesto pendiente</span>
+          <span class="condition-pill calibration" *ngIf="item.requiresCalibration">Requiere calibración</span>
           <span class="condition-pill warranty" *ngIf="isUnderWarranty(item)">En garantía</span>
         </span>
-        <span class="actions">
+        <span class="actions life-sheet-actions">
           <button type="button" (click)="viewItem.emit(item)">Ver</button>
           <button type="button" *ngIf="canEdit" (click)="editItem.emit(item)">Editar</button>
           <button type="button" class="danger" *ngIf="canDelete" (click)="requestDelete(item)">Eliminar</button>
@@ -314,6 +315,7 @@
         <span class="status-stack" data-label="Estado operativo">
           <span class="status-pill" [attr.data-status]="item.status">{{ assetStatusLabel(item.status) }}</span>
           <span class="condition-pill spare" *ngIf="item.hasPendingSpare">Repuesto pendiente</span>
+          <span class="condition-pill calibration" *ngIf="item.requiresCalibration">Requiere calibración</span>
           <span class="condition-pill warranty" *ngIf="isUnderWarranty(item)">En garantía</span>
         </span>
         <span class="actions">

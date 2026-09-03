@@ -2052,7 +2052,9 @@ export class HojasDeVidaComponent implements OnDestroy {
         locationId: row.location_id ?? null,
         acquisitionDate: row.acquisition_date ?? null,
         warrantyYears: row.warranty_years ?? null,
-        hasPendingSpare: row.has_pending_spare ?? false
+        hasPendingSpare: row.has_pending_spare ?? false,
+        requiresCalibration: row.requires_calibration ?? false,
+        calibrationFrequency: row.calibration_frequency ?? null
       }));
     } catch (error) {
       console.error(error);
