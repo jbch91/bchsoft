@@ -35,6 +35,12 @@ export class LoginComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    if (this.auth.isAuthenticated()) {
+      void this.auth.initializeSession().then((valid) => {
+        if (valid) void this.router.navigateByUrl(this.postLoginRoute());
+      });
+    }
+
     const reason = this.route.snapshot.queryParamMap.get('reason') || this.auth.consumeLogoutReason();
     if (reason === 'expired') {
       this.sessionMessage = 'Tu sesión expiró. Inicia sesión nuevamente para continuar.';
@@ -43,7 +49,7 @@ export class LoginComponent implements OnInit, OnDestroy {
       this.sessionMessage = 'Tu sesión se cerró por inactividad. Inicia sesión nuevamente para continuar.';
     }
     if (reason === 'replaced') {
-      this.sessionMessage = 'Tu sesión se cerró porque iniciaste sesión en otro dispositivo.';
+      this.sessionMessage = 'Esta sesión dejó de estar activa. Puedes ingresar nuevamente si aún usas este dispositivo.';
     }
   }
 

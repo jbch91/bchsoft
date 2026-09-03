@@ -6,14 +6,25 @@ dotenv.config();
 
 async function isActiveSession(userId, sessionId) {
   const { rows } = await query(
-    `SELECT 1
-     FROM refresh_tokens
-     WHERE user_id = $1
-       AND session_id = $2
-       AND revoked_at IS NULL
-       AND replaced_at IS NULL
-       AND expires_at > NOW()
-     LIMIT 1`,
+    `WITH active_session AS (
+       SELECT id
+       FROM refresh_tokens
+       WHERE user_id = $1
+         AND session_id = $2
+         AND revoked_at IS NULL
+         AND replaced_at IS NULL
+         AND expires_at > NOW()
+       ORDER BY created_at DESC
+       LIMIT 1
+     ), touched_session AS (
+       UPDATE refresh_tokens rt
+       SET last_seen_at = NOW()
+       FROM active_session active
+       WHERE rt.id = active.id
+         AND rt.last_seen_at < NOW() - INTERVAL '5 minutes'
+       RETURNING rt.id
+     )
+     SELECT id FROM active_session`,
     [userId, sessionId]
   );
   return rows.length > 0;
@@ -31,7 +42,7 @@ export async function requireAuth(req, res, next) {
     if (payload.sessionId && !(await isActiveSession(payload.sub, payload.sessionId))) {
       return res.status(401).json({
         code: 'SESSION_REPLACED',
-        message: 'Tu sesión se cerró porque iniciaste sesión en otro dispositivo.'
+        message: 'Esta sesión dejó de estar activa en el dispositivo.'
       });
     }
     req.user = payload;

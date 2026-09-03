@@ -15,8 +15,11 @@ import { query, withTransaction } from './db.js';
 import {
   authenticateUser,
   getCurrentSessionUser,
+  listActiveSessions,
   refreshSession,
+  revokeActiveSession,
   revokeClientActiveSessions,
+  revokeOtherActiveSessions,
   revokeRefreshToken,
   revokeRoleActiveSessions,
   revokeUserActiveSessions
@@ -430,6 +433,7 @@ dotenv.config();
 
 const execFileAsync = promisify(execFile);
 const app = express();
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const corsOriginList = String(process.env.CORS_ORIGIN || 'http://localhost:4200')
   .split(',')
   .map((v) => v.trim())
@@ -450,6 +454,18 @@ app.use(
 );
 app.use(express.json({ limit: '2mb' }));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+function sessionContextFromRequest(req) {
+  const forwardedFor = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwardedFor)
+    ? forwardedFor[0]
+    : String(forwardedFor || '').split(',')[0].trim();
+
+  return {
+    userAgent: req.get('user-agent') || null,
+    ipAddress: forwardedIp || req.socket?.remoteAddress || null
+  };
+}
 
 const upload = multer({ storage: multer.memoryStorage() });
 const MAX_SCHEDULE_PDF_BYTES = 15 * 1024 * 1024;
@@ -1171,7 +1187,7 @@ app.post('/auth/login', async (req, res) => {
   }
 
   try {
-    const result = await authenticateUser(username, password);
+    const result = await authenticateUser(username, password, sessionContextFromRequest(req));
     if (!result) {
       return res.status(401).json({ message: 'Usuario o contraseña incorrectos.' });
     }
@@ -1190,16 +1206,21 @@ app.post('/auth/refresh', async (req, res) => {
   }
 
   try {
-    const result = await refreshSession(refreshToken);
+    const result = await refreshSession(refreshToken, sessionContextFromRequest(req));
     return res.json(result);
   } catch (error) {
-    if (error?.message === 'SESSION_REPLACED') {
-      return res.status(401).json({
-        code: 'SESSION_REPLACED',
-        message: 'Tu sesión se cerró porque iniciaste sesión en otro dispositivo.'
-      });
-    }
-    return res.status(401).json({ message: 'Refresh inválido.' });
+    const code = error?.code
+      || (error?.name === 'TokenExpiredError' ? 'REFRESH_EXPIRED' : 'TOKEN_INVALID');
+    const messages = {
+      TOKEN_ROTATED: 'La sesión ya fue renovada en otra pestaña.',
+      SESSION_REPLACED: 'Esta sesión dejó de estar activa en el dispositivo.',
+      REFRESH_EXPIRED: 'La sesión expiró. Ingresa nuevamente.',
+      TOKEN_INVALID: 'La sesión no es válida. Ingresa nuevamente.'
+    };
+    return res.status(code === 'TOKEN_ROTATED' ? 409 : 401).json({
+      code,
+      message: messages[code] || messages.TOKEN_INVALID
+    });
   }
 });
 
@@ -1210,6 +1231,44 @@ app.get('/auth/me', requireAuth, async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(401).json({ message: 'Sesión inválida.' });
+  }
+});
+
+app.get('/auth/sessions', requireAuth, async (req, res) => {
+  try {
+    return res.json(await listActiveSessions(req.user.sub, req.user.sessionId));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron consultar los dispositivos activos.' });
+  }
+});
+
+app.delete('/auth/sessions/:sessionId', requireAuth, async (req, res) => {
+  const sessionId = String(req.params.sessionId || '').trim();
+  if (!UUID_PATTERN.test(sessionId)) {
+    return res.status(400).json({ message: 'Sesión inválida.' });
+  }
+
+  try {
+    const revoked = await revokeActiveSession(req.user.sub, sessionId);
+    return res.json({
+      ok: true,
+      revoked,
+      current: sessionId === req.user.sessionId
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudo cerrar la sesión seleccionada.' });
+  }
+});
+
+app.post('/auth/sessions/revoke-others', requireAuth, async (req, res) => {
+  try {
+    const revoked = await revokeOtherActiveSessions(req.user.sub, req.user.sessionId);
+    return res.json({ ok: true, revoked });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'No se pudieron cerrar las demás sesiones.' });
   }
 });
 

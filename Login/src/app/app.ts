@@ -40,6 +40,7 @@ interface ShellSubscription {
 export class App {
   private readonly apiBase = getApiBase();
   private readonly publicBase = getPublicBase();
+  private readonly chunkReloadKey = 'inbi_chunk_reload_v1';
   protected readonly title = signal('Login');
   readonly moduleLoadFailed = signal(false);
   currentPath = '/login';
@@ -168,6 +169,7 @@ export class App {
     private readonly sessionTimeout: SessionTimeoutService,
     private readonly cdr: ChangeDetectorRef
   ) {
+    void this.auth.initializeSession();
     this.currentPath = this.router.url.split('?')[0];
     this.router.events
       .pipe(takeUntilDestroyed())
@@ -175,10 +177,11 @@ export class App {
         if (event instanceof NavigationError) {
           const message = typeof event.error === 'string' ? event.error : event.error?.message;
           if (typeof message === 'string' && /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|loading chunk .+ failed/i.test(message)) {
-            this.moduleLoadFailed.set(true);
+            this.recoverFromOutdatedModule(event.url);
           }
         } else if (event instanceof NavigationEnd) {
           this.moduleLoadFailed.set(false);
+          sessionStorage.removeItem(this.chunkReloadKey);
           this.currentPath = event.urlAfterRedirects.split('?')[0];
           this.scheduleShellDataLoad();
         }
@@ -200,6 +203,16 @@ export class App {
 
   reloadApplication(): void {
     window.location.reload();
+  }
+
+  async retrySessionValidation(): Promise<void> {
+    const valid = await this.auth.initializeSession(true);
+    if (!valid) return;
+
+    const browserPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (this.router.url !== browserPath) {
+      await this.router.navigateByUrl(browserPath);
+    }
   }
 
   shellVisible(): boolean {
@@ -278,6 +291,34 @@ export class App {
     };
   }
 
+  private recoverFromOutdatedModule(route: string): void {
+    const normalizedRoute = route.split('?')[0] || '/';
+    const previousAttempt = this.readChunkReloadAttempt();
+    const isRepeatedAttempt = previousAttempt?.route === normalizedRoute
+      && Date.now() - previousAttempt.createdAt < 5 * 60 * 1000;
+
+    this.moduleLoadFailed.set(true);
+    if (isRepeatedAttempt) return;
+
+    sessionStorage.setItem(
+      this.chunkReloadKey,
+      JSON.stringify({ route: normalizedRoute, createdAt: Date.now() })
+    );
+    this.reloadApplication();
+  }
+
+  private readChunkReloadAttempt(): { route: string; createdAt: number } | null {
+    const raw = sessionStorage.getItem(this.chunkReloadKey);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as { route?: unknown; createdAt?: unknown };
+      if (typeof parsed.route !== 'string' || typeof parsed.createdAt !== 'number') return null;
+      return { route: parsed.route, createdAt: parsed.createdAt };
+    } catch {
+      return null;
+    }
+  }
+
   private scheduleShellDataLoad(): void {
     setTimeout(() => {
       void this.loadShellData();
@@ -285,7 +326,11 @@ export class App {
   }
 
   private async loadShellData(): Promise<void> {
-    if (this.loadingShellData || !this.shellVisible()) return;
+    if (
+      this.loadingShellData
+      || this.auth.sessionState() !== 'ready'
+      || !this.shellVisible()
+    ) return;
     const token = this.auth.tokens()?.accessToken;
     const user = this.auth.currentUser();
     if (!token || !user) return;

@@ -19,9 +19,63 @@
 
       <div class="panel-actions">
         <a routerLink="/dashboard">Menú principal</a>
-        <button type="button" class="secondary" disabled>Configuración</button>
-        <button type="button" (click)="auth.logout()" routerLink="/login">Salir</button>
+        <button type="button" class="secondary" (click)="toggleSessions($event)">
+          {{ sessionsOpen() ? 'Ocultar dispositivos' : 'Dispositivos' }}
+        </button>
+        <button type="button" (click)="logout()">Salir</button>
       </div>
+
+      <section class="sessions-panel" *ngIf="sessionsOpen()" aria-labelledby="sessions-title">
+        <div class="sessions-heading">
+          <div>
+            <strong id="sessions-title">Dispositivos con sesión</strong>
+            <span>Máximo {{ maxActiveSessions() }} dispositivos activos.</span>
+          </div>
+          <button
+            type="button"
+            class="refresh-sessions"
+            (click)="loadSessions()"
+            [disabled]="sessionsLoading()"
+          >Actualizar</button>
+        </div>
+
+        <p class="sessions-feedback error" *ngIf="sessionsError()">{{ sessionsError() }}</p>
+        <p class="sessions-feedback success" *ngIf="sessionsMessage()">{{ sessionsMessage() }}</p>
+        <p class="sessions-loading" *ngIf="sessionsLoading()">Consultando sesiones...</p>
+
+        <div class="session-list" *ngIf="!sessionsLoading() && sessions().length">
+          <article class="session-item" *ngFor="let session of sessions()">
+            <div class="session-item-copy">
+              <div class="session-device-line">
+                <strong>{{ session.device }}</strong>
+                <small *ngIf="session.current">Este dispositivo</small>
+              </div>
+              <span>Inicio: {{ session.startedAt | date: 'dd/MM/yyyy, h:mm a' }}</span>
+              <span>Último uso: {{ session.lastSeenAt | date: 'dd/MM/yyyy, h:mm a' }}</span>
+              <span *ngIf="session.ipAddress">IP: {{ session.ipAddress }}</span>
+            </div>
+            <button
+              *ngIf="!session.current"
+              type="button"
+              class="close-session"
+              (click)="closeSession(session)"
+              [disabled]="sessionActionId() !== null"
+            >{{ sessionActionId() === session.id ? 'Cerrando...' : 'Cerrar' }}</button>
+          </article>
+        </div>
+
+        <p class="sessions-empty" *ngIf="!sessionsLoading() && !sessions().length && !sessionsError()">
+          No encontramos sesiones activas.
+        </p>
+
+        <button
+          *ngIf="otherSessionsCount() > 0"
+          type="button"
+          class="close-others"
+          (click)="closeOtherSessions()"
+          [disabled]="sessionActionId() !== null"
+        >{{ sessionActionId() === 'all' ? 'Cerrando...' : 'Cerrar las demás sesiones' }}</button>
+      </section>
     </div>
   </details>
 </div>

@@ -1,11 +1,24 @@
-import { HttpInterceptorFn } from '@angular/common/http';
+import { HttpContextToken, HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { from, throwError } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
 import { AuthService } from './auth.service';
 
+const AUTH_RETRIED = new HttpContextToken<boolean>(() => false);
+const PUBLIC_AUTH_ENDPOINTS = [
+  '/auth/login',
+  '/auth/refresh',
+  '/auth/logout',
+  '/auth/forgot-password',
+  '/auth/reset-password'
+];
+
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
+  if (PUBLIC_AUTH_ENDPOINTS.some((path) => req.url.includes(path))) {
+    return next(req);
+  }
+
   const tokens = auth.tokens();
   if (!tokens?.accessToken) {
     return next(req);
@@ -19,7 +32,13 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
 
   return next(cloned).pipe(
     catchError((error) => {
-      const alreadyRetried = req.headers.has('x-retry');
+      const code = error?.error?.code;
+      if (error?.status === 401 && code === 'SESSION_REPLACED') {
+        auth.handleSessionFailure(code);
+        return throwError(() => error);
+      }
+
+      const alreadyRetried = req.context.get(AUTH_RETRIED);
       if (error?.status !== 401 || alreadyRetried) {
         return throwError(() => error);
       }
@@ -34,9 +53,9 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
             return throwError(() => error);
           }
           const retry = req.clone({
+            context: req.context.set(AUTH_RETRIED, true),
             setHeaders: {
-              Authorization: `Bearer ${refreshed.accessToken}`,
-              'x-retry': '1'
+              Authorization: `Bearer ${refreshed.accessToken}`
             }
           });
           return next(retry);

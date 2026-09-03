@@ -16,12 +16,19 @@ interface AccessData {
   moduleKey?: string;
 }
 
+function isTransientAccessError(error: unknown): boolean {
+  const status = (error as { status?: number } | null)?.status;
+  return status === 0 || status === 408 || status === 429 || Boolean(status && status >= 500);
+}
+
 export const accessGuard: CanActivateFn = async (route, state) => {
   const auth = inject(AuthService);
   const router = inject(Router);
   const http = inject(HttpClient);
 
-  if (!auth.isAuthenticated()) {
+  const sessionReady = await auth.initializeSession();
+  if (!sessionReady) {
+    if (auth.sessionState() === 'connection-error') return false;
     return router.createUrlTree(['/login'], {
       queryParams: { returnUrl: state.url }
     });
@@ -65,7 +72,11 @@ export const accessGuard: CanActivateFn = async (route, state) => {
       if (!suite?.enabled) {
         return router.createUrlTree(['/no-autorizado']);
       }
-    } catch {
+    } catch (error) {
+      if (isTransientAccessError(error)) {
+        auth.handleConnectionFailure();
+        return false;
+      }
       return router.createUrlTree(['/no-autorizado']);
     }
   }
@@ -79,7 +90,11 @@ export const accessGuard: CanActivateFn = async (route, state) => {
       if (!module?.enabled) {
         return router.createUrlTree(['/no-autorizado']);
       }
-    } catch {
+    } catch (error) {
+      if (isTransientAccessError(error)) {
+        auth.handleConnectionFailure();
+        return false;
+      }
       return router.createUrlTree(['/no-autorizado']);
     }
   }

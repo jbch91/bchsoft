@@ -83,3 +83,26 @@
   </div>
   <button type="button" (click)="reloadApplication()">Recargar página</button>
 </section>
+
+<main
+  *ngIf="auth.sessionState() !== 'ready'"
+  class="session-gate"
+  [attr.aria-busy]="auth.sessionState() === 'checking'"
+>
+    <section class="session-gate-card">
+      <img src="/assets/inbi-logo.png" alt="INBIHOSPITALARIO" />
+
+      <ng-container *ngIf="auth.sessionState() === 'checking'; else connectionProblem">
+        <span class="session-spinner" aria-hidden="true"></span>
+        <strong>Verificando tu sesión</strong>
+        <p>Estamos preparando tus módulos y permisos.</p>
+      </ng-container>
+
+      <ng-template #connectionProblem>
+        <span class="session-warning" aria-hidden="true">!</span>
+        <strong>No pudimos conectar con el servidor</strong>
+        <p>{{ auth.sessionValidationMessage() }}</p>
+        <button type="button" (click)="retrySessionValidation()">Intentar nuevamente</button>
+      </ng-template>
+    </section>
+</main>
