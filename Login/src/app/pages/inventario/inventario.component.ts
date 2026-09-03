@@ -80,7 +80,9 @@ export class InventarioComponent {
   errorMessage = '';
   qrModalOpen = false;
   qrSearchTerm = '';
+  qrSiteFilter = '';
   qrAreaFilter = '';
+  qrLocationFilter = '';
   qrStatusFilter = '';
   readonly qrExportFormats: QrExportFormatOption[] = [
     {
@@ -344,8 +346,24 @@ export class InventarioComponent {
     }
   }
 
+  get qrSiteOptions(): string[] {
+    return this.uniqueQrOptionValues(this.qrEligibleItems, 'siteName');
+  }
+
   get qrAreaOptions(): string[] {
-    return Array.from(new Set(this.qrEligibleItems.map((item) => item.areaName || '').filter(Boolean))).sort();
+    const items = this.qrEligibleItems.filter((item) => (
+      !this.qrSiteFilter || item.siteName === this.qrSiteFilter
+    ));
+    return this.uniqueQrOptionValues(items, 'areaName');
+  }
+
+  get qrLocationOptions(): string[] {
+    const items = this.qrEligibleItems.filter((item) => {
+      if (this.qrSiteFilter && item.siteName !== this.qrSiteFilter) return false;
+      if (this.qrAreaFilter && item.areaName !== this.qrAreaFilter) return false;
+      return true;
+    });
+    return this.uniqueQrOptionValues(items, 'locationName');
   }
 
   get qrStatusOptions(): string[] {
@@ -359,7 +377,9 @@ export class InventarioComponent {
   get qrFilteredItems(): InventoryPanelItem[] {
     const term = this.normalize(this.qrSearchTerm);
     return this.qrEligibleItems.filter((item) => {
+      if (this.qrSiteFilter && item.siteName !== this.qrSiteFilter) return false;
       if (this.qrAreaFilter && item.areaName !== this.qrAreaFilter) return false;
+      if (this.qrLocationFilter && item.locationName !== this.qrLocationFilter) return false;
       if (this.qrStatusFilter && item.status !== this.qrStatusFilter) return false;
       if (!term) return true;
       const haystack = [
@@ -451,8 +471,21 @@ export class InventarioComponent {
 
   clearQrFilters(): void {
     this.qrSearchTerm = '';
+    this.qrSiteFilter = '';
     this.qrAreaFilter = '';
+    this.qrLocationFilter = '';
     this.qrStatusFilter = '';
+    this.onQrFiltersChanged();
+  }
+
+  onQrSiteFilterChanged(): void {
+    this.qrAreaFilter = '';
+    this.qrLocationFilter = '';
+    this.onQrFiltersChanged();
+  }
+
+  onQrAreaFilterChanged(): void {
+    this.qrLocationFilter = '';
     this.onQrFiltersChanged();
   }
 
@@ -1106,6 +1139,17 @@ export class InventarioComponent {
     this.qrPage = 1;
     this.qrProgressCompleted = 0;
     this.qrProgressTotal = 0;
+  }
+
+  private uniqueQrOptionValues(
+    items: InventoryPanelItem[],
+    property: 'siteName' | 'areaName' | 'locationName'
+  ): string[] {
+    return Array.from(new Set(
+      items
+        .map((item) => item[property]?.trim() ?? '')
+        .filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b, 'es'));
   }
 
   private async createQrDataUrl(

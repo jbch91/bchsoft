@@ -68,7 +68,7 @@
       </div>
 
       <div class="qr-tools">
-        <label>
+        <label class="qr-search-field">
           Buscar equipo
           <input
             type="search"
@@ -78,10 +78,24 @@
           />
         </label>
         <label>
+          Sede
+          <select [(ngModel)]="qrSiteFilter" (ngModelChange)="onQrSiteFilterChanged()">
+            <option value="">Todas</option>
+            <option *ngFor="let site of qrSiteOptions" [value]="site">{{ site }}</option>
+          </select>
+        </label>
+        <label>
           Área
-          <select [(ngModel)]="qrAreaFilter" (ngModelChange)="onQrFiltersChanged()">
+          <select [(ngModel)]="qrAreaFilter" (ngModelChange)="onQrAreaFilterChanged()">
             <option value="">Todas</option>
             <option *ngFor="let area of qrAreaOptions" [value]="area">{{ area }}</option>
+          </select>
+        </label>
+        <label>
+          Ubicación
+          <select [(ngModel)]="qrLocationFilter" (ngModelChange)="onQrFiltersChanged()">
+            <option value="">Todas</option>
+            <option *ngFor="let location of qrLocationOptions" [value]="location">{{ location }}</option>
           </select>
         </label>
         <label>

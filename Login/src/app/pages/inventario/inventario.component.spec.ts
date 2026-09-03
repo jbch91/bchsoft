@@ -218,6 +218,48 @@ describe('InventarioComponent QR flow', () => {
     expect(component.qrExportScopeLabel).toBe('seleccionados');
   });
 
+  it('encadena los filtros QR por sede, área y ubicación', () => {
+    const component = createQrComponent();
+    component.items = [
+      {
+        ...inventoryItem('001', 'URGENCIAS'),
+        siteName: 'SEDE PRINCIPAL',
+        locationName: 'CONSULTORIO 1'
+      },
+      {
+        ...inventoryItem('002', 'UCI'),
+        siteName: 'SEDE PRINCIPAL',
+        locationName: 'CUBÍCULO 2'
+      },
+      {
+        ...inventoryItem('003', 'URGENCIAS'),
+        siteName: 'SEDE NORTE',
+        locationName: 'OBSERVACIÓN'
+      }
+    ];
+
+    expect(component.qrSiteOptions).toEqual(['SEDE NORTE', 'SEDE PRINCIPAL']);
+
+    component.qrSiteFilter = 'SEDE PRINCIPAL';
+    component.onQrSiteFilterChanged();
+    expect(component.qrAreaOptions).toEqual(['UCI', 'URGENCIAS']);
+
+    component.qrAreaFilter = 'URGENCIAS';
+    component.onQrAreaFilterChanged();
+    expect(component.qrLocationOptions).toEqual(['CONSULTORIO 1']);
+
+    component.qrLocationFilter = 'CONSULTORIO 1';
+    component.onQrFiltersChanged();
+    expect(component.qrFilteredItems.map((item) => item.id)).toEqual(['001']);
+
+    component.qrSiteFilter = 'SEDE NORTE';
+    component.onQrSiteFilterChanged();
+    expect(component.qrAreaFilter).toBe('');
+    expect(component.qrLocationFilter).toBe('');
+    expect(component.qrAreaOptions).toEqual(['URGENCIAS']);
+    expect(component.qrFilteredItems.map((item) => item.id)).toEqual(['003']);
+  });
+
   it('codifica un destino identificable y usa margen de impresión seguro', async () => {
     qrToDataUrl.mockClear();
     const component = createQrComponent();
