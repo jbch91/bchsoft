@@ -44,4 +44,14 @@ describe('SessionTimeoutService', () => {
     vi.advanceTimersByTime(10 * 60 * 1000);
     expect(auth.logout).toHaveBeenCalledWith(true, 'inactive');
   });
+
+  it('expulsa antes de procesar el primer clic tras una suspensión prolongada', () => {
+    service.start();
+    vi.setSystemTime(new Date('2026-09-02T12:31:00.000Z'));
+
+    window.dispatchEvent(new Event('click'));
+
+    expect(auth.logout).toHaveBeenCalledWith(true, 'inactive');
+    expect(localStorage.getItem('auth_last_activity_v1')).toBe('1788350400000');
+  });
 });

@@ -81,6 +81,10 @@ export class CalibracionesComponent implements OnInit {
     return this.clients.find((client) => client.id === this.selectedClientId) ?? null;
   }
 
+  get canManageSchedules(): boolean {
+    return this.auth.hasPermission('calibration:schedule:manage');
+  }
+
   clientLogoUrl(client: ClientOption | null): string | null {
     if (!client?.logoPath) return null;
     if (client.logoPath.startsWith('http')) return client.logoPath;
@@ -245,6 +249,12 @@ export class CalibracionesComponent implements OnInit {
   }
 
   async onClientChange(): Promise<void> {
+    await this.loadSchedules();
+  }
+
+  async onYearChange(): Promise<void> {
+    this.selectedScheduleId = '';
+    this.items = [];
     await this.loadSchedules();
   }
 }

@@ -391,7 +391,8 @@ export class AuthService implements OnDestroy {
     if (redirectToLogin) {
       if (reason !== 'manual') sessionStorage.setItem(this.logoutReasonKey, reason);
       void this.router.navigate(['/login'], {
-        queryParams: reason !== 'manual' ? { reason } : undefined
+        queryParams: reason !== 'manual' ? { reason } : undefined,
+        replaceUrl: true
       });
     }
   }

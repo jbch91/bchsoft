@@ -13,6 +13,7 @@ export class SessionTimeoutService {
     if (!document.hidden) this.checkAndSchedule();
   };
   private readonly onFocus = (): void => this.checkAndSchedule();
+  private readonly onPageShow = (): void => this.checkAndSchedule();
   private readonly onStorage = (event: StorageEvent): void => {
     if (event.key !== this.lastActivityKey || !event.newValue) return;
     const timestamp = Number(event.newValue);
@@ -35,6 +36,7 @@ export class SessionTimeoutService {
         window.addEventListener(eventName, this.onActivity, { passive: true });
       }
       window.addEventListener('focus', this.onFocus);
+      window.addEventListener('pageshow', this.onPageShow);
       window.addEventListener('storage', this.onStorage);
       document.addEventListener('visibilitychange', this.onVisibilityChange);
       this.listening = true;
@@ -56,6 +58,7 @@ export class SessionTimeoutService {
         window.removeEventListener(eventName, this.onActivity);
       }
       window.removeEventListener('focus', this.onFocus);
+      window.removeEventListener('pageshow', this.onPageShow);
       window.removeEventListener('storage', this.onStorage);
       document.removeEventListener('visibilitychange', this.onVisibilityChange);
     }
@@ -72,6 +75,14 @@ export class SessionTimeoutService {
     }
 
     const now = Date.now();
+    const storedActivity = this.readLastActivity();
+    if (storedActivity) {
+      this.lastActivityAt = Math.max(this.lastActivityAt, storedActivity);
+    }
+    if (this.lastActivityAt && now - this.lastActivityAt >= this.inactivityMs) {
+      this.expireSession();
+      return;
+    }
     if (!forcePersist && now - this.lastActivityAt < this.activityThrottleMs) return;
     this.lastActivityAt = now;
     if (forcePersist || now - this.lastPersistedAt >= this.persistThrottleMs) {

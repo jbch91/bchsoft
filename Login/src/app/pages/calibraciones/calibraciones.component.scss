@@ -7,6 +7,105 @@
   margin-top: 12px;
 }
 
+.calibration-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.calibration-toolbar-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.calibration-toolbar-copy > span {
+  color: var(--brand-700);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.calibration-toolbar-copy > strong {
+  font-size: 18px;
+}
+
+.calibration-toolbar-copy > small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.calibration-toolbar-fields {
+  display: grid;
+  grid-template-columns: minmax(100px, 120px) minmax(150px, 170px) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.calibration-toolbar-fields label {
+  font-size: 12px;
+}
+
+.generate-schedule {
+  min-height: 39px;
+  white-space: nowrap;
+}
+
+.calibration-state {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 112px;
+}
+
+.calibration-state > div {
+  display: grid;
+  gap: 5px;
+}
+
+.calibration-state p,
+.calibration-state small {
+  margin: 0;
+  color: #64748b;
+}
+
+.calibration-state.empty {
+  border-style: dashed;
+}
+
+.state-icon,
+.state-spinner {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
+
+.state-icon {
+  background: #f1f5f9;
+  color: #64748b;
+  font-weight: 800;
+}
+
+.state-spinner {
+  border: 3px solid #e2e8f0;
+  border-top-color: var(--brand-600);
+  animation: calibration-spin 0.8s linear infinite;
+}
+
+.feedback-message {
+  margin: 0;
+}
+
+@keyframes calibration-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .filters-top {
   display: grid;
   grid-template-columns: minmax(220px, 360px) 1fr;
@@ -203,6 +302,15 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .calibration-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .calibration-toolbar-fields {
+    grid-template-columns: minmax(90px, 0.75fr) minmax(150px, 1fr) auto;
+  }
+
   .schedule-row.header,
   .item-row.header {
     display: none;
@@ -211,5 +319,15 @@ button {
   .schedule-row,
   .item-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .calibration-toolbar-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .generate-schedule {
+    width: 100%;
   }
 }

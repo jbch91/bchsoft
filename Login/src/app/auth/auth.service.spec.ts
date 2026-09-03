@@ -92,7 +92,8 @@ describe('AuthService session coordination', () => {
     expect(await refresh).toBe(false);
     expect(auth.isAuthenticated()).toBe(false);
     expect(router.navigate).toHaveBeenCalledWith(['/login'], {
-      queryParams: { reason: 'replaced' }
+      queryParams: { reason: 'replaced' },
+      replaceUrl: true
     });
   });
 });

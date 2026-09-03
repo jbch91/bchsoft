@@ -1,6 +1,43 @@
 <section class="page">
   <app-module-tabs></app-module-tabs>
 
+  <section class="card calibration-toolbar">
+    <div class="calibration-toolbar-copy">
+      <span>Periodo</span>
+      <strong>Calibraciones {{ selectedYear }}</strong>
+      <small>Consulta los cronogramas y certificados del año seleccionado.</small>
+    </div>
+
+    <div class="calibration-toolbar-fields">
+      <label>
+        Año
+        <input
+          type="number"
+          min="2000"
+          max="2100"
+          [(ngModel)]="selectedYear"
+          [disabled]="loading"
+          (change)="onYearChange()"
+        />
+      </label>
+
+      <ng-container *ngIf="canManageSchedules">
+        <label>
+          Fecha inicial
+          <input type="date" [(ngModel)]="startDate" [disabled]="loading" />
+        </label>
+        <button
+          type="button"
+          class="primary generate-schedule"
+          [disabled]="loading || !startDate"
+          (click)="generateSchedule()"
+        >
+          Generar cronograma
+        </button>
+      </ng-container>
+    </div>
+  </section>
+
   <div class="card filters-card" *ngIf="!auth.currentUser()?.clientId">
     <div class="filters-top" *ngIf="clients.length">
       <div class="filters">
@@ -39,7 +76,32 @@
     </label>
   </div>
 
-  <div class="card" *ngIf="selectedScheduleId">
+  <section class="card calibration-state" *ngIf="loading" aria-live="polite">
+    <span class="state-spinner" aria-hidden="true"></span>
+    <div>
+      <strong>Cargando calibraciones</strong>
+      <p>Estamos consultando los cronogramas de {{ selectedYear }}.</p>
+    </div>
+  </section>
+
+  <p class="error feedback-message" *ngIf="errorMessage" role="alert">{{ errorMessage }}</p>
+  <p class="success feedback-message" *ngIf="successMessage" role="status">{{ successMessage }}</p>
+
+  <section
+    class="card calibration-state empty"
+    *ngIf="!loading && !errorMessage && !schedules.length"
+  >
+    <span class="state-icon" aria-hidden="true">0</span>
+    <div>
+      <strong>Sin cronogramas de calibración</strong>
+      <p>No hay cronogramas registrados para {{ selectedYear }}. Puedes consultar otro año.</p>
+      <small *ngIf="canManageSchedules">
+        Para iniciar uno, selecciona la fecha inicial y pulsa Generar cronograma.
+      </small>
+    </div>
+  </section>
+
+  <div class="card" *ngIf="selectedScheduleId && !loading">
     <h2>Detalle de calibraciones</h2>
     <div class="items-table">
       <div class="item-row header">
