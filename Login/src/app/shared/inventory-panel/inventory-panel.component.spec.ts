@@ -60,6 +60,7 @@ describe('InventoryPanelComponent operational conditions', () => {
       areaName: 'UCI',
       locationName: 'BOX 2',
       status: 'operativo',
+      requiresCalibration: false,
       acquisitionDate: '2099-01-01',
       warrantyYears: 2
     },
@@ -117,6 +118,13 @@ describe('InventoryPanelComponent operational conditions', () => {
     component.exportCondition = 'requires_calibration';
     expect(component.exportFilteredItems.map((item) => item.id)).toEqual(['operational']);
     expect(component.exportItemCount).toBe(1);
+
+    component.filterCondition = 'does_not_require_calibration';
+    component.exportCondition = 'does_not_require_calibration';
+    expect(component.filteredItems.map((item) => item.id)).toEqual(['warranty']);
+    expect(component.exportFilteredItems.map((item) => item.id)).toEqual(['warranty']);
+    expect(component.lifeSheetConditionLabel('does_not_require_calibration'))
+      .toBe('No requieren calibración');
   });
 
   it('emite el equipo seleccionado para solicitar revisión', () => {
