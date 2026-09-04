@@ -29,6 +29,7 @@ export const accessGuard: CanActivateFn = async (route, state) => {
   const sessionReady = await auth.initializeSession();
   if (!sessionReady) {
     if (auth.sessionState() === 'connection-error') return false;
+    auth.rememberPostLoginRoute(state.url);
     return router.createUrlTree(['/login'], {
       queryParams: { returnUrl: state.url }
     });

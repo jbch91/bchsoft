@@ -37,9 +37,14 @@ export class LoginComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    const requestedRoute = this.route.snapshot.queryParamMap.get('returnUrl');
+    if (requestedRoute !== null) {
+      this.auth.rememberPostLoginRoute(requestedRoute);
+    }
+
     if (this.auth.isAuthenticated()) {
       void this.auth.initializeSession().then((valid) => {
-        if (valid) void this.router.navigateByUrl(this.postLoginRoute());
+        if (valid) void this.navigateAfterLogin();
       });
     }
 
@@ -67,7 +72,7 @@ export class LoginComponent implements OnInit, OnDestroy {
       const result = await this.auth.login(this.username.trim(), this.password);
 
       if (result.ok) {
-        void this.router.navigateByUrl(this.postLoginRoute());
+        await this.navigateAfterLogin();
         return;
       }
 
@@ -183,8 +188,14 @@ export class LoginComponent implements OnInit, OnDestroy {
   }
 
   private postLoginRoute(): string {
-    const returnUrl = this.safeReturnUrl(this.route.snapshot.queryParamMap.get('returnUrl'));
-    if (returnUrl) return returnUrl;
+    const requestedRoute = this.route.snapshot.queryParamMap.get('returnUrl');
+    if (requestedRoute !== null) {
+      const returnUrl = this.auth.rememberPostLoginRoute(requestedRoute);
+      if (returnUrl) return returnUrl;
+    } else {
+      const pendingRoute = this.auth.pendingPostLoginRoute();
+      if (pendingRoute) return pendingRoute;
+    }
 
     const user = this.auth.currentUser();
     if (
@@ -202,14 +213,15 @@ export class LoginComponent implements OnInit, OnDestroy {
     return '/dashboard';
   }
 
-  private safeReturnUrl(value: string | null): string | null {
-    if (!value || !value.startsWith('/') || value.startsWith('//')) return null;
+  private async navigateAfterLogin(): Promise<void> {
+    const destination = this.postLoginRoute();
     try {
-      const target = new URL(value, window.location.origin);
-      if (target.origin !== window.location.origin || target.pathname === '/login') return null;
-      return `${target.pathname}${target.search}${target.hash}`;
+      const navigated = await this.router.navigateByUrl(destination, { replaceUrl: true });
+      if (navigated !== false) this.auth.clearPostLoginRoute();
     } catch {
-      return null;
+      this.auth.rememberPostLoginRoute(destination);
+      this.errorMessage = 'La sesión inició, pero no se pudo abrir el destino solicitado. Intenta nuevamente.';
+      this.cdr.detectChanges();
     }
   }
 }

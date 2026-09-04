@@ -38,6 +38,11 @@ interface BrowserLockManager {
   request<T>(name: string, callback: () => Promise<T>): Promise<T>;
 }
 
+interface StoredPostLoginRoute {
+  url: string;
+  createdAt: number;
+}
+
 export type SessionState = 'checking' | 'ready' | 'connection-error';
 export type LogoutReason = 'manual' | 'expired' | 'inactive' | 'replaced';
 
@@ -61,6 +66,8 @@ export class AuthService implements OnDestroy {
   private readonly tokenKey = 'auth_tokens_v1';
   private readonly lastActivityKey = 'auth_last_activity_v1';
   private readonly logoutReasonKey = 'auth_logout_reason_v1';
+  private readonly postLoginRouteKey = 'auth_post_login_route_v1';
+  private readonly postLoginRouteMaxAgeMs = 30 * 60 * 1000;
   private readonly channelName = 'inbi-auth-v1';
   private readonly refreshLockName = 'inbi-auth-refresh-v1';
   private readonly apiBase = getApiBase();
@@ -128,6 +135,57 @@ export class AuthService implements OnDestroy {
 
   isAuthenticated(): boolean {
     return this.currentUser() !== null && this.tokens() !== null;
+  }
+
+  rememberPostLoginRoute(value: string): string | null {
+    const url = this.normalizePostLoginRoute(value);
+    if (!url) return null;
+
+    try {
+      sessionStorage.setItem(
+        this.postLoginRouteKey,
+        JSON.stringify({ url, createdAt: Date.now() } satisfies StoredPostLoginRoute)
+      );
+    } catch {
+      // The URL query parameter remains the fallback when storage is unavailable.
+    }
+    return url;
+  }
+
+  pendingPostLoginRoute(): string | null {
+    let raw: string | null = null;
+    try {
+      raw = sessionStorage.getItem(this.postLoginRouteKey);
+    } catch {
+      return null;
+    }
+    if (!raw) return null;
+
+    try {
+      const stored = JSON.parse(raw) as Partial<StoredPostLoginRoute>;
+      if (
+        typeof stored.url !== 'string'
+        || typeof stored.createdAt !== 'number'
+        || Date.now() - stored.createdAt > this.postLoginRouteMaxAgeMs
+      ) {
+        this.clearPostLoginRoute();
+        return null;
+      }
+      const url = this.normalizePostLoginRoute(stored.url);
+      if (!url) this.clearPostLoginRoute();
+      return url;
+    } catch {
+      this.clearPostLoginRoute();
+      return null;
+    }
+  }
+
+  clearPostLoginRoute(): void {
+    try {
+      sessionStorage.removeItem(this.postLoginRouteKey);
+    } catch {
+      // Nothing else is required when browser storage is unavailable.
+    }
   }
 
   async initializeSession(force = false): Promise<boolean> {
@@ -431,6 +489,18 @@ export class AuthService implements OnDestroy {
     this.sessionValidationMessage.set(
       'No pudimos confirmar tu sesión porque el servidor no respondió. Tus datos de acceso se conservaron.'
     );
+  }
+
+  private normalizePostLoginRoute(value: string): string | null {
+    if (!value || !value.startsWith('/') || value.startsWith('//')) return null;
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+      const target = new URL(value, origin);
+      if (target.origin !== origin || target.pathname === '/login') return null;
+      return `${target.pathname}${target.search}${target.hash}`;
+    } catch {
+      return null;
+    }
   }
 
   private isTransientSessionError(error: unknown): boolean {

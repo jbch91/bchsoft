@@ -96,4 +96,19 @@ describe('AuthService session coordination', () => {
       replaceUrl: true
     });
   });
+
+  it('conserva temporalmente una ruta interna para continuar después del login', () => {
+    expect(auth.rememberPostLoginRoute('/q/asset-1')).toBe('/q/asset-1');
+    expect(auth.pendingPostLoginRoute()).toBe('/q/asset-1');
+
+    auth.clearPostLoginRoute();
+
+    expect(auth.pendingPostLoginRoute()).toBeNull();
+  });
+
+  it('rechaza retornos externos o hacia el propio login', () => {
+    expect(auth.rememberPostLoginRoute('//example.com/steal-session')).toBeNull();
+    expect(auth.rememberPostLoginRoute('/login?returnUrl=%2Fq%2Fasset-1')).toBeNull();
+    expect(auth.pendingPostLoginRoute()).toBeNull();
+  });
 });
