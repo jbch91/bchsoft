@@ -1,9 +1,10 @@
-import { provideHttpClient } from '@angular/common/http';
+import { HttpClient, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthService } from './auth.service';
+import { SessionTimeoutService } from './session-timeout.service';
 
 const LOGIN_RESPONSE = {
   user: {
@@ -21,13 +22,20 @@ const LOGIN_RESPONSE = {
 describe('AuthService session coordination', () => {
   let auth: AuthService;
   let http: HttpTestingController;
-  const router = { navigate: vi.fn(), navigateByUrl: vi.fn() };
+  const router = {
+    navigate: vi.fn(), navigateByUrl: vi.fn(), currentNavigation: vi.fn(),
+    url: '/', navigated: false
+  };
 
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
     router.navigate.mockReset();
     router.navigateByUrl.mockReset();
+    router.currentNavigation.mockReset();
+    router.url = '/';
+    router.navigated = false;
+    window.history.replaceState({}, '', '/');
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
@@ -42,6 +50,7 @@ describe('AuthService session coordination', () => {
   afterEach(() => {
     http.verify();
     TestBed.resetTestingModule();
+    window.history.replaceState({}, '', '/');
   });
 
   async function login(): Promise<void> {
@@ -110,5 +119,85 @@ describe('AuthService session coordination', () => {
     expect(auth.rememberPostLoginRoute('//example.com/steal-session')).toBeNull();
     expect(auth.rememberPostLoginRoute('/login?returnUrl=%2Fq%2Fasset-1')).toBeNull();
     expect(auth.pendingPostLoginRoute()).toBeNull();
+  });
+
+  it('conserva el QR antes del guard al cerrar por inactividad una sesión de ayer', async () => {
+    await login();
+    auth.ngOnDestroy();
+    window.history.replaceState({}, '', '/q/asset-1');
+    localStorage.setItem('auth_last_activity_v1', String(Date.now() - 24 * 60 * 60 * 1000));
+    const restored = new AuthService(TestBed.inject(HttpClient), router as never);
+    const timeout = new SessionTimeoutService(restored);
+    try {
+      timeout.start();
+      http.expectOne((item) => item.url.endsWith('/auth/logout')).flush({ ok: true });
+      await Promise.resolve();
+
+      expect(restored.isAuthenticated()).toBe(false);
+      expect(restored.pendingPostLoginRoute()).toBe('/q/asset-1');
+      expect(router.navigate).toHaveBeenCalledWith(['/login'], {
+        queryParams: { reason: 'inactive', returnUrl: '/q/asset-1' }, replaceUrl: true
+      });
+      restored.handleSessionFailure('SESSION_REPLACED');
+      expect(router.navigate).toHaveBeenLastCalledWith(['/login'], {
+        queryParams: { reason: 'replaced', returnUrl: '/q/asset-1' }, replaceUrl: true
+      });
+    } finally {
+      timeout.stop();
+      restored.ngOnDestroy();
+    }
+  });
+
+  it('prioriza el nuevo QR en navegación sobre el equipo que estaba abierto', () => {
+    router.url = '/q/asset-1';
+    router.navigated = true;
+    router.currentNavigation.mockReturnValue({ extractedUrl: { toString: () => '/q/asset-2' } });
+
+    auth.handleSessionFailure();
+
+    expect(router.navigate).toHaveBeenCalledWith(['/login'], {
+      queryParams: { reason: 'expired', returnUrl: '/q/asset-2' }, replaceUrl: true
+    });
+  });
+
+  it('descarta el destino pendiente al cerrar sesión voluntariamente', () => {
+    auth.rememberPostLoginRoute('/q/asset-1');
+    auth.logout(true);
+    expect(auth.pendingPostLoginRoute()).toBeNull();
+    expect(router.navigate).toHaveBeenCalledWith(['/login'], {
+      queryParams: undefined, replaceUrl: true
+    });
+  });
+
+  it('no cierra el nuevo login si termina tarde la validación de la sesión anterior', async () => {
+    await login();
+    const validation = auth.initializeSession(true);
+    const stale = http.expectOne((item) => item.url.includes('/auth/me'));
+    const signingIn = auth.login('ingeniero', 'ClaveSegura1');
+    http.expectOne((item) => item.url.endsWith('/auth/login')).flush({
+      ...LOGIN_RESPONSE, accessToken: 'new-access', refreshToken: 'new-refresh'
+    });
+    await signingIn;
+    stale.flush({}, { status: 401, statusText: 'Unauthorized' });
+
+    expect(await validation).toBe(true);
+    expect(auth.tokens()?.refreshToken).toBe('new-refresh');
+    expect(router.navigate).not.toHaveBeenCalled();
+  });
+
+  it('ignora una renovación rechazada de la sesión anterior después de un nuevo login', async () => {
+    await login();
+    const refresh = auth.refreshSession();
+    const stale = http.expectOne((item) => item.url.endsWith('/auth/refresh'));
+    const signingIn = auth.login('ingeniero', 'ClaveSegura1');
+    http.expectOne((item) => item.url.endsWith('/auth/login')).flush({
+      ...LOGIN_RESPONSE, accessToken: 'new-access', refreshToken: 'new-refresh'
+    });
+    await signingIn;
+    stale.flush({ code: 'SESSION_REPLACED' }, { status: 401, statusText: 'Unauthorized' });
+
+    expect(await refresh).toBe(false);
+    expect(auth.tokens()?.refreshToken).toBe('new-refresh');
+    expect(router.navigate).not.toHaveBeenCalled();
   });
 });

@@ -104,6 +104,8 @@ export class AuthService implements OnDestroy {
     private readonly http: HttpClient,
     private readonly router: Router
   ) {
+    // Inactivity can redirect before the first route guard has run.
+    this.captureQrReturnRoute();
     const hasPartialOrInvalidStorage = Boolean(
       localStorage.getItem(this.storageKey) || localStorage.getItem(this.tokenKey)
     ) && (!this.currentUser() || !this.tokens());
@@ -215,6 +217,9 @@ export class AuthService implements OnDestroy {
         this.sessionState.set('ready');
         return true;
       } catch (error) {
+        if (this.tokens()?.refreshToken !== expectedRefreshToken) {
+          return this.isAuthenticated();
+        }
         if (this.sessionState() === 'connection-error' || this.isTransientSessionError(error)) {
           this.setConnectionError();
           return false;
@@ -375,6 +380,7 @@ export class AuthService implements OnDestroy {
       );
       return true;
     } catch (error: any) {
+      if (this.tokens()?.refreshToken !== attemptedRefreshToken) return false;
       const code = error?.error?.code;
       if (code === 'TOKEN_ROTATED') {
         return this.waitForRotatedStoredSession(attemptedRefreshToken);
@@ -437,6 +443,8 @@ export class AuthService implements OnDestroy {
   }
 
   private clearLocalSession(reason: LogoutReason, redirectToLogin: boolean, broadcast: boolean): void {
+    if (reason === 'manual') this.clearPostLoginRoute();
+    else this.captureQrReturnRoute();
     this.currentUser.set(null);
     this.tokens.set(null);
     this.sessionState.set('ready');
@@ -448,8 +456,9 @@ export class AuthService implements OnDestroy {
 
     if (redirectToLogin) {
       if (reason !== 'manual') sessionStorage.setItem(this.logoutReasonKey, reason);
+      const returnUrl = reason !== 'manual' ? this.pendingPostLoginRoute() : null;
       void this.router.navigate(['/login'], {
-        queryParams: reason !== 'manual' ? { reason } : undefined,
+        queryParams: reason !== 'manual' ? { reason, ...(returnUrl ? { returnUrl } : {}) } : undefined,
         replaceUrl: true
       });
     }
@@ -500,6 +509,23 @@ export class AuthService implements OnDestroy {
       return `${target.pathname}${target.search}${target.hash}`;
     } catch {
       return null;
+    }
+  }
+
+  private captureQrReturnRoute(): void {
+    const navigation = this.router.currentNavigation();
+    const candidates = [
+      (navigation?.finalUrl ?? navigation?.extractedUrl)?.toString(),
+      this.router.url,
+      !this.router.navigated && typeof window !== 'undefined'
+        ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+        : null
+    ];
+    for (const candidate of candidates) {
+      if (candidate && /^\/q\/[^/?#]+(?:[/?#]|$)/.test(candidate)) {
+        this.rememberPostLoginRoute(candidate);
+        return;
+      }
     }
   }
 

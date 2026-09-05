@@ -34,7 +34,9 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
     catchError((error) => {
       const code = error?.error?.code;
       if (error?.status === 401 && code === 'SESSION_REPLACED') {
-        auth.handleSessionFailure(code);
+        if (auth.tokens()?.accessToken === tokens.accessToken) {
+          auth.handleSessionFailure(code);
+        }
         return throwError(() => error);
       }
 

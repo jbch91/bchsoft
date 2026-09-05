@@ -57,4 +57,14 @@ describe('authInterceptor', () => {
     expect(auth.handleSessionFailure).toHaveBeenCalledWith('SESSION_REPLACED');
     expect(auth.refreshSession).not.toHaveBeenCalled();
   });
+
+  it('no expulsa el login nuevo por una respuesta tardía de la sesión anterior', () => {
+    client.get('/api/private').subscribe({ error: () => undefined });
+    const stale = http.expectOne('/api/private');
+    tokens.set({ accessToken: 'new-access', refreshToken: 'new-refresh' });
+    stale.flush({ code: 'SESSION_REPLACED' }, { status: 401, statusText: 'Unauthorized' });
+
+    expect(auth.handleSessionFailure).not.toHaveBeenCalled();
+    expect(auth.refreshSession).not.toHaveBeenCalled();
+  });
 });
