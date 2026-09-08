@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import { query } from './db.js';
+import { readerRequestAllowed, restrictReaderPermissions } from './reader-policy.js';
 
 dotenv.config();
 
@@ -44,6 +45,13 @@ export async function requireAuth(req, res, next) {
         code: 'SESSION_REPLACED',
         message: 'Esta sesión dejó de estar activa en el dispositivo.'
       });
+    }
+    if (payload.roles?.includes('lector')) {
+      payload.permissions = restrictReaderPermissions(payload.permissions, payload.roles);
+      const pathname = new URL(req.originalUrl, 'http://localhost').pathname;
+      if (!payload.clientId || !readerRequestAllowed(req.method, pathname)) {
+        return res.status(403).json({ message: 'El lector solo puede consultar hojas de vida e inventario de sus áreas asignadas.' });
+      }
     }
     req.user = payload;
     return next();

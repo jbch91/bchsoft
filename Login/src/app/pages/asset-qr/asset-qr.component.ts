@@ -75,6 +75,10 @@ export class AssetQrComponent implements OnInit {
       this.errorMessage = 'Abre este QR con un usuario asociado a la institución del equipo.';
       return;
     }
+    if (this.auth.hasRole('lector')) {
+      await this.router.navigate(['/hojas-de-vida'], { queryParams: { assetId: this.assetId }, replaceUrl: true });
+      return;
+    }
     await this.loadContext();
   }
 
@@ -83,7 +87,7 @@ export class AssetQrComponent implements OnInit {
   }
 
   get isAreaReporter(): boolean {
-    return !this.isEngineer && this.auth.hasRole(['responsable_area', 'lector']);
+    return !this.isEngineer && this.auth.hasRole('responsable_area');
   }
 
   get isWarehouse(): boolean {

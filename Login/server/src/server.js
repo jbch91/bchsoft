@@ -423,6 +423,7 @@ import {
 } from './equipment-catalog.js';
 import { sendNotificationEmail } from './mailer.js';
 import { listReaderAccess, replaceReaderAccess } from './reader-access.js';
+import { READER_PERMISSIONS, restrictReaderPermissions } from './reader-policy.js';
 import { sendPreventiveRemindersForClient } from './preventive-reminders.js';
 import {
   sendManualOdontologyAppointmentWhatsappReminder,
@@ -537,7 +538,6 @@ const AREA_SCOPED_OPERATIONAL_ROLES = ['lector', AREA_RESPONSIBLE_ROLE];
 const MAINTENANCE_ACCEPTANCE_SIGNER_ROLES = [
   'almacenista',
   AREA_RESPONSIBLE_ROLE,
-  'lector',
   'viewer',
   'visor',
   'superuser'
@@ -546,7 +546,6 @@ const MAINTENANCE_REPORT_ACCESS_ROLES = [
   'almacenista',
   'ingeniero_biomedico',
   AREA_RESPONSIBLE_ROLE,
-  'lector',
   'viewer',
   'visor',
   'superuser'
@@ -1041,7 +1040,7 @@ async function listLegacyMaintenanceReportSigningUsers(clientId, asset, request)
        JOIN reader_access ra ON ra.user_id = u.id AND ra.client_id = $1
        WHERE u.client_id = $1
          AND u.is_active = TRUE
-         AND r.name IN ('lector', 'viewer', 'visor')
+         AND r.name IN ('viewer', 'visor')
          AND (
            ($2::uuid IS NOT NULL AND ra.area_id = $2::uuid)
            OR ($3::uuid IS NOT NULL AND ra.location_id = $3::uuid)
@@ -1049,8 +1048,6 @@ async function listLegacyMaintenanceReportSigningUsers(clientId, asset, request)
       [clientId, asset.area_id || null, asset.location_id || null]
     );
     readers = rows;
-  } else {
-    readers = await listUsersByRoleAndClient('lector', clientId);
   }
 
   for (const user of readers) {
@@ -1059,7 +1056,7 @@ async function listLegacyMaintenanceReportSigningUsers(clientId, asset, request)
 
   if (request?.type !== 'preventivo' && request?.requested_by) {
     const requester = await getUserById(request.requested_by);
-    if (requester?.id) {
+    if (requester?.id && !requester.roles?.includes('lector')) {
       byId.set(requester.id, requester);
     }
   }
@@ -1371,7 +1368,7 @@ app.get(
       }
       const allowed = await listAllowedClientRolePermissions(req.user.clientId);
       const permissions = await getClientRolePermissions(req.user.clientId, req.params.id);
-      return res.json(permissions.filter((permission) => allowed.has(permission)));
+      return res.json(restrictReaderPermissions(permissions, [roleName]).filter((permission) => allowed.has(permission)));
     }
     if (!isSuperuser(req.user)) {
       return res.json([]);
@@ -1403,10 +1400,11 @@ app.put(
 
       const requested = cleanPermissionList(permissions);
       const allowed = await listAllowedClientRolePermissions(req.user.clientId);
-      const invalid = requested.filter((permission) => !allowed.has(permission));
+      const invalid = requested.filter((permission) => !allowed.has(permission)
+        || (roleName === 'lector' && !READER_PERMISSIONS.includes(permission)));
       if (invalid.length) {
         return res.status(400).json({
-          message: 'Algunos permisos no están habilitados para este cliente.',
+          message: 'Algunos permisos no están habilitados para este cliente o rol.',
           invalid
         });
       }
@@ -7007,9 +7005,9 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       message: 'Registro INVIMA obligatorio para el ingeniero biomédico.'
     });
   }
-  if (role === AREA_RESPONSIBLE_ROLE && !scopedAreaIds.length && !scopedLocationIds.length) {
+  if (AREA_SCOPED_OPERATIONAL_ROLES.includes(role) && !scopedAreaIds.length && !scopedLocationIds.length) {
     return res.status(400).json({
-      message: 'Asigna al menos un área o una ubicación al responsable antes de crear el usuario.'
+      message: 'Asigna al menos un área o una ubicación antes de crear el usuario.'
     });
   }
   if (role === AREA_RESPONSIBLE_ROLE && !req.file) {
@@ -12116,7 +12114,7 @@ app.get(
   '/maintenance/reports/:id/pdf',
   requireAuth,
   requireAnyPermissionOrRole(
-    ['maintenance:report:create', 'maintenance:report:sign', 'read:all'],
+    ['maintenance:report:create', 'maintenance:report:sign', 'read:all', 'hb:view'],
     MAINTENANCE_REPORT_ACCESS_ROLES
   ),
   async (req, res) => {
@@ -13969,11 +13967,11 @@ app.post(
 app.get(
   '/calibration/items/:id/pdf',
   requireAuth,
-  requireAnyPermission(['calibration:schedule:manage', 'calibration:report:upload', 'read:all']),
+  requireAnyPermission(['calibration:schedule:manage', 'calibration:report:upload', 'read:all', 'hb:view']),
   async (req, res) => {
     const itemId = req.params.id;
     const { rows } = await query(
-      `SELECT i.id, i.schedule_id, i.pdf_path, s.client_id
+      `SELECT i.id, i.schedule_id, i.pdf_path, i.asset_id, s.client_id
        FROM calibration_schedule_items i
        JOIN calibration_schedules s ON s.id = i.schedule_id
        WHERE i.id = $1`,
@@ -13985,6 +13983,10 @@ app.get(
     }
     if (req.user.clientId && req.user.clientId !== item.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    if (isAreaScopedOperationalUser(req.user)
+      && !(await readerCanAccessAsset(item.client_id, req.user.sub, item.asset_id))) {
+      return res.status(403).json({ message: 'Sin acceso al equipo.' });
     }
     if (!item.pdf_path) {
       return res.status(404).json({ message: 'PDF no disponible.' });

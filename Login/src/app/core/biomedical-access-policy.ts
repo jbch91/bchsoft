@@ -1,4 +1,5 @@
 import { Permission, Role } from '../auth/models';
+import { READER_PERMISSIONS } from '../auth/reader-policy';
 
 export interface BiomedicalFeaturePolicy {
   label: string;
@@ -14,14 +15,14 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
     route: '/hojas-de-vida',
     moduleKey: 'hojas_de_vida',
     permissionsAny: ['hb:create', 'hb:view', 'read:all'],
-    excludedRoles: ['lector', 'responsable_area']
+    excludedRoles: ['responsable_area']
   },
   hojas_de_vida_industriales: {
     label: 'Hojas de vida industriales',
     route: '/hojas-de-vida-industriales',
     moduleKey: 'hojas_de_vida',
     permissionsAny: ['hb:create', 'hb:view', 'read:all'],
-    excludedRoles: ['lector', 'responsable_area']
+    excludedRoles: ['responsable_area']
   },
   inventario: {
     label: 'Inventario',
@@ -32,11 +33,13 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
   sedes_areas_ubicaciones: {
     label: 'Sedes y ubicaciones',
     route: '/sedes-areas-ubicaciones',
+    excludedRoles: ['lector'],
     permissionsAny: ['areas:manage']
   },
   guias_rapidas: {
     label: 'Guías rápidas',
     route: '/guias-rapidas',
+    excludedRoles: ['lector'],
     moduleKey: 'guias_rapidas',
     permissionsAny: [
       'quick_guides:view',
@@ -51,6 +54,7 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
   reportes_mantenimiento: {
     label: 'Mantenimiento',
     route: '/mantenimiento',
+    excludedRoles: ['lector'],
     moduleKey: 'reportes_mantenimiento',
     permissionsAny: [
       'maintenance:request:create',
@@ -63,6 +67,7 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
   reportes_mantenimiento_industrial: {
     label: 'Mantenimiento industrial',
     route: '/mantenimiento-industrial',
+    excludedRoles: ['lector'],
     moduleKey: 'reportes_mantenimiento',
     permissionsAny: [
       'maintenance:request:create',
@@ -75,18 +80,21 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
   cronogramas: {
     label: 'Cronogramas',
     route: '/cronogramas',
+    excludedRoles: ['lector'],
     moduleKey: 'cronogramas',
     permissionsAny: ['schedules:manage', 'schedules:unlock_approved']
   },
   cronogramas_industriales: {
     label: 'Cronogramas industriales',
     route: '/cronogramas-industriales',
+    excludedRoles: ['lector'],
     moduleKey: 'cronogramas',
     permissionsAny: ['schedules:manage', 'schedules:unlock_approved']
   },
   calibraciones: {
     label: 'Calibraciones',
     route: '/calibraciones',
+    excludedRoles: ['lector'],
     moduleKey: 'calibraciones',
     permissionsAny: ['calibration:schedule:manage', 'calibration:report:upload', 'read:all']
   }
@@ -106,7 +114,8 @@ export function canOpenBiomedicalFeature(
   if (policy.excludedRoles?.some((role) => context.roles.includes(role))) {
     return false;
   }
-  if (!policy.permissionsAny.some((permission) => context.permissions.includes(permission))) {
+  if (!policy.permissionsAny.some((permission) => context.permissions.includes(permission)
+    && (!context.roles.includes('lector') || READER_PERMISSIONS.includes(permission)))) {
     return false;
   }
   if (!policy.moduleKey) {

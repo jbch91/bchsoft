@@ -58,7 +58,7 @@
   </div>
   <p class="success page-feedback" *ngIf="successMessage && !assetFormModalOpen">{{ successMessage }}</p>
 
-  <div class="life-sheet-workspace-tabs" role="tablist" aria-label="Gestión de hojas de vida">
+  <div class="life-sheet-workspace-tabs" *ngIf="!isReader" role="tablist" aria-label="Gestión de hojas de vida">
     <button
       type="button"
       role="tab"
@@ -1117,12 +1117,12 @@
     </div>
   </div>
 
-  <div class="modal-backdrop" *ngIf="assetModalMode === 'view'">
-    <div class="modal-shell detail-modal" role="dialog" aria-modal="true">
+  <div class="modal-backdrop detail-modal-backdrop" *ngIf="assetModalMode === 'view'">
+    <div class="modal-shell detail-modal" role="dialog" aria-modal="true" aria-labelledby="hv-detail-title" (keydown.escape)="closeAssetModal()">
       <div class="modal-header">
         <div>
           <span>Hoja de vida {{ isIndustrialAssetModule ? 'industrial' : 'biomédica' }}</span>
-          <h2>{{ name || selectedAssetForModal?.name || 'Detalle del equipo' }}</h2>
+          <h2 id="hv-detail-title" [title]="name || selectedAssetForModal?.name || 'Detalle del equipo'">{{ name || selectedAssetForModal?.name || 'Detalle del equipo' }}</h2>
         </div>
         <button type="button" class="modal-close" (click)="closeAssetModal()">Cerrar</button>
       </div>
@@ -1130,6 +1130,43 @@
       <div class="modal-loading" *ngIf="assetDetailsLoading">Cargando hoja de vida...</div>
 
       <div class="detail-content" *ngIf="!assetDetailsLoading">
+        <div class="detail-tabs" role="tablist" aria-label="Secciones de hoja de vida">
+          <button
+            type="button"
+            role="tab"
+            id="hv-summary-tab"
+            aria-controls="hv-detail-panel"
+            [attr.aria-selected]="detailModalTab === 'summary'"
+            [class.active]="detailModalTab === 'summary'"
+            (click)="setDetailModalTab('summary')"
+          >
+            Resumen
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="hv-history-tab"
+            aria-controls="hv-detail-panel"
+            [attr.aria-selected]="detailModalTab === 'history'"
+            [class.active]="detailModalTab === 'history'"
+            (click)="setDetailModalTab('history')"
+          >
+            Historial
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="hv-documents-tab"
+            aria-controls="hv-detail-panel"
+            [attr.aria-selected]="detailModalTab === 'documents'"
+            [class.active]="detailModalTab === 'documents'"
+            (click)="setDetailModalTab('documents')"
+          >
+            Documentos
+          </button>
+        </div>
+
+        <div #detailScroll class="detail-scroll" id="hv-detail-panel" role="tabpanel" [attr.aria-labelledby]="'hv-' + detailModalTab + '-tab'" tabindex="0">
         <div class="detail-summary">
           <div>
             <span>Código</span>
@@ -1147,30 +1184,6 @@
             <span>Serie</span>
             <strong>{{ serial || '-' }}</strong>
           </div>
-        </div>
-
-        <div class="detail-tabs" role="tablist" aria-label="Secciones de hoja de vida">
-          <button
-            type="button"
-            [class.active]="detailModalTab === 'summary'"
-            (click)="setDetailModalTab('summary')"
-          >
-            Resumen
-          </button>
-          <button
-            type="button"
-            [class.active]="detailModalTab === 'history'"
-            (click)="setDetailModalTab('history')"
-          >
-            Historial
-          </button>
-          <button
-            type="button"
-            [class.active]="detailModalTab === 'documents'"
-            (click)="setDetailModalTab('documents')"
-          >
-            Documentos
-          </button>
         </div>
 
         <div class="summary-grid" *ngIf="detailModalTab === 'summary'">
@@ -1274,7 +1287,7 @@
             </div>
             <button type="button" class="primary" (click)="openSelectedAssetPdf()">Abrir PDF</button>
           </div>
-          <div class="document-action">
+          <div class="document-action" *ngIf="!isReader">
             <div>
               <strong>Guía rápida de uso</strong>
               <span>Guía aprobada para esta combinación de equipo, marca y modelo.</span>
@@ -1282,7 +1295,7 @@
             <button type="button" class="ghost" (click)="openSelectedAssetQuickGuide()">Abrir guía</button>
           </div>
 
-          <section class="document-upload-panel">
+          <section class="document-upload-panel" *ngIf="!isReader">
             <div class="document-upload-header">
               <div>
                 <span>Archivo documental</span>
@@ -1407,7 +1420,9 @@
           </section>
         </div>
 
-        <div class="modal-actions" *ngIf="detailModalTab === 'summary'">
+        </div>
+
+        <div class="modal-actions">
           <button type="button" class="primary" (click)="openSelectedAssetPdf()">Abrir PDF</button>
           <button type="button" class="ghost" *ngIf="canCreateAssets" (click)="editFromViewModal()">Editar</button>
         </div>

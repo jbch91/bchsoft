@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
+import { READER_PERMISSIONS } from '../../auth/reader-policy';
 import { Role } from '../../auth/models';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
 
@@ -374,10 +375,7 @@ export class UsersComponent implements OnInit {
     ],
     lector: [
       'software:biomedico:access',
-      'hb:view',
-      'maintenance:request:create',
-      'maintenance:report:sign',
-      'quick_guides:view'
+      'hb:view'
     ],
     admin_odontologia: [
       'software:odontologico:access',
@@ -489,8 +487,7 @@ export class UsersComponent implements OnInit {
   private readonly signatureRoles: Role[] = [
     'almacenista',
     'ingeniero_biomedico',
-    'responsable_area',
-    'lector'
+    'responsable_area'
   ];
 
   constructor(
@@ -610,11 +607,11 @@ export class UsersComponent implements OnInit {
       return;
     }
     if (
-      this.role === 'responsable_area'
+      this.isAreaScopedRole(this.role)
       && this.createScopeAreaIds.size === 0
       && this.createScopeLocationIds.size === 0
     ) {
-      this.errorMessage = 'Asigna al menos un área o una ubicación al jefe o responsable.';
+      this.errorMessage = 'Asigna al menos un área o una ubicación al usuario.';
       return;
     }
 
@@ -628,7 +625,7 @@ export class UsersComponent implements OnInit {
         email: this.email.trim(),
         role: this.role,
         clientId: this.isClientScopedRole(this.role) ? this.clientId : undefined,
-        signatureFile: this.signatureFile,
+        signatureFile: this.requiresSignature(this.role) ? this.signatureFile : null,
         documentType: this.documentType,
         documentNumber: this.documentNumber.trim(),
         invimaRegistration: this.requiresBiomedicalCredentials(this.role) ? this.invimaRegistration.trim() : null,
@@ -1048,7 +1045,7 @@ export class UsersComponent implements OnInit {
       ingeniero_biomedico: 'Crea hojas de vida, reportes, cronogramas y documentos biomédicos.',
       calibracion: 'Carga certificados y reportes de calibración.',
       responsable_area: 'Ve únicamente sus áreas o ubicaciones asignadas, reporta fallas y avala con firma los mantenimientos realizados.',
-      lector: 'Consulta información autorizada por área/ubicación y firma cuando aplique.',
+      lector: 'Consulta hojas de vida e inventario y exporta el inventario de sus áreas y ubicaciones. Sin edición ni firma.',
       admin_odontologia: 'Administra la operación odontológica del cliente.',
       odontologo: 'Gestiona atención clínica odontológica.',
       auxiliar_odontologia: 'Apoya agenda, pacientes, adjuntos, inventario y esterilización.',
@@ -1279,6 +1276,7 @@ export class UsersComponent implements OnInit {
   }
 
   onCreateRoleChange(): void {
+    if (!this.requiresSignature(this.role)) this.signatureFile = null;
     this.resetCreateAreaScope();
     if (this.isAreaScopedRole(this.role) && this.clientId) {
       void this.loadCreateAreaScope(this.clientId);
@@ -1544,6 +1542,8 @@ export class UsersComponent implements OnInit {
   }
 
   roleAssignablePermissions(role: Role): string[] {
+    if (role === 'lector') return this.permissions.filter((permission) =>
+      (READER_PERMISSIONS as readonly string[]).includes(permission));
     if (role === 'superuser') return this.permissions;
     return this.permissions.filter((permission) =>
       !this.temporaryOnlyPermissions.has(permission)
@@ -1662,7 +1662,8 @@ export class UsersComponent implements OnInit {
     const roleId = this.roleIds.get(role);
     if (!roleId) return;
     this.editingRoleId = roleId;
-    this.permissionDraft = new Set(this.rolePermissions[roleId] ?? []);
+    const allowed = new Set(this.roleAssignablePermissions(role));
+    this.permissionDraft = new Set((this.rolePermissions[roleId] ?? []).filter((permission) => allowed.has(permission)));
     this.errorMessage = '';
     this.successMessage = '';
   }
@@ -1686,8 +1687,9 @@ export class UsersComponent implements OnInit {
     this.successMessage = '';
     try {
       const role = this.roles.find((roleOption) => this.roleIds.get(roleOption) === roleId);
+      const allowed = new Set(role ? this.roleAssignablePermissions(role) : []);
       const permissions = Array.from(this.permissionDraft).filter((permission) =>
-        role === 'superuser' || !this.temporaryOnlyPermissions.has(permission)
+        allowed.has(permission)
       );
       const roleName = role ? this.roleLabel(role) : `rol ${roleId}`;
       const action = this.isTenantAdmin() ? 'CLIENT_ROLE_PERMISSIONS_UPDATE' : 'ROLE_PERMISSIONS_UPDATE';

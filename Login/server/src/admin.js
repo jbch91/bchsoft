@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import { pool, query } from './db.js';
 import { TEMPORARY_ONLY_PERMISSIONS } from './permission-policy.js';
+import { restrictReaderPermissions } from './reader-policy.js';
 
 const PLATFORM_ONLY_MODULES = ['clientes', 'auditoria'];
 
@@ -342,7 +343,8 @@ export async function updateRolePermissions(roleId, permissions) {
   const roleName = roleRows[0]?.name;
   const allowedPermissions = roleName === 'superuser'
     ? permissions
-    : permissions.filter((permission) => !TEMPORARY_ONLY_PERMISSIONS.includes(permission));
+    : restrictReaderPermissions(permissions, [roleName])
+      .filter((permission) => !TEMPORARY_ONLY_PERMISSIONS.includes(permission));
 
   await query('DELETE FROM role_permissions WHERE role_id = $1', [roleId]);
 
@@ -360,7 +362,8 @@ export async function updateRolePermissions(roleId, permissions) {
 }
 
 export async function updateClientRolePermissions({ clientId, roleId, permissions, actorUserId }) {
-  const allowedPermissions = Array.from(new Set(permissions || []))
+  const { rows: roleRows } = await query('SELECT name FROM roles WHERE id = $1', [roleId]);
+  const allowedPermissions = restrictReaderPermissions(Array.from(new Set(permissions || [])), [roleRows[0]?.name])
     .filter((permission) => !TEMPORARY_ONLY_PERMISSIONS.includes(permission));
 
   const client = await pool.connect();

@@ -6,6 +6,7 @@ import { pool, query } from './db.js';
 import { listClientModules } from './admin.js';
 import { getClientSubscriptionAccess } from './subscriptions.js';
 import { allowedClientPermissionsForModules } from './permission-policy.js';
+import { restrictReaderPermissions } from './reader-policy.js';
 import {
   describeSessionDevice,
   normalizeMaxActiveSessions,
@@ -220,7 +221,7 @@ async function loadUserPermissions(userId, clientId, roles = []) {
      ORDER BY name`,
     [userId, clientId || null, CLIENT_CONFIGURABLE_ROLES]
   );
-  const permissions = permRows.rows.map((row) => row.name);
+  const permissions = restrictReaderPermissions(permRows.rows.map((row) => row.name), roles);
   if (!clientId || roles.includes('client_admin')) {
     return permissions;
   }

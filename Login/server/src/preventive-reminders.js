@@ -121,7 +121,7 @@ export async function sendPreventiveRemindersForAllClients() {
   }
 }
 
-async function listLectorUsersForArea(clientId, areaId, schema) {
+async function listAreaResponsibleUsersForArea(clientId, areaId, schema) {
   const { rows } = await query(
     `SELECT DISTINCT u.id, u.email, u.display_name
      FROM users u
@@ -131,7 +131,7 @@ async function listLectorUsersForArea(clientId, areaId, schema) {
      LEFT JOIN "${schema}".locations lo ON lo.id = ra.location_id
      WHERE u.client_id = $1
        AND u.is_active = TRUE
-       AND r.name = 'lector'
+       AND r.name = 'responsable_area'
        AND (ra.area_id = $2 OR lo.area_id = $2)`,
     [clientId, areaId]
   );
@@ -173,8 +173,8 @@ export async function sendTrainingRemindersForClient(clientId) {
     );
     if (alreadySent.rows.length) continue;
 
-    const lectores = await listLectorUsersForArea(clientId, item.area_id, schema);
-    const recipients = [...engineers, ...almacenistas, ...lectores];
+    const responsables = await listAreaResponsibleUsersForArea(clientId, item.area_id, schema);
+    const recipients = [...engineers, ...almacenistas, ...responsables];
     const uniqueRecipients = new Map();
     for (const user of recipients) {
       uniqueRecipients.set(user.id, user);
@@ -268,8 +268,8 @@ export async function sendCalibrationRemindersForClient(clientId) {
     );
     if (alreadySent.rows.length) continue;
 
-    const lectores = await listLectorUsersForArea(clientId, item.area_id, schema);
-    const recipients = [...almacenistas, ...lectores];
+    const responsables = await listAreaResponsibleUsersForArea(clientId, item.area_id, schema);
+    const recipients = [...almacenistas, ...responsables];
     const uniqueRecipients = new Map();
     for (const user of recipients) {
       uniqueRecipients.set(user.id, user);

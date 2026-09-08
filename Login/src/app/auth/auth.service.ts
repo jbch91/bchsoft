@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { getApiBase } from '../core/api-base';
 import { LoginResult, Permission, Role, User } from './models';
+import { READER_PERMISSIONS } from './reader-policy';
 
 interface LoginResponse {
   user: {
@@ -573,7 +574,8 @@ export class AuthService implements OnDestroy {
     if (!user) return false;
 
     const required = Array.isArray(permissions) ? permissions : [permissions];
-    return required.every((permission) => user.permissions.includes(permission));
+    return required.every((permission) => user.permissions.includes(permission)
+      && (!this.hasRole('lector') || READER_PERMISSIONS.includes(permission)));
   }
 
   private loadStoredUser(): User | null {

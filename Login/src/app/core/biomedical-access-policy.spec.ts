@@ -4,6 +4,18 @@ import {
 } from './biomedical-access-policy';
 
 describe('biomedical access policy', () => {
+  it('el lector solo consulta hojas de vida e inventario, incluso con permisos heredados', () => {
+    const context = {
+      permissions: ['hb:view', 'hb:create', 'read:all', 'areas:manage', 'schedules:manage', 'maintenance:report:sign'] as const,
+      roles: ['lector'] as const,
+      enabledModules: new Set(['hojas_de_vida', 'inventario', 'reportes_mantenimiento', 'cronogramas', 'calibraciones', 'guias_rapidas'])
+    };
+    for (const key of Object.keys(BIOMEDICAL_FEATURE_POLICIES) as Array<keyof typeof BIOMEDICAL_FEATURE_POLICIES>) {
+      expect(canOpenBiomedicalFeature(key, context)).toBe(
+        ['inventario', 'hojas_de_vida', 'hojas_de_vida_industriales'].includes(key));
+    }
+    expect(canOpenBiomedicalFeature('hojas_de_vida', { ...context, enabledModules: new Set() })).toBe(false);
+  });
   it('muestra sedes solo cuando areas:manage está presente', () => {
     expect(canOpenBiomedicalFeature('sedes_areas_ubicaciones', {
       permissions: ['areas:manage'],

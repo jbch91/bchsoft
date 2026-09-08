@@ -346,6 +346,33 @@ app-inventory-panel[hidden] {
   width: min(1120px, 100%);
 }
 
+.detail-modal .modal-header {
+  align-items: center;
+  flex-direction: row;
+  min-width: 0;
+}
+
+.detail-modal .modal-header > div {
+  min-width: 0;
+}
+
+.detail-modal .modal-header span {
+  letter-spacing: 0;
+}
+
+.detail-modal .modal-header h2 {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.detail-modal .modal-close {
+  flex: 0 0 auto;
+  min-height: 40px;
+}
+
 .protocol-upload-backdrop {
   z-index: 160;
 }
@@ -841,9 +868,33 @@ app-inventory-panel[hidden] {
 .detail-content {
   display: grid;
   gap: 14px;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
+}
+
+.detail-scroll {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0 4px 4px 0;
+}
+
+.detail-modal .modal-actions {
+  border-top: 1px solid var(--border);
+  flex-wrap: nowrap;
+  padding-top: 10px;
+}
+
+.detail-modal .modal-actions button {
+  min-height: 40px;
+  min-width: 0;
 }
 
 .detail-summary {
@@ -855,7 +906,7 @@ app-inventory-panel[hidden] {
 .detail-summary > div {
   background: linear-gradient(135deg, #ffffff, var(--brand-50));
   border: 1px solid color-mix(in srgb, var(--brand-100) 75%, var(--border));
-  border-radius: 14px;
+  border-radius: 8px;
   display: grid;
   gap: 4px;
   padding: 12px;
@@ -877,9 +928,9 @@ app-inventory-panel[hidden] {
 .detail-tabs {
   background: color-mix(in srgb, var(--brand-50) 68%, #ffffff);
   border: 1px solid color-mix(in srgb, var(--brand-100) 72%, var(--border));
-  border-radius: 12px;
-  display: flex;
-  flex-wrap: wrap;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   padding: 6px;
 }
@@ -888,13 +939,15 @@ app-inventory-panel[hidden] {
   appearance: none;
   background: transparent;
   border: 0;
-  border-radius: 9px;
+  border-radius: 6px;
   color: var(--muted);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
   font-weight: 900;
-  padding: 8px 12px;
+  min-height: 40px;
+  min-width: 0;
+  padding: 8px 4px;
 }
 
 .detail-tabs button.active {
@@ -906,8 +959,8 @@ app-inventory-panel[hidden] {
 .history-panel,
 .documents-panel {
   min-height: 0;
-  overflow: auto;
-  padding-right: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .history-filters {
@@ -917,21 +970,35 @@ app-inventory-panel[hidden] {
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
 }
 
+.history-filters label,
+.history-filters input,
+.history-filters select {
+  min-width: 0;
+  width: 100%;
+}
+
+.history-filters input,
+.history-filters select,
+.history-filters button {
+  min-height: 40px;
+  font-size: 12px;
+}
+
 .history-panel {
   display: grid;
   gap: 12px;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  align-content: start;
 }
 
 .table.history-list .history-row {
   color: var(--muted);
-  grid-template-columns: 180px 112px minmax(0, 1fr) 94px;
-  min-width: 760px;
+  grid-template-columns: minmax(110px, 0.7fr) 90px minmax(0, 2fr) 64px;
+  min-width: 0;
 }
 
 .history-list {
   margin-top: 0;
-  overflow: auto;
+  min-width: 0;
 }
 
 .history-row > span {
@@ -941,9 +1008,7 @@ app-inventory-panel[hidden] {
 .history-row strong,
 .history-row small {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .history-row strong {
@@ -963,7 +1028,7 @@ app-inventory-panel[hidden] {
   font-weight: 900;
   justify-self: start;
   padding: 6px 8px;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .history-actions,
@@ -975,6 +1040,12 @@ app-inventory-panel[hidden] {
 
 .history-actions {
   justify-content: flex-end;
+}
+
+.history-actions button,
+.history-more button {
+  min-height: 40px;
+  min-width: 44px;
 }
 
 .document-action {
@@ -1826,8 +1897,9 @@ form {
 
 .summary-grid {
   display: grid;
+  align-content: start;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
 }
 
 .summary-grid > div {
@@ -1859,6 +1931,20 @@ form {
   font-weight: 800;
   margin: 0;
   padding: 10px 12px;
+}
+
+@media (max-width: 600px), (max-height: 500px) {
+  .modal-backdrop.detail-modal-backdrop {
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+
+  .modal-shell.detail-modal {
+    height: calc(100dvh - max(8px, env(safe-area-inset-top)) - max(8px, env(safe-area-inset-bottom)));
+    max-height: calc(100dvh - max(8px, env(safe-area-inset-top)) - max(8px, env(safe-area-inset-bottom)));
+    border-radius: 8px;
+    padding: 12px;
+  }
 }
 
 .error,
@@ -1974,7 +2060,10 @@ li span {
     border-top: 1px solid var(--border);
   }
 
-  .history-filters,
+  .history-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .document-action {
     grid-template-columns: 1fr;
   }
@@ -2072,7 +2161,7 @@ li span {
 @media (max-width: 680px) {
   .table.history-list .history-row {
     align-items: stretch;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
     min-width: 0;
   }
 
@@ -2083,7 +2172,20 @@ li span {
   .table.history-list .history-row span[data-label] {
     display: grid;
     gap: 8px;
-    grid-template-columns: 110px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .table.history-list .history-row span[data-label='Documento'] {
+    grid-column: 1 / -1;
+  }
+
+  .table.history-list .history-row span[data-label='Acciones'] {
+    grid-column: 1 / -1;
+    justify-content: end;
+  }
+
+  .table.history-list .history-row span[data-label='Acciones']::before {
+    display: none;
   }
 
   .table.history-list .history-row span[data-label]::before {
@@ -2121,6 +2223,33 @@ li span {
 
   .detail-modal {
     height: calc(100dvh - 24px);
+    gap: 10px;
+  }
+
+  .detail-modal .modal-header h2 {
+    font-size: 16px;
+  }
+
+  .detail-content {
+    gap: 10px;
+  }
+
+  .detail-summary > div {
+    padding: 9px;
+  }
+
+  .detail-scroll label,
+  .detail-scroll input,
+  .detail-scroll select,
+  .detail-scroll textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .detail-scroll input,
+  .detail-scroll select {
+    min-height: 40px;
+    width: 100%;
   }
 
   .schedule-programming-modal {
@@ -2245,7 +2374,7 @@ li span {
   }
 
   .detail-summary {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .protocol-upload-equipment,
@@ -2287,7 +2416,6 @@ li span {
     justify-self: start;
   }
 
-  .detail-tabs button,
   .history-more button,
   .document-action button {
     width: 100%;

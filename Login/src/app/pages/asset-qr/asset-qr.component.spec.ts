@@ -103,6 +103,17 @@ function createComponent(options: {
 }
 
 describe('AssetQrComponent role-aware flow', () => {
+  it('abre la hoja de vida del lector sin consultar acciones de mantenimiento', async () => {
+    const { component, router, maintenance } = createComponent({
+      roles: ['lector'], permissions: ['hb:view']
+    });
+    await component.ngOnInit();
+    expect(router.navigate).toHaveBeenCalledWith(['/hojas-de-vida'], {
+      queryParams: { assetId: 'asset-1' }, replaceUrl: true
+    });
+    expect(maintenance.getAssetQrContext).not.toHaveBeenCalled();
+    expect(component.isAreaReporter).toBe(false);
+  });
   it('prioriza el correctivo activo sobre el preventivo para el ingeniero', async () => {
     const period = periodInBogota();
     const corrective = request('corrective-1', 'correctivo');

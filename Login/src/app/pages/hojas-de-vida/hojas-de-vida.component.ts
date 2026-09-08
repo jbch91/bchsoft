@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnDestroy } from '@angular/core';
+import { ChangeDetectorRef, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -151,6 +151,7 @@ type SupplementalDocumentType = 'maintenance_corrective' | 'calibration' | 'othe
   styleUrl: './hojas-de-vida.component.scss'
 })
 export class HojasDeVidaComponent implements OnDestroy {
+  @ViewChild('detailScroll') private detailScroll?: ElementRef<HTMLElement>;
   readonly assetCategory: AssetCategory;
   private readonly apiBase = getApiBase();
   private readonly publicBase = getPublicBase();
@@ -544,6 +545,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   setLifeSheetView(view: LifeSheetWorkspaceView): void {
+    if (this.isReader && view !== 'records') return;
     this.activeLifeSheetView = view;
     if (view === 'pending_protocols' && !this.pendingProtocolsLoading) {
       void this.loadPendingProtocols();
@@ -552,6 +554,10 @@ export class HojasDeVidaComponent implements OnDestroy {
 
   get canUploadHistoricalProtocols(): boolean {
     return this.auth.hasPermission('asset_history:upload');
+  }
+
+  get isReader(): boolean {
+    return this.auth.hasRole('lector');
   }
 
   get pendingProtocolAreas(): string[] {
@@ -599,7 +605,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   async loadPendingProtocols(): Promise<void> {
-    if (!this.selectedClientId) {
+    if (!this.selectedClientId || this.isReader) {
       this.pendingProtocols = [];
       return;
     }
@@ -832,7 +838,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   get canRefreshTemporaryPermissions(): boolean {
-    return this.auth.isAuthenticated()
+    return !this.isReader && this.auth.isAuthenticated()
       && (this.auth.hasRole('ingeniero_biomedico') || Boolean(this.auth.currentUser()?.clientId));
   }
 
@@ -972,6 +978,7 @@ export class HojasDeVidaComponent implements OnDestroy {
 
   setDetailModalTab(tab: 'summary' | 'history' | 'documents'): void {
     this.detailModalTab = tab;
+    this.detailScroll?.nativeElement.scrollTo(0, 0);
     if (tab === 'history' && !this.assetHistoryItems.length && !this.assetHistoryLoading) {
       void this.loadAssetHistory(true);
     }
@@ -2066,7 +2073,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   async loadEquipmentCatalog(): Promise<void> {
-    if (!this.selectedClientId) {
+    if (!this.selectedClientId || this.isReader) {
       this.equipmentCatalog = [];
       return;
     }

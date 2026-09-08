@@ -59,6 +59,17 @@ describe('AuthService session coordination', () => {
     expect(await promise).toEqual({ ok: true });
   }
 
+  it('no conserva permisos de escritura de un lector en una sesion antigua', () => {
+    auth.currentUser.set({ id: 'reader', username: 'lector', displayName: 'Lector',
+      role: 'lector', roles: ['lector'], clientId: 'client-1',
+      permissions: ['hb:view', 'hb:create', 'maintenance:report:sign', 'inventory:move', 'read:all'] });
+    expect(auth.hasPermission('hb:view')).toBe(true);
+    expect(auth.hasPermission('hb:create')).toBe(false);
+    expect(auth.hasPermission('maintenance:report:sign')).toBe(false);
+    expect(auth.hasPermission('inventory:move')).toBe(false);
+    expect(auth.hasPermission('read:all')).toBe(false);
+  });
+
   it('comparte una sola renovación entre solicitudes simultáneas', async () => {
     await login();
 

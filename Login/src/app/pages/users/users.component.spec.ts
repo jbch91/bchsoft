@@ -34,6 +34,44 @@ function buildComponent(createUser: ReturnType<typeof vi.fn>): {
 }
 
 describe('UsersComponent user creation', () => {
+  it('crea un lector sin firma y con las areas seleccionadas', async () => {
+    const createUser = vi.fn().mockResolvedValue({ id: 'reader-1', invitation_sent: true });
+    const { component } = buildComponent(createUser);
+    component.role = 'lector';
+    component.createScopeAreaIds.add('area-1');
+    component.signatureFile = new File(['previous'], 'signature.png', { type: 'image/png' });
+    expect(component.requiresSignature('lector')).toBe(false);
+    await component.onCreateUser();
+    expect(createUser).toHaveBeenCalledWith(expect.objectContaining({
+      role: 'lector', signatureFile: null, areaIds: ['area-1'], locationIds: []
+    }));
+    expect(component.createUserModalOpen).toBe(false);
+  });
+
+  it('no permite crear un lector sin alcance y acepta ubicaciones especificas', async () => {
+    const createUser = vi.fn().mockResolvedValue({ id: 'reader-1' });
+    const { component } = buildComponent(createUser);
+    component.role = 'lector';
+    await component.onCreateUser();
+    expect(createUser).not.toHaveBeenCalled();
+    expect(component.createUserModalOpen).toBe(true);
+    expect(component.errorMessage).toContain('Asigna al menos');
+    component.createScopeLocationIds.add('location-1');
+    await component.onCreateUser();
+    expect(createUser).toHaveBeenCalledWith(expect.objectContaining({ areaIds: [], locationIds: ['location-1'] }));
+  });
+
+  it('limita los permisos configurables del lector y mantiene la firma del responsable', () => {
+    const { component } = buildComponent(vi.fn());
+    component.permissions = ['software:biomedico:access', 'hb:view', 'maintenance:report:sign', 'hb:create'];
+    expect(component.roleAssignablePermissions('lector')).toEqual(['software:biomedico:access', 'hb:view']);
+    expect(component.requiresSignature('responsable_area')).toBe(true);
+    component.role = 'lector';
+    component.clientId = '';
+    component.signatureFile = new File(['previous'], 'signature.png');
+    component.onCreateRoleChange();
+    expect(component.signatureFile).toBeNull();
+  });
   it('cierra y limpia el modal solo cuando el servidor confirma la creación', async () => {
     const createUser = vi.fn().mockResolvedValue({
       id: 'user-1',
