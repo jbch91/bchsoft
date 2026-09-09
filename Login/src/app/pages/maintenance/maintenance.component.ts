@@ -10,6 +10,7 @@ import type { AssetCategory } from '../../biomed/biomed.service';
 import {
   MaintenanceService,
   MaintenanceReportDto,
+  MaintenanceSignatureResult,
   MaintenanceRequestDto,
   PreventiveMaintenanceProgressDto,
   PreventiveProgressItemDto,
@@ -484,6 +485,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportPdfLoadingId = '';
   signConfirmationReport: MaintenanceReportDto | null = null;
   signingReport = false;
+  verifyingSignature = false;
+  signErrorMessage = '';
   correctionDialogReport: MaintenanceReportDto | null = null;
   correctionReason = '';
   correctionSubmitting = false;
@@ -1249,36 +1252,101 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   openSignConfirmation(report: MaintenanceReportDto): void {
-    if (!this.canSignReport(report)) return;
+    if (this.signingReport || !this.canSignReport(report)) return;
     this.reportDetail = null;
+    this.signErrorMessage = '';
     this.signConfirmationReport = report;
   }
 
   closeSignConfirmation(): void {
     if (this.signingReport) return;
     this.signConfirmationReport = null;
+    this.signErrorMessage = '';
   }
 
   async confirmSignReport(): Promise<void> {
     const report = this.signConfirmationReport;
     if (!report || this.signingReport) return;
     this.signingReport = true;
+    this.signErrorMessage = '';
+    this.refreshViewSoon();
     try {
-      await this.maintenance.signReport(report.id);
-      await this.loadData();
-      this.signConfirmationReport = null;
-      this.showAlert(
-        this.isAreaResponsible
-          ? 'Reporte firmado y avalado correctamente.'
-          : 'Reporte firmado correctamente.',
-        'success'
-      );
+      const result = await this.maintenance.signReport(report.id);
+      if (!result?.signed_by_me) throw new Error('Respuesta de firma sin confirmacion.');
+      this.applyConfirmedSignature(report, result);
     } catch (error: any) {
       console.error(error);
-      this.errorMessage = error?.error?.message ?? 'No se pudo firmar el reporte.';
-      this.showAlert(this.errorMessage, 'error');
+      // A lost response does not mean the signature was not saved. Never repeat the POST automatically.
+      const uncertain = !error?.status || error.status >= 500 || error.status === 409;
+      if (uncertain) {
+        this.verifyingSignature = true;
+        this.refreshViewSoon();
+        try {
+          const reports = await this.maintenance.listReports(report.client_id, {
+            assetCategory: this.assetCategory, assetId: report.asset_id
+          });
+          const saved = reports.find((item) => item.id === report.id);
+          if (saved?.signed_by_me) {
+            this.applyConfirmedSignature(report, {
+              reportId: report.id, signed_by_me: true,
+              is_fully_signed: Boolean(saved.is_fully_signed),
+              request_status: saved.request_status, alreadySigned: true
+            });
+            return;
+          }
+        } catch (verificationError) {
+          console.error('No se pudo verificar la firma del reporte', verificationError);
+        }
+      }
+      this.signErrorMessage = error?.status >= 400 && error.status < 500 && error?.error?.message
+        ? error.error.message
+        : uncertain
+          ? `No se pudo confirmar la firma. Puedes cerrar y consultar ${this.isAreaResponsible ? 'Finalizados' : 'el historial de reportes'} o reintentar; una firma guardada no se duplicará.`
+          : 'No se pudo firmar el reporte. Intenta nuevamente.';
     } finally {
       this.signingReport = false;
+      this.verifyingSignature = false;
+      this.refreshViewSoon();
+    }
+  }
+
+  private applyConfirmedSignature(report: MaintenanceReportDto, result: MaintenanceSignatureResult): void {
+    if (this.destroyed) return;
+    this.reports = this.reports.map((item) => item.id === report.id ? {
+      ...item, signed_by_me: true, is_fully_signed: result.is_fully_signed,
+      request_status: result.request_status ?? item.request_status, can_reopen_by_me: false
+    } : item);
+    this.requests = this.requests.map((item) => item.id === report.request_id && result.request_status
+      ? { ...item, status: result.request_status } : item);
+    this.signConfirmationReport = null;
+    this.signErrorMessage = '';
+    this.clampReportPage();
+    const message = result.alreadySigned
+      ? 'La firma ya estaba registrada. Se confirmó sin duplicarla.'
+      : result.is_fully_signed
+        ? 'Reporte firmado y avalado correctamente.'
+        : 'Firma guardada correctamente. El reporte aún tiene firmas pendientes.';
+    const warning = result.warnings?.length
+      ? ' La firma quedó guardada, pero no se completaron algunas tareas posteriores. El reporte conserva su firma.'
+      : '';
+    this.showAlert(message + warning, 'success');
+    this.refreshViewSoon();
+    void this.refreshReportsAfterSignature(report.client_id);
+  }
+
+  private async refreshReportsAfterSignature(clientId: string): Promise<void> {
+    try {
+      const reports = await this.maintenance.listReports(clientId, {
+        assetCategory: this.assetCategory, order: 'desc'
+      });
+      if (this.destroyed || this.selectedClientId !== clientId) return;
+      this.reports = reports;
+      this.clampReportPage();
+      this.lastUpdatedAt = new Date();
+    } catch (error) {
+      console.error('Firma confirmada; no se pudo actualizar el listado', error);
+    } finally {
+      this.refreshViewSoon();
     }
   }
 

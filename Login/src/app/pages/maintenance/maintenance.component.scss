@@ -3440,3 +3440,14 @@ button:disabled {
     font-size: 16px;
   }
 }
+.sign-error {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  color: var(--table-danger-color, #b91c1c);
+  background: var(--table-danger-bg, #fff1f2);
+  border: 1px solid var(--table-danger-border, #fecdd3);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}

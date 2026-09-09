@@ -2147,6 +2147,7 @@
     role="dialog"
     aria-modal="true"
     aria-labelledby="sign-confirm-title"
+    [attr.aria-busy]="signingReport"
     (click)="closeSignConfirmation()"
   >
     <article class="maintenance-modal" (click)="$event.stopPropagation()">
@@ -2155,7 +2156,7 @@
           <span>Firma digital</span>
           <h2 id="sign-confirm-title">Confirmar firma del reporte</h2>
         </div>
-        <button type="button" class="icon-action ghost" aria-label="Cerrar" title="Cerrar" (click)="closeSignConfirmation()">×</button>
+        <button type="button" class="icon-action ghost" aria-label="Cerrar" title="Cerrar" [disabled]="signingReport" (click)="closeSignConfirmation()">×</button>
       </div>
       <dl>
         <div>
@@ -2176,10 +2177,11 @@
         </div>
       </dl>
       <p class="modal-notice">{{ signConfirmationNotice(report) }}</p>
+      <p *ngIf="signErrorMessage" class="sign-error" role="alert">{{ signErrorMessage }}</p>
       <div class="modal-actions">
         <button type="button" class="ghost" [disabled]="signingReport" (click)="closeSignConfirmation()">Cancelar</button>
         <button type="button" [disabled]="signingReport" (click)="confirmSignReport()">
-          {{ signingReport ? 'Firmando...' : 'Confirmar firma' }}
+          {{ verifyingSignature ? 'Verificando firma...' : signingReport ? 'Firmando...' : 'Confirmar firma' }}
         </button>
       </div>
     </article>

@@ -1,6 +1,7 @@
 import { query, withTransaction } from './db.js';
 import { normalizeAssetCategory } from './asset-category.js';
 import {
+  isMaintenanceReportFullySigned,
   maintenanceReportEngineerReopenError,
   maintenancePreventiveItemPhase,
   maintenancePreventiveItemWaitsForSpare,
@@ -671,29 +672,81 @@ export async function signMaintenanceReport(payload) {
     signerInvimaRegistration,
     signatureSha256
   } = payload;
-  const { rows } = await query(
-    `INSERT INTO report_signatures (
-       report_id,
-       user_id,
-       role,
-       signature_path,
-       signer_name,
-       signer_invima_registration,
-       signature_sha256
-     )
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
-     RETURNING id`,
-    [
-      reportId,
-      userId,
-      role,
-      signaturePath,
-      signerName || null,
-      signerInvimaRegistration || null,
-      signatureSha256 || null
-    ]
-  );
-  return rows[0];
+  return withTransaction(async (client) => {
+    // Serialize signatures with each other and with reopening a report for correction.
+    const { rows: reports } = await client.query(
+      `SELECT r.*, req.status AS request_status, req.requested_by
+       FROM maintenance_reports r
+       JOIN maintenance_requests req ON req.id = r.request_id
+       WHERE r.id = $1 FOR UPDATE OF r, req`,
+      [reportId]
+    );
+    const report = reports[0];
+    if (!report) throw Object.assign(new Error('Reporte no encontrado.'), { status: 404 });
+    const { rows: corrections } = await client.query(
+      'SELECT id FROM maintenance_report_corrections WHERE report_id = $1 AND resolved_at IS NULL LIMIT 1',
+      [reportId]
+    );
+    if (corrections.length) {
+      throw Object.assign(new Error('Este reporte tiene una correccion pendiente y no puede firmarse todavia.'), { status: 409 });
+    }
+    const { rows: signatures } = await client.query(
+      'SELECT id, user_id, role, signed_at FROM report_signatures WHERE report_id = $1 ORDER BY signed_at',
+      [reportId]
+    );
+    let signature = signatures.find((item) => item.user_id === userId);
+    const alreadySigned = Boolean(signature);
+    if (!signature) {
+      if (!signaturePath || !role || !signerName) {
+        throw Object.assign(new Error('La firma del reporte cambio. Actualiza el reporte antes de firmar.'), { status: 409 });
+      }
+      const { rows } = await client.query(
+        `INSERT INTO report_signatures (
+           report_id, user_id, role, signature_path, signer_name,
+           signer_invima_registration, signature_sha256
+         )
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         RETURNING id, user_id, role, signed_at`,
+        [reportId, userId, role, signaturePath, signerName,
+          signerInvimaRegistration || null, signatureSha256 || null]
+      );
+      signature = rows[0];
+      signatures.push(signature);
+      await client.query('UPDATE maintenance_reports SET pdf_path = NULL WHERE id = $1', [reportId]);
+    }
+    const fullySigned = isMaintenanceReportFullySigned(report, signatures);
+    const waitingSpare = report.requires_spare_parts && report.spare_parts_status !== 'recibido';
+    let requestStatus = report.request_status;
+    if (fullySigned) {
+      await client.query(
+        `UPDATE notifications SET read_at = COALESCE(read_at, NOW())
+         WHERE payload->>'reportId' = $1 AND type = 'maintenance_report_ready' AND read_at IS NULL`,
+        [reportId]
+      );
+      if (!waitingSpare) {
+        requestStatus = 'firmado';
+        await client.query(
+          "UPDATE maintenance_requests SET status = 'firmado', updated_at = NOW() WHERE id = $1 AND status <> 'firmado'",
+          [report.request_id]
+        );
+        await client.query(
+          `UPDATE notifications SET read_at = COALESCE(read_at, NOW())
+           WHERE payload->>'requestId' = $1 AND type IN (
+             'maintenance_request_created', 'maintenance_preventive_generated', 'maintenance_spare_part_requested'
+           ) AND read_at IS NULL`,
+          [report.request_id]
+        );
+      }
+    }
+    return {
+      id: signature.id,
+      signed_at: signature.signed_at,
+      alreadySigned,
+      signed_by_me: true,
+      is_fully_signed: fullySigned,
+      request_status: requestStatus
+    };
+  });
 }
 
 export async function updateMaintenanceReportSignatureSnapshot(payload) {

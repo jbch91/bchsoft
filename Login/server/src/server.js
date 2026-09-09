@@ -6,12 +6,13 @@ import fs from 'fs';
 import os from 'os';
 import { execFile } from 'child_process';
 import { randomBytes, randomUUID } from 'crypto';
-import { finished } from 'stream/promises';
+import { finished, pipeline } from 'stream/promises';
 import { promisify } from 'util';
 import multer from 'multer';
 import sharp from 'sharp';
 import { PDFDocument as PdfMergerDocument } from 'pdf-lib';
 import { query, withTransaction } from './db.js';
+import { createMaintenanceReportSignHandler } from './maintenance-signing.js';
 import {
   authenticateUser,
   getCurrentSessionUser,
@@ -3042,7 +3043,7 @@ async function signMaintenanceReportWithSnapshot({ reportId, clientId, user, rol
     sourceSignaturePath: user.signature_path
   });
   try {
-    return await signMaintenanceReport({
+    const result = await signMaintenanceReport({
       reportId,
       userId: user.id,
       role,
@@ -3051,6 +3052,10 @@ async function signMaintenanceReportWithSnapshot({ reportId, clientId, user, rol
       signerInvimaRegistration: user.invima_registration,
       signatureSha256: snapshot.sha256
     });
+    if (result.alreadySigned) {
+      await removeMaintenanceSignatureSnapshot(snapshot.fullPath).catch(() => {});
+    }
+    return result;
   } catch (error) {
     await removeMaintenanceSignatureSnapshot(snapshot.fullPath).catch(() => {});
     throw error;
@@ -11856,131 +11861,14 @@ app.post(
   '/maintenance/reports/:id/sign',
   requireAuth,
   requireAnyPermissionOrRole(['maintenance:report:sign'], MAINTENANCE_ACCEPTANCE_SIGNER_ROLES),
-  async (req, res) => {
-    const report = await getMaintenanceReportById(req.params.id);
-    if (!report) {
-      return res.status(404).json({ message: 'Reporte no encontrado.' });
-    }
-    if (req.user.clientId && req.user.clientId !== report.client_id) {
-      return res.status(403).json({ message: 'Sin acceso al cliente.' });
-    }
-    if (report.area_responsible_required && !hasRole(req.user, AREA_RESPONSIBLE_ROLE)) {
-      return res.status(403).json({
-        message: 'Este reporte requiere el aval de un responsable asignado al área.'
-      });
-    }
-    if (isAreaScopedOperationalUser(req.user)) {
-      const allowed = await readerCanAccessAsset(report.client_id, req.user.sub, report.asset_id);
-      if (!allowed) {
-        return res.status(403).json({ message: 'Sin acceso al equipo.' });
-      }
-    }
-    if (report.correction_requested) {
-      return res.status(409).json({ message: 'Este reporte tiene una corrección solicitada y no puede firmarse todavía.' });
-    }
-    const user = await getUserById(req.user.sub);
-    if (!user?.signature_path) {
-      return res.status(400).json({ message: 'Firma no registrada para este usuario.' });
-    }
-    if (!resolveStoredFilePath(user.signature_path)) {
-      return res.status(400).json({
-        message: 'La firma registrada no está disponible. Solicita al administrador volver a cargarla.'
-      });
-    }
-
-    const existingSignatures = await listReportSignatures(report.id);
-    if (existingSignatures.some((sig) => sig.user_id === req.user.sub)) {
-      return res.status(409).json({ message: 'Ya firmaste este reporte.' });
-    }
-
-    const result = await signMaintenanceReportWithSnapshot({
-      reportId: report.id,
-      clientId: report.client_id,
-      user,
-      role: maintenanceAcceptanceRoleForUser(req.user)
-    });
-
-    const signedAsset = await getAssetById(report.client_id, report.asset_id);
-    await logEquipmentAudit(req, {
-      action: 'MAINTENANCE_REPORT_SIGN',
-      clientId: report.client_id,
-      assetId: report.asset_id,
-      asset: signedAsset,
-      description: `Firma de reporte de mantenimiento para ${assetLabel(signedAsset)}.`,
-      details: {
-        eventType: 'reporte_mantenimiento_firmado',
-        reportId: report.id,
-        requestId: report.request_id,
-        signerRole: maintenanceAcceptanceRoleForUser(req.user),
-        signatureId: result?.id ?? null
-      }
-    });
-
-    const signatures = await listReportSignatures(report.id);
-    const hasEngineer = signatures.some((sig) => sig.role === 'ingeniero_biomedico');
-    if (!hasEngineer) {
-      const engineerUser = await getUserById(report.created_by);
-      if (engineerUser?.signature_path && resolveStoredFilePath(engineerUser.signature_path)) {
-        await signMaintenanceReportWithSnapshot({
-          reportId: report.id,
-          clientId: report.client_id,
-          user: engineerUser,
-          role: 'ingeniero_biomedico'
-        });
-      }
-    }
-    const signaturesAfter = await listReportSignatures(report.id);
-    const isFullySigned = isMaintenanceReportFullySigned(report, signaturesAfter);
-    const waitsForSpare = report.requires_spare_parts && report.spare_parts_status !== 'recibido';
-    if (isFullySigned) {
-      await markMaintenanceReportNotificationsResolved(report.id);
-      if (!waitsForSpare) {
-        await updateMaintenanceRequestStatus(report.request_id, 'firmado');
-        await markMaintenanceRequestNotificationsResolved(report.request_id);
-      }
-      await logEquipmentAudit(req, {
-        action: waitsForSpare ? 'MAINTENANCE_REPORT_SIGNED_WAITING_SPARE' : 'MAINTENANCE_REPORT_FINALIZED',
-        clientId: report.client_id,
-        assetId: report.asset_id,
-        asset: signedAsset,
-        description: waitsForSpare
-          ? `Reporte de mantenimiento firmado y en espera de repuesto para ${assetLabel(signedAsset)}.`
-          : `Reporte de mantenimiento finalizado para ${assetLabel(signedAsset)}.`,
-        details: {
-          eventType: waitsForSpare ? 'reporte_mantenimiento_firmado_espera_repuesto' : 'reporte_mantenimiento_finalizado',
-          reportId: report.id,
-          requestId: report.request_id
-        }
-      });
-    }
-
-    await writeMaintenanceReportPdfFile(report.id);
-
-    if (report.created_by) {
-      const title = 'Reporte firmado';
-      const message = isFullySigned
-        ? waitsForSpare
-          ? 'El reporte fue firmado y validado. El caso continúa abierto en espera de repuesto.'
-          : 'El reporte fue firmado y queda finalizado.'
-        : 'El reporte recibió una firma, pero aún tiene firmas pendientes.';
-      await createNotification({
-        userId: report.created_by,
-        clientId: report.client_id,
-        title,
-        message,
-        link: maintenanceRouteForAsset(asset),
-        type: 'maintenance_report_signed',
-        priority: 'normal',
-        data: {
-          reportId: report.id,
-          requestId: report.request_id,
-          assetId: report.asset_id
-        }
-      });
-    }
-
-    return res.json(result);
-  }
+  createMaintenanceReportSignHandler({
+    getMaintenanceReportById, isAreaScopedOperationalUser, readerCanAccessAsset,
+    listReportSignatures, maintenanceAcceptanceRoleForUser, signMaintenanceReport,
+    getUserById, resolveStoredFilePath, signMaintenanceReportWithSnapshot,
+    getAssetById, logEquipmentAudit, assetLabel, writeMaintenanceReportPdfFile,
+    createNotificationOnce, maintenanceRouteForAsset,
+    logError: (...args) => console.error(...args)
+  })
 );
 
 app.post(
@@ -12101,13 +11989,22 @@ async function writeMaintenanceReportPdfFile(reportId) {
   const filename = path.join(dir, reportPdfFilename);
   const publicPath = `/${path.join('uploads', 'clients', report.client_id, 'maintenance', reportPdfFilename)}`.replace(/\\/g, '/');
   const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
-  const stream = fs.createWriteStream(filename);
-  doc.pipe(stream);
-  buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures: signaturesForPdf });
-  doc.end();
-  await finished(stream);
-  await updateMaintenanceReportPdf(report.id, publicPath);
-  return publicPath;
+  const temporaryFilename = `${filename}.${randomUUID()}.tmp`;
+  const writing = pipeline(doc, fs.createWriteStream(temporaryFilename));
+  void writing.catch(() => {});
+  try {
+    buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures: signaturesForPdf });
+    doc.end();
+    await writing;
+    await fs.promises.rename(temporaryFilename, filename);
+    await updateMaintenanceReportPdf(report.id, publicPath);
+    return publicPath;
+  } catch (error) {
+    doc.destroy();
+    await writing.catch(() => {});
+    await fs.promises.unlink(temporaryFilename).catch(() => {});
+    throw error;
+  }
 }
 
 app.get(

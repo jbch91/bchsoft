@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout } from 'rxjs';
 import { getApiBase } from '../core/api-base';
 import type { AssetCategory } from '../biomed/biomed.service';
 
@@ -132,6 +132,17 @@ export interface MaintenanceReportDto {
   correction_reason?: string | null;
   correction_requested_at?: string | null;
   correction_requested_by_name?: string | null;
+}
+
+export interface MaintenanceSignatureResult {
+  id?: string;
+  reportId: string;
+  signed_at?: string;
+  alreadySigned?: boolean;
+  signed_by_me: boolean;
+  is_fully_signed: boolean;
+  request_status?: string | null;
+  warnings?: string[];
 }
 
 export interface NotificationDto {
@@ -279,6 +290,7 @@ export class MaintenanceService {
     const suffix = query.toString() ? `?${query}` : '';
     return firstValueFrom(
       this.http.get<MaintenanceReportDto[]>(`${this.apiBase}/maintenance/reports/${clientId}${suffix}`)
+        .pipe(timeout({ first: 20000 }))
     );
   }
 
@@ -301,8 +313,11 @@ export class MaintenanceService {
     await firstValueFrom(this.http.post(`${this.apiBase}/maintenance/reports`, payload));
   }
 
-  async signReport(reportId: string): Promise<void> {
-    await firstValueFrom(this.http.post(`${this.apiBase}/maintenance/reports/${reportId}/sign`, {}));
+  async signReport(reportId: string): Promise<MaintenanceSignatureResult> {
+    return firstValueFrom(
+      this.http.post<MaintenanceSignatureResult>(`${this.apiBase}/maintenance/reports/${reportId}/sign`, {})
+        .pipe(timeout({ first: 30000 }))
+    );
   }
 
   async requestReportCorrection(reportId: string, reason: string): Promise<void> {
