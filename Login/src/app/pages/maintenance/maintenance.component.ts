@@ -375,7 +375,14 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   @ViewChild('qrVideo') qrVideo?: ElementRef<HTMLVideoElement>;
   @ViewChild('reportFormCard') reportFormCard?: ElementRef<HTMLElement>;
   @ViewChild('preventiveProgrammedCard') preventiveProgrammedCard?: ElementRef<HTMLElement>;
+  @ViewChild('protocolReasonInput') protocolReasonInput?: ElementRef<HTMLTextAreaElement>;
+  @ViewChild('protocolReasonErrorElement') protocolReasonErrorElement?: ElementRef<HTMLElement>;
+  @ViewChild('protocolDialog') set protocolDialog(ref: ElementRef<HTMLDialogElement> | undefined) {
+    this.protocolDialogElement = ref?.nativeElement ?? null;
+    if (ref && !ref.nativeElement.open) ref.nativeElement.showModal();
+  }
 
+  private protocolDialogElement: HTMLDialogElement | null = null;
   private readonly publicBase = getPublicBase();
   private qrStream: MediaStream | null = null;
   private qrTimer: ReturnType<typeof setTimeout> | null = null;
@@ -446,6 +453,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   protocolAreaFilter = '';
   protocolStatusFilter = '';
   protocolReason = '';
+  protocolReasonError = '';
+  protocolGenerationError = '';
   protocolGenerating = false;
   protocolConfirmationScope: 'selected' | 'all_active' | null = null;
   selectedProtocolAssetIds = new Set<string>();
@@ -1554,40 +1563,72 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   openProtocolConfirmation(scope: 'selected' | 'all_active'): void {
+    if (this.protocolGenerating) return;
     this.errorMessage = '';
     this.successMessage = '';
+    this.protocolReasonError = '';
+    this.protocolGenerationError = '';
+    this.protocolConfirmationScope = scope;
+  }
+
+  get protocolScopeError(): string {
     if (!this.canPrintBlankProtocols) {
-      this.errorMessage = 'Necesitas un permiso temporal activo para generar protocolos físicos.';
-      return;
+      return 'El permiso temporal no está activo o venció. Solicita su renovación antes de generar el lote.';
     }
-    const reason = this.protocolReason.replace(/\s+/g, ' ').trim();
-    if (reason.length < 10) {
-      this.errorMessage = 'Registra un motivo de al menos 10 caracteres.';
-      return;
-    }
-    const count = scope === 'all_active' ? this.activeAssets.length : this.selectedProtocolAssetIds.size;
+    const count = this.protocolConfirmationCount;
     if (!count) {
-      this.errorMessage = scope === 'all_active'
+      return this.protocolConfirmationScope === 'all_active'
         ? 'No hay equipos vigentes para generar protocolos.'
         : 'Selecciona al menos un equipo.';
-      return;
     }
     if (count > 500) {
-      this.errorMessage = 'Cada lote admite máximo 500 equipos. Usa los filtros y genera varios lotes seleccionados.';
-      return;
+      return 'Cada lote admite máximo 500 equipos. Cierra esta ventana y selecciona un grupo más pequeño.';
     }
-    this.protocolReason = reason;
-    this.protocolConfirmationScope = scope;
+    if (this.protocolConfirmationScope === 'selected'
+      && this.activeAssets.filter((asset) => this.selectedProtocolAssetIds.has(asset.id)).length !== count) {
+      return 'La selección contiene equipos que ya no están vigentes. Actualiza el listado y vuelve a seleccionarlos.';
+    }
+    return '';
+  }
+
+  get protocolReasonLength(): number {
+    return this.protocolReason.replace(/\s+/g, ' ').trim().length;
+  }
+
+  onProtocolReasonChange(): void {
+    if (this.protocolReasonLength >= 10 && this.protocolReasonLength <= 300) {
+      this.protocolReasonError = '';
+    }
+  }
+
+  onProtocolDialogCancel(event: Event): void {
+    event.preventDefault();
+    this.closeProtocolConfirmation();
   }
 
   closeProtocolConfirmation(): void {
     if (this.protocolGenerating) return;
+    this.protocolDialogElement?.close();
     this.protocolConfirmationScope = null;
+    if (this.viewMode === 'protocolos_fisicos' && !this.canPrintBlankProtocols) {
+      this.viewMode = 'equipos';
+    }
   }
 
   async generateBlankProtocols(): Promise<void> {
     const scope = this.protocolConfirmationScope;
     if (!scope || this.protocolGenerating) return;
+    this.protocolGenerationError = '';
+    if (this.protocolScopeError) return;
+    this.protocolReasonError = '';
+    if (this.protocolReasonLength < 10 || this.protocolReasonLength > 300) {
+      this.protocolReasonError = 'Escribe un motivo de entre 10 y 300 caracteres, sin contar espacios repetidos.';
+      this.cdr.detectChanges();
+      this.protocolReasonInput?.nativeElement.focus();
+      this.protocolReasonErrorElement?.nativeElement.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    this.protocolReason = this.protocolReason.replace(/\s+/g, ' ').trim();
 
     const previewWindow = window.open('', '_blank');
     if (previewWindow) {
@@ -1621,21 +1662,15 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         anchor.click();
       }
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      this.protocolDialogElement?.close();
       this.protocolConfirmationScope = null;
       this.selectedProtocolAssetIds = new Set<string>();
       this.protocolReason = '';
-      this.successMessage = `Lote ${result.batchCode} generado con ${result.assetCount} protocolo(s).`;
+      this.showAlert(`Lote ${result.batchCode} generado con ${result.assetCount} protocolo(s).`);
     } catch (error: any) {
       previewWindow?.close();
       console.error(error);
-      this.errorMessage = await this.blankProtocolErrorMessage(error);
-      if (error?.status === 403) {
-        await this.auth.reloadCurrentUser();
-        if (!this.canPrintBlankProtocols) {
-          this.protocolConfirmationScope = null;
-          this.viewMode = 'equipos';
-        }
-      }
+      this.protocolGenerationError = await this.blankProtocolErrorMessage(error);
     } finally {
       this.protocolGenerating = false;
       this.refreshViewSoon();
@@ -3095,6 +3130,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   private async blankProtocolErrorMessage(error: any): Promise<string> {
     const fallback = 'No se pudieron generar los protocolos físicos.';
+    if (error?.status === 0) return 'No se pudo conectar con el servidor. Revisa la conexión e intenta nuevamente.';
     if (error?.error instanceof Blob) {
       try {
         const text = await error.error.text();

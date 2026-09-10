@@ -1642,13 +1642,30 @@
       <div class="protocol-heading">
         <div>
           <span class="temporary-badge">Permiso temporal activo</span>
-          <h2>Protocolos físicos en blanco</h2>
-          <p>Una hoja por equipo, sin fecha de mantenimiento, con tu firma digital y trazabilidad por lote.</p>
+          <h2>Protocolos en blanco</h2>
         </div>
         <div class="protocol-counts">
           <span><strong>{{ activeAssets.length }}</strong> equipos vigentes</span>
           <span><strong>{{ selectedProtocolAssetCount }}</strong> seleccionados</span>
         </div>
+      </div>
+
+      <div class="protocol-generation-actions">
+        <button
+          type="button"
+          [disabled]="protocolGenerating || selectedProtocolAssetCount === 0"
+          (click)="openProtocolConfirmation('selected')"
+        >
+          Generar seleccionados ({{ selectedProtocolAssetCount }})
+        </button>
+        <button
+          type="button"
+          class="ghost"
+          [disabled]="protocolGenerating || activeAssets.length === 0"
+          (click)="openProtocolConfirmation('all_active')"
+        >
+          Generar todos los vigentes ({{ activeAssets.length }})
+        </button>
       </div>
 
       <div class="protocol-filters">
@@ -1704,7 +1721,7 @@
         </button>
       </div>
 
-      <div class="table protocol-table">
+      <div class="table protocol-table" role="region" aria-label="Equipos para protocolos" tabindex="0">
         <div class="row header">
           <span></span>
           <span>Equipo</span>
@@ -1743,34 +1760,6 @@
         </p>
       </div>
 
-      <div class="protocol-generation">
-        <label>
-          Motivo del lote
-          <textarea
-            rows="2"
-            maxlength="300"
-            [(ngModel)]="protocolReason"
-            placeholder="Ejemplo: contingencia documental autorizada para digitalización posterior"
-          ></textarea>
-        </label>
-        <div class="protocol-generation-actions">
-          <button
-            type="button"
-            [disabled]="protocolGenerating || selectedProtocolAssetCount === 0"
-            (click)="openProtocolConfirmation('selected')"
-          >
-            Generar seleccionados ({{ selectedProtocolAssetCount }})
-          </button>
-          <button
-            type="button"
-            class="ghost"
-            [disabled]="protocolGenerating || activeAssets.length === 0"
-            (click)="openProtocolConfirmation('all_active')"
-          >
-            Generar todos los vigentes ({{ activeAssets.length }})
-          </button>
-        </div>
-      </div>
     </div>
   </ng-container>
 
@@ -2346,52 +2335,77 @@
     </article>
   </div>
 
-  <div
-    class="protocol-confirm-backdrop"
+  <dialog
+    #protocolDialog
+    class="protocol-confirm-modal"
     *ngIf="protocolConfirmationScope"
-    role="dialog"
-    aria-modal="true"
     aria-labelledby="protocol-confirm-title"
-    (click)="closeProtocolConfirmation()"
+    (cancel)="onProtocolDialogCancel($event)"
   >
-    <article class="protocol-confirm-modal" (click)="$event.stopPropagation()">
-      <div>
-        <span class="temporary-badge">Operación auditada</span>
-        <h2 id="protocol-confirm-title">Confirmar lote físico</h2>
+    <form class="protocol-confirm-form" (ngSubmit)="generateBlankProtocols()" novalidate>
+      <header class="protocol-confirm-header">
+        <div>
+          <span class="temporary-badge">Operación auditada</span>
+          <h2 id="protocol-confirm-title">Generar protocolos en blanco</h2>
+        </div>
+        <button type="button" class="ghost icon-action" aria-label="Cerrar" title="Cerrar"
+          [disabled]="protocolGenerating" (click)="closeProtocolConfirmation()">×</button>
+      </header>
+      <div class="protocol-confirm-body">
+        <dl>
+          <div>
+            <dt>Lote</dt>
+            <dd><strong>{{ protocolConfirmationCount }} protocolos</strong></dd>
+          </div>
+          <div>
+            <dt>Equipos</dt>
+            <dd>{{ protocolConfirmationScope === 'all_active' ? 'Todos los vigentes, sin aplicar los filtros del listado' : 'Solo los equipos seleccionados' }}</dd>
+          </div>
+          <div>
+            <dt>Fecha del servicio</dt>
+            <dd>En blanco</dd>
+          </div>
+          <div>
+            <dt>Firma del ingeniero</dt>
+            <dd>Tu firma digital registrada</dd>
+          </div>
+        </dl>
+        <div class="protocol-reason-field">
+          <label for="protocol-reason">Motivo del lote <span class="protocol-required">Obligatorio</span></label>
+          <textarea
+            #protocolReasonInput
+            id="protocol-reason"
+            name="protocolReason"
+            rows="3"
+            maxlength="300"
+            required
+            autofocus
+            [(ngModel)]="protocolReason"
+            (ngModelChange)="onProtocolReasonChange()"
+            [disabled]="protocolGenerating"
+            [attr.aria-invalid]="protocolReasonError ? 'true' : null"
+            [attr.aria-describedby]="protocolReasonError ? 'protocol-reason-help protocol-reason-error' : 'protocol-reason-help'"
+            placeholder="Ejemplo: contingencia documental autorizada para digitalización posterior"
+          ></textarea>
+          <div class="protocol-reason-help" id="protocol-reason-help">
+            <span>Mínimo 10 caracteres</span><span>{{ protocolReasonLength }}/300</span>
+          </div>
+          <p *ngIf="protocolReasonError" #protocolReasonErrorElement id="protocol-reason-error" class="protocol-field-error" role="alert">{{ protocolReasonError }}</p>
+        </div>
+        <p class="protocol-confirm-note">Este lote no registra mantenimientos realizados ni modifica el historial de los equipos.</p>
       </div>
-      <dl>
-        <div>
-          <dt>Alcance</dt>
-          <dd>{{ protocolConfirmationScope === 'all_active' ? 'Todos los equipos vigentes' : 'Equipos seleccionados' }}</dd>
+      <footer class="protocol-confirm-footer" [attr.aria-busy]="protocolGenerating">
+        <p *ngIf="protocolGenerationError || protocolScopeError" class="protocol-generation-error" role="alert">
+          {{ protocolGenerationError || protocolScopeError }}
+        </p>
+        <p *ngIf="protocolGenerating" class="protocol-progress" role="status">Preparando {{ protocolConfirmationCount }} protocolos...</p>
+        <div class="protocol-confirm-actions">
+          <button type="button" class="ghost" [disabled]="protocolGenerating" (click)="closeProtocolConfirmation()">Cancelar</button>
+          <button type="submit" [disabled]="protocolGenerating || !!protocolScopeError">
+            {{ protocolGenerating ? 'Generando PDF...' : 'Generar PDF' }}
+          </button>
         </div>
-        <div>
-          <dt>Protocolos</dt>
-          <dd>{{ protocolConfirmationCount }}</dd>
-        </div>
-        <div>
-          <dt>Fecha del servicio</dt>
-          <dd>Quedará en blanco</dd>
-        </div>
-        <div>
-          <dt>Firma del ingeniero</dt>
-          <dd>Se incorporará tu firma digital registrada</dd>
-        </div>
-        <div>
-          <dt>Motivo</dt>
-          <dd>{{ protocolReason }}</dd>
-        </div>
-      </dl>
-      <p class="protocol-confirm-note">
-        Esta generación no crea reportes de mantenimiento ni modifica el historial digital de los equipos.
-      </p>
-      <div class="protocol-confirm-actions">
-        <button type="button" class="ghost" [disabled]="protocolGenerating" (click)="closeProtocolConfirmation()">
-          Cancelar
-        </button>
-        <button type="button" [disabled]="protocolGenerating" (click)="generateBlankProtocols()">
-          {{ protocolGenerating ? 'Generando PDF...' : 'Generar PDF' }}
-        </button>
-      </div>
-    </article>
-  </div>
+      </footer>
+    </form>
+  </dialog>
 </section>
