@@ -171,6 +171,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   locationsAll: LocationOption[] = [];
   equipmentCatalog: EquipmentCatalogItemDto[] = [];
   loading = false;
+  formContextLoading = true;
   errorMessage = '';
   successMessage = '';
   importPanelOpen = false;
@@ -340,6 +341,12 @@ export class HojasDeVidaComponent implements OnDestroy {
 
   editingAssetId: string | null = null;
   code = '';
+  codeAutomatic = true;
+  codeState: 'idle' | 'checking' | 'available' | 'duplicate' | 'error' = 'idle';
+  codeMessage = '';
+  private codeRequestToken = 0;
+  private codeValidationTimer?: ReturnType<typeof setTimeout>;
+  private validatedCode = '';
   name = '';
   brand = '';
   model = '';
@@ -361,7 +368,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   tempMax: number | null = null;
   humidityMin: number | null = null;
   humidityMax: number | null = null;
-  maintenanceFrequency = 'mensual';
+  maintenanceFrequency = 'trimestral';
   scheduleEnrollmentMode: AssetScheduleEnrollmentMode = 'new';
   requiresCalibration = false;
   calibrationFrequency = 'anual';
@@ -441,6 +448,7 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.cancelCodeValidation();
     window.removeEventListener('focus', this.handleWindowFocus);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
   }
@@ -467,7 +475,7 @@ export class HojasDeVidaComponent implements OnDestroy {
           this.siteId &&
           this.areaId &&
           this.locationId &&
-          this.code &&
+          this.code && this.codeState === 'available' && this.code === this.validatedCode &&
           (this.isIndustrialAssetModule || this.invimaReg) &&
           (this.isIndustrialAssetModule || !this.requiresSanitaryClassification || this.riskClass) &&
           (this.isIndustrialAssetModule || !this.requiresElectricalClassification || (this.electricalProtectionClass && this.appliedPartType))
@@ -533,15 +541,23 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   async onClientChange(): Promise<void> {
+    this.formContextLoading = true;
+    this.cancelCodeValidation();
+    if (this.assetFormModalOpen) this.closeAssetModal();
     this.closePendingProtocolUpload(true);
-    await this.loadSites();
-    await Promise.all([
-      this.loadAreas(),
-      this.loadEquipmentCatalog(),
-      this.loadAssets(),
-      this.loadPendingProtocols()
-    ]);
-    await this.openPendingRouteAsset();
+    try {
+      await this.loadSites();
+      await Promise.all([
+        this.loadAreas(),
+        this.loadEquipmentCatalog(),
+        this.loadAssets(),
+        this.loadPendingProtocols()
+      ]);
+      await this.openPendingRouteAsset();
+    } finally {
+      this.formContextLoading = false;
+      this.cdr.detectChanges();
+    }
   }
 
   setLifeSheetView(view: LifeSheetWorkspaceView): void {
@@ -905,16 +921,75 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   async openCreateModal(): Promise<void> {
-    if (!this.canCreateAssets) return;
+    if (!this.canCreateAssets || this.formContextLoading || !this.selectedClientId) return;
     this.errorMessage = '';
     this.successMessage = '';
     this.selectedAssetForModal = null;
     this.resetForm();
-    await this.loadLocationsForForm();
     this.assetModalMode = 'create';
     this.formMode = 'wizard';
     this.wizardStep = 0;
     this.cdr.detectChanges();
+    await this.useAutomaticCode();
+  }
+
+  private cancelCodeValidation(): void {
+    this.codeRequestToken += 1;
+    clearTimeout(this.codeValidationTimer);
+    this.codeValidationTimer = undefined;
+  }
+
+  onCodeInput(value: string): void {
+    this.cancelCodeValidation();
+    this.code = value.toUpperCase();
+    this.codeAutomatic = false;
+    this.validatedCode = '';
+    this.codeState = this.code.trim() ? 'checking' : 'idle';
+    this.codeMessage = this.code.trim() ? 'Verificando código...' : '';
+    if (this.code.trim()) {
+      this.codeValidationTimer = setTimeout(() => void this.checkAssetCode(false), 400);
+    }
+  }
+
+  async useAutomaticCode(): Promise<void> {
+    if (this.editingAssetId || this.assetSaving || this.assetModalMode !== 'create') return;
+    this.codeAutomatic = true;
+    await this.checkAssetCode(true);
+  }
+
+  private async checkAssetCode(automatic: boolean): Promise<boolean> {
+    if (!this.selectedClientId || !this.assetFormModalOpen) return false;
+    this.cancelCodeValidation();
+    const token = this.codeRequestToken;
+    const clientId = this.selectedClientId;
+    this.codeState = 'checking';
+    this.codeMessage = automatic ? 'Generando código...' : 'Verificando código...';
+    this.cdr.detectChanges();
+    try {
+      const result = await this.biomed.getAssetCodeSuggestion(clientId, automatic ? {} : {
+        code: this.code.trim(),
+        assetId: this.editingAssetId || undefined
+      });
+      if (token !== this.codeRequestToken || clientId !== this.selectedClientId || !this.assetFormModalOpen) return false;
+      this.code = result.code;
+      this.validatedCode = result.code;
+      this.codeState = result.available ? 'available' : 'duplicate';
+      this.codeMessage = result.available
+        ? (automatic ? 'Automático · Disponible' : 'Código disponible')
+        : 'Este código ya existe en este cliente.';
+      return result.available;
+    } catch (error) {
+      if (token !== this.codeRequestToken || clientId !== this.selectedClientId || !this.assetFormModalOpen) return false;
+      this.codeState = 'error';
+      this.codeMessage = this.extractErrorMessage(error) || 'No se pudo verificar. Reintenta.';
+      return false;
+    } finally {
+      if (token === this.codeRequestToken) this.cdr.detectChanges();
+    }
+  }
+
+  async retryAssetCode(): Promise<void> {
+    if (!this.assetSaving) await this.checkAssetCode(this.codeAutomatic);
   }
 
   async openViewModal(asset: InventoryPanelItem): Promise<void> {
@@ -2417,6 +2492,16 @@ export class HojasDeVidaComponent implements OnDestroy {
       return;
     }
 
+    this.assetSaving = true;
+    const codeAvailable = await this.checkAssetCode(this.codeAutomatic && !this.editingAssetId);
+    this.assetSaving = false;
+    if (!codeAvailable) {
+      this.wizardStep = 0;
+      this.cdr.detectChanges();
+      return;
+    }
+    this.cdr.detectChanges();
+
     this.errorMessage = '';
     this.successMessage = '';
     if (this.editingAssetId && this.maintenanceFrequencyChanged() && !skipScheduleProgrammingPreview) {
@@ -2489,6 +2574,7 @@ export class HojasDeVidaComponent implements OnDestroy {
       } else {
         const result = await this.biomed.createAsset(this.selectedClientId, {
           code: this.code.trim(),
+          automaticCode: this.codeAutomatic,
           name: this.catalogStorageValue(this.name),
           brand: this.catalogStorageValue(this.brand) || undefined,
           model: this.catalogStorageValue(this.model) || undefined,
@@ -2542,7 +2628,7 @@ export class HojasDeVidaComponent implements OnDestroy {
           historicalFollowUpDates = evidence.map((item) => item.plannedDate);
           historicalFollowUpCount = evidence.length;
         }
-        this.successMessage = `Hoja de vida creada.${this.catalogReviewNotice(result.catalogReview)}${this.scheduleSyncNotice(result.scheduleSync)}`;
+        this.successMessage = `Hoja de vida creada. Código: ${result.code || this.code}.${this.catalogReviewNotice(result.catalogReview)}${this.scheduleSyncNotice(result.scheduleSync)}`;
       }
 
       this.resetForm();
@@ -2565,6 +2651,11 @@ export class HojasDeVidaComponent implements OnDestroy {
     } catch (error) {
       console.error(error);
       const message = this.extractErrorMessage(error) || 'No se pudo guardar la hoja de vida.';
+      if (this.extractErrorCode(error)?.startsWith('ASSET_CODE_')) {
+        this.codeState = this.extractErrorCode(error) === 'ASSET_CODE_EXISTS' ? 'duplicate' : 'error';
+        this.codeMessage = message;
+        this.wizardStep = 0;
+      }
       if (
         !skipScheduleProgrammingPreview
         && this.editingAssetId
@@ -2595,6 +2686,11 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   resetForm(): void {
+    this.cancelCodeValidation();
+    this.codeAutomatic = true;
+    this.codeState = 'idle';
+    this.codeMessage = '';
+    this.validatedCode = '';
     this.editingAssetId = null;
     this.wizardStep = 0;
     this.code = '';
@@ -2619,7 +2715,7 @@ export class HojasDeVidaComponent implements OnDestroy {
     this.tempMax = null;
     this.humidityMin = null;
     this.humidityMax = null;
-    this.maintenanceFrequency = 'mensual';
+    this.maintenanceFrequency = 'trimestral';
     this.scheduleEnrollmentMode = 'new';
     this.originalMaintenanceFrequency = '';
     this.scheduleProgrammingPreview = null;
@@ -2659,7 +2755,12 @@ export class HojasDeVidaComponent implements OnDestroy {
       throw new Error('El equipo no pertenece a esta categoría de hojas de vida.');
     }
     this.editingAssetId = assetId;
+    this.cancelCodeValidation();
+    this.codeAutomatic = false;
+    this.codeState = 'available';
+    this.codeMessage = 'Código actual';
     this.code = data.code ?? '';
+    this.validatedCode = this.code;
     this.name = data.name ?? '';
     this.brand = data.brand ?? '';
     this.model = data.model ?? '';

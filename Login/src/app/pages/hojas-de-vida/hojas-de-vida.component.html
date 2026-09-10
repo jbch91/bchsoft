@@ -33,7 +33,8 @@
       <h2>{{ lifeSheetTitle }}</h2>
     </div>
     <div class="list-action-buttons">
-      <button type="button" class="primary" *ngIf="canCreateAssets" (click)="openCreateModal()">
+      <button type="button" class="primary" *ngIf="canCreateAssets" (click)="openCreateModal()"
+        [disabled]="formContextLoading || !selectedClientId">
         Crear hoja de vida{{ isIndustrialAssetModule ? ' industrial' : '' }}
       </button>
       <button
@@ -539,10 +540,27 @@
             <div class="inventory-location-notice" *ngIf="assetModalMode === 'edit'">
               La ubicación actual es informativa. Los traslados se realizan desde Inventario para conservar su trazabilidad.
             </div>
-            <label class="required">
-              <span class="label-line"><span class="label-text">Código</span><span class="required-star">*</span></span>
-              <input type="text" name="code" [(ngModel)]="code" required />
-            </label>
+            <div class="asset-code-field">
+              <label class="required" for="hv-asset-code">
+                <span class="label-line"><span class="label-text">Código</span><span class="required-star">*</span></span>
+              </label>
+              <div class="asset-code-input">
+                <input id="hv-asset-code" type="text" name="code" [ngModel]="code"
+                  (ngModelChange)="onCodeInput($event)" maxlength="80" autocomplete="off" required
+                  [disabled]="assetSaving" aria-describedby="hv-code-status"
+                  [attr.aria-invalid]="codeState === 'duplicate'" />
+                <button *ngIf="assetModalMode === 'create'" type="button" class="code-auto-button"
+                  title="Usar código automático" aria-label="Usar código automático"
+                  [disabled]="assetSaving || (codeAutomatic && codeState === 'checking')"
+                  (click)="useAutomaticCode()">↻</button>
+              </div>
+              <div id="hv-code-status" class="asset-code-status" role="status"
+                [class.invalid]="codeState === 'duplicate' || codeState === 'error'">
+                <span>{{ codeMessage }}</span>
+                <button *ngIf="codeState === 'error'" type="button" class="code-retry"
+                  [disabled]="assetSaving" (click)="retryAssetCode()">Reintentar</button>
+              </div>
+            </div>
             <label class="required" *ngIf="!isIndustrialAssetModule">
               <span class="label-line"><span class="label-text">Registro Invima</span><span class="required-star">*</span></span>
               <input type="text" name="invimaReg" [(ngModel)]="invimaReg" required />

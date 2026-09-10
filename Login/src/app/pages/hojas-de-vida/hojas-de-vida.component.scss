@@ -1668,6 +1668,63 @@ form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.asset-code-field {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+
+.asset-code-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.asset-code-input input {
+  min-width: 0;
+  flex: 1;
+}
+
+.code-auto-button {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.asset-code-status {
+  min-height: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.asset-code-status.invalid {
+  color: #b42318;
+}
+
+.code-retry {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .section-grid .range,
 .section-grid .list-section,
 .section-grid .risk-classification-grid {

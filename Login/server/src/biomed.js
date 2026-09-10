@@ -1,4 +1,5 @@
 import { query, withTransaction } from './db.js';
+import { withAssetCode } from './asset-codes.js';
 import { canonicalizeCatalogValue, ensureEquipmentCatalogPath } from './equipment-catalog.js';
 import { assertBiomedicalRiskClassifications } from './biomedical-risk.js';
 import { normalizeAssetCategory } from './asset-category.js';
@@ -572,60 +573,63 @@ export async function createAsset(clientId, payload) {
     submittedBy: catalogCreatedBy,
     submittedClientId: clientId
   });
-  const { rows } = await query(
-    `INSERT INTO "${schema}".assets
-     (code, name, brand, model, serial, invima_reg, site_id, area_id, location_id, risk_class,
-      requires_sanitary_classification, requires_electrical_classification, electrical_protection_class, applied_part_type,
-      is_mobile, manufacturer,
-      acquisition_type, contract_text, acquisition_date, useful_life_years, warranty_years,
-      supplier_name, supplier_phone, supplier_email, power_type, voltage, temp_min, temp_max,
-      humidity_min, humidity_max, maintenance_frequency, requires_calibration, calibration_frequency,
-      asset_category, hv_engineer_user_id, hv_engineer_signed_at, equipment_catalog_model_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-             $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
-             $34,$35, CASE WHEN $35::uuid IS NULL THEN NULL ELSE NOW() END, $36)
-     RETURNING id`,
-    [
-      code,
-      equipmentName,
-      equipmentBrand || null,
-      equipmentModel || null,
-      serial,
-      invimaReg,
-      siteId,
-      areaId,
-      locationId,
-      risk.riskClass,
-      risk.requiresSanitaryClassification,
-      risk.requiresElectricalClassification,
-      risk.electricalProtectionClass,
-      risk.appliedPartType,
-      isMobile,
-      manufacturer,
-      acquisitionType,
-      contractText,
-      acquisitionDate,
-      usefulLifeYears,
-      warrantyYears,
-      supplierName,
-      supplierPhone,
-      supplierEmail,
-      powerType,
-      voltage,
-      tempMin,
-      tempMax,
-      humidityMin,
-      humidityMax,
-      maintenanceFrequency,
-      assetRequiresCalibration,
-      assetCalibrationFrequency,
-      category,
-      hvEngineerUserId || null,
-      catalogPath.modelId
-    ]
-  );
+  const saved = await withAssetCode(clientId, { code, automatic: payload.automaticCode === true }, async (db, assignedCode) => {
+    const { rows } = await db.query(
+      `INSERT INTO "${schema}".assets
+       (code, name, brand, model, serial, invima_reg, site_id, area_id, location_id, risk_class,
+        requires_sanitary_classification, requires_electrical_classification, electrical_protection_class, applied_part_type,
+        is_mobile, manufacturer,
+        acquisition_type, contract_text, acquisition_date, useful_life_years, warranty_years,
+        supplier_name, supplier_phone, supplier_email, power_type, voltage, temp_min, temp_max,
+        humidity_min, humidity_max, maintenance_frequency, requires_calibration, calibration_frequency,
+        asset_category, hv_engineer_user_id, hv_engineer_signed_at, equipment_catalog_model_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+               $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
+               $34,$35, CASE WHEN $35::uuid IS NULL THEN NULL ELSE NOW() END, $36)
+       RETURNING id`,
+      [
+        assignedCode,
+        equipmentName,
+        equipmentBrand || null,
+        equipmentModel || null,
+        serial,
+        invimaReg,
+        siteId,
+        areaId,
+        locationId,
+        risk.riskClass,
+        risk.requiresSanitaryClassification,
+        risk.requiresElectricalClassification,
+        risk.electricalProtectionClass,
+        risk.appliedPartType,
+        isMobile,
+        manufacturer,
+        acquisitionType,
+        contractText,
+        acquisitionDate,
+        usefulLifeYears,
+        warrantyYears,
+        supplierName,
+        supplierPhone,
+        supplierEmail,
+        powerType,
+        voltage,
+        tempMin,
+        tempMax,
+        humidityMin,
+        humidityMax,
+        maintenanceFrequency,
+        assetRequiresCalibration,
+        assetCalibrationFrequency,
+        category,
+        hvEngineerUserId || null,
+        catalogPath.modelId
+      ]
+    );
+    return rows[0];
+  });
   return {
-    ...rows[0],
+    ...saved,
     catalogReview: {
       status: catalogPath.reviewStatus,
       pendingNodes: catalogPath.pendingNodes
@@ -717,64 +721,67 @@ export async function updateAsset(clientId, assetId, payload) {
     submittedBy: catalogCreatedBy,
     submittedClientId: clientId
   });
-  await query(
-    `UPDATE "${schema}".assets
-     SET code = $1, name = $2, brand = $3, model = $4, serial = $5,
-         invima_reg = $6, site_id = $7, area_id = $8, location_id = $9, risk_class = $10,
-         requires_sanitary_classification = $11, requires_electrical_classification = $12,
-         electrical_protection_class = $13, applied_part_type = $14,
-         is_mobile = $15, manufacturer = $16,
-         acquisition_type = $17, contract_text = $18, acquisition_date = $19,
-         useful_life_years = $20, warranty_years = $21, supplier_name = $22,
-         supplier_phone = $23, supplier_email = $24, power_type = $25, voltage = $26,
-         temp_min = $27, temp_max = $28, humidity_min = $29, humidity_max = $30,
-         maintenance_frequency = $31, requires_calibration = $32, calibration_frequency = $33,
-         asset_category = $34,
-         hv_engineer_user_id = COALESCE($35::uuid, hv_engineer_user_id),
-         hv_engineer_signed_at = CASE WHEN $35::uuid IS NULL THEN hv_engineer_signed_at ELSE NOW() END,
-         equipment_catalog_model_id = $36
-     WHERE id = $37`,
-    [
-      code,
-      equipmentName,
-      equipmentBrand || null,
-      equipmentModel || null,
-      serial,
-      invimaReg,
-      siteId || null,
-      areaId || null,
-      locationId || null,
-      risk.riskClass,
-      risk.requiresSanitaryClassification,
-      risk.requiresElectricalClassification,
-      risk.electricalProtectionClass,
-      risk.appliedPartType,
-      isMobile,
-      manufacturer,
-      acquisitionType,
-      contractText,
-      acquisitionDate,
-      usefulLifeYears,
-      warrantyYears,
-      supplierName,
-      supplierPhone,
-      supplierEmail,
-      powerType,
-      voltage,
-      tempMin,
-      tempMax,
-      humidityMin,
-      humidityMax,
-      maintenanceFrequency,
-      assetRequiresCalibration,
-      assetCalibrationFrequency,
-      category,
-      hvEngineerUserId || null,
-      catalogPath.modelId,
-      assetId
-    ]
-  );
+  const saved = await withAssetCode(clientId, { code, assetId }, async (db, assignedCode) => {
+    await db.query(
+      `UPDATE "${schema}".assets
+       SET code = $1, name = $2, brand = $3, model = $4, serial = $5,
+           invima_reg = $6, site_id = $7, area_id = $8, location_id = $9, risk_class = $10,
+           requires_sanitary_classification = $11, requires_electrical_classification = $12,
+           electrical_protection_class = $13, applied_part_type = $14,
+           is_mobile = $15, manufacturer = $16,
+           acquisition_type = $17, contract_text = $18, acquisition_date = $19,
+           useful_life_years = $20, warranty_years = $21, supplier_name = $22,
+           supplier_phone = $23, supplier_email = $24, power_type = $25, voltage = $26,
+           temp_min = $27, temp_max = $28, humidity_min = $29, humidity_max = $30,
+           maintenance_frequency = $31, requires_calibration = $32, calibration_frequency = $33,
+           asset_category = $34,
+           hv_engineer_user_id = COALESCE($35::uuid, hv_engineer_user_id),
+           hv_engineer_signed_at = CASE WHEN $35::uuid IS NULL THEN hv_engineer_signed_at ELSE NOW() END,
+           equipment_catalog_model_id = $36
+       WHERE id = $37`,
+      [
+        assignedCode,
+        equipmentName,
+        equipmentBrand || null,
+        equipmentModel || null,
+        serial,
+        invimaReg,
+        siteId || null,
+        areaId || null,
+        locationId || null,
+        risk.riskClass,
+        risk.requiresSanitaryClassification,
+        risk.requiresElectricalClassification,
+        risk.electricalProtectionClass,
+        risk.appliedPartType,
+        isMobile,
+        manufacturer,
+        acquisitionType,
+        contractText,
+        acquisitionDate,
+        usefulLifeYears,
+        warrantyYears,
+        supplierName,
+        supplierPhone,
+        supplierEmail,
+        powerType,
+        voltage,
+        tempMin,
+        tempMax,
+        humidityMin,
+        humidityMax,
+        maintenanceFrequency,
+        assetRequiresCalibration,
+        assetCalibrationFrequency,
+        category,
+        hvEngineerUserId || null,
+        catalogPath.modelId,
+        assetId
+      ]
+    );
+  });
   return {
+    ...saved,
     catalogReview: {
       status: catalogPath.reviewStatus,
       pendingNodes: catalogPath.pendingNodes
@@ -873,22 +880,23 @@ export async function moveAsset(clientId, assetId, payload) {
     throw new Error('Equipo no encontrado');
   }
 
-  await query(
-    `UPDATE "${schema}".assets
-     SET code = $1,
-         site_id = $2,
-         area_id = $3,
-         location_id = $4
-     WHERE id = $5`,
-    [
-      payload.code || before.code,
-      payload.siteId || null,
-      payload.areaId || null,
-      payload.locationId || null,
-      assetId
-    ]
-  );
-
+  await withAssetCode(clientId, { code: payload.code || before.code, assetId }, async (db, assignedCode) => {
+    await db.query(
+      `UPDATE "${schema}".assets
+       SET code = $1,
+           site_id = $2,
+           area_id = $3,
+           location_id = $4
+       WHERE id = $5`,
+      [
+        assignedCode,
+        payload.siteId || null,
+        payload.areaId || null,
+        payload.locationId || null,
+        assetId
+      ]
+    );
+  });
   const after = await getAssetById(clientId, assetId);
   return { before, after };
 }

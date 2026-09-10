@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout } from 'rxjs';
 import { getApiBase } from '../core/api-base';
 
 export type AssetCategory = 'biomedical' | 'industrial';
@@ -189,9 +189,18 @@ export interface MaintenanceScheduleProgrammingSelectionDto {
 
 export interface CatalogMutationResultDto {
   id?: string;
+  code?: string;
+  codeAdjusted?: boolean;
   ok?: boolean;
   catalogReview: CatalogReviewDto;
   scheduleSync?: MaintenanceScheduleSyncDto | null;
+}
+
+export interface AssetCodeSuggestionDto {
+  code: string;
+  available: boolean;
+  suggestion: string | null;
+  prefix: string;
 }
 
 interface AreaDto {
@@ -400,8 +409,17 @@ export class BiomedService {
     await firstValueFrom(this.http.delete(`${this.apiBase}/biomed/${clientId}/locations/${locationId}`));
   }
 
+  async getAssetCodeSuggestion(clientId: string, options: { code?: string; assetId?: string } = {}): Promise<AssetCodeSuggestionDto> {
+    const params: Record<string, string> = {};
+    if (options.code !== undefined) params['code'] = options.code;
+    if (options.assetId) params['assetId'] = options.assetId;
+    return firstValueFrom(this.http.get<AssetCodeSuggestionDto>(`${this.apiBase}/biomed/${clientId}/asset-code`, { params })
+      .pipe(timeout({ first: 10_000 })));
+  }
+
   async createAsset(clientId: string, payload: {
     code: string;
+    automaticCode?: boolean;
     name: string;
     brand?: string;
     model?: string;
@@ -445,6 +463,7 @@ export class BiomedService {
   }): Promise<CatalogMutationResultDto> {
     const form = new FormData();
     form.append('code', payload.code);
+    if (payload.automaticCode) form.append('automaticCode', 'true');
     form.append('name', payload.name);
     if (payload.brand) form.append('brand', payload.brand);
     if (payload.model) form.append('model', payload.model);

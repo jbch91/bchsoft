@@ -258,6 +258,7 @@ import {
   replaceRecommendations,
   replaceDocuments
 } from './biomed.js';
+import { getAssetCodeSuggestion } from './asset-codes.js';
 import PDFDocument from 'pdfkit';
 import {
   buildAssetMovementPdf,
@@ -8624,6 +8625,36 @@ app.delete(
 );
 
 app.get(
+  '/biomed/:clientId/asset-code',
+  requireAuth,
+  requirePermission('hb:create'),
+  async (req, res) => {
+    const { clientId } = req.params;
+    if (req.user.clientId && req.user.clientId !== clientId) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const { code, assetId } = req.query;
+    if ((code !== undefined && typeof code !== 'string') ||
+        (assetId !== undefined && (typeof assetId !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(assetId)))) {
+      return res.status(400).json({ message: 'Consulta de código inválida.' });
+    }
+    try {
+      if (assetId && isAreaScopedOperationalUser(req.user) && !(await readerCanAccessAsset(clientId, req.user.sub, assetId))) {
+        return res.status(403).json({ message: 'Sin acceso al equipo.' });
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json(await getAssetCodeSuggestion(clientId, { code, assetId }));
+    } catch (error) {
+      if (String(error?.code || '').startsWith('ASSET_CODE_')) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
+      console.error(error);
+      return res.status(500).json({ message: 'No se pudo verificar el código del equipo.' });
+    }
+  }
+);
+
+app.get(
   '/biomed/:clientId/equipment-catalog',
   requireAuth,
   requireAnyPermission([
@@ -8732,7 +8763,7 @@ app.post(
       cleaning,
       recommendations
     } = body;
-    if (!code || !name) {
+    if ((!code && String(body.automaticCode) !== 'true') || !name) {
       return res.status(400).json({ message: 'Código y nombre son requeridos.' });
     }
 
@@ -8743,6 +8774,7 @@ app.post(
       const hvEngineerUserId = await resolveHvEngineerUserId(req);
       const result = await createAsset(clientId, {
         code,
+        automaticCode: String(body.automaticCode) === 'true',
         name,
         brand,
         model,
@@ -8854,6 +8886,9 @@ app.post(
       });
       return res.status(201).json({ ...result, scheduleSync });
     } catch (error) {
+      if (String(error?.code || '').startsWith('ASSET_CODE_')) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
       if (String(error?.code || '').startsWith('CATALOG_')) {
         return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo de equipos.');
       }
@@ -9065,6 +9100,9 @@ app.post(
         return res.status(400).json({ message: error.message });
       }
       console.error(error);
+      if (String(error?.code || '').startsWith('ASSET_CODE_')) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
       return res.status(500).json({ message: 'No se pudo completar la importación masiva.' });
     }
   }
@@ -9378,8 +9416,11 @@ app.put(
           scheduleSync
         }
       });
-      return res.json({ ok: true, catalogReview: updateResult.catalogReview, scheduleSync });
+      return res.json({ ok: true, code: updateResult.code, catalogReview: updateResult.catalogReview, scheduleSync });
     } catch (error) {
+      if (String(error?.code || '').startsWith('ASSET_CODE_')) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
       if (String(error?.code || '').startsWith('CATALOG_')) {
         return sendCatalogError(res, error, 'No se pudo registrar la propuesta en el catálogo de equipos.');
       }
@@ -9505,6 +9546,9 @@ app.post(
         return res.status(400).json({ message: error.message });
       }
       console.error(error);
+      if (String(error?.code || '').startsWith('ASSET_CODE_')) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
       return res.status(500).json({ message: 'No se pudo mover el equipo.' });
     }
   }
