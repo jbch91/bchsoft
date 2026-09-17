@@ -123,6 +123,10 @@ export interface MaintenanceReportDto {
   spare_parts_status?: string | null;
   created_by: string;
   created_at: string;
+  performed_on?: string | null;
+  verbal_reporter_name?: string | null;
+  verbal_reporter_role?: string | null;
+  verbal_asset_status_applied?: boolean | null;
   engineer_name?: string | null;
   request_status?: string | null;
   signed_by_me?: boolean;
@@ -132,6 +136,35 @@ export interface MaintenanceReportDto {
   correction_reason?: string | null;
   correction_requested_at?: string | null;
   correction_requested_by_name?: string | null;
+}
+
+export interface VerbalAttentionInput {
+  submissionId: string;
+  assetId: string;
+  assetCategory: AssetCategory;
+  performedOn: string;
+  reporterName: string;
+  reporterRole: string;
+  description: string;
+  summary: string;
+  findings: string;
+  actionsTaken: string;
+  maintenanceChecks: string[];
+  maintenanceActivities: string[];
+  maintenanceTests: string[];
+  assetStatusAfter: string;
+  assetStatusObservations: string;
+  requiresSpareParts: boolean;
+  sparePartsNeeded: string;
+  sparePartsInstalledNow: boolean;
+}
+
+export interface VerbalAttentionResult {
+  id: string;
+  requestId: string;
+  replayed: boolean;
+  assetStatusApplied: boolean;
+  warnings?: string[];
 }
 
 export interface MaintenanceSignatureResult {
@@ -318,6 +351,16 @@ export class MaintenanceService {
       this.http.post<MaintenanceSignatureResult>(`${this.apiBase}/maintenance/reports/${reportId}/sign`, {})
         .pipe(timeout({ first: 30000 }))
     );
+  }
+
+  async createVerbalAttention(payload: VerbalAttentionInput): Promise<VerbalAttentionResult> {
+    return firstValueFrom(this.http.post<VerbalAttentionResult>(`${this.apiBase}/maintenance/verbal-attentions`, payload)
+      .pipe(timeout({ first: 60000 })));
+  }
+
+  async findVerbalAttention(submissionId: string): Promise<VerbalAttentionResult> {
+    return firstValueFrom(this.http.get<VerbalAttentionResult>(`${this.apiBase}/maintenance/verbal-attentions/${encodeURIComponent(submissionId)}`)
+      .pipe(timeout({ first: 10000 })));
   }
 
   async requestReportCorrection(reportId: string, reason: string): Promise<void> {

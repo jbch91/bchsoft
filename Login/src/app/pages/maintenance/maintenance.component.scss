@@ -2904,6 +2904,69 @@ button:disabled {
   max-width: 760px;
 }
 
+.report-editor-fields {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.verbal-create-button {
+  flex: 0 1 auto;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.verbal-attention-fields {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.verbal-equipment-row,
+.verbal-contact-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+
+.verbal-contact-row {
+  grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.verbal-attention-fields label { min-width: 0; }
+.verbal-attention-fields input,
+.verbal-attention-fields select,
+.verbal-attention-fields textarea { width: 100%; min-width: 0; box-sizing: border-box; font-size: 13px; }
+.verbal-attention-fields [aria-invalid='true'] { border-color: #b42318; }
+
+.report-editor-modal.verbal-editor {
+  display: flex;
+  flex-direction: column;
+  height: min(900px, calc(100dvh - 28px));
+  max-height: calc(100dvh - 28px);
+  overflow: hidden;
+
+  .report-editor-heading { position: static; flex-shrink: 0; }
+  input, select, textarea { font-family: inherit; }
+  form { display: flex; flex-direction: column; min-height: 0; gap: 0; }
+  .report-editor-fields { overflow-y: auto; overscroll-behavior: contain; padding: 0 4px 12px 0; }
+  .report-editor-footer { flex-shrink: 0; border-top: 1px solid var(--border); padding-top: 12px; background: #fff; }
+  .report-editor-footer .message { margin: 0 0 8px; font-size: 13px; overflow-wrap: anywhere; }
+  .form-actions { margin-top: 0; flex-wrap: wrap; }
+  .form-actions button { min-width: 0; white-space: normal; }
+}
+
+@media (max-width: 640px) {
+  .verbal-equipment-row,
+  .verbal-contact-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .report-editor-modal.verbal-editor { height: calc(100dvh - 16px); max-height: calc(100dvh - 16px); }
+}
+
 .modal-message {
   margin-bottom: 12px;
 }

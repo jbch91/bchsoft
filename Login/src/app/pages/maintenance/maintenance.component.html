@@ -1,4 +1,4 @@
-<section class="page">
+<section class="page" [class.corrective-workspace-active]="viewMode === 'reportes' && !isAreaResponsible">
   <app-module-tabs></app-module-tabs>
 
   <div class="card filters-card" *ngIf="!auth.currentUser()?.clientId">
@@ -111,9 +111,9 @@
   </div>
 
   <div class="loading-strip" *ngIf="loading" role="status" aria-live="polite">Actualizando información...</div>
-  <div class="message error" *ngIf="errorMessage" role="alert">{{ errorMessage }}</div>
+  <div class="message error" *ngIf="errorMessage && !reportFormActive" role="alert">{{ errorMessage }}</div>
   <div class="message success" *ngIf="successMessage" role="status" aria-live="polite">{{ successMessage }}</div>
-  <div class="floating-alert" [ngClass]="alertKind" *ngIf="alertMessage" role="status" aria-live="polite">
+  <div class="floating-alert" [ngClass]="alertKind" *ngIf="alertMessage && !reportFormActive && !reportDetail" role="status" aria-live="polite">
     <strong>{{ alertKind === 'success' ? 'Proceso realizado' : 'Revisa la información' }}</strong>
     <span>{{ alertMessage }}</span>
     <button type="button" class="icon-action" aria-label="Cerrar notificación" title="Cerrar" (click)="alertMessage = ''">×</button>
@@ -727,15 +727,17 @@
       <article
         #reportFormCard
         class="maintenance-modal report-editor-modal card form-card"
+        [class.verbal-editor]="verbalAttentionMode"
+        [class.corrective-editor]="isCorrectiveReportEditor"
         tabindex="-1"
         (click)="$event.stopPropagation()"
       >
         <div class="modal-heading report-editor-heading">
           <div class="card-title">
-            <span>Reporte técnico</span>
-            <h2 id="report-editor-title">{{ reportCorrectionMode ? 'Corregir reporte' : 'Crear reporte' }}</h2>
-            <p *ngIf="!reportCorrectionMode">Registra la intervención, el estado final del equipo y si requiere repuestos.</p>
-            <p *ngIf="reportCorrectionMode">
+            <span>{{ isCorrectiveReportEditor ? correctiveEditorSource : 'Reporte técnico' }}</span>
+            <h2 id="report-editor-title">{{ isCorrectiveReportEditor ? 'Reporte correctivo' : reportCorrectionMode ? 'Corregir reporte' : 'Crear reporte' }}</h2>
+            <p *ngIf="!isCorrectiveReportEditor && !reportCorrectionMode">Registra la intervención, el estado final del equipo y si requiere repuestos.</p>
+            <p *ngIf="!isCorrectiveReportEditor && reportCorrectionMode">
               Ajusta el protocolo según la observación recibida. Al guardar, el reporte volverá a quedar pendiente de firma.
             </p>
           </div>
@@ -744,13 +746,28 @@
             class="icon-action ghost"
             aria-label="Cerrar formulario de reporte"
             title="Cerrar"
+            [disabled]="reportSaving"
             (click)="cancelReportWorkflow()"
           >
-            ×
+            <svg class="maintenance-icon" aria-hidden="true"><use href="/assets/guide-icons.svg#x"></use></svg>
           </button>
         </div>
-        <div class="message error modal-message" *ngIf="errorMessage" role="alert">{{ errorMessage }}</div>
-        <div class="workflow-note" *ngIf="reportFlowMode !== 'normal'">
+        <div class="corrective-editor-context" *ngIf="isCorrectiveReportEditor && selectedReportAsset as asset" [class.has-photo]="assetPhotoAvailable(asset)">
+          <img *ngIf="assetPhotoAvailable(asset)" [src]="assetPhotoUrl(asset) || ''" [alt]="'Fotografía de ' + asset.name" (error)="onAssetPhotoError(asset.id)" />
+          <div>
+            <strong>{{ asset.code }} · {{ asset.name }}</strong>
+            <span>{{ asset.brand || 'Sin marca' }} · {{ asset.model || 'Sin modelo' }} · S/N {{ asset.serial || 'NR' }}</span>
+          </div>
+        </div>
+        <nav class="corrective-editor-tabs" *ngIf="isCorrectiveReportEditor" aria-label="Secciones del reporte correctivo">
+          <button type="button" *ngFor="let section of correctiveEditorSections; let i = index"
+            [class.active]="correctiveEditorSection === section.key" [attr.aria-current]="correctiveEditorSection === section.key ? 'step' : null"
+            [disabled]="reportSaving" (click)="setCorrectiveEditorSection(section.key)"><span>{{ i + 1 }}</span>{{ section.label }}</button>
+        </nav>
+        <div class="message error modal-message" *ngIf="errorMessage && !isCorrectiveReportEditor" role="alert">{{ errorMessage }}</div>
+        <form (ngSubmit)="submitReportEditor()">
+          <fieldset class="report-editor-fields" [disabled]="reportSaving">
+        <div class="workflow-note" *ngIf="reportFlowMode !== 'normal'" [hidden]="isCorrectiveReportEditor && correctiveEditorSection !== 'attention'">
           <div>
             <span>{{ reportWorkflowTitle() }}</span>
             <strong>{{ reportFlowSource ? assetLabel(reportFlowSource.asset_id) : 'Equipo seleccionado' }}</strong>
@@ -760,7 +777,7 @@
           </div>
           <button type="button" class="ghost" (click)="cancelReportWorkflow()">Cancelar flujo</button>
         </div>
-        <div class="workflow-note" *ngIf="reportCorrectionMode">
+        <div class="workflow-note" *ngIf="reportCorrectionMode" [hidden]="isCorrectiveReportEditor && correctiveEditorSection !== 'attention'">
           <div>
             <span>Corrección solicitada</span>
             <strong>{{ selectedReportAsset ? assetLabel(selectedReportAsset.id) : 'Reporte seleccionado' }}</strong>
@@ -768,13 +785,39 @@
           </div>
           <button type="button" class="ghost" (click)="cancelReportWorkflow()">Cancelar corrección</button>
         </div>
-        <form (ngSubmit)="createReport()">
-          <label>
+          <section class="verbal-attention-fields" *ngIf="verbalAttentionMode" [hidden]="correctiveEditorSection !== 'attention'" aria-label="Datos de la atención verbal">
+            <div class="verbal-equipment-row">
+              <label>Buscar equipo
+                <input type="search" name="verbalAssetSearch" [(ngModel)]="verbalAssetSearch" placeholder="Código, nombre, marca, modelo o serie" />
+              </label>
+              <label>Equipo
+                <select name="verbalAssetId" [(ngModel)]="verbalAssetId" (ngModelChange)="clearVerbalFieldError('assetId')" [attr.aria-invalid]="verbalErrorField === 'assetId'">
+                  <option value="">Selecciona un equipo</option>
+                  <option *ngFor="let asset of verbalAssetOptions" [value]="asset.id">{{ asset.code }} · {{ asset.name }} · {{ asset.serial || 'Sin serie' }}</option>
+                </select>
+              </label>
+            </div>
+            <div class="verbal-contact-row">
+              <label>Fecha de atención
+                <input type="date" name="verbalPerformedOn" [(ngModel)]="verbalPerformedOn" (ngModelChange)="clearVerbalFieldError('performedOn')" min="1900-01-01" [max]="verbalToday" [attr.aria-invalid]="verbalErrorField === 'performedOn'" />
+              </label>
+              <label>Persona que informó la falla
+                <input name="verbalReporterName" [(ngModel)]="verbalReporterName" (ngModelChange)="clearVerbalFieldError('reporterName')" maxlength="160" autocomplete="off" [attr.aria-invalid]="verbalErrorField === 'reporterName'" />
+              </label>
+              <label>Cargo (opcional)
+                <input name="verbalReporterRole" [(ngModel)]="verbalReporterRole" maxlength="100" autocomplete="off" />
+              </label>
+            </div>
+            <label>Falla informada verbalmente
+              <textarea name="verbalDescription" [(ngModel)]="verbalDescription" (ngModelChange)="clearVerbalFieldError('description')" rows="2" maxlength="1000" [attr.aria-invalid]="verbalErrorField === 'description'"></textarea>
+            </label>
+          </section>
+          <label *ngIf="!verbalAttentionMode" [hidden]="isCorrectiveReportEditor && correctiveEditorSection !== 'attention'">
             Solicitud
             <select
               [(ngModel)]="reportRequestId"
               name="reportRequestId"
-              [disabled]="reportCorrectionMode"
+              [disabled]="reportCorrectionMode || reportFlowMode !== 'normal'"
               (change)="onReportRequestChange()"
             >
               <option *ngFor="let request of reportableRequests" [value]="request.id">
@@ -782,12 +825,12 @@
               </option>
             </select>
           </label>
-          <div class="selected-request" *ngIf="reportRequestId">
+          <div class="selected-request" *ngIf="reportRequestId && !isCorrectiveReportEditor">
             {{ selectedRequestLabel(reportRequestId) }}
           </div>
-          <div class="request-context" *ngIf="selectedReportRequest as request">
+          <div class="request-context" *ngIf="selectedReportRequest as request" [hidden]="isCorrectiveReportEditor && correctiveEditorSection !== 'attention'">
             <ng-container *ngIf="selectedReportAsset as asset; else requestContextWithoutAsset">
-              <div class="report-asset-identity">
+              <div class="report-asset-identity" *ngIf="!isCorrectiveReportEditor">
                 <div class="asset-photo-preview">
                   <img
                     *ngIf="assetPhotoAvailable(asset)"
@@ -800,9 +843,9 @@
                   <span *ngIf="!assetPhotoAvailable(asset)">Sin fotografía</span>
                 </div>
                 <div class="context-title report-asset-copy">
-                  <span>Solicitud realizada</span>
+                  <span>{{ verbalAttentionMode ? 'Equipo de la atención' : 'Solicitud realizada' }}</span>
                   <strong>{{ asset.code }} - {{ asset.name }}</strong>
-                  <small>{{ request.created_at | date: 'dd/MM/yyyy, h:mm a' }} · {{ statusLabel(request.status) }}</small>
+                  <small *ngIf="!verbalAttentionMode">{{ request.created_at | date: 'dd/MM/yyyy, h:mm a' }} · {{ statusLabel(request.status) }}</small>
                   <div class="report-asset-identifiers">
                     <span>Marca: <b>{{ asset.brand || '-' }}</b></span>
                     <span>Modelo: <b>{{ asset.model || '-' }}</b></span>
@@ -818,7 +861,7 @@
                 <small>{{ request.created_at | date: 'dd/MM/yyyy, h:mm a' }} · {{ statusLabel(request.status) }}</small>
               </div>
             </ng-template>
-            <div class="context-grid" *ngIf="selectedReportAsset as asset">
+            <div class="context-grid" *ngIf="selectedReportAsset as asset" [class.verbal-context]="verbalAttentionMode">
               <div>
                 <span>Sede</span>
                 <strong>{{ asset.siteName || '-' }}</strong>
@@ -831,34 +874,35 @@
                 <span>Ubicación</span>
                 <strong>{{ asset.locationName || '-' }}</strong>
               </div>
-              <div>
+              <div *ngIf="!verbalAttentionMode">
                 <span>Solicitante</span>
                 <strong>{{ request.requester_name || '-' }}</strong>
               </div>
             </div>
-            <label class="readonly-field">
+            <label class="readonly-field" *ngIf="!verbalAttentionMode">
               Descripción de la solicitud
-              <textarea [ngModel]="request.description || 'Sin descripción registrada.'" name="requestDescriptionReadonly" rows="3" readonly></textarea>
+              <textarea [ngModel]="request.description || 'Sin descripción registrada.'" name="requestDescriptionReadonly" [rows]="isCorrectiveReportEditor ? 2 : 3" readonly></textarea>
             </label>
           </div>
 
-          <div class="standard-report-panel" *ngIf="selectedReportRequest as request">
+          <div class="standard-report-panel" *ngIf="selectedReportRequest as request" [hidden]="isCorrectiveReportEditor && correctiveEditorSection !== 'intervention'">
             <div class="standard-report-head">
               <div>
                 <span
                   class="report-kind-badge"
+                  *ngIf="!isCorrectiveReportEditor"
                   [class.corrective]="request.type === 'correctivo'"
                   [class.preventive]="request.type === 'preventivo'"
                 >
                   {{ reportTypeLabel() }}
                 </span>
-                <h3>Formato técnico estandarizado</h3>
-                <p>
+                <h3>{{ isCorrectiveReportEditor ? 'Revisiones, actividades y pruebas' : 'Formato técnico estandarizado' }}</h3>
+                <p *ngIf="!isCorrectiveReportEditor">
                   Selecciona la causa probable, revisiones, actividades y pruebas realizadas.
                   Esto deja todos los reportes comparables aunque los equipos sean diferentes.
                 </p>
               </div>
-              <small>
+              <small *ngIf="!isCorrectiveReportEditor">
                 Estos campos quedan guardados en el PDF y en el historial de la hoja de vida.
               </small>
             </div>
@@ -912,7 +956,7 @@
           </div>
 
           <ng-container
-            *ngIf="selectedReportRequest?.type === 'preventivo' && reportFlowMode === 'normal'; else manualReportNarrative"
+            *ngIf="!isCorrectiveReportEditor && selectedReportRequest?.type === 'preventivo' && reportFlowMode === 'normal'; else manualReportNarrative"
           >
             <section class="preventive-outcome-panel" aria-labelledby="preventiveOutcomeTitle">
               <div class="guided-section-heading">
@@ -1048,6 +1092,26 @@
           </ng-container>
 
           <ng-template #manualReportNarrative>
+            <ng-container *ngIf="isCorrectiveReportEditor; else basicReportNarrative">
+              <section class="corrective-narrative" *ngFor="let field of correctiveNarrativeFields" [hidden]="correctiveEditorSection !== field.section">
+                <div class="corrective-section-heading">
+                  <h3>{{ field.title }}</h3>
+                  <small>{{ narrativeSelectedCount(field.key, field.options) }} seleccionados</small>
+                </div>
+                <div class="corrective-suggestions">
+                  <label *ngFor="let option of field.options" [class.selected]="narrativeOptionChecked(field.key, option.text)">
+                    <input type="checkbox" [checked]="narrativeOptionChecked(field.key, option.text)" (change)="toggleCorrectiveNarrativeOption(field.key, option, $any($event.target).checked)" />
+                    <span>{{ option.label }}</span>
+                  </label>
+                </div>
+                <label class="corrective-narrative-detail">Detalle de la atención
+                  <textarea [ngModel]="reportNarrativeValue(field.key)" (ngModelChange)="setReportNarrativeValue(field.key, $event)"
+                    [name]="field.key === 'summary' ? 'reportSummary' : field.key === 'findings' ? 'reportFindings' : 'reportActions'"
+                    [attr.aria-label]="field.title + ': detalle'" rows="3" maxlength="5000"></textarea>
+                </label>
+              </section>
+            </ng-container>
+            <ng-template #basicReportNarrative>
             <label>
               Resumen
               <textarea [(ngModel)]="reportSummary" name="reportSummary" rows="2"></textarea>
@@ -1060,9 +1124,10 @@
               Acciones realizadas
               <textarea [(ngModel)]="reportActions" name="reportActions" rows="2"></textarea>
             </label>
+            </ng-template>
           </ng-template>
 
-          <div class="tracking-grid">
+          <div class="tracking-grid" [hidden]="isCorrectiveReportEditor && correctiveEditorSection !== 'closure'">
             <div class="tracking-stack">
               <label>
                 Estado final del equipo
@@ -1083,7 +1148,7 @@
                 </div>
                 <div
                   class="narrative-option-list compact"
-                  *ngIf="selectedReportRequest?.type === 'preventivo' && reportFlowMode === 'normal'"
+                  *ngIf="isCorrectiveReportEditor || (selectedReportRequest?.type === 'preventivo' && reportFlowMode === 'normal')"
                 >
                   <label
                     class="narrative-option"
@@ -1141,7 +1206,7 @@
               <div class="spare-box" *ngIf="reportRequiresSpareParts">
                 <div
                   class="spare-suggestions"
-                  *ngIf="selectedReportRequest?.type === 'preventivo' && reportFlowMode === 'normal'"
+                  *ngIf="isCorrectiveReportEditor || (selectedReportRequest?.type === 'preventivo' && reportFlowMode === 'normal')"
                 >
                   <div class="narrative-inline-heading">
                     <strong>Tipo de repuesto</strong>
@@ -1202,7 +1267,7 @@
                   <span>Estado al guardar</span>
                   <strong>{{ reportSpareStateLabel() }}</strong>
                   <small *ngIf="reportSpareStateLabel() === 'Repuesto solicitado'">
-                    El preventivo continuará a aval o firma y, en paralelo, el equipo quedará en
+                    El reporte continuará a aval o firma y, en paralelo, el equipo quedará en
                     Pendientes repuestos. Se notificará al almacenista.
                   </small>
                   <small
@@ -1224,13 +1289,23 @@
             </div>
           </div>
 
+          </fieldset>
+          <div class="report-editor-footer">
+          <div class="message error" *ngIf="isCorrectiveReportEditor && errorMessage" role="alert">{{ errorMessage }}</div>
           <div class="form-actions">
             <button type="button" class="ghost" [disabled]="loading || reportOpening" (click)="cancelReportWorkflow()">
               Cancelar
             </button>
-            <button type="submit" [disabled]="loading || reportOpening">
+            <button type="button" class="ghost corrective-back" *ngIf="isCorrectiveReportEditor && correctiveEditorSection !== 'attention'" [disabled]="reportSaving"
+              (click)="setCorrectiveEditorSection(correctiveEditorSection === 'closure' ? 'intervention' : 'attention')">
+              <svg class="maintenance-icon" aria-hidden="true"><use href="/assets/guide-icons.svg#arrow-left"></use></svg>Anterior
+            </button>
+            <button type="button" *ngIf="isCorrectiveReportEditor && correctiveEditorSection !== 'closure'" [disabled]="reportSaving"
+              (click)="setCorrectiveEditorSection(correctiveEditorSection === 'attention' ? 'intervention' : 'closure')">Continuar</button>
+            <button type="submit" *ngIf="!isCorrectiveReportEditor || correctiveEditorSection === 'closure'" [disabled]="loading || reportOpening">
               {{ loading ? 'Guardando reporte...' : reportOpening ? 'Preparando reporte...' : submitReportLabel() }}
             </button>
+          </div>
           </div>
         </form>
       </article>
@@ -1351,7 +1426,7 @@
                 {{ asset.siteName || 'Sin sede' }} / {{ asset.areaName || 'Sin área' }} / {{ asset.locationName || 'Sin ubicación' }}
               </p>
               <div class="area-report-meta">
-                <span>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</span>
+                <span>{{ (report.performed_on || report.created_at) | date: (report.performed_on ? 'dd/MM/yyyy' : 'dd/MM/yyyy, h:mm a') }}</span>
                 <span>{{ report.engineer_name || 'Ingeniero no registrado' }}</span>
               </div>
               <p class="area-report-correction" *ngIf="report.correction_requested">
@@ -1429,23 +1504,23 @@
       </div>
     </section>
 
-    <div class="card report-list-card" *ngIf="!isAreaResponsible">
-      <div class="list-title report-list-title">
-        <div>
+    <section class="report-workspace" *ngIf="!isAreaResponsible" aria-label="Listado de reportes">
+      <div class="report-workspace-heading">
+        <div class="report-workspace-title">
           <h2>{{ engineerReportsOnlyCorrectives ? 'Reportes correctivos' : 'Reportes' }}</h2>
-          <p>
-            {{
-              engineerReportsOnlyCorrectives
-                ? 'Consulta y gestiona aquí únicamente los mantenimientos correctivos.'
-                : 'Consulta primero el listado y abre únicamente el reporte que necesitas revisar o gestionar.'
-            }}
-          </p>
+          <span>{{ filteredReports.length }}</span>
         </div>
-        <span class="report-total-badge">{{ filteredReports.length }} resultado{{ filteredReports.length === 1 ? '' : 's' }}</span>
+        <button type="button" class="verbal-create-button" *ngIf="canRegisterVerbalAttention" [disabled]="loading || reportSaving" (click)="openVerbalAttention()">
+          <svg class="maintenance-icon" aria-hidden="true"><use href="/assets/guide-icons.svg#plus"></use></svg>Registrar atención verbal
+        </button>
       </div>
 
-      <div class="report-filter-panel">
-        <div class="list-tools report-filters">
+      <nav class="report-workspace-tabs" aria-label="Estado de los reportes">
+        <button type="button" [class.active]="reportSubView === 'pendientes_firma'" [attr.aria-pressed]="reportSubView === 'pendientes_firma'" (click)="setReportSubView('pendientes_firma')">Por firmar <span>{{ pendingSignatureReports.length }}</span></button>
+        <button type="button" [class.active]="reportSubView === 'historial'" [attr.aria-pressed]="reportSubView === 'historial'" (click)="setReportSubView('historial')">Historial <span>{{ reportHistory.length }}</span></button>
+      </nav>
+      <div class="report-workspace-filters">
+        <div class="report-primary-filters">
           <label>
             Buscar
             <input
@@ -1457,27 +1532,39 @@
           </label>
           <label>
             Sede
-            <select [(ngModel)]="reportSiteFilter" (ngModelChange)="onReportSiteFilterChange()">
+            <select aria-label="Sede" [(ngModel)]="reportSiteFilter" (ngModelChange)="onReportSiteFilterChange()">
               <option value="">Todas</option>
               <option *ngFor="let site of reportSiteOptions" [value]="site">{{ site }}</option>
             </select>
           </label>
           <label>
             Área
-            <select [(ngModel)]="reportAreaFilter" (ngModelChange)="resetReportPage()">
+            <select aria-label="Área" [(ngModel)]="reportAreaFilter" (ngModelChange)="onReportAreaFilterChange()">
               <option value="">Todas</option>
               <option *ngFor="let area of reportAreaOptions" [value]="area">{{ area }}</option>
             </select>
           </label>
+          <label>Ubicación
+            <select aria-label="Ubicación" [(ngModel)]="reportLocationFilter" (ngModelChange)="resetReportPage()">
+              <option value="">Todas</option>
+              <option *ngFor="let location of reportLocationOptions" [value]="location">{{ location }}</option>
+            </select>
+          </label>
           <label>
             Estado
-            <select [(ngModel)]="reportStatusFilter" (ngModelChange)="resetReportPage()">
+            <select aria-label="Estado" [(ngModel)]="reportStatusFilter" (ngModelChange)="resetReportPage()">
               <option *ngFor="let option of reportStatusOptions" [value]="option.value">{{ option.label }}</option>
             </select>
           </label>
+          <div class="report-filter-actions">
+            <button type="button" class="ghost" [attr.aria-expanded]="reportAdvancedFiltersOpen" aria-controls="report-extra-filters" (click)="reportAdvancedFiltersOpen = !reportAdvancedFiltersOpen">Más filtros<span *ngIf="reportAdvancedFilterCount"> ({{ reportAdvancedFilterCount }})</span></button>
+            <button type="button" class="icon-action ghost" title="Limpiar filtros" aria-label="Limpiar filtros" [disabled]="!hasActiveReportFilters" (click)="clearReportFilters()"><svg class="maintenance-icon" aria-hidden="true"><use href="/assets/guide-icons.svg#x"></use></svg></button>
+          </div>
+        </div>
+        <div class="report-extra-filters" id="report-extra-filters" *ngIf="reportAdvancedFiltersOpen">
           <label *ngIf="!engineerReportsOnlyCorrectives">
             Tipo
-            <select [(ngModel)]="reportTypeFilter" (ngModelChange)="resetReportPage()">
+            <select aria-label="Tipo" [(ngModel)]="reportTypeFilter" (ngModelChange)="resetReportPage()">
               <option value="">Todos</option>
               <option value="correctivo">Correctivo</option>
               <option value="preventivo">Preventivo</option>
@@ -1485,7 +1572,7 @@
           </label>
           <label>
             Repuestos
-            <select [(ngModel)]="reportSpareFilter" (ngModelChange)="resetReportPage()">
+            <select aria-label="Repuestos" [(ngModel)]="reportSpareFilter" (ngModelChange)="resetReportPage()">
               <option value="">Todos</option>
               <option value="con_repuesto">Con repuesto</option>
               <option value="sin_repuesto">Sin repuesto</option>
@@ -1509,79 +1596,44 @@
               (ngModelChange)="resetReportPage()"
             />
           </label>
-          <button
-            type="button"
-            class="ghost clear-report-filters"
-            [disabled]="!hasActiveReportFilters"
-            (click)="clearReportFilters()"
-          >
-            Limpiar
-          </button>
         </div>
       </div>
 
-      <div class="inner-tabs">
-        <button
-          type="button"
-          [class.active]="reportSubView === 'pendientes_firma'"
-          (click)="setReportSubView('pendientes_firma')"
-        >
-          {{ engineerReportsOnlyCorrectives ? 'Correctivos por firmar' : 'Reportes por firmar' }}
-          <strong>{{ pendingSignatureReports.length }}</strong>
-        </button>
-        <button
-          type="button"
-          [class.active]="reportSubView === 'historial'"
-          (click)="setReportSubView('historial')"
-        >
-          {{ engineerReportsOnlyCorrectives ? 'Historial correctivo' : 'Historial y trazabilidad' }}
-          <strong>{{ reportHistory.length }}</strong>
-        </button>
-      </div>
-
-      <div class="table reports-table compact-reports-table">
-        <div class="row header">
-          <span>Fecha</span>
-          <span>Equipo</span>
-          <span>Tipo</span>
-          <span>Estado</span>
-          <span>Reporte</span>
-        </div>
-        <div class="row" *ngFor="let report of paginatedReports">
-          <span data-label="Fecha">
-            <strong>{{ report.created_at | date: 'dd/MM/yyyy' }}</strong>
-            <small>{{ report.created_at | date: 'h:mm a' }}</small>
-          </span>
-          <span data-label="Equipo">
-            <strong>{{ assetLabel(report.asset_id) }}</strong>
-            <small *ngIf="assetForReport(report) as asset">{{ asset.siteName || '-' }} / {{ asset.areaName || '-' }}</small>
-          </span>
-          <span data-label="Tipo">
-            <strong>{{ report.type === 'preventivo' ? 'Preventivo' : 'Correctivo' }}</strong>
-            <small>{{ report.engineer_name || 'Ingeniero no registrado' }}</small>
-          </span>
-          <span data-label="Estado">
-            <span class="status-pill" [ngClass]="statusClass(report.asset_status_after)">
-              {{ statusLabel(report.asset_status_after || 'operativo') }}
-            </span>
-            <span class="status-pill" [ngClass]="reportSignatureClass(report)">
-              {{ reportSignedDate(report) }}
-            </span>
-          </span>
-          <span class="actions" data-label="Reporte">
-            <button
-              *ngIf="canReopenOwnPreventiveReport(report)"
-              type="button"
-              class="warning"
-              title="Corregir el reporte antes de la firma"
-              aria-label="Corregir el reporte antes de la firma"
-              (click)="openEngineerCorrectionDialog(report)"
-            >
-              Corregir
-            </button>
-            <button type="button" class="ghost view-report-button" (click)="openReportDetail(report)">Ver reporte</button>
-          </span>
-        </div>
+      <div class="report-register">
+        <table class="report-register-table" *ngIf="filteredReports.length > 0">
+          <thead><tr><th scope="col">Equipo</th><th scope="col" class="report-place">Ubicación</th><th scope="col">Atención</th><th scope="col">Estado</th><th scope="col">Reporte</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let report of paginatedReports">
+              <td class="report-equipment">
+                <strong>{{ assetLabel(report.asset_id) }}</strong>
+                <ng-container *ngIf="assetForReport(report) as asset">
+                  <span>{{ asset.brand || 'Sin marca' }} · {{ asset.model || 'Sin modelo' }}</span>
+                  <small>S/N {{ asset.serial || 'NR' }}</small>
+                  <small class="report-mobile-place">{{ asset.areaName || '-' }} · {{ asset.locationName || '-' }}</small>
+                </ng-container>
+              </td>
+              <td class="report-place"><ng-container *ngIf="assetForReport(report) as asset">
+                <strong>{{ asset.areaName || '-' }}</strong><span>{{ asset.locationName || '-' }}</span><small>{{ asset.siteName || '-' }}</small>
+              </ng-container></td>
+              <td class="report-attention">
+                <strong>{{ (report.performed_on || report.created_at) | date: 'dd/MM/yyyy' }}</strong>
+                <span>{{ report.engineer_name || 'Ingeniero no registrado' }}</span>
+                <small>{{ report.performed_on ? 'Aviso verbal' : report.type === 'preventivo' ? 'Preventivo' : 'Correctivo' }}</small>
+              </td>
+              <td class="report-state">
+                <span class="status-pill" [ngClass]="statusClass(report.asset_status_after)">{{ statusLabel(report.asset_status_after || 'operativo') }}</span>
+                <small class="report-signature-state" [ngClass]="reportSignatureClass(report)">{{ reportSignedDate(report) }}</small>
+              </td>
+              <td class="report-row-actions">
+                <div>
+                  <button type="button" class="ghost" (click)="openReportDetail(report)"><span class="maintenance-eye" aria-hidden="true"></span>Ver</button>
+                  <button type="button" class="icon-action ghost" title="Abrir PDF" [attr.aria-label]="'Abrir PDF de ' + assetLabel(report.asset_id)" [disabled]="reportPdfLoadingId === report.id" (click)="downloadReport(report.id)"><svg class="maintenance-icon" aria-hidden="true"><use href="/assets/guide-icons.svg#file-text"></use></svg></button>
+                  <button *ngIf="canReopenOwnPreventiveReport(report)" type="button" class="icon-action ghost" title="Corregir antes de firmar" aria-label="Corregir antes de firmar" (click)="openEngineerCorrectionDialog(report)"><svg class="maintenance-icon" aria-hidden="true"><use href="/assets/guide-icons.svg#pencil"></use></svg></button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
         <p class="empty" *ngIf="filteredReports.length === 0 && reportSubView === 'pendientes_firma'">
           {{
             engineerReportsOnlyCorrectives
@@ -1634,7 +1686,7 @@
           </button>
         </div>
       </div>
-    </div>
+    </section>
   </ng-container>
 
   <ng-container *ngIf="viewMode === 'protocolos_fisicos' && canPrintBlankProtocols">
@@ -1824,7 +1876,7 @@
               <span class="status-pill danger" *ngIf="report.request_status === 'correccion'">
                 En corrección
               </span>
-              <small>{{ report.created_at | date: 'dd/MM/yyyy' }}</small>
+              <small>{{ (report.performed_on || report.created_at) | date: 'dd/MM/yyyy' }}</small>
               <small class="assignment-note" *ngIf="!canContinueSpareCase(report)">
                 {{ spareCaseActionNotice(report) }}
               </small>
@@ -1880,7 +1932,7 @@
             <span>Reporte final</span>
             <strong>{{ report.summary || 'Baja técnica del equipo' }}</strong>
             <small>{{ report.actions_taken || report.findings || 'Sin justificación registrada.' }}</small>
-            <small>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</small>
+            <small>{{ (report.performed_on || report.created_at) | date: (report.performed_on ? 'dd/MM/yyyy' : 'dd/MM/yyyy, h:mm a') }}</small>
             <div class="spare-actions">
               <button type="button" (click)="downloadReport(report.id)">VER REPORTE FINAL</button>
               <button
@@ -1991,7 +2043,15 @@
       <div class="report-detail-overview">
         <div>
           <span>Fecha</span>
+          <strong>{{ (report.performed_on || report.created_at) | date: (report.performed_on ? 'dd/MM/yyyy' : 'dd/MM/yyyy, h:mm a') }}</strong>
+        </div>
+        <div *ngIf="report.performed_on">
+          <span>Registrado en el sistema</span>
           <strong>{{ report.created_at | date: 'dd/MM/yyyy, h:mm a' }}</strong>
+        </div>
+        <div *ngIf="report.verbal_reporter_name">
+          <span>Aviso verbal recibido de</span>
+          <strong>{{ report.verbal_reporter_name }}{{ report.verbal_reporter_role ? ' · ' + report.verbal_reporter_role : '' }}</strong>
         </div>
         <div>
           <span>Ingeniero</span>

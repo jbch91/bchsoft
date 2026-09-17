@@ -293,7 +293,7 @@ export async function getPreventiveMaintenanceProgress(
   };
 }
 
-export async function createMaintenanceRequest(payload) {
+export async function createMaintenanceRequest(payload, { queryRunner = query } = {}) {
   const {
     clientId,
     assetId,
@@ -306,7 +306,7 @@ export async function createMaintenanceRequest(payload) {
     scheduleId,
     scheduleItemId
   } = payload;
-  const { rows } = await query(
+  const { rows } = await queryRunner(
     `INSERT INTO maintenance_requests (
        client_id, asset_id, type, description, planned_date, deadline_date, source,
        requested_by, schedule_id, schedule_item_id
@@ -497,7 +497,7 @@ export async function assignMaintenanceRequest(
   return rows[0] ?? null;
 }
 
-export async function createMaintenanceReport(payload) {
+export async function createMaintenanceReport(payload, { queryRunner = query } = {}) {
   const {
     clientId,
     requestId,
@@ -519,7 +519,7 @@ export async function createMaintenanceReport(payload) {
     requestStatusAfter,
     createdBy
   } = payload;
-  const { rows } = await query(
+  const { rows } = await queryRunner(
     `INSERT INTO maintenance_reports (
        client_id, request_id, asset_id, type, summary, findings, actions_taken,
        failure_cause, maintenance_checks, maintenance_activities, maintenance_tests,
@@ -549,7 +549,7 @@ export async function createMaintenanceReport(payload) {
       createdBy
     ]
   );
-  await query(
+  await queryRunner(
     `UPDATE maintenance_requests SET status = $2, updated_at = NOW()
      WHERE id = $1`,
     [requestId, requestStatusAfter || 'reportado']
@@ -801,11 +801,11 @@ export async function listMaintenanceReports(
   }
   if (from) {
     params.push(from);
-    clauses.push(`r.created_at >= $${params.length}`);
+    clauses.push(`COALESCE(r.performed_on, (r.created_at AT TIME ZONE 'America/Bogota')::date) >= $${params.length}::date`);
   }
   if (to) {
     params.push(to);
-    clauses.push(`r.created_at <= $${params.length}`);
+    clauses.push(`COALESCE(r.performed_on, (r.created_at AT TIME ZONE 'America/Bogota')::date) <= $${params.length}::date`);
   }
   if (limit !== undefined) {
     params.push(limit);
@@ -817,7 +817,7 @@ export async function listMaintenanceReports(
   const limitClause = limit !== undefined ? `LIMIT $${params.length - (offset !== undefined ? 1 : 0)}` : '';
   const offsetClause = offset !== undefined ? `OFFSET $${params.length}` : '';
   const { rows } = await query(
-    `SELECT r.*, u.display_name AS engineer_name, req.status AS request_status, req.requested_by,
+    `SELECT r.*, r.performed_on::text AS performed_on, u.display_name AS engineer_name, req.status AS request_status, req.requested_by,
             (lc.id IS NOT NULL) AS correction_requested,
             lc.reason AS correction_reason,
             lc.created_at AS correction_requested_at,
@@ -835,7 +835,7 @@ export async function listMaintenanceReports(
      ) lc ON TRUE
      LEFT JOIN users lcu ON lcu.id = lc.requested_by
      WHERE ${clauses.join(' AND ')}
-     ORDER BY r.created_at ${orderDir}
+     ORDER BY COALESCE(r.performed_on::timestamp AT TIME ZONE 'America/Bogota', r.created_at) ${orderDir}, r.created_at ${orderDir}
      ${limitClause} ${offsetClause}`,
     params
   );
@@ -903,11 +903,11 @@ export async function listMaintenanceReportsForReader(
   }
   if (from) {
     params.push(from);
-    clauses.push(`r.created_at >= $${params.length}`);
+    clauses.push(`COALESCE(r.performed_on, (r.created_at AT TIME ZONE 'America/Bogota')::date) >= $${params.length}::date`);
   }
   if (to) {
     params.push(to);
-    clauses.push(`r.created_at <= $${params.length}`);
+    clauses.push(`COALESCE(r.performed_on, (r.created_at AT TIME ZONE 'America/Bogota')::date) <= $${params.length}::date`);
   }
   let accessClause = '';
   if (locationIds.length && areaIds.length) {
@@ -934,7 +934,7 @@ export async function listMaintenanceReportsForReader(
     offsetClause = `OFFSET $${params.length}`;
   }
   const { rows } = await query(
-    `SELECT r.*, u.display_name AS engineer_name, req.status AS request_status, req.requested_by,
+    `SELECT r.*, r.performed_on::text AS performed_on, u.display_name AS engineer_name, req.status AS request_status, req.requested_by,
             (lc.id IS NOT NULL) AS correction_requested,
             lc.reason AS correction_reason,
             lc.created_at AS correction_requested_at,
@@ -952,7 +952,7 @@ export async function listMaintenanceReportsForReader(
      ) lc ON TRUE
      LEFT JOIN users lcu ON lcu.id = lc.requested_by
      WHERE ${clauses.join(' AND ')} ${accessClause}
-     ORDER BY r.created_at ${orderDir}
+     ORDER BY COALESCE(r.performed_on::timestamp AT TIME ZONE 'America/Bogota', r.created_at) ${orderDir}, r.created_at ${orderDir}
      ${limitClause} ${offsetClause}`,
     params
   );
@@ -961,7 +961,7 @@ export async function listMaintenanceReportsForReader(
 
 export async function getMaintenanceReportById(reportId) {
   const { rows } = await query(
-    `SELECT r.*, req.client_id, req.requested_by, req.status AS request_status,
+    `SELECT r.*, r.performed_on::text AS performed_on, req.client_id, req.requested_by, req.status AS request_status,
             (lc.id IS NOT NULL) AS correction_requested,
             lc.reason AS correction_reason,
             lc.created_at AS correction_requested_at,
@@ -1109,9 +1109,9 @@ export async function deleteMaintenanceRequest(requestId) {
   await query('DELETE FROM maintenance_requests WHERE id = $1', [requestId]);
 }
 
-export async function createNotification(payload) {
+export async function createNotification(payload, { queryRunner = query } = {}) {
   const { userId, clientId, title, message, link, type, priority, data } = payload;
-  const { rows } = await query(
+  const { rows } = await queryRunner(
     `INSERT INTO notifications (user_id, client_id, title, message, link, type, priority, payload)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      RETURNING id`,

@@ -4,7 +4,7 @@ import { PDFDocument as PdfReaderDocument } from 'pdf-lib';
 import PDFDocument from 'pdfkit';
 import { buildMaintenanceReportPdf, formatMaintenanceDate } from './pdf.js';
 
-function buildReportBuffer(signatures, requestOverrides = {}) {
+function buildReportBuffer(signatures, requestOverrides = {}, reportOverrides = {}) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
     const chunks = [];
@@ -51,7 +51,8 @@ function buildReportBuffer(signatures, requestOverrides = {}) {
         asset_status_observations: null,
         requires_spare_parts: false,
         spare_parts_needed: null,
-        spare_parts_status: 'no_aplica'
+        spare_parts_status: 'no_aplica',
+        ...reportOverrides
       },
       signatures
     });
@@ -104,4 +105,16 @@ test('documenta la ejecución extemporánea sin alterar el periodo programado', 
   const pdf = await PdfReaderDocument.load(buffer);
   assert.ok(pdf.getPageCount() >= 2);
   assert.ok(pdf.getPageCount() <= 5);
+});
+
+test('genera el correctivo verbal con fecha real, registro y contacto de nombre largo', async () => {
+  const buffer = await buildReportBuffer([], { source: 'verbal', type: 'correctivo', description: 'Aviso verbal por falla de encendido.' }, {
+    type: 'correctivo', performed_on: '2026-08-15', created_at: '2026-09-16T15:00:00Z',
+    verbal_reporter_name: 'RESPONSABLE DEL TURNO CON NOMBRE EXTENSO PARA VERIFICAR EL AJUSTE DE TEXTO EN EL DOCUMENTO',
+    verbal_reporter_role: 'COORDINACION DEL AREA DE HOSPITALIZACION Y URGENCIAS',
+    requires_spare_parts: true, spare_parts_needed: 'Cable instalado durante la intervencion.', spare_parts_status: 'recibido'
+  });
+  const pdf = await PdfReaderDocument.load(buffer);
+  assert.ok(pdf.getPageCount() >= 2 && pdf.getPageCount() <= 5);
+  assert.equal(formatMaintenanceDate('2026-08-15'), '15/08/2026');
 });

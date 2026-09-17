@@ -44,4 +44,36 @@ describe('maintenance signature HTTP lifecycle', () => {
     await rejected;
     expect(req.cancelled).toBe(true);
   });
+
+  it('posts one verbal attention and preserves its submission id', async () => {
+    const payload = { submissionId: 'unique-submission', assetId: 'asset' } as never;
+    const pending = service.createVerbalAttention(payload);
+    const req = http.expectOne(r => r.url.endsWith('/maintenance/verbal-attentions'));
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual(payload);
+    req.flush({ id: 'report', requestId: 'request', assetStatusApplied: true });
+    expect((await pending).id).toBe('report');
+  });
+
+  it('bounds a stalled verbal save so the modal can recover', async () => {
+    vi.useFakeTimers();
+    const pending = service.createVerbalAttention({ submissionId: 'same-key' } as never);
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+    const req = http.expectOne(r => r.url.endsWith('/maintenance/verbal-attentions'));
+    await vi.advanceTimersByTimeAsync(60001);
+    await rejected;
+    expect(req.cancelled).toBe(true);
+    http.expectNone(r => r.method === 'POST');
+  });
+
+  it('recovers the verbal save through a bounded read, not a new report', async () => {
+    vi.useFakeTimers();
+    const pending = service.findVerbalAttention('same-key');
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+    const req = http.expectOne(r => r.url.endsWith('/maintenance/verbal-attentions/same-key'));
+    expect(req.request.method).toBe('GET');
+    await vi.advanceTimersByTimeAsync(10001);
+    await rejected;
+    expect(req.cancelled).toBe(true);
+  });
 });

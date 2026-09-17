@@ -13,6 +13,7 @@ import sharp from 'sharp';
 import { PDFDocument as PdfMergerDocument } from 'pdf-lib';
 import { query, withTransaction } from './db.js';
 import { createMaintenanceReportSignHandler } from './maintenance-signing.js';
+import { createVerbalAttentionHandler, findVerbalAttention, saveVerbalAttention, verbalAttentionAccessError } from './maintenance-verbal.js';
 import {
   authenticateUser,
   getCurrentSessionUser,
@@ -11493,6 +11494,51 @@ app.get(
       };
     });
     return res.json(enriched);
+  }
+);
+
+app.post(
+  '/maintenance/verbal-attentions',
+  requireAuth,
+  requirePermission('maintenance:report:create'),
+  createVerbalAttentionHandler({
+    options: { checks: MAINTENANCE_CHECK_OPTIONS, activities: MAINTENANCE_ACTIVITY_OPTIONS, tests: MAINTENANCE_TEST_OPTIONS },
+    today: todayInBogota,
+    getEngineer: async userId => {
+      let current;
+      try { current = await getCurrentSessionUser(userId); }
+      catch (error) {
+        if (error.message === 'User inactive') return null;
+        throw error;
+      }
+      if (verbalAttentionAccessError(current)) return null;
+      return getUserById(userId);
+    },
+    signatureAvailable: resolveStoredFilePath,
+    save: saveVerbalAttention,
+    buildSigningPlan: buildMaintenanceReportSigningPlan,
+    listStorekeepers: clientId => listUsersByRoleAndClient('almacenista', clientId),
+    maintenanceRoute: maintenanceRouteForAsset,
+    signReport: (reportId, clientId, user) => signMaintenanceReportWithSnapshot({ reportId, clientId, user, role: 'ingeniero_biomedico' }),
+    writePdf: writeMaintenanceReportPdfFile,
+    sendEmail: sendNotificationEmail
+  })
+);
+
+app.get(
+  '/maintenance/verbal-attentions/:submissionId',
+  requireAuth,
+  requirePermission('maintenance:report:create'),
+  async (req, res) => {
+    const accessError = verbalAttentionAccessError(req.user);
+    if (accessError) return res.status(403).json({ message: accessError });
+    try {
+      const saved = await findVerbalAttention(req.user.clientId, req.user.sub, req.params.submissionId);
+      if (!saved) return res.status(404).json({ message: 'Atención todavía no registrada.' });
+      return res.json({ id: saved.id, requestId: saved.requestId, assetStatusApplied: saved.assetStatusApplied, replayed: true });
+    } catch (error) {
+      return res.status(error.status || 500).json({ message: error.status ? error.message : 'No se pudo consultar la atención.' });
+    }
   }
 );
 

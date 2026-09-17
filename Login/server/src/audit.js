@@ -24,8 +24,8 @@ export async function logAudit({
   targetUserId,
   targetUsername,
   details
-}) {
-  await query(
+}, { queryRunner = query } = {}) {
+  await queryRunner(
     `INSERT INTO audit_logs
      (actor_user_id, actor_username, action, target_user_id, target_username, details)
      VALUES ($1,$2,$3,$4,$5,$6)`,

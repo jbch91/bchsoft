@@ -70,6 +70,7 @@ const MIGRATIONS = [
   'maintenance_report_tracking.sql',
   'maintenance_report_standard_fields.sql',
   'maintenance_report_status_observations.sql',
+  'maintenance_verbal_attention.sql',
   'maintenance_report_corrections.sql',
   'notifications_mobile_ready.sql',
   'maintenance_spare_part_notifications_backfill.sql',

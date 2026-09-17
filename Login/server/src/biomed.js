@@ -1310,6 +1310,7 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
          'maintenance_report' AS item_type,
          r.type AS subtype,
          COALESCE(
+           r.performed_on::timestamp AT TIME ZONE 'America/Bogota',
            (SELECT MAX(s.signed_at) FROM report_signatures s WHERE s.report_id = r.id),
            r.created_at
          ) AS event_date,
@@ -1331,27 +1332,14 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
            WHERE s.report_id = r.id
              AND s.role = 'ingeniero_biomedico'
          )
-         AND (
-           (
-             r.type = 'preventivo'
-             AND EXISTS (
-               SELECT 1
-               FROM report_signatures s
-               WHERE s.report_id = r.id
-                 AND s.role IN ('almacenista', 'lector', 'viewer', 'visor', 'superuser')
-             )
-           )
-           OR (
-             r.type <> 'preventivo'
-             AND EXISTS (
-               SELECT 1
-               FROM report_signatures s
-               WHERE s.report_id = r.id
-                 AND (
-                   s.user_id = req.requested_by
-                   OR s.role IN ('almacenista', 'lector', 'viewer', 'visor', 'superuser')
-                 )
-             )
+         AND EXISTS (
+           SELECT 1 FROM report_signatures s WHERE s.report_id = r.id
+           AND (
+             (r.area_responsible_required AND s.role = 'responsable_area')
+             OR (NOT r.area_responsible_required AND (
+               s.role IN ('responsable_area', 'almacenista', 'lector', 'viewer', 'visor', 'superuser')
+               OR (r.type <> 'preventivo' AND s.user_id = req.requested_by)
+             ))
            )
          )
 

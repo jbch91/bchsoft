@@ -99,6 +99,7 @@ function maintenanceSourceLabel(value) {
   const labels = {
     cronograma: 'CRONOGRAMA APROBADO',
     manual: 'SOLICITUD MANUAL',
+    verbal: 'AVISO VERBAL',
     qr: 'SOLICITUD DESDE CÓDIGO QR'
   };
   return labels[value] || maintenanceTokenLabel(value);
@@ -2438,15 +2439,22 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     { label: 'TIPO DE INTERVENCIÓN', value: maintenanceTypeLabel(report.type) },
     { label: 'ORIGEN DE LA SOLICITUD', value: maintenanceSourceLabel(request.source) },
     { label: 'ESTADO DOCUMENTAL', value: header.documentStatus, compact: true },
-    { label: 'FECHA DE SOLICITUD', value: formatMaintenanceDateTime(request.created_at) },
-    { label: 'FECHA PROGRAMADA', value: formatMaintenanceDate(request.planned_date) },
-    { label: 'FECHA LÍMITE', value: formatMaintenanceDate(request.deadline_date) },
-    { label: 'SOLICITADO POR', value: request.requester_name },
+    ...(report.performed_on ? [
+      { label: 'FECHA DE ATENCIÓN', value: formatMaintenanceDate(report.performed_on) },
+      { label: 'REGISTRADO EN EL SISTEMA', value: formatMaintenanceDateTime(report.created_at) },
+      { label: 'PERSONA QUE INFORMÓ', value: report.verbal_reporter_name },
+      { label: 'CARGO DE QUIEN INFORMÓ', value: report.verbal_reporter_role || 'NO REGISTRADO' }
+    ] : [
+      { label: 'FECHA DE SOLICITUD', value: formatMaintenanceDateTime(request.created_at) },
+      { label: 'FECHA PROGRAMADA', value: formatMaintenanceDate(request.planned_date) },
+      { label: 'FECHA LÍMITE', value: formatMaintenanceDate(request.deadline_date) },
+      { label: 'SOLICITADO POR', value: request.requester_name }
+    ]),
     {
       label: 'RESPONSABLE TÉCNICO',
       value: engineerSignature?.display_name || request.assigned_name
     },
-    { label: 'FECHA DE INTERVENCIÓN', value: formatMaintenanceDateTime(report.created_at) },
+    ...(report.performed_on ? [] : [{ label: 'FECHA DE INTERVENCIÓN', value: formatMaintenanceDateTime(report.created_at) }]),
     ...(request.late_execution_authorized_at
       ? [
           { label: 'CONDICIÓN', value: 'EJECUCIÓN EXTEMPORÁNEA AUTORIZADA' },

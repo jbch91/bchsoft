@@ -11,6 +11,7 @@ import {
   MaintenanceService,
   MaintenanceReportDto,
   MaintenanceSignatureResult,
+  VerbalAttentionResult,
   MaintenanceRequestDto,
   PreventiveMaintenanceProgressDto,
   PreventiveProgressItemDto,
@@ -19,6 +20,7 @@ import {
 } from '../../maintenance/maintenance.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import { CORRECTIVE_NARRATIVE_FIELDS, CORRECTIVE_FINDING_OPTIONS, CORRECTIVE_OBSERVATION_OPTIONS, CorrectiveNarrativeOption } from './corrective-report.options';
 import {
   maintenanceAssetMatchesLookup,
   maintenanceSpareStatusForReport,
@@ -369,7 +371,7 @@ const PREVENTIVE_OUTCOME_PRESETS: readonly PreventiveOutcomePreset[] = [
   standalone: true,
   imports: [CommonModule, FormsModule, ModuleTabsComponent],
   templateUrl: './maintenance.component.html',
-  styleUrl: './maintenance.component.scss'
+  styleUrls: ['./maintenance.component.scss', './maintenance-corrective.component.scss']
 })
 export class MaintenanceComponent implements OnInit, OnDestroy {
   @ViewChild('qrVideo') qrVideo?: ElementRef<HTMLVideoElement>;
@@ -471,6 +473,18 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   requestDescription = '';
 
   reportRequestId = '';
+  reportSaving = false;
+  verbalAttentionMode = false;
+  verbalAssetId = '';
+  verbalAssetSearch = '';
+  verbalPerformedOn = '';
+  verbalReporterName = '';
+  verbalReporterRole = '';
+  verbalDescription = '';
+  verbalSubmissionId = '';
+  verbalRegisteredAt = '';
+  verbalErrorField = '';
+  verbalSaveUncertain = false;
   reportSummary = '';
   reportFindings = '';
   reportActions = '';
@@ -486,6 +500,15 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportFlowMode: 'normal' | 'install_spare' | 'retire_asset' = 'normal';
   reportFlowSource: MaintenanceReportDto | null = null;
   reportCorrectionMode = false;
+  reportCorrectionType: MaintenanceReportDto['type'] | null = null;
+  correctiveEditorSection: 'attention' | 'intervention' | 'closure' = 'attention';
+  readonly correctiveNarrativeFields = CORRECTIVE_NARRATIVE_FIELDS;
+  readonly correctiveEditorSections = [
+    { key: 'attention', label: 'Atención' },
+    { key: 'intervention', label: 'Intervención' },
+    { key: 'closure', label: 'Cierre' }
+  ] as const;
+  reportAdvancedFiltersOpen = false;
   reportFormActive = false;
   reportSubView: 'pendientes_firma' | 'historial' = 'pendientes_firma';
   areaResponsibleReportView: AreaResponsibleReportView = 'pending';
@@ -606,7 +629,59 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   get preventiveStatusObservationOptions(): readonly ReportNarrativeOption[] {
     return this.reportAssetStatus === 'fuera_de_servicio'
       ? PREVENTIVE_OUT_OF_SERVICE_OPTIONS
-      : PREVENTIVE_OBSERVATION_OPTIONS;
+      : this.isCorrectiveReportEditor ? CORRECTIVE_OBSERVATION_OPTIONS : PREVENTIVE_OBSERVATION_OPTIONS;
+  }
+
+  get isCorrectiveReportEditor(): boolean {
+    return this.verbalAttentionMode || this.reportFlowMode !== 'normal'
+      || (this.reportCorrectionMode && this.reportCorrectionType === 'correctivo')
+      || this.selectedReportRequest?.type === 'correctivo';
+  }
+
+  get correctiveEditorSource(): string {
+    if (this.reportCorrectionMode) return 'Corrección solicitada';
+    if (this.verbalAttentionMode) return 'Aviso verbal';
+    if (this.reportFlowMode === 'install_spare') return 'Instalación de repuesto';
+    if (this.reportFlowMode === 'retire_asset') return 'Baja técnica';
+    return this.selectedReportRequest?.source === 'qr' ? 'Solicitud desde QR' : 'Solicitud de mantenimiento';
+  }
+
+  get reportAdvancedFilterCount(): number {
+    return [this.reportSpareFilter, this.reportDateFrom, this.reportDateTo,
+      this.engineerReportsOnlyCorrectives ? '' : this.reportTypeFilter].filter(Boolean).length;
+  }
+
+  setCorrectiveEditorSection(section: 'attention' | 'intervention' | 'closure'): void {
+    if (this.reportSaving) return;
+    this.correctiveEditorSection = section;
+    this.reportFormCard?.nativeElement.querySelector('.report-editor-fields')?.scrollTo({ top: 0 });
+  }
+
+  async submitReportEditor(): Promise<void> {
+    await this.createReport();
+    if (!this.isCorrectiveReportEditor || !this.reportFormActive || !this.errorMessage) return;
+    if ((this.verbalAttentionMode && ['assetId', 'performedOn', 'reporterName', 'reporterRole', 'description', 'summary', 'findings'].includes(this.verbalErrorField))
+      || !this.reportSummary.trim() || !this.reportFindings.trim()) {
+      this.setCorrectiveEditorSection('attention');
+    } else if ((this.verbalAttentionMode && this.verbalErrorField === 'actions') || !this.reportActions.trim() || !this.reportMaintenanceChecks.length || !this.reportMaintenanceActivities.length
+      || (this.reportAssetStatus !== 'fuera_de_servicio' && !this.reportMaintenanceTests.length)
+      || (this.reportRequiresSpareParts && this.reportSparePartResolution === 'installed_now' && !this.reportMaintenanceActivities.includes('instalacion_repuesto'))) {
+      this.setCorrectiveEditorSection('intervention');
+    } else if ((this.reportAssetStatus !== 'operativo' && this.reportAssetStatusObservations.trim().length < 5)
+      || (this.reportRequiresSpareParts && !this.reportSparePartsNeeded.trim())) {
+      this.setCorrectiveEditorSection('closure');
+    }
+    this.refreshViewSoon();
+  }
+
+  toggleCorrectiveNarrativeOption(field: ReportNarrativeField, option: CorrectiveNarrativeOption, checked: boolean): void {
+    let lines = this.narrativeLines(this.reportNarrativeValue(field)).filter(line => line !== option.text);
+    if (field === 'findings' && checked) {
+      const incompatible = new Set(CORRECTIVE_FINDING_OPTIONS.filter(item => option.exclusive || item.exclusive).map(item => item.text));
+      lines = lines.filter(line => !incompatible.has(line));
+    }
+    if (checked) lines.push(option.text);
+    this.setReportNarrativeValue(field, lines.join('\n'));
   }
 
   get isAreaResponsible(): boolean {
@@ -1023,6 +1098,96 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.openReportFormForRequest(request, message);
   }
 
+  get canRegisterVerbalAttention(): boolean {
+    return Boolean(this.auth.currentUser()?.clientId)
+      && this.auth.hasRole('ingeniero_biomedico') && !this.auth.hasRole('superuser')
+      && this.auth.hasPermission('maintenance:report:create');
+  }
+
+  get verbalToday(): string {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+    return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type)?.value).join('-');
+  }
+
+  get verbalAssetOptions(): AssetLite[] {
+    const term = this.normalize(this.verbalAssetSearch);
+    return this.activeAssets.filter(asset => asset.id === this.verbalAssetId || !term || this.assetHaystack(asset).includes(term));
+  }
+
+  openVerbalAttention(): void {
+    if (!this.canRegisterVerbalAttention || this.reportSaving || this.loading) return;
+    this.resetReportFields();
+    this.reportRequestId = '';
+    this.verbalAttentionMode = true;
+    this.verbalAssetId = '';
+    this.verbalAssetSearch = '';
+    this.verbalPerformedOn = this.verbalToday;
+    this.verbalReporterName = '';
+    this.verbalReporterRole = '';
+    this.verbalDescription = '';
+    this.verbalSubmissionId = this.newVerbalSubmissionId();
+    this.verbalRegisteredAt = new Date().toISOString();
+    this.verbalErrorField = '';
+    this.verbalSaveUncertain = false;
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.reportFormActive = true;
+    this.scrollToReportForm();
+  }
+
+  private validateVerbalAttention(): boolean {
+    this.verbalErrorField = '';
+    let message = '';
+    if (!this.canRegisterVerbalAttention) message = 'No tienes permiso para registrar esta atención.';
+    else if (!this.activeAssets.some(asset => asset.id === this.verbalAssetId)) {
+      this.verbalErrorField = 'assetId'; message = 'Selecciona un equipo vigente de tu cliente.';
+    } else if (!this.verbalPerformedOn || this.verbalPerformedOn > this.verbalToday || this.verbalPerformedOn < '1900-01-01') {
+      this.verbalErrorField = 'performedOn'; message = 'La fecha de atención debe ser válida y no puede estar en el futuro.';
+    } else if (this.verbalReporterName.trim().length < 3 || this.verbalReporterName.trim().length > 160) {
+      this.verbalErrorField = 'reporterName'; message = 'Escribe el nombre de la persona que informó la falla (3 a 160 caracteres).';
+    } else if (this.verbalDescription.trim().length < 10 || this.verbalDescription.trim().length > 1000) {
+      this.verbalErrorField = 'description'; message = 'Describe la falla informada con al menos 10 caracteres.';
+    }
+    if (!message) return true;
+    this.errorMessage = message;
+    return false;
+  }
+
+  private newVerbalSubmissionId(): string {
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    // getRandomValues also works on legacy HTTP installations without randomUUID.
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  clearVerbalFieldError(field: string): void {
+    if (this.verbalErrorField !== field) return;
+    this.verbalErrorField = '';
+    this.errorMessage = '';
+  }
+
+  private finishVerbalAttention(saved: VerbalAttentionResult, recovered = false): void {
+    const spareMessage = this.reportRequiresSpareParts
+      ? (this.reportSparePartResolution === 'installed_now' ? ' Repuesto registrado como instalado.' : ' Repuesto pendiente notificado a almacén.') : '';
+    this.reportFormActive = false;
+    this.verbalAttentionMode = false;
+    this.verbalSubmissionId = '';
+    this.verbalSaveUncertain = false;
+    this.resetReportFields();
+    this.reportRequestId = '';
+    this.reportSubView = 'pendientes_firma';
+    const message = (recovered ? 'Se confirmó el correctivo guardado; no se duplicó.' : 'Atención verbal guardada como correctivo, pendiente de aval o firma.')
+      + spareMessage
+      + (saved.assetStatusApplied === false ? ' Se conservó el estado del equipo de una atención posterior.' : '')
+      + (saved.warnings?.length ? ' El registro está guardado, pero la firma del ingeniero o el PDF requieren verificación.' : '');
+    void this.loadData().then(() => { if (!this.destroyed) { this.showAlert(message); this.refreshViewSoon(); } });
+    this.showAlert(message);
+    this.refreshViewSoon();
+  }
+
   private openReportFormForRequest(request: MaintenanceRequestDto, message = ''): void {
     if (['reportado', 'firmado', 'vencido'].includes(request.status)) {
       this.reportFormActive = false;
@@ -1136,7 +1301,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   async createReport(): Promise<void> {
-    if (!this.reportRequestId) {
+    if (this.reportSaving) return;
+    if (this.verbalAttentionMode && !this.validateVerbalAttention()) return;
+    if (!this.reportRequestId && !this.verbalAttentionMode) {
       this.errorMessage = 'Selecciona una solicitud.';
       return;
     }
@@ -1185,6 +1352,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.errorMessage = '';
     this.successMessage = '';
     this.loading = true;
+    this.reportSaving = true;
     try {
       const requestBeforeSave = this.selectedReportRequest;
       const savedAssetLabel = requestBeforeSave ? this.assetLabel(requestBeforeSave.asset_id) : '';
@@ -1207,6 +1375,20 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       const sparePartsNeededForPayload = flowMode === 'install_spare'
         ? (this.reportSparePartsNeeded.trim() || 'Repuesto instalado')
         : this.reportSparePartsNeeded.trim();
+      if (this.verbalAttentionMode) {
+        const saved = await this.maintenance.createVerbalAttention({
+          submissionId: this.verbalSubmissionId, assetId: this.verbalAssetId, assetCategory: this.assetCategory,
+          performedOn: this.verbalPerformedOn, reporterName: this.verbalReporterName.trim(), reporterRole: this.verbalReporterRole.trim(),
+          description: this.verbalDescription.trim(), summary, findings, actionsTaken,
+          maintenanceChecks: this.reportMaintenanceChecks, maintenanceActivities: this.reportMaintenanceActivities,
+          maintenanceTests: this.reportMaintenanceTests, assetStatusAfter: this.reportAssetStatus,
+          assetStatusObservations: this.reportAssetStatus === 'operativo' ? '' : assetStatusObservations,
+          requiresSpareParts: requiresSparePartsForPayload, sparePartsNeeded: requiresSparePartsForPayload ? sparePartsNeededForPayload : '',
+          sparePartsInstalledNow: installedSpareDuringService
+        });
+        this.finishVerbalAttention(saved);
+        return;
+      }
       await this.maintenance.createReport({
         requestId: this.reportRequestId,
         summary,
@@ -1252,10 +1434,26 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.showAlert(message, 'success');
     } catch (error: any) {
       console.error(error);
+      if (this.verbalAttentionMode) {
+        if (!error?.status || error.status >= 500 || error?.name === 'TimeoutError') {
+          this.verbalSaveUncertain = true;
+          try {
+            const saved = await this.maintenance.findVerbalAttention(this.verbalSubmissionId);
+            this.finishVerbalAttention(saved, true);
+            return;
+          } catch { /* Keep the same submission id for a safe retry. */ }
+        }
+        this.verbalErrorField = error?.error?.field || '';
+        this.errorMessage = error?.error?.message || (this.verbalSaveUncertain
+          ? 'No se pudo confirmar el guardado. Reintenta desde esta ventana para verificarlo sin duplicar el reporte.'
+          : 'No se pudo guardar la atención verbal. Revisa los datos e intenta nuevamente.');
+        return;
+      }
       this.errorMessage = error?.error?.message ?? 'No se pudo crear el reporte.';
       this.showAlert(this.errorMessage, 'error');
     } finally {
       this.loading = false;
+      this.reportSaving = false;
       this.refreshViewSoon();
     }
   }
@@ -1451,10 +1649,12 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   startReportCorrection(report: MaintenanceReportDto): void {
     if (!this.canCorrectReport(report)) return;
+    this.resetReportFields();
     this.reportDetail = null;
     this.reportRequestId = report.request_id;
     this.reportFormActive = true;
     this.reportCorrectionMode = true;
+    this.reportCorrectionType = report.type;
     this.viewMode = 'reportes';
     this.reportSummary = report.summary || '';
     this.reportFindings = report.findings || '';
@@ -2356,7 +2556,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (this.reportSiteFilter && asset?.siteName !== this.reportSiteFilter) return false;
     if (this.reportAreaFilter && asset?.areaName !== this.reportAreaFilter) return false;
     if (this.reportLocationFilter && asset?.locationName !== this.reportLocationFilter) return false;
-    const reportDate = report.created_at.slice(0, 10);
+    const reportDate = (report.performed_on || report.created_at).slice(0, 10);
     if (this.reportDateFrom && reportDate < this.reportDateFrom) return false;
     if (this.reportDateTo && reportDate > this.reportDateTo) return false;
     if (!term) return true;
@@ -2665,6 +2865,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   get selectedReportRequest(): MaintenanceRequestDto | null {
+    if (this.verbalAttentionMode) {
+      return this.verbalAssetId ? { id: '', client_id: this.selectedClientId, asset_id: this.verbalAssetId,
+        type: 'correctivo', source: 'verbal', description: this.verbalDescription, requester_name: this.verbalReporterName,
+        requested_by: '', assigned_to: this.auth.currentUser()?.id, status: 'en_proceso', created_at: this.verbalRegisteredAt } : null;
+    }
     return this.requests.find((item) => item.id === this.reportRequestId) ?? null;
   }
 
@@ -2771,8 +2976,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (this.reportAssetStatus === 'operativo') {
       this.reportAssetStatusObservations = '';
     } else {
-      const incompatibleOptions = this.reportAssetStatus === 'fuera_de_servicio'
-        ? PREVENTIVE_OBSERVATION_OPTIONS
+    const incompatibleOptions = this.reportAssetStatus === 'fuera_de_servicio'
+        ? [...PREVENTIVE_OBSERVATION_OPTIONS, ...CORRECTIVE_OBSERVATION_OPTIONS]
         : PREVENTIVE_OUT_OF_SERVICE_OPTIONS;
       const incompatibleTexts = new Set(incompatibleOptions.map((option) => option.text));
       this.reportAssetStatusObservations = this.narrativeLines(this.reportAssetStatusObservations)
@@ -2786,7 +2991,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       return;
     }
     if (
-      this.selectedReportRequest?.type === 'preventivo'
+      !this.isCorrectiveReportEditor && this.selectedReportRequest?.type === 'preventivo'
       && !this.reportMaintenanceTests.includes('equipo_operativo_entregado')
     ) {
       this.reportMaintenanceTests = [...this.reportMaintenanceTests, 'equipo_operativo_entregado'];
@@ -2803,7 +3008,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   reportTypeLabel(): string {
-    if (this.reportFlowMode === 'install_spare' || this.reportFlowMode === 'retire_asset') {
+    if (this.isCorrectiveReportEditor) {
       return 'Reporte correctivo';
     }
     const request = this.selectedReportRequest;
@@ -2813,6 +3018,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   submitReportLabel(): string {
+    if (this.verbalAttentionMode) return 'Guardar atención y enviar a firma';
     if (this.reportCorrectionMode) return 'Guardar corrección del reporte';
     if (this.reportFlowMode === 'install_spare') return 'Guardar instalación de repuesto';
     if (this.reportFlowMode === 'retire_asset') return 'Guardar baja técnica';
@@ -2912,6 +3118,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   startSpareInstallation(report: MaintenanceReportDto): void {
     if (!this.canContinueSpareCase(report)) return;
+    this.resetReportFields();
     this.reportRequestId = report.request_id;
     this.reportFormActive = true;
     this.reportSummary = `Instalación de repuesto para ${this.assetLabel(report.asset_id)}`;
@@ -2934,6 +3141,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   startAssetRetirement(report: MaintenanceReportDto): void {
     if (!this.canContinueSpareCase(report)) return;
+    this.resetReportFields();
     this.reportRequestId = report.request_id;
     this.reportFormActive = true;
     this.reportSummary = `Baja técnica para ${this.assetLabel(report.asset_id)}`;
@@ -2955,6 +3163,12 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   cancelReportWorkflow(): void {
+    if (this.reportSaving) return;
+    if (this.verbalAttentionMode && (this.verbalAssetId || this.verbalReporterName || this.verbalDescription)
+      && !confirm(this.verbalSaveUncertain
+        ? 'No se confirmó el guardado. Antes de crear otra atención, revisa Reportes. ¿Cerrar esta ventana?'
+        : '¿Descartar los datos de esta atención verbal?')) return;
+    this.verbalAttentionMode = false;
     this.reportSummary = '';
     this.reportFindings = '';
     this.reportActions = '';
@@ -3332,13 +3546,14 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportFlowMode = 'normal';
     this.reportFlowSource = null;
     this.reportCorrectionMode = false;
+    this.reportCorrectionType = null;
   }
 
   private asStringArray(value?: string[] | null): string[] {
     return Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [];
   }
 
-  private reportNarrativeValue(field: ReportNarrativeField): string {
+  reportNarrativeValue(field: ReportNarrativeField): string {
     if (field === 'summary') return this.reportSummary;
     if (field === 'findings') return this.reportFindings;
     if (field === 'actions') return this.reportActions;
@@ -3346,7 +3561,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return this.reportSparePartsNeeded;
   }
 
-  private setReportNarrativeValue(field: ReportNarrativeField, value: string): void {
+  setReportNarrativeValue(field: ReportNarrativeField, value: string): void {
     if (field === 'summary') this.reportSummary = value;
     if (field === 'findings') this.reportFindings = value;
     if (field === 'actions') this.reportActions = value;
@@ -3398,6 +3613,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   private resetReportFields(): void {
+    this.correctiveEditorSection = 'attention';
+    this.verbalAttentionMode = false;
     this.reportSummary = '';
     this.reportFindings = '';
     this.reportActions = '';
@@ -3451,6 +3668,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     setTimeout(() => {
       if (this.alertMessage === message) {
         this.alertMessage = '';
+        this.refreshViewSoon();
       }
     }, 6500);
   }
