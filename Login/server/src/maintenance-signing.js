@@ -17,6 +17,9 @@ export function createMaintenanceReportSignHandler(deps) {
       if (req.user.clientId && req.user.clientId !== report.client_id) {
         return res.status(403).json({ message: 'Sin acceso al cliente.' });
       }
+      if (report.closure_kind === 'not_located') {
+        return res.status(409).json({ message: 'La constancia ya está finalizada con la firma del ingeniero.' });
+      }
       if (report.area_responsible_required && !req.user.roles?.includes('responsable_area')) {
         return res.status(403).json({ message: 'Este reporte requiere el aval de un responsable asignado al area.' });
       }

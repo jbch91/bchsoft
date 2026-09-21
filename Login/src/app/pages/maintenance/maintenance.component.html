@@ -371,7 +371,7 @@
                 role="progressbar"
                 aria-label="Avance preventivo gestionado"
                 [attr.aria-valuenow]="preventiveManagedPercent(progress)"
-                [attr.aria-valuetext]="progress.completed + ' finalizadas y ' + progress.warranty + ' cubiertas por garantía de ' + progress.total"
+                [attr.aria-valuetext]="progress.completed + ' ejecutadas y firmadas, ' + progress.warranty + ' cubiertas por garantía y ' + (progress.not_located || 0) + ' cerradas sin ejecución, de ' + progress.total"
                 aria-valuemin="0"
                 aria-valuemax="100"
               >
@@ -385,6 +385,8 @@
                   [style.width.%]="preventiveProgressShare(progress, 'warranty')"
                   [title]="'Cubiertas por garantía: ' + progress.warranty"
                 ></span>
+                <span class="not-located" [style.width.%]="preventiveProgressShare(progress, 'not_located')"
+                  [title]="'Cerradas sin ejecución: ' + (progress.not_located || 0)"></span>
               </div>
               <span class="preventive-overdue" *ngIf="progress.overdue">
                 {{ progress.overdue }} vencido{{ progress.overdue === 1 ? '' : 's' }} sin finalizar
@@ -593,6 +595,9 @@
               </ng-container>
 
               <ng-container *ngIf="item.phase === 'not_started' || item.phase === 'in_progress'">
+                <button *ngIf="canCloseNotLocated(item)" type="button" class="ghost"
+                  title="Registrar búsqueda y firmar una constancia sin ejecución de mantenimiento"
+                  (click)="openNotLocated(item)">No localizado</button>
                 <ng-container *ngIf="preventiveRequestForItem(item) as request; else preventiveNotAvailable">
                   <button
                     *ngIf="canTakeRequest(request)"
@@ -651,7 +656,7 @@
               </ng-container>
 
               <button
-                *ngIf="item.phase === 'completed'"
+                *ngIf="item.phase === 'completed' || item.phase === 'not_located'"
                 type="button"
                 [disabled]="!item.pdf_available || preventivePdfLoadingId === item.id"
                 (click)="openPreventiveFinalPdf(item)"
@@ -2394,6 +2399,45 @@
       </form>
     </article>
   </div>
+
+  <dialog
+    #notLocatedDialog class="protocol-confirm-modal not-located-modal" *ngIf="notLocatedItem as item"
+    aria-labelledby="not-located-title" (cancel)="closeNotLocated($event)">
+    <form class="protocol-confirm-form" (ngSubmit)="submitNotLocated()" novalidate>
+      <header class="protocol-confirm-header">
+        <div><span class="temporary-badge">Cierre sin ejecución</span><h2 id="not-located-title">Equipo no localizado</h2></div>
+        <button type="button" class="ghost icon-action" aria-label="Cerrar" title="Cerrar"
+          [disabled]="notLocatedSaving" (click)="closeNotLocated()">×</button>
+      </header>
+      <div class="protocol-confirm-body">
+        <dl>
+          <div><dt>Equipo</dt><dd><strong>{{ item.asset_code }} · {{ item.asset_name }}</strong><br>{{ item.asset_brand || 'NR' }} · {{ item.asset_model || 'NR' }} · Serie: {{ item.asset_serial || 'NR' }}</dd></div>
+          <div><dt>Área registrada</dt><dd>{{ item.area_name || 'No registra' }}<span *ngIf="item.location_name"> · {{ item.location_name }}</span></dd></div>
+          <div><dt>Programado</dt><dd>{{ item.planned_date | date:'dd/MM/yyyy':'UTC' }}</dd></div>
+        </dl>
+        <fieldset [disabled]="notLocatedSaving" class="not-located-fields">
+          <label for="not-located-date">Fecha de búsqueda
+            <input id="not-located-date" name="searchDate" type="date" autofocus required
+              [min]="item.planned_date.slice(0, 10)" [max]="notLocatedToday" [(ngModel)]="notLocatedDate">
+          </label>
+          <label for="not-located-place">Lugar revisado
+            <input id="not-located-place" name="searchPlace" type="text" required maxlength="250" [(ngModel)]="notLocatedLocation">
+          </label>
+          <label for="not-located-reason">Búsqueda realizada y justificación
+            <textarea id="not-located-reason" name="searchReason" rows="3" required minlength="20" maxlength="1000" [(ngModel)]="notLocatedReason"></textarea>
+          </label>
+          <label class="not-located-confirm"><input type="checkbox" name="searchConfirmed" [(ngModel)]="notLocatedConfirmed">
+            <span>Confirmo que busqué el equipo y no fue localizado. No realicé mantenimiento ni verifiqué su estado operativo. Firmo esta constancia con mi firma registrada.</span>
+          </label>
+        </fieldset>
+        <p *ngIf="notLocatedError" class="error" role="alert">{{ notLocatedError }}</p>
+      </div>
+      <footer class="protocol-confirm-footer">
+        <button type="button" class="ghost" [disabled]="notLocatedSaving" (click)="closeNotLocated()">Cancelar</button>
+        <button type="submit" [disabled]="notLocatedSaving">{{ notLocatedSaving ? 'Firmando...' : 'Firmar y cerrar' }}</button>
+      </footer>
+    </form>
+  </dialog>
 
   <dialog
     #protocolDialog

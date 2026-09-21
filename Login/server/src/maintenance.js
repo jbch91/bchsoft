@@ -149,6 +149,7 @@ export async function getPreventiveMaintenanceProgress(
             request.assigned_to,
             assigned.display_name AS assigned_name,
             report.id AS report_id,
+            report.closure_kind,
             report.created_at AS report_created_at,
             report.pdf_path AS report_pdf_path,
             report.area_responsible_required,
@@ -198,6 +199,7 @@ export async function getPreventiveMaintenanceProgress(
        ON late_permission.id = item.late_execution_temporary_permission_id
      LEFT JOIN LATERAL (
        SELECT maintenance_report.id,
+              maintenance_report.closure_kind,
               maintenance_report.area_responsible_required,
               maintenance_report.requires_spare_parts,
               maintenance_report.spare_parts_status,
@@ -255,12 +257,12 @@ export async function getPreventiveMaintenanceProgress(
       planned_date: item.planned_date,
       deadline_date: item.deadline_date,
       phase,
-      is_overdue: Boolean(item.is_overdue && !['completed', 'warranty'].includes(phase)),
+      is_overdue: Boolean(item.is_overdue && !['completed', 'warranty', 'not_located'].includes(phase)),
       warranty_resolution: item.warranty_resolution,
       warranty_resolved_at: item.warranty_resolved_at,
       warranty_release_date: item.warranty_release_date,
       is_under_warranty: Boolean(item.is_under_warranty),
-      can_perform_protocol: Boolean(item.can_perform_protocol),
+      can_perform_protocol: Boolean(item.can_perform_protocol && !['completed', 'not_located'].includes(phase)),
       is_late_execution: Boolean(item.late_execution_authorized_at),
       late_execution_authorized_at: item.late_execution_authorized_at,
       late_execution_authorized_until: item.late_execution_authorized_until,
@@ -272,8 +274,9 @@ export async function getPreventiveMaintenanceProgress(
       assigned_to: item.assigned_to,
       assigned_name: item.assigned_name,
       report_id: item.report_id,
+      closure_kind: item.closure_kind,
       report_created_at: item.report_created_at,
-      pdf_available: Boolean(item.report_pdf_path || item.legacy_history_file_id),
+      pdf_available: Boolean(item.report_pdf_path || item.legacy_history_file_id || item.closure_kind === 'not_located'),
       has_pending_spare: maintenancePreventiveItemWaitsForSpare(item),
       legacy_history_file_id: item.legacy_history_file_id,
       completion_source: item.completion_source,
@@ -498,6 +501,17 @@ export async function assignMaintenanceRequest(
 }
 
 export async function createMaintenanceReport(payload, { queryRunner = query } = {}) {
+  if (queryRunner === query) {
+    return withTransaction(client => createMaintenanceReport(payload, { queryRunner: client.query.bind(client) }));
+  }
+  // Serialize with an engineer-only non-execution closure on the same request.
+  await queryRunner('SELECT id FROM maintenance_requests WHERE id=$1 FOR UPDATE', [payload.requestId]);
+  const existingClosure = await queryRunner(
+    "SELECT id FROM maintenance_reports WHERE request_id=$1 AND closure_kind='not_located'", [payload.requestId]
+  );
+  if (existingClosure.rows.length) {
+    throw Object.assign(new Error('Esta actividad ya fue cerrada como equipo no localizado.'), { status: 409 });
+  }
   const {
     clientId,
     requestId,
@@ -683,6 +697,9 @@ export async function signMaintenanceReport(payload) {
     );
     const report = reports[0];
     if (!report) throw Object.assign(new Error('Reporte no encontrado.'), { status: 404 });
+    if (report.closure_kind === 'not_located') {
+      throw Object.assign(new Error('La constancia ya fue firmada por el ingeniero y no requiere aval adicional.'), { status: 409 });
+    }
     const { rows: corrections } = await client.query(
       'SELECT id FROM maintenance_report_corrections WHERE report_id = $1 AND resolved_at IS NULL LIMIT 1',
       [reportId]

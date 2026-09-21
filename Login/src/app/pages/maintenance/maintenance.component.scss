@@ -1646,6 +1646,69 @@ button:disabled {
   background: rgba(15, 23, 42, 0.58);
 }
 
+.not-located-fields {
+  border: 0;
+  padding: 16px 0 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: 165px minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.not-located-fields > label:nth-child(n + 3) { grid-column: 1 / -1; }
+
+.not-located-modal .protocol-confirm-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.not-located-modal .protocol-confirm-footer button {
+  width: auto;
+  flex: 0 1 auto;
+  min-height: 34px;
+  padding: 7px 14px;
+  font-size: 12px;
+}
+
+.not-located-modal .error { font-size: 12px; font-weight: 600; line-height: 1.5; }
+
+@media (max-width: 540px) {
+  .not-located-fields { grid-template-columns: minmax(0, 1fr); }
+}
+
+.not-located-fields label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.not-located-fields input:not([type='checkbox']), .not-located-fields textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.not-located-fields .not-located-confirm {
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  line-height: 1.5;
+  color: #475569;
+  font-weight: 500;
+}
+
+.not-located-confirm input { width: 16px; height: 16px; margin: 2px 0; }
+
+.preventive-completion-track .not-located,
+.preventive-status-track .not-located,
+.preventive-progress-legend .not-located > span { background: #737b86; }
+
+.preventive-phase-pill.not-located { color: #454e5b; background: #eef0f3; }
+
 .protocol-confirm-modal {
   box-sizing: border-box;
   width: min(580px, calc(100% - 24px));
@@ -2467,7 +2530,7 @@ button:disabled {
 
 .preventive-progress-legend {
   display: grid;
-  grid-template-columns: repeat(5, minmax(100px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   gap: 8px 14px;
 }
 

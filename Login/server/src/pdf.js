@@ -107,6 +107,7 @@ function maintenanceSourceLabel(value) {
 
 function maintenanceDocumentStatusLabel(report, signatures) {
   const hasEngineer = signatures?.some((signature) => signature.role === 'ingeniero_biomedico');
+  if (report.closure_kind === 'not_located') return hasEngineer ? 'CONSTANCIA FIRMADA' : 'PENDIENTE DE FIRMA';
   const hasAcceptance = signatures?.some((signature) => [
     'responsable_area',
     'almacenista',
@@ -223,7 +224,7 @@ function maintenanceReportCode(report, isIndustrial) {
   const part = (type) => parts.find((item) => item.type === type)?.value || '';
   const dateCode = `${part('year')}${part('month')}${part('day')}`;
   const reportCode = String(report.id || 'SIN-ID').replace(/-/g, '').slice(0, 8).toUpperCase();
-  return `RM-${isIndustrial ? 'IND' : 'BIO'}-${dateCode}-${reportCode}`;
+  return `${report.closure_kind === 'not_located' ? 'CNL' : 'RM'}-${isIndustrial ? 'IND' : 'BIO'}-${dateCode}-${reportCode}`;
 }
 
 function maintenanceClientInitials(name) {
@@ -1754,7 +1755,9 @@ function drawMaintenanceReportHeader(doc, { client, report, signatures, isIndust
     .fontSize(13.5)
     .fillColor(PDF_BRAND_700)
     .text(
-      isIndustrial
+      report.closure_kind === 'not_located'
+        ? 'CONSTANCIA DE\nEQUIPO NO LOCALIZADO'
+        : isIndustrial
         ? 'REPORTE TÉCNICO DE\nMANTENIMIENTO INDUSTRIAL'
         : 'REPORTE TÉCNICO DE\nMANTENIMIENTO BIOMÉDICO',
       titleX + 12,
@@ -1811,6 +1814,10 @@ function drawMaintenanceReportHeader(doc, { client, report, signatures, isIndust
       });
   });
 
+  if (report.closure_kind === 'not_located') {
+    doc.y = y + headerHeight + 9;
+    return { code, documentStatus };
+  }
   const bandY = y + headerHeight + 8;
   const bandHeight = 48;
   const contact = [client.email, client.phone].filter((value) => value).join(' / ');
@@ -2115,19 +2122,19 @@ function drawMaintenanceChecklistColumns(doc, groups) {
   return columnHeight;
 }
 
-function maintenanceNarrativeHeight(doc, value, width) {
+function maintenanceNarrativeHeight(doc, value, width, minHeight = 58) {
   doc.font('Helvetica').fontSize(8.8);
   const textHeight = doc.heightOfString(maintenanceUpperText(value), {
     width: width - 18,
     lineGap: 2
   });
-  return Math.max(58, textHeight + 35);
+  return Math.max(minHeight, textHeight + 35);
 }
 
-function drawMaintenanceNarrativeBox(doc, label, value, { ink = PDF_INK } = {}) {
+function drawMaintenanceNarrativeBox(doc, label, value, { ink = PDF_INK, minHeight = 58 } = {}) {
   const x = doc.page.margins.left;
   const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const height = maintenanceNarrativeHeight(doc, value, width);
+  const height = maintenanceNarrativeHeight(doc, value, width, minHeight);
   ensureSpace(doc, height + 8);
   const y = doc.y;
   doc
@@ -2216,7 +2223,7 @@ function maintenanceSignerCredential(signature) {
   return 'USUARIO AUTORIZADO DEL CLIENTE';
 }
 
-function drawMaintenanceSignatures(doc, signatures) {
+function drawMaintenanceSignatures(doc, signatures, { description } = {}) {
   if (!signatures?.length) {
     drawMaintenanceNarrativeBox(doc, 'ESTADO DE FIRMAS', 'SIN FIRMAS REGISTRADAS');
     return;
@@ -2267,7 +2274,7 @@ function drawMaintenanceSignatures(doc, signatures) {
       .font('Helvetica')
       .fontSize(9)
       .fillColor(PDF_MUTED)
-      .text(maintenanceSignerDescription(signature.role), cursorX + 10, cursorY + 23, {
+      .text(description || maintenanceSignerDescription(signature.role), cursorX + 10, cursorY + 23, {
         width: signatureWidth - 20,
         height: 12,
         align: 'center',
@@ -2413,6 +2420,9 @@ function addMaintenanceReportPageChrome(doc, { client, code }) {
 }
 
 export function buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures }) {
+  if (report.closure_kind === 'not_located') {
+    return buildNotLocatedCertificatePdf(doc, { client, asset, request, report, signatures });
+  }
   const isIndustrial = asset.asset_category === 'industrial';
   const signatureList = Array.isArray(signatures) ? signatures : [];
   const header = drawMaintenanceReportHeader(doc, {
@@ -2558,6 +2568,37 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
   drawMaintenanceSignatures(doc, signatureList);
 
   addMaintenanceReportPageChrome(doc, { client, code: header.code });
+}
+
+function buildNotLocatedCertificatePdf(doc, { client, asset, request, report, signatures }) {
+  const details = report.non_execution_details || {};
+  const recordedAsset = details.asset || asset;
+  const recordedClient = { ...client, name: details.clientName || client.name };
+  const engineerSignatures = (signatures || []).filter(signature => signature.role === 'ingeniero_biomedico');
+  const header = drawMaintenanceReportHeader(doc, { client: recordedClient, report,
+    signatures: engineerSignatures, isIndustrial: recordedAsset.asset_category === 'industrial' });
+  drawMaintenanceSectionTitle(doc, 1, 'IDENTIFICACIÓN REGISTRADA DEL EQUIPO', 144);
+  drawMaintenanceInfoGrid(doc, [
+    { label: 'CÓDIGO', value: recordedAsset.code },
+    { label: 'EQUIPO', value: recordedAsset.name, compact: true },
+    { label: 'MARCA / MODELO', value: `${safeText(recordedAsset.brand)} / ${safeText(recordedAsset.model)}`, compact: true },
+    { label: 'SERIE', value: recordedAsset.serial },
+    { label: 'ÁREA REGISTRADA', value: recordedAsset.area_name, compact: true },
+    { label: 'UBICACIÓN REGISTRADA', value: recordedAsset.location_name, compact: true },
+    { label: 'SEDE', value: recordedAsset.site_name, compact: true },
+    { label: 'FECHA PROGRAMADA', value: formatMaintenanceDate(details.plannedDate || request.planned_date) },
+    { label: 'FECHA DE BÚSQUEDA', value: formatMaintenanceDate(details.verifiedOn) }
+  ], { cellHeight: 44 });
+  drawMaintenanceSectionTitle(doc, 2, 'CONSTANCIA DE NO EJECUCIÓN', 80);
+  drawMaintenanceNarrativeBox(doc, 'LUGAR REVISADO', details.searchedLocation, { minHeight: 46 });
+  drawMaintenanceNarrativeBox(doc, 'BÚSQUEDA REALIZADA Y JUSTIFICACIÓN', details.reason, { minHeight: 46 });
+  drawMaintenanceNarrativeBox(doc, 'RESULTADO',
+    'EQUIPO NO LOCALIZADO. NO SE REALIZÓ MANTENIMIENTO NI SE VERIFICÓ SU ESTADO OPERATIVO. '
+    + 'ESTA CONSTANCIA CIERRA ÚNICAMENTE LA ACTIVIDAD PROGRAMADA; NO CERTIFICA FUNCIONAMIENTO, '
+    + 'NO MODIFICA EL ESTADO DEL INVENTARIO NI RETIRA EL EQUIPO. SE REQUIERE LOCALIZARLO PARA SU EVALUACIÓN.');
+  drawMaintenanceSectionTitle(doc, 3, 'FIRMA DEL INGENIERO RESPONSABLE', 171);
+  drawMaintenanceSignatures(doc, engineerSignatures, { description: 'RESPONSABLE DE LA CONSTANCIA' });
+  addMaintenanceReportPageChrome(doc, { client: recordedClient, code: header.code });
 }
 export function buildMaintenanceSchedulePdf(doc, { client, schedule, items }) {
   const isIndustrial = schedule.asset_category === 'industrial';

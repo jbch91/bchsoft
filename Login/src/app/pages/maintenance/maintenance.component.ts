@@ -385,6 +385,18 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   private protocolDialogElement: HTMLDialogElement | null = null;
+  @ViewChild('notLocatedDialog') set notLocatedDialog(ref: ElementRef<HTMLDialogElement> | undefined) {
+    this.notLocatedDialogElement = ref?.nativeElement ?? null;
+    if (ref && !ref.nativeElement.open) ref.nativeElement.showModal();
+  }
+  private notLocatedDialogElement: HTMLDialogElement | null = null;
+  notLocatedItem: PreventiveProgressItemDto | null = null;
+  notLocatedDate = '';
+  notLocatedLocation = '';
+  notLocatedReason = '';
+  notLocatedConfirmed = false;
+  notLocatedSaving = false;
+  notLocatedError = '';
   private readonly publicBase = getPublicBase();
   private qrStream: MediaStream | null = null;
   private qrTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2114,9 +2126,13 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       },
       {
         key: 'completed',
-        label: 'Finalizados',
+        label: 'Ejecutados y firmados',
         count: progress.completed,
         percent: percent(progress.completed)
+      },
+      {
+        key: 'not-located', label: 'Cerrados sin ejecución',
+        count: progress.not_located ?? 0, percent: percent(progress.not_located ?? 0)
       }
     ];
   }
@@ -2147,7 +2163,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       {
         value: 'completed',
         label: 'Finalizados',
-        count: progress?.completed ?? 0
+        count: (progress?.completed ?? 0) + (progress?.not_located ?? 0)
       }
     ];
   }
@@ -2323,6 +2339,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       pending_signature: 'Pendiente de aval/firma',
       waiting_spare: 'Esperando repuesto',
       warranty: 'En garantía',
+      not_located: 'No ejecutado: no localizado',
       completed: 'Finalizado'
     };
     return labels[phase];
@@ -2343,7 +2360,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   preventiveManagedTotal(progress: PreventiveProgressSummaryDto): number {
-    return progress.completed + progress.warranty;
+    return progress.completed + progress.warranty + (progress.not_located ?? 0);
   }
 
   preventiveManagedPercent(progress: PreventiveProgressSummaryDto): number {
@@ -2357,9 +2374,73 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   preventiveProgressShare(
     progress: PreventiveProgressSummaryDto,
-    phase: 'completed' | 'warranty'
+    phase: 'completed' | 'warranty' | 'not_located'
   ): number {
-    return progress.total ? (progress[phase] / progress.total) * 100 : 0;
+    return progress.total ? ((progress[phase] ?? 0) / progress.total) * 100 : 0;
+  }
+
+  get notLocatedToday(): string {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+    return ['year', 'month', 'day'].map(key => parts.find(part => part.type === key)?.value).join('-');
+  }
+
+  canCloseNotLocated(item: PreventiveProgressItemDto): boolean {
+    const user = this.auth.currentUser();
+    return this.canManagePreventiveWarranty() && user?.clientId === this.selectedClientId
+      && ['not_started', 'in_progress'].includes(item.phase) && !item.report_id
+      && !item.legacy_history_file_id && !item.completion_source && !item.has_pending_spare
+      && Boolean(item.can_perform_protocol) && item.planned_date.slice(0, 10) <= this.notLocatedToday
+      && (item.warranty_resolution === 'perform' || (!item.is_under_warranty && item.warranty_resolution !== 'covered'))
+      && (!item.request_status || ['abierto', 'en_proceso'].includes(item.request_status))
+      && (!item.assigned_to || item.assigned_to === user?.id);
+  }
+
+  openNotLocated(item: PreventiveProgressItemDto): void {
+    if (!this.canCloseNotLocated(item)) return;
+    this.notLocatedItem = item;
+    this.notLocatedDate = this.notLocatedToday;
+    this.notLocatedLocation = '';
+    this.notLocatedReason = '';
+    this.notLocatedConfirmed = false;
+    this.notLocatedError = '';
+  }
+
+  closeNotLocated(event?: Event): void {
+    event?.preventDefault();
+    if (this.notLocatedSaving) return;
+    this.notLocatedDialogElement?.close();
+    this.notLocatedItem = null;
+  }
+
+  async submitNotLocated(): Promise<void> {
+    const item = this.notLocatedItem;
+    if (!item || this.notLocatedSaving) return;
+    this.notLocatedError = '';
+    if (!this.notLocatedDate || this.notLocatedDate > this.notLocatedToday || this.notLocatedDate < item.planned_date.slice(0, 10)) {
+      this.notLocatedError = 'La fecha de búsqueda debe estar entre la fecha programada y hoy.';
+    } else if (this.notLocatedLocation.trim().length < 3 || this.notLocatedReason.replace(/\s+/g, ' ').trim().length < 20) {
+      this.notLocatedError = 'Indica el lugar revisado y describe la búsqueda con al menos 20 caracteres.';
+    } else if (!this.notLocatedConfirmed) {
+      this.notLocatedError = 'Confirma que no localizaste el equipo y no realizaste mantenimiento.';
+    }
+    if (this.notLocatedError) return;
+    this.notLocatedSaving = true;
+    try {
+      const result = await this.maintenance.closeNotLocatedPreventive(this.selectedClientId, item.id, {
+        verifiedOn: this.notLocatedDate, searchedLocation: this.notLocatedLocation,
+        reason: this.notLocatedReason, confirmed: this.notLocatedConfirmed
+      });
+      this.notLocatedSaving = false;
+      this.closeNotLocated();
+      this.successMessage = result.message + (!result.pdfAvailable ? ' El PDF podrá generarse desde Finalizados.' : '');
+      this.refreshViewSoon();
+      await this.loadData();
+    } catch (error: any) {
+      this.notLocatedError = error?.error?.message ?? 'No se pudo confirmar el cierre. Consulta Finalizados antes de reintentar.';
+    } finally {
+      this.notLocatedSaving = false;
+      this.refreshViewSoon();
+    }
   }
 
   preventiveWarrantyReleaseLabel(item: PreventiveProgressItemDto): string {
@@ -2445,6 +2526,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (this.preventivePhaseView === 'waiting_spare') {
       return Boolean(item.has_pending_spare);
     }
+    if (this.preventivePhaseView === 'completed') return ['completed', 'not_located'].includes(item.phase);
     return item.phase === this.preventivePhaseView;
   }
 

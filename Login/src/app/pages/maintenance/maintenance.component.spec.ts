@@ -772,7 +772,7 @@ describe('maintenance report modal flow', () => {
     expect(component.preventiveProgressShare(component.preventiveProgress.monthly, 'completed')).toBeCloseTo(27.27, 2);
     expect(component.preventiveProgressShare(component.preventiveProgress.monthly, 'warranty')).toBeCloseTo(9.09, 2);
     expect(component.preventiveProgressSegments.map((segment) => segment.count)).toEqual([
-      4, 1, 2, 1, 3
+      4, 1, 2, 1, 3, 0
     ]);
     expect(component.preventivePhaseTabs.map((tab) => tab.count)).toEqual([5, 1, 2, 1, 3]);
     expect(component.filteredPreventiveItems.map((item) => item.id)).toEqual(['item-1', 'item-2']);

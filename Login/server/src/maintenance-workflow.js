@@ -29,6 +29,9 @@ export function maintenancePreventiveItemIsWarranty(item = {}) {
 }
 
 export function maintenancePreventiveItemPhase(item = {}) {
+  if (item.closure_kind === 'not_located') {
+    return item.has_engineer_signature ? 'not_located' : 'pending_signature';
+  }
   if (
     item.legacy_history_file_id
     || (item.completion_source && item.completion_source !== 'software_report')
@@ -71,6 +74,7 @@ function emptyPreventiveProgressSummary() {
     waiting_spare: 0,
     warranty: 0,
     completed: 0,
+    not_located: 0,
     overdue: 0,
     completion_percent: 0
   };
@@ -94,7 +98,7 @@ function summarizePreventiveItems(items) {
     if (maintenancePreventiveItemWaitsForSpare(item)) {
       summary.waiting_spare += 1;
     }
-    if (item.is_overdue && phase !== 'completed' && phase !== 'warranty') {
+    if (item.is_overdue && !['completed', 'warranty', 'not_located'].includes(phase)) {
       summary.overdue += 1;
     }
   }
@@ -139,6 +143,7 @@ export function isMaintenanceReportFullySigned(
 ) {
   const hasEngineer = signatures.some((signature) => signature.role === 'ingeniero_biomedico');
   if (!hasEngineer) return false;
+  if (report?.closure_kind === 'not_located') return true;
 
   if (report?.area_responsible_required) {
     return signatures.some((signature) => signature.role === 'responsable_area');

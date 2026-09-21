@@ -1126,6 +1126,7 @@ export class HojasDeVidaComponent implements OnDestroy {
 
   assetHistoryTypeLabel(item: AssetHistoryItemDto): string {
     if (item.item_type === 'maintenance_report') {
+      if (item.subtype === 'not_located') return 'Constancia de equipo no localizado';
       return item.subtype === 'preventivo' ? 'Mantenimiento preventivo' : 'Mantenimiento correctivo';
     }
     if (item.item_type === 'calibration_report') return 'Calibración';

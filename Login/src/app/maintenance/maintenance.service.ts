@@ -33,6 +33,7 @@ export interface PreventiveProgressSummaryDto {
   waiting_spare: number;
   warranty: number;
   completed: number;
+  not_located?: number;
   overdue: number;
   completion_percent: number;
 }
@@ -43,6 +44,7 @@ export type PreventiveProgressPhase =
   | 'pending_signature'
   | 'waiting_spare'
   | 'warranty'
+  | 'not_located'
   | 'completed';
 
 export interface PreventiveProgressItemDto {
@@ -103,6 +105,7 @@ export interface AssetQrMaintenanceContextDto {
 }
 
 export interface MaintenanceReportDto {
+  closure_kind?: 'maintenance' | 'not_located';
   id: string;
   client_id: string;
   request_id: string;
@@ -239,6 +242,14 @@ export class MaintenanceService {
         { decision }
       )
     );
+  }
+
+  async closeNotLocatedPreventive(clientId: string, itemId: string,
+    payload: { verifiedOn: string; searchedLocation: string; reason: string; confirmed: boolean }
+  ): Promise<{ id: string; replayed: boolean; pdfAvailable: boolean; message: string }> {
+    return firstValueFrom(this.http.post<{ id: string; replayed: boolean; pdfAvailable: boolean; message: string }>(
+      `${this.apiBase}/maintenance/preventive-progress/${clientId}/items/${itemId}/not-located`, payload
+    ).pipe(timeout(45000)));
   }
 
   async openLatePreventivePeriod(

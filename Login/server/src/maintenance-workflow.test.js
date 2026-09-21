@@ -136,6 +136,7 @@ test('resume el avance mensual y anual con vencidos como indicador transversal',
     waiting_spare: 1,
     warranty: 1,
     completed: 1,
+    not_located: 0,
     overdue: 1,
     completion_percent: 25
   });

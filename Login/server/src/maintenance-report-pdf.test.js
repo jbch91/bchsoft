@@ -65,6 +65,24 @@ test('conserva sin desplazamiento las fechas de calendario del cronograma', () =
   assert.equal(formatMaintenanceDate('2026-08-31'), '31/08/2026');
 });
 
+test('constancia breve conserva la firma y el contenido en una pagina sin protocolo ejecutado', async () => {
+  const buffer = await buildReportBuffer([{role:'ingeniero_biomedico',display_name:'INGENIERO QA',signed_at:'2026-09-21T14:00:00Z'}], {}, {
+    closure_kind:'not_located',non_execution_details:{verifiedOn:'2026-09-21',searchedLocation:'CONSULTORIOS',
+      reason:'Se revisaron consultorios y almacen sin localizar el equipo.'}
+  });
+  const pdf = await PdfReaderDocument.load(buffer);
+  assert.equal(pdf.getPageCount(),1);
+});
+
+test('constancia admite justificaciones extensas sin perder la firma', async () => {
+  const buffer = await buildReportBuffer([{role:'ingeniero_biomedico',display_name:'INGENIERO QA',signed_at:'2026-09-21T14:00:00Z'}], {}, {
+    closure_kind:'not_located',non_execution_details:{verifiedOn:'2026-09-21',searchedLocation:'UBICACION '.repeat(25),
+      reason:'Busqueda documentada en consultorios sin encontrar el equipo. '.repeat(16)}
+  });
+  const pdf = await PdfReaderDocument.load(buffer);
+  assert.ok(pdf.getPageCount() <= 2);
+});
+
 test('genera firmas legibles con nombres largos y más de una fila', async () => {
   const buffer = await buildReportBuffer([
     {

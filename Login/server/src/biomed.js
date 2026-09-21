@@ -1308,8 +1308,10 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
        SELECT
          r.id,
          'maintenance_report' AS item_type,
-         r.type AS subtype,
+         CASE WHEN r.closure_kind = 'not_located' THEN 'not_located' ELSE r.type END AS subtype,
          COALESCE(
+           CASE WHEN r.closure_kind = 'not_located' THEN
+             (r.non_execution_details->>'verifiedOn')::timestamp AT TIME ZONE 'America/Bogota' END,
            r.performed_on::timestamp AT TIME ZONE 'America/Bogota',
            (SELECT MAX(s.signed_at) FROM report_signatures s WHERE s.report_id = r.id),
            r.created_at
@@ -1332,7 +1334,7 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
            WHERE s.report_id = r.id
              AND s.role = 'ingeniero_biomedico'
          )
-         AND EXISTS (
+         AND (r.closure_kind = 'not_located' OR EXISTS (
            SELECT 1 FROM report_signatures s WHERE s.report_id = r.id
            AND (
              (r.area_responsible_required AND s.role = 'responsable_area')
@@ -1341,7 +1343,7 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
                OR (r.type <> 'preventivo' AND s.user_id = req.requested_by)
              ))
            )
-         )
+         ))
 
        UNION ALL
 

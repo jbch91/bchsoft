@@ -14,6 +14,7 @@ import { PDFDocument as PdfMergerDocument } from 'pdf-lib';
 import { query, withTransaction } from './db.js';
 import { createMaintenanceReportSignHandler } from './maintenance-signing.js';
 import { createVerbalAttentionHandler, findVerbalAttention, saveVerbalAttention, verbalAttentionAccessError } from './maintenance-verbal.js';
+import { closeNotLocatedPreventive } from './maintenance-not-located.js';
 import {
   authenticateUser,
   getCurrentSessionUser,
@@ -10824,6 +10825,26 @@ app.get(
 );
 
 app.post(
+  '/maintenance/preventive-progress/:clientId/items/:itemId/not-located',
+  requireAuth,
+  requirePermission('maintenance:report:create'),
+  async (req, res) => {
+    try {
+      const result = await closeNotLocatedPreventive({ ...req.params, payload: req.body, actor: req.user, today: todayInBogota() });
+      let pdfAvailable = false;
+      try { pdfAvailable = Boolean(await writeMaintenanceReportPdfFile(result.id)); }
+      catch (error) { console.error('PDF de constancia pendiente', result.id, error); }
+      return res.status(result.replayed ? 200 : 201).json({ ...result, pdfAvailable,
+        message: 'Constancia firmada. Actividad cerrada sin ejecución de mantenimiento.' });
+    } catch (error) {
+      const status = [400,403,404,409].includes(error.status) ? error.status : 500;
+      if (status === 500) console.error('Cierre de equipo no localizado', error);
+      return res.status(status).json({ message: status === 500 ? 'No se pudo registrar la constancia. Consulta el estado antes de reintentar.' : error.message });
+    }
+  }
+);
+
+app.post(
   '/maintenance/preventive-progress/:clientId/late-execution',
   requireAuth,
   requirePermission(LATE_MAINTENANCE_EXECUTION_PERMISSION),
@@ -11704,9 +11725,16 @@ app.post(
       requestStatusAfter,
       createdBy: req.user.sub
     };
-    const result = correctionReport
-      ? await updateMaintenanceReport(correctionReport.id, reportPayload)
-      : await createMaintenanceReport(reportPayload);
+    let result;
+    try {
+      result = correctionReport
+        ? await updateMaintenanceReport(correctionReport.id, reportPayload)
+        : await createMaintenanceReport(reportPayload);
+    } catch (error) {
+      if (error.status === 409) return res.status(409).json({ message: error.message });
+      console.error('Error al guardar reporte', error);
+      return res.status(500).json({ message: 'No se pudo guardar el reporte.' });
+    }
 
     if (correctionReport) {
       await deleteReportSignatures(result.id);
