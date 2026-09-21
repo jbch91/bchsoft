@@ -85,6 +85,7 @@
     </div>
 
     <div class="maintenance-workspace-actions">
+      <app-activity-report-dialog [clientId]="selectedClientId" [category]="assetCategory"></app-activity-report-dialog>
       <button
         *ngIf="!isAreaResponsible && canRefreshMaintenanceTemporaryPermissions"
         type="button"
@@ -1321,6 +1322,7 @@
     <section class="area-approval-queue" *ngIf="isAreaResponsible" aria-label="Reportes de mantenimiento del área">
       <div class="area-approval-heading">
         <h2>Mantenimiento</h2>
+        <app-activity-report-dialog [clientId]="selectedClientId" [category]="assetCategory"></app-activity-report-dialog>
         <div class="area-report-types" role="group" aria-label="Tipo de mantenimiento">
           <button type="button" [attr.aria-pressed]="reportTypeFilter === ''" (click)="setAreaResponsibleReportType('')">Todos</button>
           <button type="button" [attr.aria-pressed]="reportTypeFilter === 'preventivo'" (click)="setAreaResponsibleReportType('preventivo')">Preventivos</button>

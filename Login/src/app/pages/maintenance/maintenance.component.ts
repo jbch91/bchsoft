@@ -20,6 +20,7 @@ import {
 } from '../../maintenance/maintenance.service';
 import { getPublicBase, joinBase } from '../../core/api-base';
 import { ModuleTabsComponent } from '../../shared/module-tabs/module-tabs.component';
+import { ActivityReportDialogComponent } from './activity-report-dialog.component';
 import { CORRECTIVE_NARRATIVE_FIELDS, CORRECTIVE_FINDING_OPTIONS, CORRECTIVE_OBSERVATION_OPTIONS, CorrectiveNarrativeOption } from './corrective-report.options';
 import {
   maintenanceAssetMatchesLookup,
@@ -369,7 +370,7 @@ const PREVENTIVE_OUTCOME_PRESETS: readonly PreventiveOutcomePreset[] = [
 @Component({
   selector: 'app-maintenance',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModuleTabsComponent],
+  imports: [CommonModule, FormsModule, ModuleTabsComponent, ActivityReportDialogComponent],
   templateUrl: './maintenance.component.html',
   styleUrls: ['./maintenance.component.scss', './maintenance-corrective.component.scss']
 })

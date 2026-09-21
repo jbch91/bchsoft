@@ -1,0 +1,93 @@
+<button #trigger *ngIf="allowed" type="button" class="report-trigger" (click)="open()" title="Informes de actividades y repuestos">
+  <svg aria-hidden="true"><use href="/assets/guide-icons.svg#file-text"></use></svg>Informes
+</button>
+<dialog #dialog aria-labelledby="activity-report-title" (cancel)="$event.preventDefault(); close()">
+  <header><div><h2 id="activity-report-title">Informe de mantenimiento</h2><span>{{ category === 'industrial' ? 'Equipos industriales' : 'Equipos biomédicos' }}</span></div>
+    <button type="button" class="icon-button" title="Cerrar" aria-label="Cerrar informes" (click)="close()"><svg aria-hidden="true"><use href="/assets/guide-icons.svg#x"></use></svg></button>
+  </header>
+  <div class="dialog-body">
+    <form (ngSubmit)="review()">
+      <fieldset [disabled]="busy">
+        <div class="main-filters">
+          <label>Informe<select name="kind" [(ngModel)]="filters.kind" (ngModelChange)="invalidate()"><option value="general">General</option><option value="activities">Actividades</option><option value="spares">Solo repuestos</option></select></label>
+          <label>Periodo<select name="period" [(ngModel)]="period" (ngModelChange)="setPeriod()"><option value="month">Mes completo</option><option value="range">Rango de fechas</option></select></label>
+          <label *ngIf="period === 'month'">Mes<input type="month" name="month" [(ngModel)]="month" (ngModelChange)="setMonth()" required></label>
+          <label *ngIf="period === 'range'">Desde<input type="date" name="from" [(ngModel)]="filters.from" (ngModelChange)="invalidate()" [max]="filters.to" required></label>
+          <label *ngIf="period === 'range'">Hasta<input type="date" name="to" [(ngModel)]="filters.to" (ngModelChange)="invalidate()" [min]="filters.from" required></label>
+          <label *ngIf="filters.kind !== 'spares'">Fecha de las actividades<select name="basis" [(ngModel)]="filters.dateBasis" (ngModelChange)="invalidate()"><option value="attention">Atención / registro</option><option value="scheduled">Periodo programado</option></select></label>
+        </div>
+        <p class="definition">{{ reportDescription }}</p>
+        <div class="location-filters">
+          <label>Sede<select name="site" [(ngModel)]="filters.siteId" (ngModelChange)="changeSite()"><option value="">Todas las autorizadas</option><option *ngFor="let option of sites; trackBy: trackOption" [value]="option.id">{{ option.name }}</option></select></label>
+          <label>Área<select name="area" [(ngModel)]="filters.areaId" (ngModelChange)="changeArea()"><option value="">Todas las autorizadas</option><option *ngFor="let option of areas; trackBy: trackOption" [value]="option.id">{{ option.name }}</option></select></label>
+          <label>Ubicación<select name="location" [(ngModel)]="filters.locationId" (ngModelChange)="invalidate()"><option value="">Todas las autorizadas</option><option *ngFor="let option of places; trackBy: trackOption" [value]="option.id">{{ option.name }}</option></select></label>
+          <label>Equipo o ingeniero<input name="search" type="search" maxlength="120" [(ngModel)]="filters.search" (ngModelChange)="invalidate()" placeholder="Código, nombre, serie, marca..."></label>
+        </div>
+        <details class="additional"><summary>Filtros adicionales</summary>
+          <div class="location-filters">
+            <label>Mantenimiento<select name="type" [(ngModel)]="filters.type" (ngModelChange)="invalidate()"><option value="all">Todos</option><option value="preventivo">Preventivos</option><option value="correctivo">Correctivos</option></select></label>
+            <label>Firma del reporte<select name="signature" [(ngModel)]="filters.signature" (ngModelChange)="invalidate()"><option value="all">Todas</option><option value="signed">Firmados</option><option value="pending">Pendientes de firma</option><option value="correction">En corrección</option></select></label>
+            <label>Estado final del equipo<select name="status" [(ngModel)]="filters.status" (ngModelChange)="invalidate()"><option value="all">Todos</option><option value="operativo">Operativo</option><option value="operativo_observacion">Con observaciones</option><option value="fuera_de_servicio">Fuera de servicio</option><option value="no_verificado">No verificado</option></select></label>
+            <label *ngIf="filters.kind !== 'activities'">Repuestos<select name="spare" [(ngModel)]="filters.spareStatus" (ngModelChange)="invalidate()"><option value="all">Instalados y pendientes</option><option value="installed">Solo instalados</option><option value="pending">Solo pendientes</option></select></label>
+            <label>Ingeniero<select name="engineer" [(ngModel)]="filters.engineerId" (ngModelChange)="invalidate()"><option value="">Todos los autorizados</option><option *ngFor="let engineer of identity?.engineers; trackBy: trackOption" [value]="engineer.id">{{ engineer.name }}</option></select></label>
+          </div>
+        </details>
+        <details class="presentation-options">
+          <summary>Presentación del informe <span>{{ presentation.mode === 'external' ? 'Prestador externo' : 'Servicio propio' }}</span></summary>
+          <div class="institution" *ngIf="identity as info">
+            <img *ngIf="info.client.logoDataUrl" [src]="info.client.logoDataUrl" alt="Logo de la institución atendida">
+            <div><small>Institución atendida</small><strong>{{ info.client.name }}</strong><span>NIT {{ info.client.nit || 'NR' }}</span></div>
+          </div>
+          <div class="location-filters">
+            <label>Prestación del servicio<select name="providerMode" [(ngModel)]="presentation.mode" (ngModelChange)="presentationChanged()"><option value="internal">Servicio propio del hospital</option><option value="external">Empresa o prestador externo</option></select></label>
+            <label>Contrato u orden (opcional)<input name="contract" maxlength="120" [(ngModel)]="presentation.contract" (ngModelChange)="presentationChanged()"></label>
+            <label class="wide-field">Dirigido a (opcional)<input name="recipient" maxlength="160" [(ngModel)]="presentation.recipient" (ngModelChange)="presentationChanged()" placeholder="Nombre o cargo de quien recibe el informe"></label>
+          </div>
+          <div *ngIf="presentation.mode === 'external'" class="provider-fields">
+            <div class="location-filters">
+              <label class="wide-field">Razón social del prestador<input name="providerName" maxlength="160" [(ngModel)]="presentation.providerName" (ngModelChange)="presentationChanged()"></label>
+              <label>NIT (opcional)<input name="providerNit" maxlength="40" [(ngModel)]="presentation.providerNit" (ngModelChange)="presentationChanged()"></label>
+              <label>Contacto (opcional)<input name="providerContact" maxlength="180" [(ngModel)]="presentation.providerContact" (ngModelChange)="presentationChanged()"></label>
+            </div>
+            <div class="provider-logo">
+              <img *ngIf="presentation.providerLogo" [src]="presentation.providerLogo" alt="Logo del prestador externo">
+              <label class="logo-upload"><svg aria-hidden="true"><use href="/assets/guide-icons.svg#image"></use></svg>Cargar logo<input type="file" accept="image/png,image/jpeg" aria-label="Logo del prestador externo" (change)="selectLogo($event)"></label>
+              <span>{{ logoName || 'PNG o JPG, máximo 1 MB (opcional)' }}</span>
+              <button *ngIf="presentation.providerLogo" type="button" class="icon-button" title="Quitar logo" aria-label="Quitar logo del prestador" (click)="removeLogo()"><svg aria-hidden="true"><use href="/assets/guide-icons.svg#x"></use></svg></button>
+            </div>
+            <p class="definition">El prestador identifica quién presenta el informe. Si hay varios prestadores, delimita las actividades con el filtro Ingeniero; escribir una empresa no filtra los registros.</p>
+          </div>
+          <label>Observaciones del informe (opcional)<textarea name="reportObservations" rows="3" maxlength="1800" [(ngModel)]="presentation.observations" (ngModelChange)="presentationChanged()"></textarea></label>
+          <p class="definition">Estos datos se aplican a esta descarga, sin cambiar la institución ni los protocolos. Word es una copia editable; no incorpora firmas de aprobación.</p>
+        </details>
+        <div class="review-actions">
+          <label class="check" *ngIf="filters.kind !== 'activities' && filters.spareStatus !== 'installed'"><input name="backlog" type="checkbox" [(ngModel)]="filters.backlog" (ngModelChange)="invalidate()">Incluir repuestos pendientes de periodos anteriores</label>
+          <button type="submit" class="secondary"><svg aria-hidden="true"><use href="/assets/guide-icons.svg#search"></use></svg>Consultar informe</button>
+        </div>
+      </fieldset>
+    </form>
+    <p class="error" role="alert" *ngIf="error">{{ error }}</p>
+    <p class="success" role="status" *ngIf="success">{{ success }}</p>
+    <p class="loading" role="status" *ngIf="busy">{{ downloading ? 'Generando archivo...' : 'Consultando información...' }}</p>
+    <section *ngIf="preview as report" class="preview" aria-label="Vista previa del informe">
+      <div class="preview-heading"><h3>{{ report.client.name }}</h3><span>{{ report.filters.from }} al {{ report.filters.to }}</span></div>
+      <div class="metrics">
+        <ng-container *ngIf="report.filters.kind !== 'spares'"><span><b>{{ report.summary.interventions }}</b>Intervenciones</span><span><b>{{ report.summary.equipment }}</b>Equipos distintos</span><span><b>{{ report.summary.pendingSignature }}</b>Pendientes de firma</span><span><b>{{ report.summary.notLocated }}</b>No localizados</span></ng-container>
+        <ng-container *ngIf="report.filters.kind !== 'activities'"><span><b>{{ report.summary.installed }}</b>Instalaciones</span><span><b>{{ report.summary.pendingSpares }}</b>Repuestos pendientes</span></ng-container>
+      </div>
+      <p *ngIf="!recordCount" class="empty">No hay registros con estos criterios.</p>
+      <ng-container *ngFor="let group of [{title:'Actividades y constancias',rows:report.activities,total:report.counts.activities},{title:'Repuestos',rows:report.spares,total:report.counts.spares},{title:'PDF históricos',rows:report.historical,total:report.counts.historical}]; trackBy: trackGroup">
+        <ng-container *ngIf="group.total"><h4>{{ group.title }} <span>{{ group.total }} registros<span *ngIf="group.total > group.rows.length"> · Vista previa: {{ group.rows.length }}</span></span></h4>
+          <div class="table-scroll" tabindex="0" [attr.aria-label]="group.title"><table><thead><tr><th>Fecha</th><th>Equipo</th><th>Área / ubicación</th><th>Resultado</th><th>Detalle</th></tr></thead><tbody>
+            <tr *ngFor="let row of group.rows; trackBy: trackOption"><td>{{ row.date | date:'dd/MM/yyyy':'UTC' }}<small *ngIf="row.plannedDate">Prog. {{ row.plannedDate | date:'dd/MM/yyyy':'UTC' }}</small></td><td><strong>{{ row.code }} · {{ row.equipment }}</strong><small>{{ row.brand || 'NR' }} / {{ row.model || 'NR' }} · S/N {{ row.serial || 'NR' }}</small></td><td>{{ row.area || 'NR' }}<small>{{ row.location || 'NR' }}</small></td><td>{{ label(row.spareResult || (row.kind === 'not_located' ? row.kind : row.status)) }}<small>{{ row.signature === 'historical' ? 'PDF histórico' : 'Firma: ' + label(row.signature) }}</small></td><td>{{ row.spareResult ? row.spare : row.reason || row.summary || row.title }}<small *ngIf="row.carriedOver">Pendiente de un periodo anterior</small></td></tr>
+          </tbody></table></div>
+        </ng-container>
+      </ng-container>
+      <details class="criteria"><summary>Criterios del informe</summary><p *ngFor="let note of report.notes">{{ note }}</p></details>
+    </section>
+  </div>
+  <footer><label>Formato<select [(ngModel)]="format" [disabled]="busy"><option value="pdf">PDF</option><option value="xlsx">Excel</option><option value="docx">Word (.docx)</option></select></label>
+    <button type="button" class="secondary" (click)="close()">Cerrar</button>
+    <button type="button" [disabled]="busy || !preview || !recordCount" (click)="download()"><svg aria-hidden="true"><use href="/assets/guide-icons.svg#file-text"></use></svg>{{ downloading ? 'Generando...' : 'Descargar informe' }}</button>
+  </footer>
+</dialog>

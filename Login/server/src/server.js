@@ -15,6 +15,7 @@ import { query, withTransaction } from './db.js';
 import { createMaintenanceReportSignHandler } from './maintenance-signing.js';
 import { createVerbalAttentionHandler, findVerbalAttention, saveVerbalAttention, verbalAttentionAccessError } from './maintenance-verbal.js';
 import { closeNotLocatedPreventive } from './maintenance-not-located.js';
+import { createActivityReportRouter, isActivityReportReadExport } from './maintenance-activity-report-routes.js';
 import {
   authenticateUser,
   getCurrentSessionUser,
@@ -856,7 +857,8 @@ async function enforceTenantSubscription(req, res, next) {
       });
     }
 
-    if (subscription.is_read_only && req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+    if (subscription.is_read_only && req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS'
+      && !isActivityReportReadExport(req)) {
       return res.status(402).json({
         message: 'La suscripción del cliente está en modo solo lectura. Puedes consultar información, pero no realizar cambios.',
         subscription
@@ -1162,6 +1164,7 @@ app.use('/admin', requireAuth, enforceTenantSubscription);
 app.use('/biomed', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
 app.use('/odontology', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
 app.use('/maintenance', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
+app.use('/maintenance/activity-reports', createActivityReportRouter());
 app.use('/training', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
 app.use('/calibration', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
 app.use('/quick-guides', requireAuth, denyPlatformOperationalAccess, enforceOperationalSubscription);
