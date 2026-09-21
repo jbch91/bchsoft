@@ -1,6 +1,10 @@
 import { query, withTransaction } from './db.js';
 import { normalizeAssetCategory } from './asset-category.js';
 import {
+  inheritActiveMaintenanceOpenings,
+  listActiveMaintenanceOpenings
+} from './maintenance-open-periods.js';
+import {
   assetWarrantyReleaseDate,
   buildOperationalMaintenanceOccurrences,
   canCorrectAssetScheduleItems,
@@ -699,6 +703,45 @@ export async function listSchedules(clientId, year, assetCategory = 'biomedical'
   return rows;
 }
 
+export async function syncNewAssetsInOpenMaintenancePeriods({ clientId, today }) {
+  const openings = await listActiveMaintenanceOpenings(clientId);
+  if (!openings.length) return { schedulesUpdated: 0, itemsAdded: 0, assets: [] };
+  const tenant = await query('SELECT schema_name FROM clients WHERE id = $1', [clientId]);
+  const schema = tenant.rows[0]?.schema_name;
+  if (!schema || !/^[a-zA-Z0-9_]+$/.test(schema)) throw new Error('Invalid tenant schema');
+  const { rows } = await query(
+    `SELECT DISTINCT asset.id
+     FROM "${schema}".assets asset
+     JOIN maintenance_schedules schedule
+       ON schedule.client_id = $1 AND schedule.asset_category = asset.asset_category
+     JOIN UNNEST($2::uuid[], $3::date[]) opening(schedule_id, period_start)
+       ON opening.schedule_id = schedule.id
+     WHERE asset.created_at >= schedule.created_at
+       AND asset.maintenance_frequency IS NOT NULL
+       AND COALESCE(asset.status, 'activo') <> 'dado_de_baja'
+       AND (asset.acquisition_date IS NULL OR asset.acquisition_date <
+            (opening.period_start + INTERVAL '1 month')::date)
+       AND (asset.warranty_years IS NULL OR (asset.acquisition_date IS NOT NULL
+            AND (asset.acquisition_date + make_interval(years => asset.warranty_years))::date <
+                (opening.period_start + INTERVAL '1 month')::date))
+       AND NOT EXISTS (
+         SELECT 1 FROM maintenance_schedule_items item
+         WHERE item.schedule_id = schedule.id AND item.asset_id = asset.id
+           AND item.planned_date >= opening.period_start
+           AND item.planned_date < (opening.period_start + INTERVAL '1 month')::date
+           AND (item.status NOT IN ('pending', 'expired') OR item.report_id IS NOT NULL
+                OR item.completion_source IS NOT NULL OR item.legacy_history_file_id IS NOT NULL
+                OR item.historical_resolution = 'not_performed'
+                OR item.warranty_resolution = 'covered')
+       )`,
+    [clientId, openings.map((opening) => opening.schedule_id),
+      openings.map((opening) => `${opening.period}-01`)]
+  );
+  return syncAssetsIntoMaintenanceSchedules({
+    clientId, schema, assetIds: rows.map((row) => row.id), today
+  });
+}
+
 export async function syncAssetsIntoMaintenanceSchedules({
   clientId,
   schema,
@@ -750,16 +793,17 @@ export async function syncAssetsIntoMaintenanceSchedules({
     const categories = Array.from(
       new Set(assets.map((asset) => normalizeAssetCategory(asset.asset_category)))
     );
+    const openings = await listActiveMaintenanceOpenings(clientId, client.query.bind(client));
     const scheduleResult = await client.query(
       `SELECT id, client_id, asset_category, year, start_date, status, created_by
        FROM maintenance_schedules
        WHERE client_id = $1
          AND asset_category = ANY($2::text[])
-         AND year >= $3
+         AND (year >= $3 OR id = ANY($4::uuid[]))
          AND status IN ('draft', 'approved')
        ORDER BY year ASC, created_at ASC
        FOR UPDATE`,
-      [clientId, categories, currentYear]
+      [clientId, categories, currentYear, openings.map((opening) => opening.schedule_id)]
     );
 
     let totalAdded = 0;
@@ -864,6 +908,10 @@ export async function syncAssetsIntoMaintenanceSchedules({
       }
 
       const additions = [];
+      const openPeriods = new Set(openings
+        .filter((opening) => opening.schedule_id === schedule.id)
+        .map((opening) => opening.period));
+      const earliestOpenDate = minimumDate(...Array.from(openPeriods, (period) => `${period}-01`));
       const scheduleStart = dateOnlyFromDatabase(schedule.start_date, 'La fecha inicial del cronograma');
       const scheduleYearStart = `${schedule.year}-01-01`;
       for (const asset of scheduleAssets) {
@@ -871,10 +919,10 @@ export async function syncAssetsIntoMaintenanceSchedules({
         const availableFrom = maximumDate(
           reconstructCurrentYear && schedule.year === currentYear
             ? scheduleYearStart
-            : schedule.year === currentYear
-              ? normalizedToday
+            : schedule.year <= currentYear
+              ? minimumDate(normalizedToday, earliestOpenDate)
               : scheduleYearStart,
-          reconstructCurrentYear && asset.acquisition_date
+          asset.acquisition_date
             ? dateOnlyFromDatabase(asset.acquisition_date, 'La fecha de adquisición')
             : null,
           detail.warrantyReleaseDate
@@ -900,13 +948,20 @@ export async function syncAssetsIntoMaintenanceSchedules({
             detail.firstPlannedDate = minimumDate(detail.firstPlannedDate, plannedDate);
           }
         }
-        for (const occurrence of desired) {
+        for (const candidate of desired) {
+          const occurrence = !reconstructCurrentYear && candidate.deadlineDate >= normalizedToday
+            && candidate.plannedDate < normalizedToday
+            ? { ...candidate, plannedDate: nextBusinessDateInWindow(normalizedToday, candidate.deadlineDate) }
+            : candidate;
+          if (!occurrence.plannedDate) continue;
+          if (!reconstructCurrentYear && occurrence.deadlineDate < normalizedToday
+            && !openPeriods.has(occurrence.plannedDate.slice(0, 7))) continue;
           if (occupiedMonths.has(occurrence.plannedDate.slice(0, 7))) continue;
           occupiedMonths.add(occurrence.plannedDate.slice(0, 7));
           const occurrenceState = maintenanceScheduleOccurrenceState(occurrence, {
             today: normalizedToday,
             scheduleStatus: schedule.status,
-            historicalBackfill: reconstructCurrentYear
+            historicalBackfill: reconstructCurrentYear || openPeriods.has(occurrence.plannedDate.slice(0, 7))
           });
           additions.push({
             assetId: asset.id,
@@ -995,6 +1050,27 @@ export async function syncAssetsIntoMaintenanceSchedules({
       }
     }
 
+    const inherited = await inheritActiveMaintenanceOpenings(client, {
+      clientId, schema: tenantSchema, assetIds: assets.map((asset) => asset.id), today: normalizedToday
+    });
+    const inheritedIds = new Set(inherited.map((item) => item.id));
+    for (const item of inherited) {
+      updatedScheduleIds.add(item.schedule_id);
+      totalActiveAdded += 1;
+      totalRequestsCreated += Number(item.requestCreated);
+      const detail = detailsByAsset.get(item.asset_id);
+      detail.activeItemsAdded += 1;
+      detail.requestsCreated += Number(item.requestCreated);
+      detail.firstPlannedDate = minimumDate(detail.firstPlannedDate, dateOnlyFromDatabase(item.planned_date));
+      detail.historicalEvidenceRequired = detail.historicalEvidenceRequired.filter(
+        (evidence) => !inheritedIds.has(evidence.scheduleItemId)
+      );
+      if (!detail.scheduleIds.includes(item.schedule_id)) {
+        detail.scheduleIds.push(item.schedule_id);
+        detail.schedulesUpdated += 1;
+      }
+    }
+
     if (updatedScheduleIds.size) {
       await client.query(
         'UPDATE maintenance_schedules SET pdf_path = NULL WHERE id = ANY($1::uuid[])',
@@ -1026,7 +1102,9 @@ export async function syncAssetsIntoMaintenanceSchedules({
       requestsRemoved: totalRequestsRemoved,
       activeItemsAdded: totalActiveAdded,
       requestsCreated: totalRequestsCreated,
-      historicalEvidenceRequired,
+      historicalEvidenceRequired: historicalEvidenceRequired.filter(
+        (evidence) => !inheritedIds.has(evidence.scheduleItemId)
+      ),
       enrollmentMode: normalizedEnrollmentMode,
       assets: details
     };

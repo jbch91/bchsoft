@@ -288,6 +288,7 @@ import {
   deleteDraftSchedule,
   setScheduleEngineerEditAccess,
   syncAssetsIntoMaintenanceSchedules,
+  syncNewAssetsInOpenMaintenancePeriods,
   previewApprovedAssetScheduleProgramming,
   applyAssetScheduleProgramming
 } from './schedules.js';
@@ -12238,6 +12239,8 @@ async function performDueScheduleRequestSync(clientId, fallbackUserId) {
   const today = todayInBogota();
   const client = await getClientById(clientId);
   if (!client?.schema_name) return;
+
+  await syncNewAssetsInOpenMaintenancePeriods({ clientId, today });
 
   await query(
     `WITH removed AS (
