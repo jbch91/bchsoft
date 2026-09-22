@@ -50,6 +50,8 @@ interface AssetLite {
   siteName?: string | null;
   areaName?: string | null;
   locationName?: string | null;
+  acquisition_date?: string | null;
+  warranty_years?: number | null;
 }
 
 interface PendingSpareCase {
@@ -515,6 +517,11 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportCorrectionMode = false;
   reportCorrectionType: MaintenanceReportDto['type'] | null = null;
   reportCorrectionReport: MaintenanceReportDto | null = null;
+  warrantyVoidDialog = false;
+  warrantyVoidReason = '';
+  warrantyVoidConfirmed = false;
+  warrantyVoidSubmitting = false;
+  warrantyVoidError = '';
   correctiveEditorSection: 'attention' | 'intervention' | 'closure' = 'attention';
   readonly correctiveNarrativeFields = CORRECTIVE_NARRATIVE_FIELDS;
   readonly correctiveEditorSections = [
@@ -944,7 +951,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         status: asset.status,
         siteName: asset.site_name,
         areaName: asset.area_name,
-        locationName: asset.location_name
+        locationName: asset.location_name,
+        acquisition_date: asset.acquisition_date,
+        warranty_years: asset.warranty_years
       }));
       this.assetMap = new Map(this.assets.map((asset) => [asset.id, asset]));
       const eligibleProtocolIds = new Set(this.activeAssets.map((asset) => asset.id));
@@ -1698,6 +1707,54 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   startPreventiveReportCorrection(report: MaintenanceReportDto): void {
     this.startReportCorrection(report);
     this.viewMode = 'preventivos';
+  }
+
+  get canVoidCorrectionForWarranty(): boolean {
+    const report = this.reportCorrectionReport;
+    const asset = report ? this.assetMap.get(report.asset_id) : null;
+    return Boolean(report && this.canCorrectReport(report) && this.auth.hasRole('ingeniero_biomedico')
+      && report.created_by === this.auth.currentUser()?.id && report.type === 'preventivo'
+      && report.closure_kind !== 'not_located' && !report.voided_at && !report.is_fully_signed
+      && report.request_status === 'correccion' && !report.requires_spare_parts
+      && (!report.spare_parts_status || report.spare_parts_status === 'no_aplica')
+      && asset?.acquisition_date && Number(asset.warranty_years) > 0);
+  }
+
+  openWarrantyVoidDialog(): void {
+    if (!this.canVoidCorrectionForWarranty || this.reportSaving) return;
+    this.warrantyVoidReason = '';
+    this.warrantyVoidConfirmed = false;
+    this.warrantyVoidError = '';
+    this.warrantyVoidDialog = true;
+  }
+
+  closeWarrantyVoidDialog(): void {
+    if (!this.warrantyVoidSubmitting) this.warrantyVoidDialog = false;
+  }
+
+  async confirmWarrantyVoid(): Promise<void> {
+    if (this.warrantyVoidSubmitting || !this.canVoidCorrectionForWarranty || !this.reportCorrectionReport) return;
+    const reason = this.warrantyVoidReason.replace(/\s+/g, ' ').trim();
+    if (reason.length < 10 || reason.length > 600 || !this.warrantyVoidConfirmed) {
+      this.warrantyVoidError = 'Escribe un motivo de 10 a 600 caracteres y confirma que no hubo mantenimiento.';
+      return;
+    }
+    this.warrantyVoidSubmitting = true;
+    this.warrantyVoidError = '';
+    try {
+      const result = await this.maintenance.voidReportForWarranty(this.reportCorrectionReport.id, reason, true);
+      this.warrantyVoidSubmitting = false;
+      this.cancelReportWorkflow();
+      this.viewMode = 'preventivos';
+      this.preventivePhaseView = 'warranty';
+      await this.loadData();
+      this.showAlert(result.message);
+    } catch (error: any) {
+      this.warrantyVoidError = error?.error?.message || 'No se pudo confirmar la anulación. Actualiza el listado antes de volver a intentarlo.';
+    } finally {
+      this.warrantyVoidSubmitting = false;
+      this.refreshViewSoon();
+    }
   }
 
   async downloadReport(reportId: string): Promise<void> {
@@ -3252,7 +3309,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   cancelReportWorkflow(): void {
-    if (this.reportSaving) return;
+    if (this.reportSaving || this.warrantyVoidSubmitting) return;
     if (this.verbalAttentionMode && (this.verbalAssetId || this.verbalReporterName || this.verbalDescription)
       && !confirm(this.verbalSaveUncertain
         ? 'No se confirmó el guardado. Antes de crear otra atención, revisa Reportes. ¿Cerrar esta ventana?'
@@ -3632,6 +3689,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   private resetReportWorkflow(): void {
+    this.warrantyVoidDialog = false;
+    this.warrantyVoidReason = '';
+    this.warrantyVoidConfirmed = false;
+    this.warrantyVoidError = '';
     this.reportFlowMode = 'normal';
     this.reportFlowSource = null;
     this.reportCorrectionMode = false;

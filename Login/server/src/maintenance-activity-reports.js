@@ -123,7 +123,7 @@ export async function loadActivityReport(user, clientId, filters, runQuery = que
     FROM maintenance_reports r ${joins}
     JOIN maintenance_requests req ON req.id=r.request_id AND req.client_id=r.client_id
     LEFT JOIN users u ON u.id=r.created_by
-    WHERE r.client_id=$1 AND a.asset_category=$2 ${scope} ${location.join(' ')}
+    WHERE r.client_id=$1 AND r.voided_at IS NULL AND a.asset_category=$2 ${scope} ${location.join(' ')}
       AND (COALESCE(r.performed_on,(r.created_at AT TIME ZONE 'America/Bogota')::date)<=$3::date
         OR (r.type='preventivo' AND req.planned_date<=$3::date))
     ORDER BY r.created_at, r.id LIMIT 10001`, params);

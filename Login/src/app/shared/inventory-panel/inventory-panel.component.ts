@@ -1009,6 +1009,7 @@ export class InventoryPanelComponent implements OnDestroy {
 
   historyTypeLabel(item: AssetHistoryItemDto): string {
     if (item.item_type === 'maintenance_report') {
+      if (item.subtype === 'voided_warranty') return 'Protocolo anulado por garantía';
       if (item.subtype === 'not_located') return 'Constancia de equipo no localizado';
       return item.subtype === 'preventivo' ? 'Mantenimiento preventivo' : 'Mantenimiento correctivo';
     }

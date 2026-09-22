@@ -15,6 +15,8 @@ import { query, withTransaction } from './db.js';
 import { createMaintenanceReportSignHandler } from './maintenance-signing.js';
 import { createVerbalAttentionHandler, findVerbalAttention, saveVerbalAttention, verbalAttentionAccessError } from './maintenance-verbal.js';
 import { closeNotLocatedPreventive } from './maintenance-not-located.js';
+import { voidPreventiveForWarranty } from './maintenance-warranty-void.js';
+import { buildWarrantyVoidPdf } from './maintenance-warranty-void-pdf.js';
 import { createActivityReportRouter, isActivityReportReadExport } from './maintenance-activity-report-routes.js';
 import {
   authenticateUser,
@@ -11898,6 +11900,19 @@ app.post(
   }
 );
 
+app.post('/maintenance/reports/:id/void-warranty', requireAuth, requirePermission('maintenance:report:create'), async (req, res) => {
+  try {
+    const result = await voidPreventiveForWarranty({
+      clientId: req.user.clientId, reportId: req.params.id, actor: req.user,
+      reason: req.body?.reason, confirmedNoExecution: req.body?.confirmedNoExecution
+    });
+    return res.json({ ...result, message: 'Protocolo anulado. La actividad quedó cubierta por garantía.' });
+  } catch (error) {
+    if (!error.status) console.error('No se pudo anular el protocolo por garantía', error);
+    return res.status(error.status || 500).json({ message: error.status ? error.message : 'No se pudo anular el protocolo. Intenta nuevamente.' });
+  }
+});
+
 app.post(
   '/maintenance/reports/:id/reopen',
   requireAuth,
@@ -11930,6 +11945,7 @@ app.post(
     if (result.error) {
       const errors = {
         not_found: [404, 'Reporte no encontrado.'],
+        voided: [409, 'El protocolo está anulado y no puede reabrirse.'],
         not_preventive: [409, 'Solo se pueden reabrir protocolos preventivos desde este flujo.'],
         not_owner: [403, 'Solo el ingeniero que elaboró el protocolo puede corregirlo antes de la firma.'],
         already_in_correction: [409, 'Este protocolo ya se encuentra en corrección.'],
@@ -12018,6 +12034,7 @@ app.post(
         message: 'Solo un responsable asignado al área puede solicitar corrección de este reporte.'
       });
     }
+    if (report.voided_at) return res.status(409).json({ message: 'El protocolo está anulado y no puede corregirse.' });
     if (isAreaScopedOperationalUser(req.user)) {
       const allowed = await readerCanAccessAsset(report.client_id, req.user.sub, report.asset_id);
       if (!allowed) {
@@ -12041,7 +12058,6 @@ app.post(
       userId: req.user.sub,
       reason
     });
-    await updateMaintenanceRequestStatus(report.request_id, 'correccion');
     await markMaintenanceReportNotificationsResolved(report.id);
 
     const signedAsset = await getAssetById(report.client_id, report.asset_id);
@@ -12103,11 +12119,11 @@ async function writeMaintenanceReportPdfFile(reportId) {
   const asset = await getAssetById(report.client_id, report.asset_id);
   const request = await getMaintenanceRequestById(report.request_id);
   if (!client || !asset || !request) return null;
-  const signaturesForPdf = await ensureMaintenanceReportSignatureSnapshots(report);
+  const signaturesForPdf = report.voided_at ? [] : await ensureMaintenanceReportSignatureSnapshots(report);
 
   const dir = path.join(process.cwd(), 'uploads', 'clients', report.client_id, 'maintenance');
   await fs.promises.mkdir(dir, { recursive: true });
-  const reportPdfFilename = maintenanceReportPdfFilename(report.id);
+  const reportPdfFilename = report.voided_at ? `anulacion-${report.id}.pdf` : maintenanceReportPdfFilename(report.id);
   const filename = path.join(dir, reportPdfFilename);
   const publicPath = `/${path.join('uploads', 'clients', report.client_id, 'maintenance', reportPdfFilename)}`.replace(/\\/g, '/');
   const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
@@ -12115,11 +12131,12 @@ async function writeMaintenanceReportPdfFile(reportId) {
   const writing = pipeline(doc, fs.createWriteStream(temporaryFilename));
   void writing.catch(() => {});
   try {
-    buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures: signaturesForPdf });
+    if (report.voided_at) buildWarrantyVoidPdf(doc, { client, asset, report });
+    else buildMaintenanceReportPdf(doc, { client, asset, request, report, signatures: signaturesForPdf });
     doc.end();
     await writing;
     await fs.promises.rename(temporaryFilename, filename);
-    await updateMaintenanceReportPdf(report.id, publicPath);
+    if (!report.voided_at) await updateMaintenanceReportPdf(report.id, publicPath);
     return publicPath;
   } catch (error) {
     doc.destroy();
@@ -12153,7 +12170,7 @@ app.get(
     let reportPdfPath = report.pdf_path;
     let pdfPath = resolveStoredFilePath(reportPdfPath);
     if (
-      !pdfPath ||
+      report.voided_at || !pdfPath ||
       !maintenanceReportPdfUsesCurrentTemplate(reportPdfPath, report.id)
     ) {
       reportPdfPath = await writeMaintenanceReportPdfFile(report.id);
@@ -12180,6 +12197,7 @@ app.delete(
     if (!report) {
       return res.status(404).json({ message: 'Reporte no encontrado.' });
     }
+    if (report.voided_at) return res.status(409).json({ message: 'La anulación debe conservarse en la trazabilidad.' });
     await deleteMaintenanceReport(report.id);
     const reportAsset = await getAssetById(report.client_id, report.asset_id);
     await logEquipmentAudit(req, {

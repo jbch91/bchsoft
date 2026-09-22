@@ -67,6 +67,7 @@ export interface PreventiveProgressItemDto {
   warranty_release_date?: string | null;
   is_under_warranty?: boolean;
   can_perform_protocol?: boolean;
+  voided_report_id?: string | null;
   is_late_execution?: boolean;
   late_execution_authorized_at?: string | null;
   late_execution_authorized_until?: string | null;
@@ -105,6 +106,7 @@ export interface AssetQrMaintenanceContextDto {
 }
 
 export interface MaintenanceReportDto {
+  voided_at?: string | null;
   closure_kind?: 'maintenance' | 'not_located';
   id: string;
   client_id: string;
@@ -384,6 +386,12 @@ export class MaintenanceService {
     await firstValueFrom(
       this.http.post(`${this.apiBase}/maintenance/reports/${reportId}/reopen`, { reason })
     );
+  }
+
+  async voidReportForWarranty(reportId: string, reason: string, confirmedNoExecution: boolean): Promise<{ message: string }> {
+    return firstValueFrom(this.http.post<{ message: string }>(
+      `${this.apiBase}/maintenance/reports/${reportId}/void-warranty`, { reason, confirmedNoExecution }
+    ));
   }
 
   async downloadReportPdf(reportId: string): Promise<Blob> {

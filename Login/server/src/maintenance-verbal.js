@@ -121,7 +121,7 @@ export async function saveVerbalAttention(input, user, deps) {
     }, { queryRunner });
     await queryRunner('UPDATE maintenance_requests SET assigned_to=$1 WHERE id=$2', [user.sub, createdRequest.id]);
     const { rows: laterReports } = await queryRunner(
-      `SELECT id FROM maintenance_reports WHERE client_id=$1 AND asset_id=$2
+      `SELECT id FROM maintenance_reports WHERE client_id=$1 AND asset_id=$2 AND voided_at IS NULL
        AND closure_kind = 'maintenance'
        AND COALESCE(performed_on, (created_at AT TIME ZONE 'America/Bogota')::date) > $3::date LIMIT 1`,
       [user.clientId, asset.id, input.performedOn]

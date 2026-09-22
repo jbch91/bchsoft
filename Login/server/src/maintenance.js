@@ -162,6 +162,9 @@ export async function getPreventiveMaintenanceProgress(
               WHERE correction.report_id = report.id
                 AND correction.resolved_at IS NULL
             ) AS correction_requested,
+            (SELECT annulled.id FROM maintenance_reports annulled
+             WHERE annulled.request_id=request.id AND annulled.voided_at IS NOT NULL
+             ORDER BY annulled.voided_at DESC LIMIT 1) AS voided_report_id,
             COALESCE(signatures.has_engineer_signature, FALSE) AS has_engineer_signature,
             COALESCE(signatures.has_area_responsible_signature, FALSE) AS has_area_responsible_signature,
             COALESCE(signatures.has_acceptance_signature, FALSE) AS has_acceptance_signature,
@@ -213,7 +216,7 @@ export async function getPreventiveMaintenanceProgress(
               maintenance_report.pdf_path,
               maintenance_report.created_at
        FROM maintenance_reports maintenance_report
-       WHERE maintenance_report.type = 'preventivo'
+       WHERE maintenance_report.type = 'preventivo' AND maintenance_report.voided_at IS NULL
          AND (
            maintenance_report.id = item.report_id
            OR maintenance_report.request_id = request.id
@@ -262,7 +265,8 @@ export async function getPreventiveMaintenanceProgress(
       warranty_resolved_at: item.warranty_resolved_at,
       warranty_release_date: item.warranty_release_date,
       is_under_warranty: Boolean(item.is_under_warranty),
-      can_perform_protocol: Boolean(item.can_perform_protocol && !['completed', 'not_located'].includes(phase)),
+      voided_report_id: item.voided_report_id,
+      can_perform_protocol: Boolean(!item.voided_report_id && item.can_perform_protocol && !['completed', 'not_located'].includes(phase)),
       is_late_execution: Boolean(item.late_execution_authorized_at),
       late_execution_authorized_at: item.late_execution_authorized_at,
       late_execution_authorized_until: item.late_execution_authorized_until,
@@ -505,7 +509,10 @@ export async function createMaintenanceReport(payload, { queryRunner = query } =
     return withTransaction(client => createMaintenanceReport(payload, { queryRunner: client.query.bind(client) }));
   }
   // Serialize with an engineer-only non-execution closure on the same request.
-  await queryRunner('SELECT id FROM maintenance_requests WHERE id=$1 FOR UPDATE', [payload.requestId]);
+  const lockedRequest = await queryRunner('SELECT id,status FROM maintenance_requests WHERE id=$1 FOR UPDATE', [payload.requestId]);
+  if (lockedRequest.rows[0]?.status === 'garantia') {
+    throw Object.assign(new Error('La actividad está cubierta por garantía.'), { status:409 });
+  }
   const existingClosure = await queryRunner(
     "SELECT id FROM maintenance_reports WHERE request_id=$1 AND closure_kind='not_located'", [payload.requestId]
   );
@@ -576,7 +583,7 @@ export async function getMaintenanceReportWithOpenCorrectionByRequest(requestId)
     `SELECT r.*
      FROM maintenance_reports r
      JOIN maintenance_report_corrections c ON c.report_id = r.id AND c.resolved_at IS NULL
-     WHERE r.request_id = $1
+     WHERE r.request_id = $1 AND r.voided_at IS NULL
      ORDER BY c.created_at DESC
      LIMIT 1`,
     [requestId]
@@ -598,7 +605,14 @@ export async function getLatestWaitingSpareReportByRequest(requestId) {
   return rows[0];
 }
 
-export async function updateMaintenanceReport(reportId, payload) {
+export async function updateMaintenanceReport(reportId, payload, { queryRunner = query } = {}) {
+  if (queryRunner === query) {
+    return withTransaction(db => updateMaintenanceReport(reportId,payload,{queryRunner:db.query.bind(db)}));
+  }
+  const context = (await queryRunner('SELECT request_id FROM maintenance_reports WHERE id=$1',[reportId])).rows[0];
+  if (context) await queryRunner('SELECT id FROM maintenance_requests WHERE id=$1 FOR UPDATE',[context.request_id]);
+  const original = (await queryRunner('SELECT id,voided_at FROM maintenance_reports WHERE id=$1 FOR UPDATE',[reportId])).rows[0];
+  if (!original || original.voided_at) throw Object.assign(new Error('El reporte fue anulado y no puede modificarse.'),{status:409});
   const {
     type,
     summary,
@@ -617,7 +631,7 @@ export async function updateMaintenanceReport(reportId, payload) {
     requestStatusAfter,
     createdBy
   } = payload;
-  await query(
+  await queryRunner(
     `UPDATE maintenance_reports
      SET type = $2,
          summary = $3,
@@ -655,7 +669,7 @@ export async function updateMaintenanceReport(reportId, payload) {
       createdBy
     ]
   );
-  await query(
+  await queryRunner(
     `UPDATE maintenance_requests SET status = $2, updated_at = NOW()
      WHERE id = (SELECT request_id FROM maintenance_reports WHERE id = $1)`,
     [reportId, requestStatusAfter || 'reportado']
@@ -697,6 +711,7 @@ export async function signMaintenanceReport(payload) {
     );
     const report = reports[0];
     if (!report) throw Object.assign(new Error('Reporte no encontrado.'), { status: 404 });
+    if (report.voided_at) throw Object.assign(new Error('El protocolo está anulado y no puede firmarse.'), { status: 409 });
     if (report.closure_kind === 'not_located') {
       throw Object.assign(new Error('La constancia ya fue firmada por el ingeniero y no requiere aval adicional.'), { status: 409 });
     }
@@ -802,7 +817,7 @@ export async function listMaintenanceReports(
   clientId,
   { assetId, assetCategory = null, from, to, order = 'desc', limit, offset } = {}
 ) {
-  const clauses = ['r.client_id = $1'];
+  const clauses = ['r.client_id = $1', 'r.voided_at IS NULL'];
   const params = [clientId];
   let assetJoin = '';
   if (assetCategory) {
@@ -874,7 +889,7 @@ export async function updateMaintenanceReportTracking(reportId, payload) {
          requires_spare_parts = $3,
          spare_parts_needed = $4,
          spare_parts_status = $5
-     WHERE id = $6`,
+     WHERE id = $6 AND voided_at IS NULL`,
     [
       assetStatusAfter || 'operativo',
       assetStatusObservations || null,
@@ -908,7 +923,7 @@ export async function listMaintenanceReportsForReader(
     return [];
   }
 
-  const clauses = ['r.client_id = $1'];
+  const clauses = ['r.client_id = $1', 'r.voided_at IS NULL'];
   const params = [clientId];
   if (assetCategory) {
     params.push(normalizeAssetCategory(assetCategory));
@@ -1001,20 +1016,27 @@ export async function getMaintenanceReportById(reportId) {
 
 export async function requestMaintenanceReportCorrection(payload) {
   const { reportId, userId, reason } = payload;
-  const { rows } = await query(
-    `INSERT INTO maintenance_report_corrections (report_id, requested_by, reason)
-     VALUES ($1,$2,$3)
-     RETURNING id`,
-    [reportId, userId, reason]
-  );
-  return rows[0];
+  return withTransaction(async db => {
+    const context = (await db.query('SELECT request_id FROM maintenance_reports WHERE id=$1', [reportId])).rows[0];
+    if (context) await db.query('SELECT id FROM maintenance_requests WHERE id=$1 FOR UPDATE', [context.request_id]);
+    const report = (await db.query('SELECT request_id,voided_at FROM maintenance_reports WHERE id=$1 FOR UPDATE', [reportId])).rows[0];
+    if (!report || report.voided_at) throw Object.assign(new Error('El reporte no está disponible para corrección.'), {status:409});
+    const { rows } = await db.query(
+      `INSERT INTO maintenance_report_corrections (report_id, requested_by, reason)
+       VALUES ($1,$2,$3)
+       RETURNING id`,
+      [reportId, userId, reason]
+    );
+    await db.query("UPDATE maintenance_requests SET status='correccion',updated_at=NOW() WHERE id=$1", [report.request_id]);
+    return rows[0];
+  });
 }
 
 export async function reopenMaintenanceReportForEngineer(payload) {
   const { reportId, userId, reason } = payload;
   return withTransaction(async (client) => {
     const { rows: reportRows } = await client.query(
-      `SELECT r.id, r.client_id, r.request_id, r.asset_id, r.type, r.created_by, r.pdf_path,
+      `SELECT r.id, r.client_id, r.request_id, r.asset_id, r.type, r.created_by, r.pdf_path, r.voided_at,
               req.status AS request_status, r.area_responsible_required
        FROM maintenance_reports r
        JOIN maintenance_requests req ON req.id = r.request_id
@@ -1090,7 +1112,7 @@ export async function updateMaintenanceRequestStatus(requestId, status) {
 }
 
 export async function updateMaintenanceReportPdf(reportId, pdfPath) {
-  await query('UPDATE maintenance_reports SET pdf_path = $1 WHERE id = $2', [pdfPath, reportId]);
+  await query('UPDATE maintenance_reports SET pdf_path = $1 WHERE id = $2 AND voided_at IS NULL', [pdfPath, reportId]);
 }
 
 export async function listReportSignatures(reportId) {
@@ -1119,11 +1141,16 @@ export async function listReportSignaturesByReports(reportIds) {
 }
 
 export async function deleteMaintenanceReport(reportId) {
-  await query('DELETE FROM maintenance_reports WHERE id = $1', [reportId]);
+  await query('DELETE FROM maintenance_reports WHERE id = $1 AND voided_at IS NULL', [reportId]);
 }
 
 export async function deleteMaintenanceRequest(requestId) {
-  await query('DELETE FROM maintenance_requests WHERE id = $1', [requestId]);
+  await withTransaction(async db => {
+    await db.query('SELECT id FROM maintenance_requests WHERE id=$1 FOR UPDATE', [requestId]);
+    const preserved = await db.query('SELECT id FROM maintenance_reports WHERE request_id=$1 AND voided_at IS NOT NULL', [requestId]);
+    if (preserved.rows.length) throw Object.assign(new Error('La solicitud conserva un protocolo anulado y su trazabilidad no puede eliminarse.'), {status:409});
+    await db.query('DELETE FROM maintenance_requests WHERE id=$1', [requestId]);
+  });
 }
 
 export async function createNotification(payload, { queryRunner = query } = {}) {

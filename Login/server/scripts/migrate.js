@@ -122,6 +122,7 @@ const MIGRATIONS = [
   'maintenance_signature_snapshots.sql',
   'maintenance_late_execution.sql',
   'maintenance_not_located.sql',
+  'maintenance_report_voids.sql',
   'reader_read_only.sql',
   'asset_code_sequences.sql'
 ];

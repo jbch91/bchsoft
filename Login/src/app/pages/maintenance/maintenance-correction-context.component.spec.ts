@@ -133,4 +133,51 @@ describe('report correction context', () => {
     expect(c.reportCorrectionReport).toBeNull();
     expect(c.reportFormActive).toBe(false);
   });
+
+  it('shows warranty annulment only for an own preventive correction with recorded warranty and no parts', async () => {
+    const { fixture, c, element } = await render('preventivo');
+    expect(c.canVoidCorrectionForWarranty).toBe(false);
+    Object.assign(c.assetMap.get('asset')!, {acquisition_date:'2026-02-26',warranty_years:1});
+    fixture.changeDetectorRef.markForCheck(); fixture.detectChanges();
+    expect(element.querySelector('.warranty-void-action')?.textContent).toContain('Anular y pasar a garantía');
+    for (const changes of [{type:'correctivo'}, {created_by:'another'}, {is_fully_signed:true},
+      {requires_spare_parts:true}, {request_status:'reportado'}, {voided_at:'2026-09-22'}]) {
+      c.reportCorrectionReport = {...report(), ...changes} as MaintenanceReportDto;
+      expect(c.canVoidCorrectionForWarranty).toBe(false);
+    }
+  });
+
+  it('preserves editor values on cancel and replaces the editor with an explicit confirmation dialog', async () => {
+    const {fixture,c,element}=await render('preventivo');
+    Object.assign(c.assetMap.get('asset')!,{acquisition_date:'2026-02-26',warranty_years:1});
+    c.reportSummary='Cambio sin guardar'; c.openWarrantyVoidDialog();
+    fixture.changeDetectorRef.markForCheck(); fixture.detectChanges();
+    expect(element.querySelector('.report-editor-modal')).toBeNull();
+    expect(element.querySelector('.warranty-void-modal')).not.toBeNull();
+    const submit=element.querySelector('.warranty-void-modal button[type=submit]') as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    c.closeWarrantyVoidDialog();
+    expect(c.reportSummary).toBe('Cambio sin guardar');
+  });
+
+  it('requires confirmation, retains errors, prevents duplicate submits and refreshes warranty after success', async () => {
+    let resolve: (value:{message:string})=>void = () => {};
+    const maintenance={voidReportForWarranty:vi.fn().mockRejectedValueOnce({error:{message:'Fecha sin garantía'}})
+      .mockImplementationOnce(()=>new Promise(r=>{resolve=r;}))};
+    const c=prepare(new MaintenanceComponent({} as never,auth as never,{} as never,maintenance as never,{detectChanges:vi.fn()} as never,route as never));
+    Object.assign(c.assetMap.get('asset')!,{acquisition_date:'2026-02-26',warranty_years:1});
+    c.startReportCorrection(report()); c.openWarrantyVoidDialog();
+    await c.confirmWarrantyVoid(); expect(maintenance.voidReportForWarranty).not.toHaveBeenCalled();
+    c.warrantyVoidReason='Registro por error, no se realizó mantenimiento.'; c.warrantyVoidConfirmed=true;
+    await c.confirmWarrantyVoid();
+    expect(c.warrantyVoidError).toBe('Fecha sin garantía'); expect(c.warrantyVoidSubmitting).toBe(false);
+    expect(c.warrantyVoidDialog).toBe(true); expect(c.warrantyVoidReason).toContain('Registro');
+    const pending=c.confirmWarrantyVoid();
+    await c.confirmWarrantyVoid(); c.closeWarrantyVoidDialog();
+    expect(maintenance.voidReportForWarranty).toHaveBeenCalledTimes(2); expect(c.warrantyVoidDialog).toBe(true);
+    resolve({message:'Actividad cubierta por garantía.'}); await pending;
+    expect(c.reportCorrectionReport).toBeNull(); expect(c.reportFormActive).toBe(false);
+    expect(c.warrantyVoidDialog).toBe(false); expect(c.warrantyVoidSubmitting).toBe(false);
+    expect(c.preventivePhaseView).toBe('warranty'); expect(c.loadData).toHaveBeenCalled();
+  });
 });

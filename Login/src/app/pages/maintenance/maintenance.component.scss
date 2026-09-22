@@ -2992,6 +2992,19 @@ button:disabled {
   .report-correction-meta > * { min-width: 0; }
 }
 
+.warranty-void-action { justify-self: start; font-size: 12px; padding: 7px 10px; white-space: normal; }
+.warranty-void-modal {
+  box-sizing: border-box;
+  max-height: calc(100dvh - 36px);
+  h2 { font-size: 18px; line-height: 1.3; }
+  textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 90px; font-size: 13px; }
+  .warranty-void-notice { font-size: 13px; line-height: 1.5; color: var(--muted); }
+  .warranty-void-confirm { display: flex; align-items: flex-start; gap: 10px; margin: 16px 0; font-size: 13px; line-height: 1.5; }
+  .warranty-void-confirm input { flex: 0 0 16px; width: 16px; height: 16px; margin-top: 2px; }
+  .modal-actions { flex-wrap: wrap; }
+  .modal-actions button { font-size: 12px; white-space: normal; }
+}
+
 .verbal-create-button {
   flex: 0 1 auto;
   padding: 8px 12px;

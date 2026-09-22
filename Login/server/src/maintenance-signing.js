@@ -17,6 +17,7 @@ export function createMaintenanceReportSignHandler(deps) {
       if (req.user.clientId && req.user.clientId !== report.client_id) {
         return res.status(403).json({ message: 'Sin acceso al cliente.' });
       }
+      if (report.voided_at) return res.status(409).json({ message:'El reporte está anulado y no puede firmarse.' });
       if (report.closure_kind === 'not_located') {
         return res.status(409).json({ message: 'La constancia ya está finalizada con la firma del ingeniero.' });
       }

@@ -141,6 +141,7 @@ export function isMaintenanceReportFullySigned(
     'superuser'
   ]
 ) {
+  if (report?.voided_at) return false;
   const hasEngineer = signatures.some((signature) => signature.role === 'ingeniero_biomedico');
   if (!hasEngineer) return false;
   if (report?.closure_kind === 'not_located') return true;
@@ -164,6 +165,7 @@ export function maintenanceReportEngineerReopenError(
   signatures = [],
   userId = ''
 ) {
+  if (report?.voided_at) return 'voided';
   if (!report || report.type !== 'preventivo') return 'not_preventive';
   if (!userId || report.created_by !== userId) return 'not_owner';
   if (report.correction_requested) return 'already_in_correction';

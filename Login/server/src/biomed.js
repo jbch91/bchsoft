@@ -1308,7 +1308,7 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
        SELECT
          r.id,
          'maintenance_report' AS item_type,
-         CASE WHEN r.closure_kind = 'not_located' THEN 'not_located' ELSE r.type END AS subtype,
+         CASE WHEN r.voided_at IS NOT NULL THEN 'voided_warranty' WHEN r.closure_kind = 'not_located' THEN 'not_located' ELSE r.type END AS subtype,
          COALESCE(
            CASE WHEN r.closure_kind = 'not_located' THEN
              (r.non_execution_details->>'verifiedOn')::timestamp AT TIME ZONE 'America/Bogota' END,
@@ -1316,9 +1316,10 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
            (SELECT MAX(s.signed_at) FROM report_signatures s WHERE s.report_id = r.id),
            r.created_at
          ) AS event_date,
-         COALESCE(NULLIF(r.summary, ''), 'Reporte de mantenimiento') AS title,
-         r.findings AS description,
-         r.pdf_path,
+         CASE WHEN r.voided_at IS NOT NULL THEN 'Protocolo anulado por garantía - sin ejecución'
+           ELSE COALESCE(NULLIF(r.summary, ''), 'Reporte de mantenimiento') END AS title,
+         CASE WHEN r.voided_at IS NOT NULL THEN r.void_reason ELSE r.findings END AS description,
+         CASE WHEN r.voided_at IS NOT NULL THEN NULL ELSE r.pdf_path END AS pdf_path,
          NULL::uuid AS maintenance_schedule_item_id,
          COALESCE(
            (SELECT MAX(s.signed_at) FROM report_signatures s WHERE s.report_id = r.id),
@@ -1328,13 +1329,13 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
        JOIN maintenance_requests req ON req.id = r.request_id
        WHERE r.asset_id = $1
          AND r.client_id = $2
-         AND EXISTS (
+         AND (r.voided_at IS NOT NULL OR EXISTS (
            SELECT 1
            FROM report_signatures s
            WHERE s.report_id = r.id
              AND s.role = 'ingeniero_biomedico'
-         )
-         AND (r.closure_kind = 'not_located' OR EXISTS (
+         ))
+         AND (r.voided_at IS NOT NULL OR r.closure_kind = 'not_located' OR EXISTS (
            SELECT 1 FROM report_signatures s WHERE s.report_id = r.id
            AND (
              (r.area_responsible_required AND s.role = 'responsable_area')

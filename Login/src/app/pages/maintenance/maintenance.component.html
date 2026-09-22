@@ -568,6 +568,9 @@
 
             <ng-template #primaryPreventiveActions>
               <ng-container *ngIf="item.phase === 'warranty'">
+                <button *ngIf="item.voided_report_id" type="button" class="ghost" [disabled]="reportPdfLoadingId === item.voided_report_id"
+                  (click)="downloadReport(item.voided_report_id)">Ver anulación</button>
+                <ng-container *ngIf="!item.voided_report_id">
                 <ng-container *ngIf="canManagePreventiveWarranty(); else warrantyReadOnly">
                   <button
                     *ngIf="item.warranty_resolution !== 'covered'"
@@ -593,6 +596,7 @@
                 <ng-template #warrantyReadOnly>
                   <small>La decisión corresponde al ingeniero biomédico.</small>
                 </ng-template>
+                </ng-container>
               </ng-container>
 
               <ng-container *ngIf="item.phase === 'not_started' || item.phase === 'in_progress'">
@@ -725,7 +729,7 @@
 
   <div
     class="maintenance-modal-backdrop report-editor-backdrop"
-    *ngIf="auth.hasPermission('maintenance:report:create') && reportFormActive"
+    *ngIf="auth.hasPermission('maintenance:report:create') && reportFormActive && !warrantyVoidDialog"
     role="dialog"
     aria-modal="true"
     aria-labelledby="report-editor-title"
@@ -790,6 +794,7 @@
             <span *ngIf="reportCorrectionReport?.correction_requested_by_name">Solicitada por: <strong>{{ reportCorrectionReport?.correction_requested_by_name }}</strong></span>
             <time *ngIf="reportCorrectionReport?.correction_requested_at" [attr.datetime]="reportCorrectionReport?.correction_requested_at">{{ reportCorrectionReport?.correction_requested_at | date: 'dd/MM/yyyy, h:mm a' }}</time>
           </div>
+          <button type="button" class="ghost warranty-void-action" *ngIf="canVoidCorrectionForWarranty" (click)="openWarrantyVoidDialog()">Anular y pasar a garantía</button>
         </section>
           <section class="verbal-attention-fields" *ngIf="verbalAttentionMode" [hidden]="correctiveEditorSection !== 'attention'" aria-label="Datos de la atención verbal">
             <div class="verbal-equipment-row">
@@ -2240,6 +2245,32 @@
           {{ verifyingSignature ? 'Verificando firma...' : signingReport ? 'Firmando...' : 'Confirmar firma' }}
         </button>
       </div>
+    </article>
+  </div>
+
+  <div class="maintenance-modal-backdrop" *ngIf="warrantyVoidDialog" role="dialog" aria-modal="true"
+    aria-labelledby="warranty-void-title" (click)="closeWarrantyVoidDialog()" (keydown.escape)="closeWarrantyVoidDialog()">
+    <article class="maintenance-modal warranty-void-modal" (click)="$event.stopPropagation()">
+      <div class="modal-heading">
+        <div><span>Registro erróneo</span><h2 id="warranty-void-title">Anular y pasar a garantía</h2></div>
+        <button type="button" class="icon-action ghost" aria-label="Cerrar" title="Cerrar" [disabled]="warrantyVoidSubmitting" (click)="closeWarrantyVoidDialog()">×</button>
+      </div>
+      <div class="modal-report-context"><strong>{{ reportCorrectionReport ? assetLabel(reportCorrectionReport.asset_id) : '' }}</strong></div>
+      <p class="warranty-void-notice">Solo corresponde si no se realizó el mantenimiento y la fecha programada está cubierta por garantía. El protocolo y sus firmas se conservarán como registro anulado. No se modifican las capacitaciones.</p>
+      <form (ngSubmit)="confirmWarrantyVoid()">
+        <label>Motivo de la anulación
+          <textarea [(ngModel)]="warrantyVoidReason" name="warrantyVoidReason" rows="4" minlength="10" maxlength="600" required [disabled]="warrantyVoidSubmitting" autofocus></textarea>
+          <small class="field-help">Mínimo 10 caracteres · {{ warrantyVoidReason.trim().length }}/600</small>
+        </label>
+        <label class="warranty-void-confirm"><input type="checkbox" name="warrantyVoidConfirmed" [(ngModel)]="warrantyVoidConfirmed" [disabled]="warrantyVoidSubmitting" />
+          <span>Confirmo que este protocolo se registró por error y que el mantenimiento no se realizó.</span>
+        </label>
+        <div class="message error" *ngIf="warrantyVoidError" role="alert">{{ warrantyVoidError }}</div>
+        <div class="modal-actions">
+          <button type="button" class="ghost" [disabled]="warrantyVoidSubmitting" (click)="closeWarrantyVoidDialog()">Volver a corregir</button>
+          <button type="submit" [disabled]="warrantyVoidSubmitting || !warrantyVoidConfirmed || warrantyVoidReason.trim().length < 10">{{ warrantyVoidSubmitting ? 'Anulando...' : 'Confirmar anulación' }}</button>
+        </div>
+      </form>
     </article>
   </div>
 
