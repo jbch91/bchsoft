@@ -1308,7 +1308,9 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
        SELECT
          r.id,
          'maintenance_report' AS item_type,
-         CASE WHEN r.voided_at IS NOT NULL THEN 'voided_warranty' WHEN r.closure_kind = 'not_located' THEN 'not_located' ELSE r.type END AS subtype,
+         CASE WHEN r.voided_at IS NOT NULL THEN
+           CASE WHEN r.void_details->>'destination' = 'not_located' THEN 'voided_not_located' ELSE 'voided_warranty' END
+           WHEN r.closure_kind = 'not_located' THEN 'not_located' ELSE r.type END AS subtype,
          COALESCE(
            CASE WHEN r.closure_kind = 'not_located' THEN
              (r.non_execution_details->>'verifiedOn')::timestamp AT TIME ZONE 'America/Bogota' END,
@@ -1316,7 +1318,9 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
            (SELECT MAX(s.signed_at) FROM report_signatures s WHERE s.report_id = r.id),
            r.created_at
          ) AS event_date,
-         CASE WHEN r.voided_at IS NOT NULL THEN 'Protocolo anulado por garantía - sin ejecución'
+         CASE WHEN r.voided_at IS NOT NULL THEN
+           CASE WHEN r.void_details->>'destination' = 'not_located' THEN 'Protocolo anulado - equipo no localizado'
+             ELSE 'Protocolo anulado por garantía - sin ejecución' END
            ELSE COALESCE(NULLIF(r.summary, ''), 'Reporte de mantenimiento') END AS title,
          CASE WHEN r.voided_at IS NOT NULL THEN r.void_reason ELSE r.findings END AS description,
          CASE WHEN r.voided_at IS NOT NULL THEN NULL ELSE r.pdf_path END AS pdf_path,

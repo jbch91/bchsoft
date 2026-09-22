@@ -8,6 +8,7 @@ const date = value => {
 
 // A separate certificate leaves the original protocol and signature files intact.
 export function buildWarrantyVoidPdf(doc, { client, asset, report }) {
+  const notLocated = report.void_details?.destination === 'not_located';
   const width = doc.page.width - 100;
   const line = (label, value) => {
     doc.font('Helvetica-Bold').fontSize(9).fillColor('#50636b').text(upper(label), { width });
@@ -17,14 +18,20 @@ export function buildWarrantyVoidPdf(doc, { client, asset, report }) {
   doc.font('Helvetica-Bold').fontSize(13).fillColor('#263c43').text(upper(client.name), { width });
   doc.moveDown(0.4).font('Helvetica').fontSize(9).text(`NIT: ${upper(client.nit)}`);
   doc.moveDown(1.4).font('Helvetica-Bold').fontSize(20).text('ANULACIÓN DE PROTOCOLO', { width });
-  doc.moveDown(0.5).fontSize(10).fillColor('#256b60').text('SIN EJECUCIÓN DE MANTENIMIENTO - CUBIERTO POR GARANTÍA', { width });
+  doc.moveDown(0.5).fontSize(10).fillColor('#256b60').text(notLocated
+    ? 'SIN EJECUCIÓN DE MANTENIMIENTO - EQUIPO NO LOCALIZADO'
+    : 'SIN EJECUCIÓN DE MANTENIMIENTO - CUBIERTO POR GARANTÍA', { width });
   doc.moveDown(1.5);
   line('Equipo', `${report.void_details?.assetCode || asset.code} - ${report.void_details?.assetName || asset.name}`);
   line('Identificación', `${asset.brand || 'NR'} / ${asset.model || 'NR'} / SERIE: ${asset.serial || 'NR'}`);
-  line('Actividad programada / Fin de garantía', `${date(report.void_details?.plannedDate)} / ${date(report.void_details?.warrantyReleaseDate)}`);
+  if (notLocated) line('Actividad programada', date(report.void_details?.plannedDate));
+  else line('Actividad programada / Fin de garantía', `${date(report.void_details?.plannedDate)} / ${date(report.void_details?.warrantyReleaseDate)}`);
   line('Anulación registrada', `${date(report.voided_at)} - ${report.void_details?.actorLabel || 'USUARIO REGISTRADO'}`);
   line('Motivo de anulación', report.void_reason);
-  line('Trazabilidad', 'Se confirmó que no hubo intervención. El protocolo y las firmas originales se conservan como evidencia del registro erróneo. La actividad pasa a garantía, sin contabilizarse como mantenimiento ejecutado. Esta constancia no acredita una intervención técnica.');
+  line('Trazabilidad', notLocated
+    ? 'Se confirmó que no hubo intervención. El protocolo y las firmas originales se conservan como evidencia del registro erróneo. La actividad se cierra mediante una constancia de equipo no localizado, sin contabilizarse como mantenimiento ejecutado. No se verificó el estado operativo del equipo.'
+    : 'Se confirmó que no hubo intervención. El protocolo y las firmas originales se conservan como evidencia del registro erróneo. La actividad pasa a garantía, sin contabilizarse como mantenimiento ejecutado. Esta constancia no acredita una intervención técnica.');
+  if (notLocated) line('Constancia de reemplazo', report.void_details?.replacementReportId);
   doc.fontSize(8).fillColor('#50636b').text(`REPORTE ORIGINAL: ${report.id}`, { width });
   doc.moveDown(2).fontSize(7).text('SOFTWARE BIOMÉDICO INBIHOSPITALARIO | CONSTANCIA DE ANULACIÓN', { width, align: 'center' });
 }

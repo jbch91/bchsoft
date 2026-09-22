@@ -1656,7 +1656,14 @@ button:disabled {
   min-width: 0;
 }
 
-.not-located-fields > label:nth-child(n + 3) { grid-column: 1 / -1; }
+.not-located-fields > .not-located-wide,
+.not-located-fields > .not-located-confirm { grid-column: 1 / -1; }
+
+.not-located-modal .warranty-void-notice {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
 
 .not-located-modal .protocol-confirm-footer {
   display: flex;

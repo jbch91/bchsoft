@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MaintenanceComponent } from './maintenance.component';
-import { PreventiveProgressItemDto, PreventiveProgressSummaryDto } from '../../maintenance/maintenance.service';
+import { MaintenanceReportDto, PreventiveProgressItemDto, PreventiveProgressSummaryDto } from '../../maintenance/maintenance.service';
 import { HojasDeVidaComponent } from '../hojas-de-vida/hojas-de-vida.component';
 import { InventoryPanelComponent } from '../../shared/inventory-panel/inventory-panel.component';
 
@@ -48,6 +48,63 @@ describe('constancia de equipo no localizado', () => {
     fill(); component.notLocatedConfirmed = false; await component.submitNotLocated();
     expect(component.notLocatedError).toContain('Confirma');
     expect(maintenance.closeNotLocatedPreventive).not.toHaveBeenCalled();
+  });
+
+  it('allows not located after cancelling an in-progress preventive without saving a report', () => {
+    const { component, maintenance, item } = setup();
+    const opened: PreventiveProgressItemDto = { ...item, phase: 'in_progress',
+      request_id: 'request', request_status: 'en_proceso', assigned_to: 'engineer' };
+    component.reportFormActive = true;
+    component.reportRequestId = 'request';
+    component.reportSummary = 'Texto sin guardar';
+    component.cancelReportWorkflow();
+    expect(component.reportFormActive).toBe(false);
+    expect(component.canCloseNotLocated(opened)).toBe(true);
+    component.openNotLocated(opened);
+    expect(component.notLocatedItem).toBe(opened);
+    expect(maintenance.closeNotLocatedPreventive).not.toHaveBeenCalled();
+    expect(component.canCloseNotLocated({ ...opened, report_id: 'saved-report' })).toBe(false);
+  });
+
+  function pendingSetup() {
+    const context = setup();
+    const report: MaintenanceReportDto = { id: 'old-report', client_id: 'client', asset_id: 'asset', request_id: 'request',
+      type: 'preventivo', created_by: 'engineer', created_at: '', request_status: 'reportado', can_reopen_by_me: true };
+    const item: PreventiveProgressItemDto = { ...context.item, phase: 'pending_signature', report_id: report.id,
+      request_id: 'request', request_status: 'reportado', can_perform_protocol: false, completion_source: 'software_report' };
+    context.component.reports = [report];
+    return { ...context, item, report };
+  }
+
+  it('offers an explicit audited replacement only for the eligible author', () => {
+    const { component, item, report } = pendingSetup();
+    expect(component.canCloseNotLocated(item)).toBe(false);
+    expect(component.canReplaceWithNotLocated(item)).toBe(true);
+    for (const change of [{ created_by: 'other' }, { client_id: 'other' }, { can_reopen_by_me: false },
+      { is_fully_signed: true }, { requires_spare_parts: true }, { spare_parts_needed: 'Parte' },
+      { closure_kind: 'not_located' }, { voided_at: '2026-01-01' }, { type: 'correctivo' }]) {
+      component.reports = [{ ...report, ...change } as MaintenanceReportDto];
+      expect(component.canReplaceWithNotLocated(item)).toBe(false);
+    }
+  });
+
+  it('requires the real search date, annulment reason and consent, then uses the replacement endpoint', async () => {
+    const { component, item, maintenance } = pendingSetup();
+    component.openNotLocated(item, true);
+    expect(component.notLocatedDate).toBe(''); expect(component.notLocatedConfirmed).toBe(false);
+    component.notLocatedDate = '2026-01-02'; component.notLocatedLocation = 'CONSULTORIO 1';
+    component.notLocatedReason = 'Se revisó el consultorio sin localizar el equipo.';
+    await component.submitNotLocated(); expect(component.notLocatedError).toContain('anulación');
+    component.notLocatedVoidReason = 'Se envió por error sin haber localizado el equipo.';
+    await component.submitNotLocated(); expect(component.notLocatedError).toContain('Confirma');
+    expect(maintenance.closeNotLocatedPreventive).not.toHaveBeenCalled();
+    component.notLocatedConfirmed = true;
+    await component.submitNotLocated();
+    expect(maintenance.closeNotLocatedPreventive).toHaveBeenCalledWith('client', 'item', expect.objectContaining({
+      confirmed: true, voidReason: 'Se envió por error sin haber localizado el equipo.'
+    }), 'old-report');
+    expect(component.notLocatedItem).toBeNull(); expect(component.notLocatedReport).toBeNull();
+    expect(component.preventivePhaseView).toBe('completed');
   });
 
   it('closes and releases busy state before refreshing without changing filters or tab', async () => {

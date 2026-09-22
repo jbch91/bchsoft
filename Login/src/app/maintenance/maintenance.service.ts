@@ -247,10 +247,12 @@ export class MaintenanceService {
   }
 
   async closeNotLocatedPreventive(clientId: string, itemId: string,
-    payload: { verifiedOn: string; searchedLocation: string; reason: string; confirmed: boolean }
+    payload: { verifiedOn: string; searchedLocation: string; reason: string; confirmed: boolean; voidReason?: string },
+    replaceReportId?: string
   ): Promise<{ id: string; replayed: boolean; pdfAvailable: boolean; message: string }> {
+    const action = replaceReportId ? `replace-report/${encodeURIComponent(replaceReportId)}/not-located` : 'not-located';
     return firstValueFrom(this.http.post<{ id: string; replayed: boolean; pdfAvailable: boolean; message: string }>(
-      `${this.apiBase}/maintenance/preventive-progress/${clientId}/items/${itemId}/not-located`, payload
+      `${this.apiBase}/maintenance/preventive-progress/${clientId}/items/${itemId}/${action}`, payload
     ).pipe(timeout(45000)));
   }
 

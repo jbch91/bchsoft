@@ -3,6 +3,7 @@ import { withTransaction } from './db.js';
 import { normalizeDateOnly, dateOnlyFromDatabase, assetWarrantyReleaseDate } from './schedule-workflow.js';
 import { createMaintenanceSignatureSnapshot, removeMaintenanceSignatureSnapshot } from './maintenance-signature-snapshots.js';
 import { logAudit } from './audit.js';
+import { prepareNotLocatedReplacement, voidNotLocatedReplacement } from './maintenance-not-located-replacement.js';
 
 function fail(status, message) {
   throw Object.assign(new Error(message), { status });
@@ -21,7 +22,7 @@ export function normalizeNotLocatedClosure(payload, today) {
   return { verifiedOn, reason, searchedLocation };
 }
 
-export async function closeNotLocatedPreventive({ clientId, itemId, payload, actor, today }, {
+export async function closeNotLocatedPreventive({ clientId, itemId, payload, actor, today, replaceReportId = null, voidReason }, {
   transactionRunner = withTransaction,
   snapshotSignature = createMaintenanceSignatureSnapshot,
   removeSnapshot = removeMaintenanceSignatureSnapshot
@@ -29,7 +30,7 @@ export async function closeNotLocatedPreventive({ clientId, itemId, payload, act
   if (!actor?.sub || actor.clientId !== clientId || !actor.roles?.includes('ingeniero_biomedico')) {
     fail(403, 'Solo el ingeniero biomédico del cliente puede registrar esta constancia.');
   }
-  if (![clientId, itemId].every(value => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value))) {
+  if (![clientId, itemId, ...(replaceReportId ? [replaceReportId] : [])].every(value => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value))) {
     fail(400, 'Identificador de actividad o cliente inválido.');
   }
   const details = normalizeNotLocatedClosure(payload, today);
@@ -59,20 +60,26 @@ export async function closeNotLocatedPreventive({ clientId, itemId, payload, act
          WHERE report.id=$1 OR request.schedule_item_id=$2`, [item.report_id, item.id]
       )).rows;
       if (existing.length) {
-        const saved = existing[0];
-        if (existing.length === 1 && saved.closure_kind === 'not_located' && saved.created_by === actor.sub
-          && Object.entries(details).every(([key,value]) => saved.non_execution_details[key] === value)) {
+        const saved = existing.find(row => !row.voided_at && row.closure_kind === 'not_located');
+        const original = existing.find(row => row.id === replaceReportId);
+        const sameReplacement = replaceReportId && original?.voided_at
+          && original.void_details?.replacementReportId === saved?.id
+          && original.void_reason === String(voidReason || '').replace(/\s+/g, ' ').trim()
+          && saved?.non_execution_details?.replacesReportId === replaceReportId;
+        if (saved?.created_by === actor.sub && ((!replaceReportId && existing.length === 1) || sameReplacement)
+          && Object.entries(details).every(([key,value]) => saved.non_execution_details?.[key] === value)) {
           return { id: saved.id, replayed: true };
         }
-        fail(409, 'Este preventivo ya tiene un reporte. No se puede convertir en una constancia de equipo no localizado.');
+        if (!replaceReportId) fail(409, 'Este preventivo ya tiene un reporte. Utiliza la anulación auditada antes de registrar la constancia.');
       }
-      if (item.schedule_status !== 'approved' || !['pending','active'].includes(item.status)
-        || item.completion_source || item.legacy_history_file_id || item.historical_resolution === 'not_performed') {
+      if (item.schedule_status !== 'approved' || item.legacy_history_file_id || item.historical_resolution === 'not_performed'
+        || (!replaceReportId && (!['pending','active'].includes(item.status) || item.completion_source))) {
         fail(409, 'La actividad no está disponible para este cierre.');
       }
       const planned = dateOnlyFromDatabase(item.planned_date);
       const deadline = dateOnlyFromDatabase(item.deadline_date);
-      if (planned > today || details.verifiedOn < planned || (deadline < today && !item.late_active)) {
+      // Replacing an existing, unapproved report corrects its record; it does not reopen service execution.
+      if (planned > today || details.verifiedOn < planned || (!replaceReportId && deadline < today && !item.late_active)) {
         fail(409, 'La ventana no está activa o la fecha de búsqueda no corresponde. Para un periodo vencido se requiere apertura temporal.');
       }
       const requests = (await client.query(
@@ -81,14 +88,18 @@ export async function closeNotLocatedPreventive({ clientId, itemId, payload, act
       if (requests.length > 1) fail(409, 'La actividad tiene más de una solicitud y necesita revisión.');
       let request = requests[0];
       if (request && (request.client_id !== clientId || request.asset_id !== item.asset_id || request.type !== 'preventivo'
-        || !['abierto','en_proceso'].includes(request.status)
+        || !(replaceReportId ? ['reportado','correccion'] : ['abierto','en_proceso']).includes(request.status)
         || (request.assigned_to && request.assigned_to !== actor.sub))) {
         fail(409, 'La solicitud no está disponible o está asignada a otro ingeniero.');
       }
       // Recheck after locking the request: a report may have been saved while waiting.
-      if (request && (await client.query('SELECT id FROM maintenance_reports WHERE request_id=$1', [request.id])).rows.length) {
+      if (!replaceReportId && request && (await client.query('SELECT id FROM maintenance_reports WHERE request_id=$1', [request.id])).rows.length) {
         fail(409, 'La solicitud ya tiene un reporte registrado.');
       }
+      if (replaceReportId && !request) fail(409, 'No existe una solicitud con el protocolo que se pretende anular.');
+      const replacement = replaceReportId ? await prepareNotLocatedReplacement(client, {
+        clientId, item, request, reportId: replaceReportId, actor, reason: voidReason
+      }) : null;
       const asset = (await client.query(
         `SELECT asset.*, area.name AS area_name, location.name AS location_name, site.name AS site_name
          FROM "${tenant.schema_name}".assets asset
@@ -133,6 +144,7 @@ export async function closeNotLocatedPreventive({ clientId, itemId, payload, act
       }
       const assetSnapshot = Object.fromEntries(['id','code','name','brand','model','serial','asset_category',
         'site_name','area_name','location_name'].map(key => [key,asset[key] || null]));
+      if (replacement) await voidNotLocatedReplacement(client, { clientId, item, asset, engineer, replacement, newReportId: reportId });
       await client.query(
         `INSERT INTO maintenance_reports(id,client_id,request_id,asset_id,type,summary,findings,actions_taken,
            asset_status_after,area_responsible_required,requires_spare_parts,created_by,closure_kind,non_execution_details)
@@ -140,7 +152,8 @@ export async function closeNotLocatedPreventive({ clientId, itemId, payload, act
            'NO SE REALIZÓ MANTENIMIENTO NI SE VERIFICÓ EL ESTADO OPERATIVO. SE REQUIERE LOCALIZAR EL EQUIPO.',
            'no_verificado',false,false,$6,'not_located',$7)`,
         [reportId,clientId,request.id,item.asset_id,details.reason,actor.sub,
-          {...details,asset:assetSnapshot,plannedDate:planned,deadlineDate:deadline,clientName:tenant.name}]
+          {...details,asset:assetSnapshot,plannedDate:planned,deadlineDate:deadline,clientName:tenant.name,
+            ...(replacement ? {replacesReportId:replacement.report.id} : {})}]
       );
       await client.query(
         `INSERT INTO report_signatures(report_id,user_id,role,signature_path,signer_name,signer_invima_registration,signature_sha256)

@@ -35,7 +35,7 @@ test('integration: non-execution closure is isolated, signed, atomic and auditab
     const area=(await query(`INSERT INTO "${schema}".areas(name) VALUES ('NO SE ENCUENTRA EN EL AREA') RETURNING id`)).rows[0].id;
     const schedule=(await query(`INSERT INTO maintenance_schedules(client_id,year,start_date,status,created_by)
       VALUES ($1,2026,'2026-09-01','approved',$2) RETURNING id`,[clientId,user])).rows[0].id;
-    const actor={sub:user,clientId,roles:['ingeniero_biomedico']};
+    const actor={sub:user,clientId,roles:['ingeniero_biomedico'],permissions:['maintenance:report:create']};
     const payload={verifiedOn:'2026-09-21',searchedLocation:'CONSULTORIOS Y ALMACEN',
       reason:'Se revisaron los consultorios y el almacen; no se encontro el equipo registrado.',confirmed:true};
     const close=(item,extra={},deps) => closeNotLocatedPreventive({clientId,itemId:item,payload,actor,today:'2026-09-21',...extra},deps);
@@ -84,6 +84,113 @@ test('integration: non-execution closure is isolated, signed, atomic and auditab
     await t.test('can close reportless activity without a request',async()=>{
       const f=await fixture({request:false}); await close(f.item);
       assert.equal((await query('SELECT id FROM maintenance_requests WHERE schedule_item_id=$1',[f.item])).rows.length,1);
+    });
+    await t.test('opened then cancelled reportless request can close as not located while in progress',async()=>{
+      const f=await fixture({requestStatus:'en_proceso'});
+      await query('UPDATE maintenance_requests SET assigned_to=$1 WHERE id=$2',[user,f.request]);
+      const before=await getPreventiveMaintenanceProgress(clientId,{year:2026,month:9,assetId:f.asset});
+      assert.equal(before.items[0].phase,'in_progress');
+      assert.equal(before.items[0].report_id,null);
+      assert.equal(before.items[0].can_perform_protocol,true);
+      const result=await close(f.item);
+      const after=await getPreventiveMaintenanceProgress(clientId,{year:2026,month:9,assetId:f.asset});
+      assert.equal(after.items[0].phase,'not_located');
+      assert.equal(after.monthly.completed,0);
+      assert.equal(after.monthly.not_located,1);
+      assert.deepEqual((await listReportSignatures(result.id)).map(signature=>signature.role),['ingeniero_biomedico']);
+    });
+    async function recordedFixture() {
+      const f=await fixture({planned:'2026-08-01',deadline:'2026-08-31',requestStatus:'reportado',status:'done'});
+      const id=randomUUID();
+      const pdfPath=`${uploadDir}/${id}-original.pdf`;
+      await fs.writeFile(pdfPath,'%PDF-ORIGINAL-QA-PRESERVED');
+      await query(`INSERT INTO maintenance_reports(id,client_id,request_id,asset_id,type,created_by,summary,pdf_path,asset_status_after)
+        VALUES ($1,$2,$3,$4,'preventivo',$5,'PROTOCOLO ORIGINAL QA',$6,'fuera_de_servicio')`,[id,clientId,f.request,f.asset,user,`/${pdfPath}`]);
+      const snapshot=await createMaintenanceSignatureSnapshot({clientId,reportId:id,sourceSignaturePath:signaturePath});
+      await query(`INSERT INTO report_signatures(report_id,user_id,role,signature_path,signer_name,signature_sha256)
+        VALUES ($1,$2,'ingeniero_biomedico',$3,'INGENIERO QA',$4)`,[id,user,snapshot.publicPath,snapshot.sha256]);
+      await query("UPDATE maintenance_schedule_items SET report_id=$2,completion_source='software_report' WHERE id=$1",[f.item,id]);
+      await query('UPDATE maintenance_requests SET assigned_to=$2 WHERE id=$1',[f.request,user]);
+      return {...f,id,pdfPath,snapshot};
+    }
+    const replacementReason='Protocolo registrado por error; el equipo no fue localizado ni intervenido.';
+    const replace=(f,extra={},deps)=>close(f.item,{replaceReportId:f.id,voidReason:replacementReason,...extra},deps);
+    await t.test('replaces an expired pending report atomically, preserving its PDF, signature and asset state',async()=>{
+      const f=await recordedFixture();
+      const original=(await query('SELECT * FROM maintenance_reports WHERE id=$1',[f.id])).rows[0];
+      const signatures=await listReportSignatures(f.id);
+      const originalPdf=await fs.readFile(f.pdfPath), originalSignature=await fs.readFile(f.snapshot.fullPath);
+      const asset=(await query(`SELECT * FROM "${schema}".assets WHERE id=$1`,[f.asset])).rows[0];
+      await assert.rejects(close(f.item),{status:409});
+      const results=await Promise.all([replace(f),replace(f)]);
+      assert.equal(results[0].id,results[1].id);
+      assert.equal(results.filter(row=>row.replayed).length,1);
+      const replaced=(await query('SELECT * FROM maintenance_reports WHERE id=$1',[f.id])).rows[0];
+      assert.ok(replaced.voided_at);
+      assert.equal(replaced.void_details.destination,'not_located');
+      assert.equal(replaced.void_details.replacementReportId,results[0].id);
+      assert.deepEqual({...replaced,voided_at:original.voided_at,void_reason:original.void_reason,void_details:original.void_details},original);
+      assert.deepEqual(await listReportSignatures(f.id),signatures);
+      assert.deepEqual(await fs.readFile(f.pdfPath),originalPdf);
+      assert.deepEqual(await fs.readFile(f.snapshot.fullPath),originalSignature);
+      assert.deepEqual((await query(`SELECT * FROM "${schema}".assets WHERE id=$1`,[f.asset])).rows[0],asset);
+      assert.deepEqual((await listReportSignatures(results[0].id)).map(row=>row.role),['ingeniero_biomedico']);
+      const progress=await getPreventiveMaintenanceProgress(clientId,{year:2026,month:8,assetId:f.asset});
+      assert.equal(progress.monthly.not_located,1);assert.equal(progress.monthly.completed,0);
+      assert.equal(progress.monthly.pending_signature,0);assert.equal(progress.items[0].voided_report_id,f.id);
+      const history=await listAssetHistory(clientId,f.asset);
+      assert.ok(history.some(row=>row.id===f.id && row.subtype==='voided_not_located'));
+      assert.ok(history.some(row=>row.id===results[0].id && row.subtype==='not_located'));
+      await assert.rejects(replace(f,{voidReason:'Otro motivo no puede sustituir el registro confirmado.'}),{status:409});
+      await assert.rejects(signMaintenanceReport({reportId:f.id,userId:user,role:'responsable_area'}),{status:409});
+      await assert.rejects(createMaintenanceReport({requestId:f.request}),{status:409});
+    });
+    await t.test('replacement enforces author, client, permission and explicit non-execution confirmation',async()=>{
+      const f=await recordedFixture();
+      await assert.rejects(replace(f,{actor:{...actor,clientId:randomUUID()}}),{status:403});
+      await assert.rejects(replace(f,{actor:{...actor,permissions:[]}}),{status:403});
+      await assert.rejects(replace(f,{payload:{...payload,confirmed:false}}),{status:400});
+      await assert.rejects(replace(f,{voidReason:'corto'}),{status:400});
+      await query('UPDATE maintenance_reports SET created_by=NULL WHERE id=$1',[f.id]);
+      await assert.rejects(replace(f),{status:403});
+      await query('UPDATE maintenance_reports SET created_by=$2 WHERE id=$1',[f.id,user]);
+      await assert.rejects(replace(f,{replaceReportId:randomUUID()}),{status:409});
+      assert.equal((await query('SELECT voided_at FROM maintenance_reports WHERE id=$1',[f.id])).rows[0].voided_at,null);
+    });
+    await t.test('replacement blocks other avals, spare parts and historical evidence',async()=>{
+      const f=await recordedFixture();
+      await query("INSERT INTO report_signatures(report_id,user_id,role,signature_path,signer_name) VALUES ($1,$2,'responsable_area',$3,'RESPONSABLE QA')",[f.id,user,signaturePath]);
+      await assert.rejects(replace(f),{status:409});
+      await query("DELETE FROM report_signatures WHERE report_id=$1 AND role='responsable_area'",[f.id]);
+      await query('UPDATE maintenance_reports SET requires_spare_parts=true WHERE id=$1',[f.id]);
+      await assert.rejects(replace(f),{status:409});
+      await query("UPDATE maintenance_reports SET requires_spare_parts=false,spare_parts_needed='Repuesto registrado' WHERE id=$1",[f.id]);
+      await assert.rejects(replace(f),{status:409});
+      await query('UPDATE maintenance_reports SET spare_parts_needed=NULL WHERE id=$1',[f.id]);
+      await query("UPDATE maintenance_schedule_items SET completion_source='historical_pdf' WHERE id=$1",[f.item]);
+      await assert.rejects(replace(f),{status:409});
+      assert.equal((await query('SELECT voided_at FROM maintenance_reports WHERE id=$1',[f.id])).rows[0].voided_at,null);
+    });
+    await t.test('failed replacement rolls back annulment and removes only the new signature snapshot',async()=>{
+      const f=await recordedFixture();let snapshot;
+      await assert.rejects(replace(f,{}, {
+        snapshotSignature:async args=>{snapshot=await createMaintenanceSignatureSnapshot(args);return snapshot;},
+        transactionRunner:cb=>withTransaction(async connection=>{await cb(connection);throw Error('QA replacement rollback');})
+      }),/QA replacement rollback/);
+      await assert.rejects(fs.access(snapshot.fullPath));
+      await fs.access(f.snapshot.fullPath);
+      assert.equal((await query('SELECT voided_at FROM maintenance_reports WHERE id=$1',[f.id])).rows[0].voided_at,null);
+      assert.equal((await query('SELECT id FROM maintenance_reports WHERE request_id=$1',[f.request])).rows.length,1);
+      assert.equal((await query('SELECT status FROM maintenance_requests WHERE id=$1',[f.request])).rows[0].status,'reportado');
+    });
+    await t.test('replacement resolves an open correction without deleting its reason',async()=>{
+      const f=await recordedFixture();
+      await query("UPDATE maintenance_requests SET status='correccion' WHERE id=$1",[f.request]);
+      await query(`INSERT INTO maintenance_report_corrections(report_id,requested_by,reason)
+        VALUES ($1,$2,'QA: equipo no encontrado, corregir el registro')`,[f.id,user]);
+      await replace(f);
+      const correction=(await query('SELECT * FROM maintenance_report_corrections WHERE report_id=$1',[f.id])).rows[0];
+      assert.ok(correction.resolved_at);assert.equal(correction.reason,'QA: equipo no encontrado, corregir el registro');
     });
     await t.test('a constancia is not a later technical intervention when recording historical corrective work',async()=>{
       const chief=(await query(`INSERT INTO users(username,password_hash,client_id,display_name,email)
@@ -202,6 +309,16 @@ test('integration: non-execution closure is isolated, signed, atomic and auditab
       const pdf=await fs.readFile(report.pdf_path.replace(/^\//,''));
       assert.equal(pdf.subarray(0,4).toString(),'%PDF');
       if(process.env.QA_NOT_LOCATED_PDF) await fs.writeFile(process.env.QA_NOT_LOCATED_PDF,pdf);
+      const recorded=await recordedFixture();
+      const endpoint=`${base}/maintenance/preventive-progress/${clientId}/items/${recorded.item}`;
+      const options={method:'POST',headers:{Authorization:`Bearer ${session.accessToken}`,'Content-Type':'application/json'},
+        body:JSON.stringify({...payload,voidReason:replacementReason,replaceReportId:recorded.id,supportCase:'FORGED BY QA'})};
+      const ordinary=await fetch(`${endpoint}/not-located`,options);
+      assert.equal(ordinary.status,409,'Body fields cannot bypass the explicit replacement route');
+      const replaced=await fetch(`${endpoint}/replace-report/${recorded.id}/not-located`,options);
+      const replacement=await replaced.json();assert.equal(replaced.status,201,JSON.stringify(replacement));
+      assert.equal(replacement.pdfAvailable,true);
+      assert.match(replacement.message,/Protocolo anulado/);
     });
   } finally {
     if(api?.exitCode===null) {api.kill('SIGTERM');await new Promise(resolve=>api.once('exit',resolve));}

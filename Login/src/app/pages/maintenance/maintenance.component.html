@@ -599,6 +599,9 @@
                 </ng-container>
               </ng-container>
 
+              <button *ngIf="canReplaceWithNotLocated(item)" type="button" class="ghost"
+                title="Anular el protocolo enviado por error y registrar que el equipo no fue localizado"
+                (click)="openNotLocated(item, true)">No localizado</button>
               <ng-container *ngIf="item.phase === 'not_started' || item.phase === 'in_progress'">
                 <button *ngIf="canCloseNotLocated(item)" type="button" class="ghost"
                   title="Registrar búsqueda y firmar una constancia sin ejecución de mantenimiento"
@@ -660,6 +663,9 @@
                 </ng-container>
               </ng-container>
 
+              <button *ngIf="item.phase === 'not_located' && item.voided_report_id" type="button" class="ghost"
+                [disabled]="reportPdfLoadingId === item.voided_report_id"
+                (click)="downloadReport(item.voided_report_id)">Ver anulación</button>
               <button
                 *ngIf="item.phase === 'completed' || item.phase === 'not_located'"
                 type="button"
@@ -795,6 +801,8 @@
             <time *ngIf="reportCorrectionReport?.correction_requested_at" [attr.datetime]="reportCorrectionReport?.correction_requested_at">{{ reportCorrectionReport?.correction_requested_at | date: 'dd/MM/yyyy, h:mm a' }}</time>
           </div>
           <button type="button" class="ghost warranty-void-action" *ngIf="canVoidCorrectionForWarranty" (click)="openWarrantyVoidDialog()">Anular y pasar a garantía</button>
+          <button type="button" class="ghost warranty-void-action" *ngIf="notLocatedCorrectionItem as item"
+            [disabled]="reportSaving" (click)="openNotLocated(item, true)">Anular por equipo no localizado</button>
         </section>
           <section class="verbal-attention-fields" *ngIf="verbalAttentionMode" [hidden]="correctiveEditorSection !== 'attention'" aria-label="Datos de la atención verbal">
             <div class="verbal-equipment-row">
@@ -2443,12 +2451,16 @@
           [disabled]="notLocatedSaving" (click)="closeNotLocated()">×</button>
       </header>
       <div class="protocol-confirm-body">
+        <p *ngIf="notLocatedReport" class="warranty-void-notice">El protocolo enviado por error y su firma se conservarán como anulados. Se creará una constancia nueva sin ejecución de mantenimiento; no se cambiará el estado operativo del inventario.</p>
         <dl>
           <div><dt>Equipo</dt><dd><strong>{{ item.asset_code }} · {{ item.asset_name }}</strong><br>{{ item.asset_brand || 'NR' }} · {{ item.asset_model || 'NR' }} · Serie: {{ item.asset_serial || 'NR' }}</dd></div>
           <div><dt>Área registrada</dt><dd>{{ item.area_name || 'No registra' }}<span *ngIf="item.location_name"> · {{ item.location_name }}</span></dd></div>
           <div><dt>Programado</dt><dd>{{ item.planned_date | date:'dd/MM/yyyy':'UTC' }}</dd></div>
         </dl>
         <fieldset [disabled]="notLocatedSaving" class="not-located-fields">
+          <label *ngIf="notLocatedReport" class="not-located-wide" for="not-located-void-reason">Motivo de anulación del protocolo
+            <textarea id="not-located-void-reason" name="voidReason" rows="2" required minlength="10" maxlength="600" [(ngModel)]="notLocatedVoidReason"></textarea>
+          </label>
           <label for="not-located-date">Fecha de búsqueda
             <input id="not-located-date" name="searchDate" type="date" autofocus required
               [min]="item.planned_date.slice(0, 10)" [max]="notLocatedToday" [(ngModel)]="notLocatedDate">
@@ -2456,18 +2468,18 @@
           <label for="not-located-place">Lugar revisado
             <input id="not-located-place" name="searchPlace" type="text" required maxlength="250" [(ngModel)]="notLocatedLocation">
           </label>
-          <label for="not-located-reason">Búsqueda realizada y justificación
+          <label class="not-located-wide" for="not-located-reason">Búsqueda realizada y justificación
             <textarea id="not-located-reason" name="searchReason" rows="3" required minlength="20" maxlength="1000" [(ngModel)]="notLocatedReason"></textarea>
           </label>
           <label class="not-located-confirm"><input type="checkbox" name="searchConfirmed" [(ngModel)]="notLocatedConfirmed">
-            <span>Confirmo que busqué el equipo y no fue localizado. No realicé mantenimiento ni verifiqué su estado operativo. Firmo esta constancia con mi firma registrada.</span>
+            <span>Confirmo que busqué el equipo y no fue localizado. No realicé mantenimiento ni verifiqué su estado operativo. <ng-container *ngIf="notLocatedReport">El protocolo anterior fue registrado por error y autorizo su anulación. </ng-container>Firmo esta constancia con mi firma registrada.</span>
           </label>
         </fieldset>
         <p *ngIf="notLocatedError" class="error" role="alert">{{ notLocatedError }}</p>
       </div>
       <footer class="protocol-confirm-footer">
         <button type="button" class="ghost" [disabled]="notLocatedSaving" (click)="closeNotLocated()">Cancelar</button>
-        <button type="submit" [disabled]="notLocatedSaving">{{ notLocatedSaving ? 'Firmando...' : 'Firmar y cerrar' }}</button>
+        <button type="submit" [disabled]="notLocatedSaving">{{ notLocatedSaving ? 'Firmando...' : notLocatedReport ? 'Anular y firmar constancia' : 'Firmar y cerrar' }}</button>
       </footer>
     </form>
   </dialog>

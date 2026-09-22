@@ -394,6 +394,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
   private notLocatedDialogElement: HTMLDialogElement | null = null;
   notLocatedItem: PreventiveProgressItemDto | null = null;
+  notLocatedReport: MaintenanceReportDto | null = null;
+  notLocatedVoidReason = '';
   notLocatedDate = '';
   notLocatedLocation = '';
   notLocatedReason = '';
@@ -2455,10 +2457,32 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       && (!item.assigned_to || item.assigned_to === user?.id);
   }
 
-  openNotLocated(item: PreventiveProgressItemDto): void {
-    if (!this.canCloseNotLocated(item)) return;
+  canReplaceWithNotLocated(item: PreventiveProgressItemDto): boolean {
+    const user = this.auth.currentUser();
+    const report = this.preventiveReportForItem(item);
+    return Boolean(report && this.auth.hasRole('ingeniero_biomedico') && this.canManagePreventiveWarranty()
+      && user?.clientId === this.selectedClientId && report.client_id === this.selectedClientId
+      && report.created_by === user?.id && report.type === 'preventivo' && !report.voided_at
+      && report.closure_kind !== 'not_located' && !report.is_fully_signed
+      && (report.can_reopen_by_me || report.request_status === 'correccion')
+      && ['in_progress', 'pending_signature'].includes(item.phase) && !item.legacy_history_file_id
+      && !report.requires_spare_parts && !report.spare_parts_needed?.trim() && !item.has_pending_spare
+      && (!report.spare_parts_status || report.spare_parts_status === 'no_aplica')
+      && (item.warranty_resolution === 'perform' || (!item.is_under_warranty && item.warranty_resolution !== 'covered'))
+      && (!item.assigned_to || item.assigned_to === user?.id));
+  }
+
+  get notLocatedCorrectionItem(): PreventiveProgressItemDto | null {
+    return this.preventiveProgress?.items.find(item => item.report_id === this.reportCorrectionReport?.id
+      && this.canReplaceWithNotLocated(item)) ?? null;
+  }
+
+  openNotLocated(item: PreventiveProgressItemDto, replaceReport = false): void {
+    if (this.reportSaving || this.notLocatedSaving || !(replaceReport ? this.canReplaceWithNotLocated(item) : this.canCloseNotLocated(item))) return;
     this.notLocatedItem = item;
-    this.notLocatedDate = this.notLocatedToday;
+    this.notLocatedReport = replaceReport ? this.preventiveReportForItem(item) : null;
+    this.notLocatedVoidReason = '';
+    this.notLocatedDate = replaceReport ? '' : this.notLocatedToday;
     this.notLocatedLocation = '';
     this.notLocatedReason = '';
     this.notLocatedConfirmed = false;
@@ -2470,16 +2494,20 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (this.notLocatedSaving) return;
     this.notLocatedDialogElement?.close();
     this.notLocatedItem = null;
+    this.notLocatedReport = null;
   }
 
   async submitNotLocated(): Promise<void> {
     const item = this.notLocatedItem;
+    const replacedReport = this.notLocatedReport;
     if (!item || this.notLocatedSaving) return;
     this.notLocatedError = '';
     if (!this.notLocatedDate || this.notLocatedDate > this.notLocatedToday || this.notLocatedDate < item.planned_date.slice(0, 10)) {
       this.notLocatedError = 'La fecha de búsqueda debe estar entre la fecha programada y hoy.';
     } else if (this.notLocatedLocation.trim().length < 3 || this.notLocatedReason.replace(/\s+/g, ' ').trim().length < 20) {
       this.notLocatedError = 'Indica el lugar revisado y describe la búsqueda con al menos 20 caracteres.';
+    } else if (replacedReport && (this.notLocatedVoidReason.trim().length < 10 || this.notLocatedVoidReason.trim().length > 600)) {
+      this.notLocatedError = 'Explica el registro erróneo con un motivo de anulación de 10 a 600 caracteres.';
     } else if (!this.notLocatedConfirmed) {
       this.notLocatedError = 'Confirma que no localizaste el equipo y no realizaste mantenimiento.';
     }
@@ -2488,10 +2516,13 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     try {
       const result = await this.maintenance.closeNotLocatedPreventive(this.selectedClientId, item.id, {
         verifiedOn: this.notLocatedDate, searchedLocation: this.notLocatedLocation,
-        reason: this.notLocatedReason, confirmed: this.notLocatedConfirmed
-      });
+        reason: this.notLocatedReason, confirmed: this.notLocatedConfirmed,
+        ...(replacedReport ? { voidReason: this.notLocatedVoidReason } : {})
+      }, replacedReport?.id);
       this.notLocatedSaving = false;
       this.closeNotLocated();
+      if (replacedReport && replacedReport.id === this.reportCorrectionReport?.id) this.cancelReportWorkflow();
+      if (replacedReport) this.preventivePhaseView = 'completed';
       this.successMessage = result.message + (!result.pdfAvailable ? ' El PDF podrá generarse desde Finalizados.' : '');
       this.refreshViewSoon();
       await this.loadData();

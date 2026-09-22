@@ -10830,17 +10830,22 @@ app.get(
 );
 
 app.post(
-  '/maintenance/preventive-progress/:clientId/items/:itemId/not-located',
+  ['/maintenance/preventive-progress/:clientId/items/:itemId/not-located',
+    '/maintenance/preventive-progress/:clientId/items/:itemId/replace-report/:reportId/not-located'],
   requireAuth,
   requirePermission('maintenance:report:create'),
   async (req, res) => {
     try {
-      const result = await closeNotLocatedPreventive({ ...req.params, payload: req.body, actor: req.user, today: todayInBogota() });
+      const result = await closeNotLocatedPreventive({ clientId: req.params.clientId, itemId: req.params.itemId,
+        replaceReportId: req.params.reportId || null, voidReason: req.body?.voidReason,
+        payload: req.body, actor: req.user, today: todayInBogota() });
       let pdfAvailable = false;
       try { pdfAvailable = Boolean(await writeMaintenanceReportPdfFile(result.id)); }
       catch (error) { console.error('PDF de constancia pendiente', result.id, error); }
       return res.status(result.replayed ? 200 : 201).json({ ...result, pdfAvailable,
-        message: 'Constancia firmada. Actividad cerrada sin ejecución de mantenimiento.' });
+        message: req.params.reportId
+          ? 'Protocolo anulado y conservado. Constancia firmada; actividad cerrada como equipo no localizado.'
+          : 'Constancia firmada. Actividad cerrada sin ejecución de mantenimiento.' });
     } catch (error) {
       const status = [400,403,404,409].includes(error.status) ? error.status : 500;
       if (status === 500) console.error('Cierre de equipo no localizado', error);
