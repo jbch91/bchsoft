@@ -514,6 +514,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportFlowSource: MaintenanceReportDto | null = null;
   reportCorrectionMode = false;
   reportCorrectionType: MaintenanceReportDto['type'] | null = null;
+  reportCorrectionReport: MaintenanceReportDto | null = null;
   correctiveEditorSection: 'attention' | 'intervention' | 'closure' = 'attention';
   readonly correctiveNarrativeFields = CORRECTIVE_NARRATIVE_FIELDS;
   readonly correctiveEditorSections = [
@@ -1668,6 +1669,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportFormActive = true;
     this.reportCorrectionMode = true;
     this.reportCorrectionType = report.type;
+    this.reportCorrectionReport = report;
     this.viewMode = 'reportes';
     this.reportSummary = report.summary || '';
     this.reportFindings = report.findings || '';
@@ -1689,7 +1691,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     }
     this.reportFlowMode = 'normal';
     this.reportFlowSource = null;
-    this.successMessage = `Corrección cargada. Motivo: ${report.correction_reason || 'Sin detalle registrado'}`;
+    this.successMessage = '';
     this.scrollToReportForm();
   }
 
@@ -2568,6 +2570,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
         : this.areaResponsiblePendingReports;
     const term = this.normalize(this.reportSearchTerm);
     return source.filter((report) => this.reportMatchesFilters(report, term, this.reportTypeFilter)).length;
+  }
+
+  trackReportStatus(_index: number, option: { value: string }): string {
+    return option.value;
   }
 
   get reportStatusOptions(): Array<{ value: string; label: string }> {
@@ -3630,6 +3636,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportFlowSource = null;
     this.reportCorrectionMode = false;
     this.reportCorrectionType = null;
+    this.reportCorrectionReport = null;
   }
 
   private asStringArray(value?: string[] | null): string[] {

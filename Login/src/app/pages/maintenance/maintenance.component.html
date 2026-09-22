@@ -783,14 +783,14 @@
           </div>
           <button type="button" class="ghost" (click)="cancelReportWorkflow()">Cancelar flujo</button>
         </div>
-        <div class="workflow-note" *ngIf="reportCorrectionMode" [hidden]="isCorrectiveReportEditor && correctiveEditorSection !== 'attention'">
-          <div>
-            <span>Corrección solicitada</span>
-            <strong>{{ selectedReportAsset ? assetLabel(selectedReportAsset.id) : 'Reporte seleccionado' }}</strong>
-            <small>Revisa todos los campos antes de guardar nuevamente el reporte.</small>
+        <section class="report-correction-context" *ngIf="reportCorrectionMode" aria-labelledby="report-correction-context-title">
+          <h3 id="report-correction-context-title">Motivo de la corrección</h3>
+          <p class="report-correction-reason">{{ reportCorrectionReport?.correction_reason?.trim() || 'No se registró un motivo para esta corrección.' }}</p>
+          <div class="report-correction-meta" *ngIf="reportCorrectionReport?.correction_requested_by_name || reportCorrectionReport?.correction_requested_at">
+            <span *ngIf="reportCorrectionReport?.correction_requested_by_name">Solicitada por: <strong>{{ reportCorrectionReport?.correction_requested_by_name }}</strong></span>
+            <time *ngIf="reportCorrectionReport?.correction_requested_at" [attr.datetime]="reportCorrectionReport?.correction_requested_at">{{ reportCorrectionReport?.correction_requested_at | date: 'dd/MM/yyyy, h:mm a' }}</time>
           </div>
-          <button type="button" class="ghost" (click)="cancelReportWorkflow()">Cancelar corrección</button>
-        </div>
+        </section>
           <section class="verbal-attention-fields" *ngIf="verbalAttentionMode" [hidden]="correctiveEditorSection !== 'attention'" aria-label="Datos de la atención verbal">
             <div class="verbal-equipment-row">
               <label>Buscar equipo
@@ -1560,7 +1560,7 @@
           <label>
             Estado
             <select aria-label="Estado" [(ngModel)]="reportStatusFilter" (ngModelChange)="resetReportPage()">
-              <option *ngFor="let option of reportStatusOptions" [value]="option.value">{{ option.label }}</option>
+              <option *ngFor="let option of reportStatusOptions; trackBy: trackReportStatus" [value]="option.value">{{ option.label }}</option>
             </select>
           </label>
           <div class="report-filter-actions">

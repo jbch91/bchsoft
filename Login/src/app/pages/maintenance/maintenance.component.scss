@@ -2976,6 +2976,22 @@ button:disabled {
   border: 0;
 }
 
+.report-correction-context {
+  display: grid;
+  grid-column: 1 / -1;
+  min-width: 0;
+  gap: 8px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--brand-600);
+  background: #f7f3f4;
+  overflow-wrap: anywhere;
+
+  h3 { margin: 0; font-size: 13px; line-height: 1.4; color: var(--brand-700); letter-spacing: 0; }
+  .report-correction-reason { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; }
+  .report-correction-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+  .report-correction-meta > * { min-width: 0; }
+}
+
 .verbal-create-button {
   flex: 0 1 auto;
   padding: 8px 12px;
