@@ -1,4 +1,5 @@
 import { query, withTransaction } from './db.js';
+import { buildCalibrationDraftItems, normalizeUuidList, ScheduleValidationError } from './schedule-workflow.js';
 
 export async function createCalibrationSchedule({ clientId, year, startDate, createdBy }) {
   const { rows } = await query(
@@ -80,11 +81,14 @@ export async function getCalibrationScheduleById(scheduleId) {
 }
 
 export async function approveCalibrationSchedule(scheduleId) {
-  const { rows } = await query(
+  return withTransaction(async (client) => {
+    await client.query('SELECT id FROM calibration_schedules WHERE id = $1 FOR UPDATE', [scheduleId]);
+    const { rows } = await client.query(
     `UPDATE calibration_schedules AS schedule
-     SET status = 'approved', approved_at = NOW()
+     SET status = 'approved', approved_at = NOW(), pdf_path = NULL
      WHERE schedule.id = $1
        AND schedule.status = 'draft'
+       AND EXISTS (SELECT 1 FROM calibration_schedule_items item WHERE item.schedule_id = schedule.id)
        AND NOT EXISTS (
          SELECT 1 FROM calibration_schedule_items item
          WHERE item.schedule_id = schedule.id AND NOT item.programming_confirmed
@@ -92,7 +96,8 @@ export async function approveCalibrationSchedule(scheduleId) {
      RETURNING schedule.id`,
     [scheduleId]
   );
-  return rows[0];
+    return rows[0];
+  });
 }
 
 export async function setCalibrationSchedulePdf(scheduleId, pdfPath) {
@@ -205,7 +210,46 @@ export async function updateCalibrationItems(scheduleId, items, programmedBy) {
       error.code = 'SCHEDULE_ITEM_MISMATCH';
       throw error;
     }
+    await client.query(`UPDATE calibration_schedules SET pdf_path = NULL,
+      start_date = (SELECT MIN(planned_date) FROM calibration_schedule_items WHERE schedule_id = $1)
+      WHERE id = $1`, [scheduleId]);
     return rows;
+  });
+}
+
+export async function reprogramCalibrationDraft({ scheduleId, clientId, siteId, startDate, frequency }) {
+  if (siteId) normalizeUuidList([siteId], 'La sede');
+  return withTransaction(async (connection) => {
+    const { rows: [schedule] } = await connection.query(
+      'SELECT * FROM calibration_schedules WHERE id = $1 AND client_id = $2 FOR UPDATE', [scheduleId, clientId]
+    );
+    if (!schedule || schedule.status !== 'draft') {
+      throw new ScheduleValidationError('El cronograma no está disponible para edición. Actualiza la información.');
+    }
+    const { rows: [tenant] } = await connection.query('SELECT schema_name FROM clients WHERE id = $1', [clientId]);
+    if (!tenant || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tenant.schema_name)) throw new Error('Invalid tenant schema');
+    const { rows: current } = await connection.query(`SELECT i.*, a.site_id FROM calibration_schedule_items i
+      JOIN "${tenant.schema_name}".assets a ON a.id = i.asset_id
+      WHERE i.schedule_id = $1 AND ($2::uuid IS NULL OR a.site_id = $2::uuid)
+      FOR UPDATE OF i`, [scheduleId, siteId || null]);
+    if (!current.length) throw new ScheduleValidationError('No hay calibraciones en la sede seleccionada.');
+    if (current.some((item) => item.pdf_path || item.completed_at || item.status === 'done')) {
+      throw new ScheduleValidationError('No se puede reprogramar una calibración con evidencia cargada.');
+    }
+    const assets = Array.from(new Map(current.map((item) => [item.asset_id, item])).values());
+    const items = buildCalibrationDraftItems({ year: schedule.year, startDate, frequency, assets });
+    await connection.query('DELETE FROM calibration_schedule_items WHERE schedule_id = $1 AND id = ANY($2::uuid[])',
+      [scheduleId, current.map((item) => item.id)]);
+    await connection.query(`INSERT INTO calibration_schedule_items
+      (schedule_id, asset_id, frequency, planned_date, deadline_date)
+      SELECT $1, data.asset_id, data.frequency, data.planned_date, data.deadline_date
+      FROM UNNEST($2::uuid[], $3::text[], $4::date[], $5::date[]) AS data(asset_id, frequency, planned_date, deadline_date)`,
+      [scheduleId, items.map((item) => item.assetId), items.map((item) => item.frequency),
+        items.map((item) => item.plannedDate), items.map((item) => item.deadlineDate)]);
+    await connection.query(`UPDATE calibration_schedules SET pdf_path = NULL,
+      start_date = (SELECT MIN(planned_date) FROM calibration_schedule_items WHERE schedule_id = $1)
+      WHERE id = $1`, [scheduleId]);
+    return { assetCount: assets.length, previousItemCount: current.length, itemCount: items.length };
   });
 }
 

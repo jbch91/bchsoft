@@ -51,6 +51,103 @@ function calibrationItem(
   };
 }
 
+describe('Calibraciones: programacion, sedes y aprobacion', () => {
+  function draftComponent(): CronogramasComponent {
+    const component = createComponent();
+    Object.assign(component.auth, { currentUser: () => ({ clientId: 'client' }), hasPermission: () => true });
+    component.selectedYear = 2026;
+    component.selectedCalibrationScheduleId = 'calibration-schedule';
+    component.calibrationSchedules = [{ id: 'calibration-schedule', client_id: 'client', year: 2026,
+      start_date: '2026-09-01', status: 'draft', created_at: '', total_items: 2, programmed_items: 0 }];
+    component.calibrationItems = ['1', '2'].map((id) => ({ ...calibrationItem(id, 'URGENCIAS', `SALA ${id}`),
+      site_id: `site-${id}`, site_name: `SEDE ${id}`, planned_date: '2026-09-01', deadline_date: '2026-10-01' }));
+    return component;
+  }
+
+  it('abre la ruta Calibraciones sin habilitar las otras clases de cronograma', async () => {
+    const component = new CronogramasComponent({} as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, { snapshot: { data: { calibrationOnly: true } } } as never);
+    expect(component.viewMode).toBe('calibration');
+    expect(component.scheduleModuleTitle).toBe('Calibraciones');
+    await component.switchView('maintenance');
+    expect(component.viewMode).toBe('calibration');
+  });
+
+  it('filtra sedes por id y restringe las ubicaciones incluso con areas del mismo nombre', () => {
+    const component = draftComponent();
+    component.onCalibrationSiteFilterChange('site-2');
+    component.onCalibrationAreaFilterChange('URGENCIAS');
+    expect(component.filteredCalibrationItems.map((row) => row.id)).toEqual(['2']);
+    expect(component.calibrationLocationOptions).toEqual(['SALA 2']);
+    component.onCalibrationSiteFilterChange('site-1');
+    expect(component.calibrationAreaFilter).toBe('');
+    expect(component.calibrationLocationFilter).toBe('');
+  });
+
+  it('agrupa la programacion por sede sin mezclar equipos', () => {
+    const component = draftComponent();
+    component.calibrationEditing = true;
+    component.calibrationEditLevel = 'site';
+    expect(component.filteredCalibrationGroups.map((group) => group.assetCount)).toEqual([1, 1]);
+    expect(component.calibrationSectionLabel()).toBe('Sede');
+  });
+
+  it('mover el inicio al dia 24 mueve el limite al dia 24 del mes siguiente', () => {
+    const component = draftComponent();
+    component.startCalibrationEdit();
+    component.onCalibrationItemDateChange(component.calibrationItems[0], '2026-09-24');
+    expect(component.calibrationItems[0].planned_date).toBe('2026-09-24');
+    expect(component.calibrationItems[0].deadline_date).toBe('2026-10-24');
+    expect(component.calibrationItems[1].planned_date).toBe('2026-09-01');
+    expect(component.hasCalibrationChanges()).toBe(true);
+    expect(component.calibrationDeadline('2026-12-24')).toBe('2026-12-31');
+  });
+
+  it('aprobar requiere datos guardados y cargar evidencia requiere aprobacion', () => {
+    const component = draftComponent();
+    expect(component.canApproveCalibrationDraft()).toBe(false);
+    component.calibrationItems.forEach((item) => { item.programming_confirmed = true; item.display_status = 'active'; });
+    component.startCalibrationEdit();
+    expect(component.canApproveCalibrationDraft()).toBe(true);
+    expect(component.canUploadCalibration(component.calibrationItems[0])).toBe(false);
+    component.onCalibrationItemDateChange(component.calibrationItems[0], '2026-09-24');
+    expect(component.canApproveCalibrationDraft()).toBe(false);
+    component.calibrationSchedules[0].status = 'approved';
+    expect(component.canUploadCalibration(component.calibrationItems[0])).toBe(true);
+    expect(component.canEditCalibration()).toBe(false);
+  });
+
+  it('guardar todas informa y guarda tambien las calibraciones ocultas por filtros', async () => {
+    const component = draftComponent();
+    const saved: unknown[] = [];
+    (component as any).calibration.updateScheduleItems = async (_id: string, items: unknown[]) => saved.push(...items);
+    component.loadCalibrationSchedules = async () => {};
+    component.calibrationSiteFilter = 'site-1';
+    component.requestSaveAllCalibration();
+    expect(component.confirmDialog?.message).toContain('2 calibraciones');
+    await component.confirmDialog!.action();
+    expect(saved.length).toBe(2);
+  });
+
+  it('reprogramar exige confirmacion y conserva sede, fecha y periodicidad elegidas', async () => {
+    const component = draftComponent();
+    let sent: unknown;
+    (component as any).calibration.reprogramDraft = async (_id: string, payload: unknown) => { sent = payload; };
+    component.loadCalibrationSchedules = async () => {};
+    component.calibrationReprogramSite = 'site-2';
+    component.calibrationReprogramDate = '2026-09-24';
+    component.calibrationReprogramFrequency = 'semestral';
+    component.requestReprogramCalibration();
+    expect(sent).toBeUndefined();
+    expect(component.confirmDialog?.message).toContain('SEDE 2');
+    await component.confirmDialog!.action();
+    expect(sent).toEqual({ siteId: 'site-2', startDate: '2026-09-24', frequency: 'semestral' });
+    expect(component.calibrationProgrammingView).toBe('pending');
+    expect(component.calibrationReprogramSite).toBe('site-2');
+    expect(component.calibrationReprogramDate).toBe('2026-09-24');
+  });
+});
+
 describe('CronogramasComponent filtros dependientes', () => {
   it('limita las ubicaciones de mantenimiento al área seleccionada', () => {
     const component = createComponent();

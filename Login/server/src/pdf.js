@@ -2721,7 +2721,7 @@ export function buildCalibrationSchedulePdf(doc, { client, schedule, items }) {
   const headerY = doc.y;
   const headerLeftX = doc.page.margins.left;
   const headerWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const headerHeight = 72;
+  const headerHeight = 96;
   const logoCellWidth = 170;
 
   doc
@@ -2753,13 +2753,14 @@ export function buildCalibrationSchedulePdf(doc, { client, schedule, items }) {
 
   const infoLines = [
     `Año: ${safeText(schedule.year)}`,
-    `Fecha inicial: ${formatDate(schedule.start_date)}`
+    `Primera fecha: ${formatDate(schedule.start_date)}`,
+    `Estado: ${{ draft: 'BORRADOR', approved: 'APROBADO', closed: 'CERRADO' }[schedule.status] || schedule.status}`
   ];
   doc
     .font('Helvetica')
     .fontSize(9)
     .fillColor(PDF_MUTED)
-    .text(infoLines.join('\n'), infoStartX, headerY + 28, { width: infoMaxWidth });
+    .text(infoLines.join('\n'), infoStartX, headerY + 56, { width: infoMaxWidth });
 
   doc.y = headerY + headerHeight + 10;
 
@@ -2775,6 +2776,8 @@ export function buildCalibrationSchedulePdf(doc, { client, schedule, items }) {
         model: item.model,
         serial: item.serial,
         frequency: item.frequency,
+        site: item.site_name,
+        area: item.area_name,
         dates: []
       });
     }
@@ -2783,17 +2786,16 @@ export function buildCalibrationSchedulePdf(doc, { client, schedule, items }) {
 
   const rows = Array.from(grouped.values()).map((item) => [
     safeText(item.code),
-    safeText(item.name),
-    safeText(item.brand),
-    safeText(item.model),
-    safeText(item.serial),
+    `${safeText(item.name)}\n${safeText(item.brand)} / ${safeText(item.model)}\nSERIE: ${safeText(item.serial)}`,
+    `${safeText(item.site)}\n${safeText(item.area)}`,
     safeText(item.frequency),
     item.dates.join('\n')
   ]);
 
-  const scheduleCols = [54, 110, 75, 55, 75, 65, 136];
+  const scheduleCols = [48, 155, 104, 60, 128];
   const tableX = doc.page.margins.left;
-  drawTable(doc, [['Código', 'Equipo', 'Marca', 'Modelo', 'Serie', 'Frecuencia', 'Fechas']], {
+  doc.font('Helvetica').fontSize(8.5);
+  drawTable(doc, [['Código', 'Equipo / identificación', 'Sede / área', 'Frecuencia', 'Inicio / límite']], {
     colWidths: scheduleCols,
     header: true,
     rowHeight: 16,

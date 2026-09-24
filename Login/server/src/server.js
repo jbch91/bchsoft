@@ -322,6 +322,7 @@ import {
   setCalibrationItemPdf,
   clearCalibrationItemPdf,
   updateCalibrationItems,
+  reprogramCalibrationDraft,
   listCalibrationReportsByAsset,
   countCalibrationItems,
   countUnprogrammedCalibrationItems,
@@ -13890,6 +13891,31 @@ app.patch(
 );
 
 app.post(
+  '/calibration/schedules/:id/reprogram',
+  requireAuth,
+  requirePermission('calibration:schedule:manage'),
+  async (req, res) => {
+    const schedule = await getCalibrationScheduleById(req.params.id);
+    if (!schedule) return res.status(404).json({ message: 'Cronograma no encontrado.' });
+    if (!req.user.clientId || req.user.clientId !== schedule.client_id) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    try {
+      const { siteId, startDate, frequency } = req.body || {};
+      const result = await reprogramCalibrationDraft({ scheduleId: schedule.id,
+        clientId: req.user.clientId, siteId, startDate, frequency });
+      await logAudit({ actorUserId: req.user.sub, actorUsername: req.user.username,
+        action: 'CALIBRATION_SCHEDULE_REPROGRAM', targetUserId: schedule.client_id,
+        details: { category: 'schedule', clientId: schedule.client_id, scheduleId: schedule.id,
+          siteId: siteId || null, startDate, frequency: frequency || 'preserve', ...result } });
+      return res.json({ ok: true, ...result });
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo reprogramar el borrador de calibración.');
+    }
+  }
+);
+
+app.post(
   '/calibration/schedules/:id/approve',
   requireAuth,
   requirePermission('calibration:schedule:manage'),
@@ -13924,8 +13950,7 @@ app.post(
     if (!approved) {
       return res.status(409).json({ message: 'El cronograma cambió de estado. Actualiza la información.' });
     }
-    const scheduleItems = await listCalibrationItemsWithSchema(schedule.id, client.schema_name);
-    await writeCalibrationSchedulePdf({ client, schedule: { ...schedule, status: 'approved' }, items: scheduleItems });
+    // The PDF is regenerated on demand; its rendering must not mask a successful approval.
     await logAudit({
       actorUserId: req.user.sub,
       actorUsername: req.user.username,

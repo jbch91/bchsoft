@@ -18,6 +18,8 @@ import {
   formatDateOnly,
   maintenanceScheduleOccurrenceState,
   normalizeCalibrationItemUpdates,
+  buildCalibrationDraftItems,
+  calibrationDeadlineDate,
   normalizeAssetScheduleEnrollmentMode,
   normalizeAssetScheduleProgrammingSelection,
   normalizePeriodicityChangeMode,
@@ -530,19 +532,40 @@ test('rechaza fechas de capacitación en fin de semana o fuera del año', () => 
   );
 });
 
-test('mantiene la ventana de calibración y valida su vigencia', () => {
+test('desplaza el mes de servicio al editar calibracion sin cambiar la periodicidad', () => {
   const id = '11111111-1111-4111-8111-111111111111';
-  const current = [{ id, deadline_date: '2026-09-30' }];
+  const current = [{ id, planned_date: '2026-09-01', deadline_date: '2026-10-01' }];
   assert.deepEqual(
     normalizeCalibrationItemUpdates([{ id, plannedDate: '2026-09-15' }], current, 2026),
-    [{ id, plannedDate: '2026-09-15', deadlineDate: '2026-09-30' }]
+    [{ id, plannedDate: '2026-09-15', deadlineDate: '2026-10-15' }]
   );
   assert.throws(
     () => normalizeCalibrationItemUpdates([{ id, plannedDate: '2026-08-28' }], current, 2026),
-    /debe estar entre/
+    /reprograma el borrador/
   );
   assert.throws(
     () => normalizeCalibrationItemUpdates([{ id, plannedDate: '2027-01-04' }], current, 2026),
     /año del cronograma/
   );
+});
+
+test('calibracion da un mes calendario y respeta fin de mes y vigencia', () => {
+  assert.equal(calibrationDeadlineDate('2026-09-24', 2026), '2026-10-24');
+  assert.equal(calibrationDeadlineDate('2026-01-31', 2026), '2026-02-28');
+  assert.equal(calibrationDeadlineDate('2028-01-31', 2028), '2028-02-29');
+  assert.equal(calibrationDeadlineDate('2026-12-24', 2026), '2026-12-31');
+});
+
+test('calibracion por sede permite periodicidad propia sin cambiar las hojas de vida', () => {
+  const assets = [{ asset_id: 'a', frequency: 'anual' }, { asset_id: 'b', frequency: 'semestral' }];
+  const input = { year: 2026, startDate: '2026-09-24', assets };
+  const preserved = buildCalibrationDraftItems(input);
+  assert.equal(preserved.filter((row) => row.assetId === 'a').length, 1);
+  assert.equal(preserved.filter((row) => row.assetId === 'b').length, 2);
+  assert.equal(preserved[0].deadlineDate, '2026-10-24');
+  const monthly = buildCalibrationDraftItems({ ...input, frequency: 'mensual' });
+  assert.equal(monthly.length, 24);
+  assert.equal(assets[0].frequency, 'anual');
+  assert.throws(() => buildCalibrationDraftItems({ ...input, frequency: 'inventada' }), /periodicidad/);
+  assert.throws(() => buildCalibrationDraftItems({ ...input, startDate: '2027-01-01' }), /año seleccionado/);
 });

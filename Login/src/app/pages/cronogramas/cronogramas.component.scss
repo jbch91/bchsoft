@@ -3,6 +3,28 @@
   color: #172033;
 }
 
+.calibration-planning-fields {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(150px, .8fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 14px 0;
+  border-block: 1px solid #dce5e1;
+  margin: 14px 0;
+}
+
+.calibration-planning-fields label { min-width: 0; }
+.calibration-planning-fields input,
+.calibration-planning-fields select { width: 100%; min-width: 0; font-size: 12px; }
+
+@media (max-width: 900px) {
+  .calibration-planning-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .calibration-planning-fields { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+}
+
 * {
   box-sizing: border-box;
   letter-spacing: 0;
@@ -764,6 +786,10 @@ button:disabled {
   padding: 2px;
   background: #e5e9ee;
   border-radius: 6px;
+}
+
+.segmented-control.calibration-edit-level {
+  grid-template-columns: repeat(4, minmax(64px, 1fr));
 }
 
 .segmented-control button {

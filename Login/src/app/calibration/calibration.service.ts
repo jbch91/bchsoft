@@ -97,6 +97,12 @@ export class CalibrationService {
     );
   }
 
+  async reprogramDraft(scheduleId: string, payload: {
+    startDate: string; siteId?: string; frequency?: string;
+  }): Promise<void> {
+    await firstValueFrom(this.http.post(`${this.apiBase}/calibration/schedules/${scheduleId}/reprogram`, payload));
+  }
+
   async uploadPdf(itemId: string, file: File): Promise<void> {
     const form = new FormData();
     form.append('pdf', file);

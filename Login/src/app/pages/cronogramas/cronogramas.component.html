@@ -57,7 +57,7 @@
     {{ noticeMessage }}
   </div>
 
-  <div class="view-switcher">
+  <div class="view-switcher" *ngIf="!calibrationOnly">
     <nav class="view-tabs" role="tablist" aria-label="Tipos de cronograma">
       <button
         type="button"
@@ -1331,6 +1331,9 @@
               Cancelar
             </button>
           </ng-container>
+          <button *ngIf="canEditCalibration()" type="button" class="secondary compact"
+            [disabled]="isBusy() || detailLoading || !calibrationItems.length || (!calibrationUnprogrammedCount && !hasCalibrationChanges())"
+            (click)="requestSaveAllCalibration()">Guardar todas</button>
           <button
             *ngIf="selectedCalibrationSchedule.status === 'draft' && canManageCalibrationSchedules()"
             type="button"
@@ -1344,12 +1347,40 @@
         </div>
       </div>
 
-      <div class="summary-strip">
+      <div class="summary-strip" *ngIf="!calibrationEditing">
         <div><strong>{{ calibrationItems.length }}</strong><span>Total</span></div>
         <div><strong>{{ calibrationSummary.pending }}</strong><span>Programadas</span></div>
         <div><strong>{{ calibrationSummary.active }}</strong><span>Activas</span></div>
         <div><strong>{{ calibrationSummary.expired }}</strong><span>Vencidas</span></div>
         <div><strong>{{ calibrationSummary.done }}</strong><span>Completadas</span></div>
+      </div>
+
+      <div *ngIf="noticeMessage" class="notice" [ngClass]="noticeKind" role="status">{{ noticeMessage }}</div>
+
+      <div *ngIf="calibrationEditing" class="calibration-planning-fields">
+        <label>
+          Reprogramar
+          <select [(ngModel)]="calibrationReprogramSite" [disabled]="isBusy()">
+            <option value="">Todas las sedes</option>
+            <ng-container *ngFor="let site of calibrationSiteOptions">
+              <option *ngIf="site.id !== 'no-site'" [value]="site.id">{{ site.name }}</option>
+            </ng-container>
+          </select>
+        </label>
+        <label>
+          Fecha de referencia
+          <input type="date" [(ngModel)]="calibrationReprogramDate" [min]="selectedYear + '-01-01'"
+            [max]="selectedYear + '-12-31'" [disabled]="isBusy()" />
+        </label>
+        <label>
+          Periodicidad del cronograma
+          <select [(ngModel)]="calibrationReprogramFrequency" [disabled]="isBusy()">
+            <option value="">Conservar por equipo</option>
+            <option *ngFor="let frequency of trainingPeriodOptions" [value]="frequency">{{ frequency }}</option>
+          </select>
+        </label>
+        <button type="button" class="secondary compact" [disabled]="isBusy() || !calibrationReprogramDate"
+          (click)="requestReprogramCalibration()">Reprogramar borrador</button>
       </div>
 
       <div *ngIf="selectedCalibrationSchedule.status === 'draft'" class="programming-panel">
@@ -1396,7 +1427,9 @@
 
       <div *ngIf="calibrationEditing" class="edit-level-bar">
         <span>Editar fechas por</span>
-        <div class="segmented-control" role="group" aria-label="Nivel de edición de calibración">
+        <div class="segmented-control calibration-edit-level" role="group" aria-label="Nivel de edición de calibración">
+          <button type="button" [class.active]="calibrationEditLevel === 'site'"
+            [attr.aria-pressed]="calibrationEditLevel === 'site'" (click)="calibrationEditLevel = 'site'">Sede</button>
           <button
             type="button"
             [class.active]="calibrationEditLevel === 'area'"
@@ -1434,6 +1467,13 @@
           />
         </label>
         <label>
+          Sede
+          <select [ngModel]="calibrationSiteFilter" (ngModelChange)="onCalibrationSiteFilterChange($event)">
+            <option value="">Todas</option>
+            <option *ngFor="let site of calibrationSiteOptions" [value]="site.id">{{ site.name }}</option>
+          </select>
+        </label>
+        <label>
           Área
           <select
             [(ngModel)]="calibrationAreaFilter"
@@ -1468,7 +1508,7 @@
           </select>
         </label>
         <span class="result-count">
-          {{ filteredCalibrationItems.length }} calibración{{ filteredCalibrationItems.length === 1 ? '' : 'es' }}
+          {{ filteredCalibrationItems.length }} {{ filteredCalibrationItems.length === 1 ? 'calibración' : 'calibraciones' }}
         </span>
       </div>
 
@@ -1542,7 +1582,7 @@
                     (change)="uploadCalibrationPdf(item, $event)"
                   />
                   <span *ngIf="!item.pdf_path && !canUploadCalibration(item)" class="availability">
-                    No habilitado
+                    {{ calibrationUploadBlockReason(item) }}
                   </span>
                 </div>
               </td>
@@ -1560,9 +1600,9 @@
             <tr>
               <th *ngIf="calibrationEditLevel === 'equipment'">Código</th>
               <th *ngIf="calibrationEditLevel === 'equipment'">Equipo</th>
-              <th>Área</th>
+              <th *ngIf="calibrationEditLevel !== 'site'">Área</th>
               <th>Sede</th>
-              <th *ngIf="calibrationEditLevel !== 'area'">Ubicación</th>
+              <th *ngIf="calibrationEditLevel === 'location' || calibrationEditLevel === 'equipment'">Ubicación</th>
               <th *ngIf="calibrationEditLevel !== 'equipment'">Equipos</th>
               <th>Frecuencia</th>
               <th>Estado</th>
@@ -1580,9 +1620,9 @@
                 <small>{{ group.brand }} · {{ group.model }}</small>
                 <small>Serie: {{ group.serial }}</small>
               </td>
-              <td data-label="Área"><strong>{{ group.areaName }}</strong></td>
+              <td *ngIf="calibrationEditLevel !== 'site'" data-label="Área"><strong>{{ group.areaName }}</strong></td>
               <td data-label="Sede">{{ group.siteName }}</td>
-              <td *ngIf="calibrationEditLevel !== 'area'" data-label="Ubicación">
+              <td *ngIf="calibrationEditLevel === 'location' || calibrationEditLevel === 'equipment'" data-label="Ubicación">
                 {{ group.locationName }}
               </td>
               <td *ngIf="calibrationEditLevel !== 'equipment'" data-label="Equipos">
@@ -1623,8 +1663,8 @@
                         <span class="calendar-glyph" aria-hidden="true"></span>
                       </button>
                     </div>
-                    <small>{{ dateGroup.items.length }} calibración{{ dateGroup.items.length === 1 ? '' : 'es' }}</small>
-                    <small>Límite: {{ formatDate(dateGroup.maxDate) }}</small>
+                    <small>{{ dateGroup.items.length }} {{ dateGroup.items.length === 1 ? 'calibración' : 'calibraciones' }}</small>
+                    <small>Límite: {{ formatDate(dateGroup.items[0].deadline_date) }}</small>
                   </div>
                 </div>
               </td>

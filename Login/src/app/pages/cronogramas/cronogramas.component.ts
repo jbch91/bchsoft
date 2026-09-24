@@ -139,6 +139,7 @@ type ProgrammingView = 'pending' | 'programmed' | 'all';
   styleUrl: './cronogramas.component.scss'
 })
 export class CronogramasComponent implements OnInit {
+  readonly calibrationOnly: boolean;
   readonly assetCategory: AssetCategory;
   readonly minimumYear = 1900;
   readonly maximumYear = 2200;
@@ -211,12 +212,17 @@ export class CronogramasComponent implements OnInit {
   calibrationScheduleStatusFilter = '';
   calibrationItemStatusFilter = '';
   calibrationSearch = '';
+  calibrationSiteFilter = '';
+  calibrationReprogramSite = '';
+  calibrationReprogramDate = '';
+  calibrationReprogramFrequency = '';
   calibrationAreaFilter = '';
   calibrationLocationFilter = '';
   calibrationEditing = false;
-  calibrationEditLevel: AssetEditLevel = 'area';
+  calibrationEditLevel: AssetEditLevel | 'site' = 'area';
   calibrationProgrammingView: ProgrammingView = 'pending';
   private calibrationSnapshot = new Map<string, string>();
+  private calibrationDeadlineSnapshot = new Map<string, string>();
   private readonly calibrationRangeMap = new Map<string, { min: string; max: string }>();
 
   constructor(
@@ -228,6 +234,8 @@ export class CronogramasComponent implements OnInit {
     private readonly cdr: ChangeDetectorRef,
     private readonly route?: ActivatedRoute
   ) {
+    this.calibrationOnly = this.route?.snapshot.data['calibrationOnly'] === true;
+    if (this.calibrationOnly) this.viewMode = 'calibration';
     this.assetCategory = this.route?.snapshot.data['assetCategory'] === 'industrial'
       ? 'industrial'
       : 'biomedical';
@@ -239,6 +247,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   get scheduleModuleTitle(): string {
+    if (this.calibrationOnly) return 'Calibraciones';
     return this.isIndustrialSchedule ? 'Cronogramas industriales' : 'Cronogramas';
   }
 
@@ -329,6 +338,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   async switchView(mode: ViewMode): Promise<void> {
+    if (this.calibrationOnly && mode !== 'calibration') return;
     if (this.isIndustrialSchedule && mode !== 'maintenance') return;
     if (mode === 'training' && !this.canManageMaintenanceSchedules()) return;
     if (mode === 'calibration' && !this.canAccessCalibrationModule()) return;
@@ -370,6 +380,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   private async loadAreas(): Promise<void> {
+    if (this.calibrationOnly) return;
     if (!this.selectedClientId) return;
     const rows = await this.biomed.listAreas(this.selectedClientId);
     this.areas = rows
@@ -1664,11 +1675,15 @@ export class CronogramasComponent implements OnInit {
       this.calibrationSnapshot = new Map(
         this.calibrationItems.map((item) => [item.id, item.planned_date])
       );
+      this.calibrationDeadlineSnapshot = new Map(this.calibrationItems.map((item) => [item.id, item.deadline_date]));
+      this.calibrationReprogramDate = this.dateOnly(this.selectedCalibrationSchedule?.start_date || '');
+      this.calibrationReprogramFrequency = '';
+      this.calibrationReprogramSite = '';
       this.calibrationRangeMap.clear();
       for (const item of this.calibrationItems) {
         this.calibrationRangeMap.set(item.id, {
-          min: this.shiftMonths(item.deadline_date, -1),
-          max: item.deadline_date
+          min: `${item.planned_date.slice(0, 7)}-01`,
+          max: this.monthEnd(item.planned_date)
         });
       }
       this.calibrationProgrammingView =
@@ -1698,14 +1713,31 @@ export class CronogramasComponent implements OnInit {
   }
 
   get calibrationAreaOptions(): string[] {
-    return this.uniqueSorted(this.calibrationItems.map((item) => item.area_name || '').filter(Boolean));
+    return this.uniqueSorted(this.calibrationItems
+      .filter((item) => !this.calibrationSiteFilter || this.calibrationSiteKey(item) === this.calibrationSiteFilter)
+      .map((item) => item.area_name || '').filter(Boolean));
+  }
+
+  calibrationSiteKey(item: CalibrationItemDto): string { return item.site_id || 'no-site'; }
+
+  get calibrationSiteOptions(): { id: string; name: string }[] {
+    return Array.from(new Map(this.calibrationItems.map((item) => [this.calibrationSiteKey(item), {
+      id: this.calibrationSiteKey(item), name: item.site_name || 'Sin sede'
+    }])).values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  onCalibrationSiteFilterChange(value: string): void {
+    this.calibrationSiteFilter = value;
+    this.calibrationAreaFilter = '';
+    this.calibrationLocationFilter = '';
   }
 
   get calibrationLocationOptions(): string[] {
     if (!this.calibrationAreaFilter) return [];
     return this.uniqueSorted(
       this.calibrationItems
-        .filter((item) => item.area_name === this.calibrationAreaFilter)
+        .filter((item) => item.area_name === this.calibrationAreaFilter &&
+          (!this.calibrationSiteFilter || this.calibrationSiteKey(item) === this.calibrationSiteFilter))
         .map((item) => item.location_name || '')
         .filter(Boolean)
     );
@@ -1719,6 +1751,7 @@ export class CronogramasComponent implements OnInit {
   get filteredCalibrationItems(): CalibrationItemDto[] {
     const term = this.calibrationSearch.trim().toLowerCase();
     return this.calibrationItems.filter((item) => {
+      if (this.calibrationSiteFilter && this.calibrationSiteKey(item) !== this.calibrationSiteFilter) return false;
       if (
         this.selectedCalibrationSchedule?.status === 'draft' &&
         !this.matchesProgrammingView(item.programming_confirmed, this.calibrationProgrammingView)
@@ -1741,6 +1774,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   get filteredCalibrationGroups(): CalibrationItemGroup[] {
+    const groupBySite = this.calibrationEditing && this.calibrationEditLevel === 'site';
     const groupByLocation = this.calibrationEditing && this.calibrationEditLevel === 'location';
     const groupByEquipment = this.calibrationEditing && this.calibrationEditLevel === 'equipment';
     const map = new Map<
@@ -1752,7 +1786,7 @@ export class CronogramasComponent implements OnInit {
       const siteName = item.site_name || 'Sin sede';
       const locationName = item.location_name || 'Sin ubicación';
       const baseKey = `${item.site_id || 'no-site'}:${item.area_id || areaName.toLowerCase()}`;
-      const key = groupByEquipment
+      const key = groupBySite ? `site:${this.calibrationSiteKey(item)}` : groupByEquipment
         ? `equipment:${item.asset_id}`
         : groupByLocation
           ? `${baseKey}:${item.location_id || locationName.toLowerCase()}`
@@ -1760,7 +1794,7 @@ export class CronogramasComponent implements OnInit {
       if (!map.has(key)) {
         map.set(key, {
           areaKey: key,
-          areaName,
+          areaName: groupBySite ? 'Todas las áreas' : areaName,
           siteName,
           locationName: groupByLocation || groupByEquipment ? locationName : 'Todas las ubicaciones',
           code: item.code || '-',
@@ -1861,6 +1895,7 @@ export class CronogramasComponent implements OnInit {
     this.closeDatePicker();
     for (const item of this.calibrationItems) {
       item.planned_date = this.calibrationSnapshot.get(item.id) ?? item.planned_date;
+      item.deadline_date = this.calibrationDeadlineSnapshot.get(item.id) ?? item.deadline_date;
     }
     this.calibrationEditing = false;
   }
@@ -1886,6 +1921,7 @@ export class CronogramasComponent implements OnInit {
   canApproveCalibrationDraft(): boolean {
     return Boolean(
       this.selectedCalibrationSchedule?.status === 'draft' &&
+      this.calibrationItems.length > 0 &&
       this.calibrationUnprogrammedCount === 0 &&
       !this.hasCalibrationChanges()
     );
@@ -1906,7 +1942,10 @@ export class CronogramasComponent implements OnInit {
 
   onCalibrationDateGroupChange(dateGroup: CalibrationDateGroup, value: string): void {
     const normalized = this.normalizeEditableDate(value, dateGroup.minDate, dateGroup.maxDate);
-    for (const item of dateGroup.items) item.planned_date = normalized;
+    for (const item of dateGroup.items) {
+      item.planned_date = normalized;
+      item.deadline_date = this.calibrationDeadline(normalized);
+    }
     dateGroup.plannedDate = normalized;
   }
 
@@ -1916,14 +1955,25 @@ export class CronogramasComponent implements OnInit {
       this.calibrationRangeMin(item),
       this.calibrationRangeMax(item)
     );
+    item.deadline_date = this.calibrationDeadline(item.planned_date);
   }
 
   calibrationRangeMin(item: CalibrationItemDto): string {
-    return this.calibrationRangeMap.get(item.id)?.min ?? item.planned_date;
+    return this.calibrationRangeMap.get(item.id)?.min ?? `${item.planned_date.slice(0, 7)}-01`;
   }
 
   calibrationRangeMax(item: CalibrationItemDto): string {
-    return this.calibrationRangeMap.get(item.id)?.max ?? item.deadline_date;
+    return this.calibrationRangeMap.get(item.id)?.max ?? this.monthEnd(item.planned_date);
+  }
+
+  private monthEnd(value: string): string {
+    const [year, month] = value.split('-').map(Number);
+    return `${value.slice(0, 7)}-${new Date(Date.UTC(year, month, 0)).getUTCDate()}`;
+  }
+
+  calibrationDeadline(value: string): string {
+    const next = this.shiftMonths(value, 1);
+    return next > `${this.selectedYear}-12-31` ? `${this.selectedYear}-12-31` : next;
   }
 
   calibrationGroupStatusItems(group: CalibrationItemGroup): { status: string; count: number }[] {
@@ -1947,10 +1997,12 @@ export class CronogramasComponent implements OnInit {
           item.programming_confirmed = true;
           item.programmed_at = programmedAt;
           this.calibrationSnapshot.set(item.id, item.planned_date);
+          this.calibrationDeadlineSnapshot.set(item.id, item.deadline_date);
         }
         if (this.selectedCalibrationSchedule) {
           this.selectedCalibrationSchedule.programmed_items = this.calibrationProgrammedCount;
           this.selectedCalibrationSchedule.total_items = this.calibrationItems.length;
+          this.selectedCalibrationSchedule.start_date = this.calibrationItems.map((item) => item.planned_date).sort()[0];
         }
       },
       `Programación de calibración por ${this.calibrationSectionLabel().toLowerCase()} guardada. El avance quedó registrado.`
@@ -1958,6 +2010,10 @@ export class CronogramasComponent implements OnInit {
   }
 
   requestApproveCalibration(schedule: CalibrationScheduleDto): void {
+    if (this.hasCalibrationChanges()) {
+      this.setNotice('info', 'Guarda los cambios de fechas antes de aprobar.');
+      return;
+    }
     const unprogrammed = this.calibrationScheduleUnprogrammed(schedule);
     if (unprogrammed) {
       this.setNotice(
@@ -2056,6 +2112,58 @@ export class CronogramasComponent implements OnInit {
     );
   }
 
+  calibrationUploadBlockReason(item: CalibrationItemDto): string {
+    if (!this.auth.hasPermission('calibration:report:upload')) return 'Sin permiso para cargar certificados';
+    if (this.selectedCalibrationSchedule?.status === 'draft') return 'Pendiente de aprobación';
+    return `Disponible desde ${this.formatDate(item.planned_date)}`;
+  }
+
+  requestSaveAllCalibration(): void {
+    if (!this.canEditCalibration() || !this.calibrationItems.length) return;
+    this.openConfirm('Guardar programación completa',
+      `Se guardarán las fechas de las ${this.calibrationItems.length} calibraciones del borrador, incluidas las ocultas por filtros.`,
+      'Guardar todas', false, async () => {
+        await this.calibration.updateScheduleItems(this.selectedCalibrationScheduleId,
+          this.calibrationItems.map((item) => ({ id: item.id, plannedDate: item.planned_date })));
+        await this.loadCalibrationSchedules(true);
+        this.setNotice('success', 'Programación guardada. El cronograma está listo para aprobar.');
+      });
+  }
+
+  requestReprogramCalibration(): void {
+    if (!this.canEditCalibration()) return;
+    if (!this.validGeneratorDate(this.calibrationReprogramDate)) {
+      this.setNotice('error', 'Selecciona una fecha de referencia dentro del año del cronograma.');
+      return;
+    }
+    if (this.hasCalibrationChanges()) {
+      this.setNotice('error', 'Guarda o descarta las fechas pendientes antes de reprogramar.');
+      return;
+    }
+    const payload = { startDate: this.calibrationReprogramDate,
+      siteId: this.calibrationReprogramSite || undefined,
+      frequency: this.calibrationReprogramFrequency || undefined };
+    const site = this.calibrationSiteOptions.find((row) => row.id === payload.siteId)?.name || 'todas las sedes';
+    const frequency = payload.frequency || 'la periodicidad actual de cada equipo';
+    this.openConfirm('Reprogramar borrador de calibración',
+      `Se recalculará el año ${this.selectedYear} para ${site}, tomando ${this.formatDate(payload.startDate)} como referencia y ${frequency}. Cada ventana tendrá un mes, hasta el cierre del año. Solo estas calibraciones volverán a pendientes de revisión. Las hojas de vida no cambian.`,
+      'Reprogramar', false, async () => {
+        await this.calibration.reprogramDraft(this.selectedCalibrationScheduleId, payload);
+        await this.loadCalibrationSchedules(true);
+        this.calibrationSiteFilter = payload.siteId || '';
+        this.calibrationReprogramSite = payload.siteId || '';
+        this.calibrationReprogramDate = payload.startDate;
+        this.calibrationReprogramFrequency = payload.frequency || '';
+        this.calibrationAreaFilter = '';
+        this.calibrationLocationFilter = '';
+        this.calibrationItemStatusFilter = '';
+        this.calibrationSearch = '';
+        this.calibrationEditLevel = 'site';
+        this.startCalibrationEdit();
+        this.setNotice('success', 'Borrador reprogramado. Revisa y guarda las nuevas fechas antes de aprobar.');
+      });
+  }
+
   canAccessCalibrationModule(): boolean {
     return (
       this.auth.hasPermission('calibration:schedule:manage') ||
@@ -2068,6 +2176,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   calibrationSectionLabel(): string {
+    if (this.calibrationEditLevel === 'site') return 'Sede';
     if (this.calibrationEditLevel === 'equipment') return 'Equipo';
     if (this.calibrationEditLevel === 'location') return 'Ubicación';
     return 'Área';
@@ -2417,6 +2526,9 @@ export class CronogramasComponent implements OnInit {
     this.trainingItems = [];
     this.selectedCalibrationScheduleId = '';
     this.calibrationItems = [];
+    this.calibrationSiteFilter = '';
+    this.calibrationAreaFilter = '';
+    this.calibrationLocationFilter = '';
     this.editing = false;
     this.trainingEditing = false;
     this.calibrationEditing = false;

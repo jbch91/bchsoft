@@ -692,15 +692,31 @@ export function normalizeCalibrationItemUpdates(items, existingItems, year) {
   const normalizedYear = normalizeScheduleYear(year);
   return normalizeRequestedItems(items, existingItems).map(({ input, current }) => {
     const plannedDate = normalizeDateOnly(input.plannedDate, 'La fecha programada');
-    const planned = assertWeekdayAndYear(plannedDate, normalizedYear);
-    const deadlineDate = dateOnlyFromDatabase(current.deadline_date, 'La fecha límite');
-    const deadline = parseDateOnly(deadlineDate);
-    const minimum = addMonthsUtc(deadline, -1);
-    if (planned < minimum || planned > deadline) {
-      throw new ScheduleValidationError(
-        `La fecha de calibración debe estar entre ${formatDateOnly(minimum)} y ${deadlineDate}.`
-      );
+    assertWeekdayAndYear(plannedDate, normalizedYear);
+    const originalDate = dateOnlyFromDatabase(current.planned_date, 'La fecha actual');
+    if (plannedDate.slice(0, 7) !== originalDate.slice(0, 7)) {
+      throw new ScheduleValidationError('Para cambiar el mes o la periodicidad, reprograma el borrador.');
     }
+    // Moving the start must also move its one-calendar-month service deadline.
+    const deadlineDate = calibrationDeadlineDate(plannedDate, normalizedYear);
     return { id: String(current.id), plannedDate, deadlineDate };
+  });
+}
+
+export function calibrationDeadlineDate(plannedDate, year) {
+  return formatDateOnly(capDateAtScheduleYearEndUtc(addMonthsUtc(parseDateOnly(plannedDate), 1), year));
+}
+
+export function buildCalibrationDraftItems({ year, startDate, frequency, assets }) {
+  const normalized = normalizeScheduleStart({ year, startDate });
+  const override = frequency ? normalizePeriodicity(frequency) : null;
+  return assets.flatMap((asset) => {
+    const periodicity = override || normalizePeriodicity(asset.frequency);
+    return buildRecurringDates({ ...normalized, months: frequencyToMonths(periodicity) }).map((plannedDate) => ({
+      assetId: asset.asset_id,
+      frequency: periodicity,
+      plannedDate,
+      deadlineDate: calibrationDeadlineDate(plannedDate, normalized.year)
+    }));
   });
 }

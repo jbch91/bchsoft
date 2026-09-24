@@ -162,9 +162,9 @@ export const routes: Routes = [
   },
   {
     path: 'calibraciones',
-    loadComponent: () => import('./pages/calibraciones/calibraciones.component').then((m) => m.CalibracionesComponent),
+    loadComponent: () => import('./pages/cronogramas/cronogramas.component').then((m) => m.CronogramasComponent),
     canActivate: [accessGuard],
-    data: biomedicalRouteData('calibraciones')
+    data: { ...biomedicalRouteData('calibraciones'), calibrationOnly: true }
   },
   {
     path: 'odontologia',
