@@ -13995,7 +13995,7 @@ app.post(
     if (!item) {
       return res.status(404).json({ message: 'Calibración no encontrada.' });
     }
-    if (req.user.clientId && req.user.clientId !== item.client_id) {
+    if (!req.user.clientId || req.user.clientId !== item.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
     if (item.schedule_status !== 'approved') {
@@ -14004,17 +14004,19 @@ app.post(
     if (item.pdf_path) {
       return res.status(409).json({ message: 'Esta calibración ya tiene un certificado cargado.' });
     }
-    if (dateOnlyFromDatabase(item.planned_date) > todayInBogota()) {
-      return res.status(409).json({ message: 'El certificado se habilita a partir de la fecha programada.' });
-    }
-
     const dir = path.join(process.cwd(), 'uploads', 'clients', item.client_id, 'calibrations');
     await fs.promises.mkdir(dir, { recursive: true });
-    const filename = path.join(dir, `calibracion-${item.id}.pdf`);
+    const basename = `calibracion-${item.id}-${randomUUID()}.pdf`;
+    const filename = path.join(dir, basename);
     await fs.promises.writeFile(filename, req.file.buffer);
-    const publicPath = `/${path.join('uploads', 'clients', item.client_id, 'calibrations', `calibracion-${item.id}.pdf`)}`.replace(/\\/g, '/');
-    await setCalibrationItemPdf(item.id, publicPath);
-    await refreshCalibrationScheduleStatus(item.schedule_id);
+    const publicPath = `/${path.join('uploads', 'clients', item.client_id, 'calibrations', basename)}`.replace(/\\/g, '/');
+    let saved = false;
+    try {
+      saved = await setCalibrationItemPdf(item.id, publicPath, req.user.clientId);
+    } finally {
+      if (!saved) await fs.promises.rm(filename, { force: true });
+    }
+    if (!saved) return res.status(409).json({ message: 'La calibración ya tiene un acta o el cronograma cambió de estado. Actualiza la información.' });
     const calibratedAsset = await getAssetById(item.client_id, item.asset_id);
     await logEquipmentAudit(req, {
       action: 'CALIBRATION_CERTIFICATE_UPLOAD',
@@ -14136,17 +14138,24 @@ app.get(
 app.delete(
   '/calibration/schedules/:id',
   requireAuth,
-  requirePermission('users:manage'),
+  requirePermission('calibration:schedule:manage'),
   async (req, res) => {
-    if (!req.user.roles?.includes('superuser')) {
-      return res.status(403).json({ message: 'Solo superuser.' });
-    }
     const schedule = await getCalibrationScheduleById(req.params.id);
     if (!schedule) {
       return res.status(404).json({ message: 'Cronograma no encontrado.' });
     }
-    await deleteCalibrationSchedule(schedule.id);
-    return res.json({ ok: true });
+    if (!req.user.clientId || req.user.clientId !== schedule.client_id) {
+      return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    try {
+      await deleteCalibrationSchedule(schedule.id, req.user.clientId);
+      await logAudit({ actorUserId: req.user.sub, actorUsername: req.user.username,
+        action: 'CALIBRATION_SCHEDULE_DELETE', targetUserId: schedule.client_id,
+        details: { category: 'schedule', clientId: schedule.client_id, scheduleId: schedule.id, year: schedule.year } });
+      return res.json({ ok: true });
+    } catch (error) {
+      return respondScheduleError(res, error, 'No se pudo eliminar el borrador de calibración.');
+    }
   }
 );
 

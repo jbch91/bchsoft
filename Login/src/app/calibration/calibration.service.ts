@@ -14,6 +14,7 @@ export interface CalibrationScheduleDto {
   pdf_path?: string | null;
   total_items: number;
   programmed_items: number;
+  completed_items?: number;
 }
 
 export interface CalibrationItemDto {
@@ -84,7 +85,7 @@ export class CalibrationService {
 
   async updateScheduleItems(
     scheduleId: string,
-    items: { id: string; plannedDate: string }[]
+    items: { id: string; plannedDate: string; deadlineDate?: string }[]
   ): Promise<void> {
     await firstValueFrom(
       this.http.patch(`${this.apiBase}/calibration/schedules/${scheduleId}/items`, { items })

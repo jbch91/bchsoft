@@ -92,15 +92,80 @@ describe('Calibraciones: programacion, sedes y aprobacion', () => {
     expect(component.calibrationSectionLabel()).toBe('Sede');
   });
 
-  it('mover el inicio al dia 24 mueve el limite al dia 24 del mes siguiente', () => {
+  it('mover el inicio conserva el cierre contractual y detecta cambios independientes', () => {
     const component = draftComponent();
     component.startCalibrationEdit();
     component.onCalibrationItemDateChange(component.calibrationItems[0], '2026-09-24');
     expect(component.calibrationItems[0].planned_date).toBe('2026-09-24');
-    expect(component.calibrationItems[0].deadline_date).toBe('2026-10-24');
+    expect(component.calibrationItems[0].deadline_date).toBe('2026-10-01');
     expect(component.calibrationItems[1].planned_date).toBe('2026-09-01');
     expect(component.hasCalibrationChanges()).toBe(true);
     expect(component.calibrationDeadline('2026-12-24')).toBe('2026-12-31');
+  });
+
+  it('edita la finalizacion entre meses, admite fines de semana y restaura al cancelar', () => {
+    const component = draftComponent();
+    component.startCalibrationEdit();
+    const group = component.filteredCalibrationGroups[0].dateGroups[0];
+    component.openCalibrationDatePicker(group, 'end');
+    component.moveCalendarMonth(1);
+    expect(component.calendarPickerMonthLabel).toContain('Noviembre');
+    component.selectCalendarDate('2026-11-07');
+    expect(component.calibrationItems[0].deadline_date).toBe('2026-11-07');
+    expect(component.hasCalibrationChanges()).toBe(true);
+    expect(component.calibrationSectionHasChanges(component.filteredCalibrationGroups[0])).toBe(true);
+    component.cancelCalibrationEdit();
+    expect(component.calibrationItems[0].deadline_date).toBe('2026-10-01');
+    expect(component.hasCalibrationChanges()).toBe(false);
+  });
+
+  it('no mezcla ventanas que tengan diferente finalizacion', () => {
+    const component = draftComponent();
+    component.calibrationItems[1].site_id = 'site-1';
+    component.calibrationItems[1].deadline_date = '2026-11-01';
+    component.startCalibrationEdit();
+    expect(component.filteredCalibrationGroups[0].dateGroups.length).toBe(2);
+  });
+
+  it('muestra progreso por actas y por sede, sin alterar el total al cambiar de fase', () => {
+    const component = draftComponent();
+    component.calibrationSchedules[0].status = 'approved';
+    component.calibrationItems[0].pdf_path = '/qa.pdf';
+    expect(component.calibrationEvidenceProgress.percent).toBe(50);
+    expect(component.filteredCalibrationItems.map((item) => item.id)).toEqual(['2']);
+    component.calibrationEvidenceView = 'with';
+    expect(component.filteredCalibrationItems.map((item) => item.id)).toEqual(['1']);
+    expect(component.calibrationEvidenceProgress.total).toBe(2);
+    component.onCalibrationSiteFilterChange('site-1');
+    expect(component.calibrationEvidenceProgress.percent).toBe(100);
+    component.onCalibrationSiteFilterChange('inexistente');
+    expect(component.calibrationEvidenceProgress.percent).toBe(0);
+    expect(component.calibrationCompletionPercent(999, 1000)).toBe(99);
+  });
+
+  it('permite cargar actas futuras al aprobar, solo con permiso de calibracion', () => {
+    const component = draftComponent();
+    component.calibrationSchedules[0].status = 'approved';
+    component.calibrationItems[0].display_status = 'pending';
+    expect(component.canUploadCalibration(component.calibrationItems[0])).toBe(true);
+    component.auth.hasPermission = (permission) => permission === 'calibration:schedule:manage';
+    expect(component.canUploadCalibration(component.calibrationItems[0])).toBe(false);
+    component.calibrationSchedules[0].status = 'closed';
+    expect(component.canUploadCalibration(component.calibrationItems[0])).toBe(false);
+  });
+
+  it('eliminar requiere permiso de gestionar y cronograma sin aprobar', () => {
+    const component = draftComponent();
+    component.requestDeleteCalibrationSchedule(component.calibrationSchedules[0]);
+    expect(component.confirmDialog?.danger).toBe(true);
+    component.confirmDialog = null;
+    component.calibrationSchedules[0].status = 'approved';
+    component.requestDeleteCalibrationSchedule(component.calibrationSchedules[0]);
+    expect(component.confirmDialog).toBeNull();
+    component.calibrationSchedules[0].status = 'draft';
+    component.auth.hasPermission = () => false;
+    component.requestDeleteCalibrationSchedule(component.calibrationSchedules[0]);
+    expect(component.confirmDialog).toBeNull();
   });
 
   it('aprobar requiere datos guardados y cargar evidencia requiere aprobacion', () => {
@@ -127,6 +192,7 @@ describe('Calibraciones: programacion, sedes y aprobacion', () => {
     expect(component.confirmDialog?.message).toContain('2 calibraciones');
     await component.confirmDialog!.action();
     expect(saved.length).toBe(2);
+    expect(saved[0]).toEqual({ id: '1', plannedDate: '2026-09-01', deadlineDate: '2026-10-01' });
   });
 
   it('reprogramar exige confirmacion y conserva sede, fecha y periodicidad elegidas', async () => {

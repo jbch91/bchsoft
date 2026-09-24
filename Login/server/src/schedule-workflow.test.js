@@ -549,6 +549,18 @@ test('desplaza el mes de servicio al editar calibracion sin cambiar la periodici
   );
 });
 
+test('calibracion admite ventanas contractuales independientes y conserva cierres al guardar', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const current = [{ id, planned_date: '2026-09-01', deadline_date: '2026-11-07' }];
+  const update = { id, plannedDate: '2026-09-24', deadlineDate: '2026-11-07' };
+  assert.deepEqual(normalizeCalibrationItemUpdates([update], current, 2026), [update]);
+  assert.equal(normalizeCalibrationItemUpdates([{ id, plannedDate: '2026-09-01' }], current, 2026)[0].deadlineDate, '2026-11-07');
+  for (const deadlineDate of ['2026-09-23', '2027-01-01', '2026-09-31', '']) {
+    assert.throws(() => normalizeCalibrationItemUpdates([{ ...update, deadlineDate }], current, 2026));
+  }
+  assert.equal(normalizeCalibrationItemUpdates([{ ...update, deadlineDate: update.plannedDate }], current, 2026)[0].deadlineDate, update.plannedDate);
+});
+
 test('calibracion da un mes calendario y respeta fin de mes y vigencia', () => {
   assert.equal(calibrationDeadlineDate('2026-09-24', 2026), '2026-10-24');
   assert.equal(calibrationDeadlineDate('2026-01-31', 2026), '2026-02-28');

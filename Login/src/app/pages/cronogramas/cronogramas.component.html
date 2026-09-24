@@ -1224,11 +1224,14 @@
               <span class="status-pill" [ngClass]="schedule.status">{{ statusLabel(schedule.status) }}</span>
             </td>
             <td data-label="Programación" class="schedule-progress-cell">
-              <strong>{{ schedule.programmed_items || 0 }} / {{ schedule.total_items || 0 }}</strong>
-              <small *ngIf="schedule.status === 'draft'">
-                {{ calibrationScheduleUnprogrammed(schedule) }} pendiente{{ calibrationScheduleUnprogrammed(schedule) === 1 ? '' : 's' }}
-              </small>
-              <small *ngIf="schedule.status !== 'draft'">Completa</small>
+              <ng-container *ngIf="schedule.status === 'draft'; else calibrationEvidenceSummary">
+                <strong>{{ schedule.programmed_items || 0 }} / {{ schedule.total_items || 0 }}</strong>
+                <small>{{ calibrationScheduleUnprogrammed(schedule) }} por guardar</small>
+              </ng-container>
+              <ng-template #calibrationEvidenceSummary>
+                <strong>{{ calibrationCompletionPercent(schedule.completed_items || 0, schedule.total_items || 0) }}%</strong>
+                <small>{{ schedule.completed_items || 0 }} / {{ schedule.total_items || 0 }} con acta</small>
+              </ng-template>
             </td>
             <td data-label="Acciones">
               <div class="row-actions">
@@ -1263,7 +1266,7 @@
                   Aprobar
                 </button>
                 <button
-                  *ngIf="auth.hasRole('superuser')"
+                  *ngIf="canEditCalibration(schedule)"
                   type="button"
                   class="danger-text compact"
                   [disabled]="isBusy()"
@@ -1347,12 +1350,32 @@
         </div>
       </div>
 
-      <div class="summary-strip" *ngIf="!calibrationEditing">
-        <div><strong>{{ calibrationItems.length }}</strong><span>Total</span></div>
-        <div><strong>{{ calibrationSummary.pending }}</strong><span>Programadas</span></div>
-        <div><strong>{{ calibrationSummary.active }}</strong><span>Activas</span></div>
-        <div><strong>{{ calibrationSummary.expired }}</strong><span>Vencidas</span></div>
-        <div><strong>{{ calibrationSummary.done }}</strong><span>Completadas</span></div>
+      <div *ngIf="selectedCalibrationSchedule.status !== 'draft'" class="programming-panel calibration-evidence-panel">
+        <div class="programming-progress" *ngIf="calibrationEvidenceProgress as progress">
+          <div class="programming-progress-copy">
+            <strong>{{ progress.done }} de {{ progress.total }} calibraciones con acta</strong>
+            <span>{{ progress.equipment }} equipos · {{ progress.percent }}%</span>
+          </div>
+          <div class="progress-track" role="progressbar" aria-label="Avance de actas de calibración"
+            [attr.aria-valuenow]="progress.percent" aria-valuemin="0" aria-valuemax="100">
+            <span [style.width.%]="progress.percent"></span>
+          </div>
+        </div>
+        <div class="programming-tabs segmented-control" role="group" aria-label="Actas de calibración">
+          <button type="button" [class.active]="calibrationEvidenceView === 'without'"
+            [attr.aria-pressed]="calibrationEvidenceView === 'without'"
+            (click)="calibrationEvidenceView = 'without'; calibrationItemStatusFilter = ''">
+            Sin acta ({{ calibrationEvidenceProgress.pending }})
+          </button>
+          <button type="button" [class.active]="calibrationEvidenceView === 'with'"
+            [attr.aria-pressed]="calibrationEvidenceView === 'with'"
+            (click)="calibrationEvidenceView = 'with'; calibrationItemStatusFilter = ''">
+            Con acta ({{ calibrationEvidenceProgress.done }})
+          </button>
+          <button type="button" [class.active]="calibrationEvidenceView === 'all'"
+            [attr.aria-pressed]="calibrationEvidenceView === 'all'"
+            (click)="calibrationEvidenceView = 'all'; calibrationItemStatusFilter = ''">Todas</button>
+        </div>
       </div>
 
       <div *ngIf="noticeMessage" class="notice" [ngClass]="noticeKind" role="status">{{ noticeMessage }}</div>
@@ -1521,7 +1544,7 @@
               <th>Área</th>
               <th>Ventana</th>
               <th>Estado</th>
-              <th>Certificado</th>
+              <th>Acta / certificado</th>
             </tr>
           </thead>
           <tbody>
@@ -1544,7 +1567,7 @@
                   {{ calibrationItemStatusLabel(item) }}
                 </span>
               </td>
-              <td data-label="Certificado">
+              <td data-label="Acta / certificado">
                 <div class="row-actions">
                   <button
                     *ngIf="item.pdf_path"
@@ -1553,7 +1576,7 @@
                     [disabled]="isBusy()"
                     (click)="openCalibrationPdf(item)"
                   >
-                    {{ isBusy('calibration-pdf-' + item.id) ? 'Abriendo...' : 'Ver certificado' }}
+                    {{ isBusy('calibration-pdf-' + item.id) ? 'Abriendo...' : 'Ver acta' }}
                   </button>
                   <button
                     *ngIf="item.pdf_path && auth.hasRole('superuser')"
@@ -1565,13 +1588,13 @@
                     Eliminar
                   </button>
                   <button
-                    *ngIf="!item.pdf_path"
+                    *ngIf="!item.pdf_path && auth.hasPermission('calibration:report:upload')"
                     type="button"
                     class="secondary compact"
                     [disabled]="!canUploadCalibration(item) || isBusy()"
                     (click)="calibrationFile.click()"
                   >
-                    {{ isBusy('calibration-upload-' + item.id) ? 'Subiendo...' : 'Subir certificado' }}
+                    {{ isBusy('calibration-upload-' + item.id) ? 'Subiendo...' : 'Subir acta' }}
                   </button>
                   <input
                     #calibrationFile
@@ -1642,29 +1665,32 @@
               </td>
               <td data-label="Ventanas de calibración" class="service-windows-cell">
                 <div class="date-list">
-                  <div *ngFor="let dateGroup of group.dateGroups" class="date-line">
-                    <div class="date-picker-control">
-                      <input
-                        type="text"
-                        [value]="formatDate(dateGroup.plannedDate)"
-                        title="Seleccionar fecha programada"
-                        aria-haspopup="dialog"
-                        readonly
-                        (click)="openCalibrationDatePicker(dateGroup)"
-                      />
-                      <button
-                        type="button"
-                        class="date-picker-trigger"
-                        title="Abrir calendario"
-                        aria-label="Abrir calendario"
-                        aria-haspopup="dialog"
-                        (click)="openCalibrationDatePicker(dateGroup)"
-                      >
-                        <span class="calendar-glyph" aria-hidden="true"></span>
-                      </button>
+                  <div *ngFor="let dateGroup of group.dateGroups" class="calibration-window">
+                    <div class="calibration-window-dates">
+                      <label>Fecha de inicio
+                        <span class="date-picker-control">
+                          <input type="text" [value]="formatDate(dateGroup.plannedDate)" readonly
+                            aria-haspopup="dialog" [disabled]="isBusy()" (click)="openCalibrationDatePicker(dateGroup)" />
+                          <button type="button" class="date-picker-trigger" title="Seleccionar fecha de inicio"
+                            aria-label="Seleccionar fecha de inicio" aria-haspopup="dialog" [disabled]="isBusy()"
+                            (click)="openCalibrationDatePicker(dateGroup)">
+                            <span class="calendar-glyph" aria-hidden="true"></span>
+                          </button>
+                        </span>
+                      </label>
+                      <label>Fecha de finalización
+                        <span class="date-picker-control">
+                          <input type="text" [value]="formatDate(dateGroup.items[0].deadline_date)" readonly
+                            aria-haspopup="dialog" [disabled]="isBusy()" (click)="openCalibrationDatePicker(dateGroup, 'end')" />
+                          <button type="button" class="date-picker-trigger" title="Seleccionar fecha de finalización"
+                            aria-label="Seleccionar fecha de finalización" aria-haspopup="dialog" [disabled]="isBusy()"
+                            (click)="openCalibrationDatePicker(dateGroup, 'end')">
+                            <span class="calendar-glyph" aria-hidden="true"></span>
+                          </button>
+                        </span>
+                      </label>
                     </div>
                     <small>{{ dateGroup.items.length }} {{ dateGroup.items.length === 1 ? 'calibración' : 'calibraciones' }}</small>
-                    <small>Límite: {{ formatDate(dateGroup.items[0].deadline_date) }}</small>
                   </div>
                 </div>
               </td>
@@ -1803,7 +1829,7 @@
     >
       <header class="calendar-picker-header">
         <div>
-          <p>Seleccionar día</p>
+          <p>{{ picker.kind === 'calibration' ? (picker.field === 'end' ? 'Fecha de finalización' : 'Fecha de inicio') : 'Seleccionar día' }}</p>
           <h2 id="calendar-picker-title">{{ calendarPickerMonthLabel }}</h2>
         </div>
         <button
@@ -1817,9 +1843,15 @@
         </button>
       </header>
 
+      <div *ngIf="picker.kind === 'calibration' && picker.field === 'end'" class="calendar-month-navigation">
+        <button type="button" class="secondary compact" aria-label="Mes anterior" title="Mes anterior"
+          [disabled]="!canMoveCalendarMonth(-1)" (click)="moveCalendarMonth(-1)">&#8592;</button>
+        <button type="button" class="secondary compact" aria-label="Mes siguiente" title="Mes siguiente"
+          [disabled]="!canMoveCalendarMonth(1)" (click)="moveCalendarMonth(1)">&#8594;</button>
+      </div>
       <p class="calendar-picker-range">
-        Rango permitido: {{ formatDate(picker.group.minDate) }} al {{ formatDate(picker.group.maxDate) }}
-        <span>Días hábiles disponibles.</span>
+        Rango permitido: {{ formatDate(calendarMinDate) }} al {{ formatDate(calendarMaxDate) }}
+        <span *ngIf="picker.kind !== 'calibration' || picker.field !== 'end'">Días hábiles disponibles.</span>
       </p>
 
       <div class="calendar-weekdays" aria-hidden="true">
@@ -1846,7 +1878,7 @@
       </div>
 
       <footer class="calendar-picker-footer">
-        <span>Fecha actual: <strong>{{ formatDate(picker.group.plannedDate) }}</strong></span>
+        <span>Fecha actual: <strong>{{ formatDate(calendarSelectedDate) }}</strong></span>
         <button type="button" class="secondary" (click)="closeDatePicker()">Cancelar</button>
       </footer>
     </section>

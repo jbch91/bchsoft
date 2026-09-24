@@ -14,6 +14,20 @@
 }
 
 .calibration-planning-fields label { min-width: 0; }
+.calibration-window { display: grid; gap: 4px; padding: 6px 0; border-bottom: 1px solid #e5e9ee; }
+.calibration-window:last-child { border-bottom: 0; }
+.calibration-window-dates { display: grid; grid-template-columns: repeat(2, minmax(145px, 1fr)); gap: 8px; }
+.calibration-window label { min-width: 0; font-size: 11px; }
+.calibration-window .date-picker-control { grid-template-columns: minmax(100px, 1fr) 30px; width: 100%; gap: 3px; }
+.calibration-window .date-picker-control input { width: 100%; min-width: 0; font-size: 12px; cursor: pointer; }
+.calibration-window small { font-size: 11px; color: #526174; }
+.calendar-month-navigation { display: flex; justify-content: space-between; margin-top: 10px; }
+.calendar-month-navigation button { width: 34px; height: 34px; padding: 0; }
+.calibration-evidence-panel { border-left-color: #2f7d50; }
+@media (max-width: 480px) {
+  .calibration-window-dates { grid-template-columns: minmax(0, 1fr); }
+  .calibration-window .date-picker-control { max-width: 230px; }
+}
 .calibration-planning-fields input,
 .calibration-planning-fields select { width: 100%; min-width: 0; font-size: 12px; }
 

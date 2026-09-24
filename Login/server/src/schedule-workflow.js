@@ -697,8 +697,14 @@ export function normalizeCalibrationItemUpdates(items, existingItems, year) {
     if (plannedDate.slice(0, 7) !== originalDate.slice(0, 7)) {
       throw new ScheduleValidationError('Para cambiar el mes o la periodicidad, reprograma el borrador.');
     }
-    // Moving the start must also move its one-calendar-month service deadline.
-    const deadlineDate = calibrationDeadlineDate(plannedDate, normalizedYear);
+    const deadlineDate = input.deadlineDate === undefined
+      ? (plannedDate === originalDate
+        ? dateOnlyFromDatabase(current.deadline_date, 'La fecha de finalización')
+        : calibrationDeadlineDate(plannedDate, normalizedYear))
+      : normalizeDateOnly(input.deadlineDate, 'La fecha de finalización');
+    if (deadlineDate < plannedDate || deadlineDate > `${normalizedYear}-12-31`) {
+      throw new ScheduleValidationError('La fecha de finalización debe ser igual o posterior al inicio y pertenecer al año del cronograma.');
+    }
     return { id: String(current.id), plannedDate, deadlineDate };
   });
 }

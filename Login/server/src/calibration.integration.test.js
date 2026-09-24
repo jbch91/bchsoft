@@ -9,7 +9,7 @@ import PDFDocument from 'pdfkit';
 import { pool, query } from './db.js';
 import { createClient } from './clients.js';
 import { authenticateUser } from './auth.js';
-import { reprogramCalibrationDraft } from './calibration.js';
+import { reprogramCalibrationDraft, deleteCalibrationSchedule } from './calibration.js';
 
 test('calibration: draft, site isolation, approval and certificate workflow', {
   skip: process.env.RUN_CALIBRATION_INTEGRATION !== '1'
@@ -19,6 +19,8 @@ test('calibration: draft, site isolation, approval and certificate workflow', {
   const tenant = await createClient({ name: tag, nit: tag, city: 'QA', email: `${tag}@example.invalid` });
   const { id: clientId, schema_name: schema } = tenant;
   let api;
+  let uploaderHeaders;
+  let engineerHeaders;
   try {
     const password = randomUUID();
     const { rows: [user] } = await query(`INSERT INTO users(username,password_hash,client_id,display_name,email)
@@ -43,6 +45,12 @@ test('calibration: draft, site isolation, approval and certificate workflow', {
     for (let n = 0; n < 100; n++) { try { if ((await fetch(`${base}/health`)).ok) break; } catch {} await new Promise((r) => setTimeout(r, 100)); }
     assert.equal(api.exitCode, null, logs);
     const headers = { Authorization: `Bearer ${session.accessToken}` };
+    const doc = new PDFDocument(); const chunks = []; doc.on('data', (chunk) => chunks.push(chunk));
+    doc.text('ACTA DE CALIBRACION QA'); doc.end(); await new Promise((r) => doc.on('end', r));
+    const upload = (itemId, auth = uploaderHeaders) => {
+      const form = new FormData(); form.append('pdf', new Blob(chunks, { type: 'application/pdf' }), 'qa.pdf');
+      return fetch(`${base}/calibration/items/${itemId}/upload`, { method: 'POST', headers: auth, body: form });
+    };
     const request = async (url, body, method = 'POST', token = true) => {
       const response = await fetch(base + url, { method, headers: { ...(token ? headers : {}), 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body) });
@@ -90,26 +98,38 @@ test('calibration: draft, site isolation, approval and certificate workflow', {
         VALUES ($1,$2,$3,$1||'@example.invalid','CALIBRADOR QA') RETURNING id`, [uploaderName, await bcrypt.hash(password, 4), clientId]);
       await query("INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE name='calibracion'", [uploader.id]);
       const uploaderSession = await authenticateUser(uploaderName, password);
+      uploaderHeaders = { Authorization: `Bearer ${uploaderSession.accessToken}` };
       for (const action of ['reprogram', 'approve']) {
         const response = await fetch(`${base}${url}/${action}`, { method: 'POST',
           headers: { Authorization: `Bearer ${uploaderSession.accessToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ startDate: '2026-09-24' }) });
         assert.equal(response.status, 403);
       }
+      assert.equal((await fetch(`${base}${url}`, { method: 'DELETE', headers: uploaderHeaders })).status, 403);
+      const engineerName = `${tag}_engineer`;
+      const { rows: [engineer] } = await query(`INSERT INTO users(username,password_hash,client_id,email,display_name)
+        VALUES ($1,$2,$3,$1||'@example.invalid','BIOMEDICO QA') RETURNING id`, [engineerName, await bcrypt.hash(password, 4), clientId]);
+      await query("INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE name='ingeniero_biomedico'", [engineer.id]);
+      const engineerSession = await authenticateUser(engineerName, password);
+      engineerHeaders = { Authorization: `Bearer ${engineerSession.accessToken}` };
+      assert.equal((await upload((await items())[0].id, engineerHeaders)).status, 403);
     });
-    await t.test('moving a day also moves the deadline, then saving all allows approval', async () => {
+    await t.test('contractual deadlines persist, then saving all allows approval', async () => {
       const current = await items();
       const updates = current.map((item) => ({ id: item.id, plannedDate: item.planned_date.slice(0, 10) }));
       const selected = current.find((item) => item.site_id === sites[0].id);
       updates.find((item) => item.id === selected.id).plannedDate = '2026-09-24';
+      updates.find((item) => item.id === selected.id).deadlineDate = '2026-11-07';
+      assert.equal((await request(`${url}/items`, { items: [{ id: selected.id, plannedDate: '2026-09-24', deadlineDate: '2026-09-23' }] }, 'PATCH')).status, 400);
       const saved = await request(`${url}/items`, { items: updates }, 'PATCH');
       assert.equal(saved.status, 200, JSON.stringify(saved));
       const moved = (await items()).find((item) => item.id === selected.id);
-      assert.equal(moved.deadline_date.slice(0, 10), '2026-10-24');
+      assert.equal(moved.deadline_date.slice(0, 10), '2026-11-07');
       assert.ok((await items()).every((item) => item.programming_confirmed));
       assert.equal((await request(`${url}/approve`, {})).status, 200);
       assert.equal((await request(`${url}/reprogram`, { startDate: '2026-09-24' })).status, 400);
       assert.equal((await request(`${url}/items`, { items: updates }, 'PATCH')).status, 403);
+      assert.equal((await request(url, undefined, 'DELETE')).status, 400);
       const pdf = await fetch(base + url + '/pdf', { headers });
       assert.equal(pdf.status, 200); assert.match(pdf.headers.get('content-type'), /pdf/);
       const bytes = Buffer.from(await pdf.arrayBuffer()); assert.equal(bytes.subarray(0, 4).toString(), '%PDF');
@@ -117,14 +137,48 @@ test('calibration: draft, site isolation, approval and certificate workflow', {
     });
     await t.test('approved schedule accepts evidence and prevents duplicate upload', async () => {
       const item = (await items()).find((row) => row.planned_date.startsWith('2026-03'));
-      const doc = new PDFDocument(); const chunks = []; doc.on('data', (chunk) => chunks.push(chunk));
-      doc.text('CERTIFICADO DE PRUEBA QA'); doc.end(); await new Promise((r) => doc.on('end', r));
-      const upload = () => { const form = new FormData(); form.append('pdf', new Blob(chunks, { type: 'application/pdf' }), 'qa.pdf');
-        return fetch(`${base}/calibration/items/${item.id}/upload`, { method: 'POST', headers, body: form }); };
-      const first = await upload(); assert.equal(first.status, 200, await first.text());
-      const second = await upload(); assert.equal(second.status, 409, await second.text());
+      const responses = await Promise.all([upload(item.id), upload(item.id)]);
+      assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
       const done = (await items()).find((row) => row.id === item.id);
       assert.equal(done.status, 'done'); assert.ok(done.pdf_path);
+      const files = await fs.readdir(`uploads/clients/${clientId}/calibrations`);
+      assert.equal(files.filter((name) => name.startsWith(`calibracion-${item.id}-`)).length, 1);
+      for (const auth of [engineerHeaders, uploaderHeaders]) {
+        const response = await fetch(`${base}/calibration/schedules/${clientId}?year=2026`, { headers: auth });
+        assert.equal(response.status, 200);
+        const [schedule] = await response.json(); assert.equal(schedule.completed_items, 1); assert.equal(schedule.total_items, 4);
+        assert.equal((await fetch(`${base}/calibration/items/${item.id}/pdf`, { headers: auth })).status, 200);
+      }
+    });
+    await t.test('concurrent remaining uploads reach 100 percent and close the schedule', async () => {
+      const pending = (await items()).filter((item) => !item.pdf_path);
+      const responses = await Promise.all(pending.map((item) => upload(item.id)));
+      assert.ok(responses.every((response) => response.status === 200));
+      const [schedule] = (await request(`/calibration/schedules/${clientId}?year=2026`, undefined, 'GET')).body;
+      assert.equal(schedule.status, 'closed'); assert.equal(schedule.completed_items, schedule.total_items);
+      assert.equal((await request(url, undefined, 'DELETE')).status, 400);
+    });
+    await t.test('draft deletion is tenant scoped, authorized and does not delete equipment', async () => {
+      const result = await request(`/calibration/schedules/${clientId}/generate`, { year: 2025, startDate: '2025-09-02' });
+      assert.equal(result.status, 201, JSON.stringify(result));
+      const id = result.body.id;
+      await assert.rejects(deleteCalibrationSchedule(id, randomUUID()));
+      const response = await fetch(`${base}/calibration/schedules/${id}`, { method: 'DELETE', headers: engineerHeaders });
+      assert.equal(response.status, 200, await response.text());
+      assert.equal((await query('SELECT id FROM calibration_schedule_items WHERE schedule_id = $1', [id])).rowCount, 0);
+      assert.equal((await query(`SELECT id FROM "${schema}".assets`)).rowCount, 3);
+    });
+    await t.test('approval enables future contractual evidence for the calibration role', async () => {
+      const year = new Date().getUTCFullYear() + 1;
+      const result = await request(`/calibration/schedules/${clientId}/generate`, { year, startDate: `${year}-09-01` });
+      assert.equal(result.status, 201, JSON.stringify(result));
+      const futureUrl = `/calibration/schedules/${result.body.id}`;
+      const futureItems = (await request(`${futureUrl}/items`, undefined, 'GET')).body;
+      const updates = futureItems.map((item) => ({ id: item.id, plannedDate: item.planned_date.slice(0, 10), deadlineDate: item.deadline_date.slice(0, 10) }));
+      assert.equal((await request(`${futureUrl}/items`, { items: updates }, 'PATCH')).status, 200);
+      assert.equal((await request(`${futureUrl}/approve`, {})).status, 200);
+      const response = await upload(futureItems[0].id);
+      assert.equal(response.status, 200, await response.text());
     });
   } finally {
     if (api?.exitCode === null) { api.kill('SIGTERM'); await new Promise((r) => api.once('exit', r)); }

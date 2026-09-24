@@ -91,7 +91,7 @@ interface CalibrationItemGroup {
 
 type CalendarPickerState =
   | { kind: 'maintenance'; group: MaintenanceAreaDateGroup }
-  | { kind: 'calibration'; group: CalibrationDateGroup };
+  | { kind: 'calibration'; group: CalibrationDateGroup; field: 'start' | 'end' };
 
 interface CalendarPickerDay {
   date: string;
@@ -175,6 +175,7 @@ export class CronogramasComponent implements OnInit {
   maintenanceDatesDialog: MaintenanceDatesDialog | null = null;
   maintenanceRescheduleDialog: MaintenanceRescheduleDialog | null = null;
   calendarPicker: CalendarPickerState | null = null;
+  calendarMonth = '';
   readonly calendarWeekdays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
   startDate = '';
@@ -221,6 +222,7 @@ export class CronogramasComponent implements OnInit {
   calibrationEditing = false;
   calibrationEditLevel: AssetEditLevel | 'site' = 'area';
   calibrationProgrammingView: ProgrammingView = 'pending';
+  calibrationEvidenceView: 'without' | 'with' | 'all' = 'without';
   private calibrationSnapshot = new Map<string, string>();
   private calibrationDeadlineSnapshot = new Map<string, string>();
   private readonly calibrationRangeMap = new Map<string, { min: string; max: string }>();
@@ -1197,8 +1199,38 @@ export class CronogramasComponent implements OnInit {
     this.calendarPicker = { kind: 'maintenance', group };
   }
 
-  openCalibrationDatePicker(group: CalibrationDateGroup): void {
-    this.calendarPicker = { kind: 'calibration', group };
+  openCalibrationDatePicker(group: CalibrationDateGroup, field: 'start' | 'end' = 'start'): void {
+    if (!this.canEditCalibration() || this.isBusy()) return;
+    this.calendarPicker = { kind: 'calibration', group, field };
+    this.calendarMonth = this.calendarSelectedDate.slice(0, 7) + '-01';
+  }
+
+  get calendarMinDate(): string {
+    const picker = this.calendarPicker;
+    return picker?.kind === 'calibration' && picker.field === 'end'
+      ? picker.group.plannedDate : picker?.group.minDate || '';
+  }
+
+  get calendarMaxDate(): string {
+    const picker = this.calendarPicker;
+    return picker?.kind === 'calibration' && picker.field === 'end'
+      ? `${this.selectedCalibrationSchedule?.year || this.selectedYear}-12-31` : picker?.group.maxDate || '';
+  }
+
+  get calendarSelectedDate(): string {
+    const picker = this.calendarPicker;
+    return picker?.kind === 'calibration' && picker.field === 'end'
+      ? picker.group.items[0].deadline_date : picker?.group.plannedDate || '';
+  }
+
+  canMoveCalendarMonth(direction: number): boolean {
+    if (this.calendarPicker?.kind !== 'calibration' || this.calendarPicker.field !== 'end') return false;
+    const next = this.shiftMonths(this.calendarMonth, direction).slice(0, 7);
+    return next >= this.calendarMinDate.slice(0, 7) && next <= this.calendarMaxDate.slice(0, 7);
+  }
+
+  moveCalendarMonth(direction: number): void {
+    if (this.canMoveCalendarMonth(direction)) this.calendarMonth = this.shiftMonths(this.calendarMonth, direction);
   }
 
   closeDatePicker(): void {
@@ -1206,7 +1238,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   get calendarPickerMonthLabel(): string {
-    const anchor = this.calendarPicker?.group.minDate;
+    const anchor = this.calendarPicker?.kind === 'calibration' ? this.calendarMonth : this.calendarPicker?.group.minDate;
     if (!anchor) return '';
     const [year, month] = anchor.split('-').map(Number);
     if (!year || !month) return '';
@@ -1221,7 +1253,7 @@ export class CronogramasComponent implements OnInit {
   get calendarPickerDays(): Array<CalendarPickerDay | null> {
     const picker = this.calendarPicker;
     if (!picker) return [];
-    const [year, month] = picker.group.minDate.split('-').map(Number);
+    const [year, month] = (picker.kind === 'calibration' ? this.calendarMonth : picker.group.minDate).split('-').map(Number);
     if (!year || !month) return [];
 
     const firstWeekday = (new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 6) % 7;
@@ -1242,8 +1274,9 @@ export class CronogramasComponent implements OnInit {
         date,
         day,
         disabled:
-          date < picker.group.minDate || date > picker.group.maxDate || weekday === 0 || weekday === 6,
-        selected: date === picker.group.plannedDate,
+          date < this.calendarMinDate || date > this.calendarMaxDate ||
+          (!(picker.kind === 'calibration' && picker.field === 'end') && (weekday === 0 || weekday === 6)),
+        selected: date === this.calendarSelectedDate,
         today: date === todayKey
       });
     }
@@ -1253,11 +1286,12 @@ export class CronogramasComponent implements OnInit {
 
   selectCalendarDate(date: string): void {
     const picker = this.calendarPicker;
-    if (!picker || date < picker.group.minDate || date > picker.group.maxDate) return;
+    if (!picker || !this.calendarPickerDays.some((day) => day?.date === date && !day.disabled)) return;
     if (picker.kind === 'maintenance') {
       this.onAreaPlannedDateChange(picker.group, date);
     } else {
-      this.onCalibrationDateGroupChange(picker.group, date);
+      if (picker.field === 'end') this.onCalibrationDeadlineGroupChange(picker.group, date);
+      else this.onCalibrationDateGroupChange(picker.group, date);
     }
     this.closeDatePicker();
   }
@@ -1651,6 +1685,7 @@ export class CronogramasComponent implements OnInit {
     this.detailModalOpen = true;
     if (this.selectedCalibrationScheduleId === scheduleId && this.calibrationItems.length) return;
     this.selectedCalibrationScheduleId = scheduleId;
+    this.calibrationEvidenceView = this.selectedCalibrationSchedule?.status === 'closed' ? 'with' : 'without';
     this.calibrationItems = [];
     try {
       await this.loadCalibrationItems(scheduleId);
@@ -1748,29 +1783,39 @@ export class CronogramasComponent implements OnInit {
     this.calibrationLocationFilter = '';
   }
 
-  get filteredCalibrationItems(): CalibrationItemDto[] {
+  get scopedCalibrationItems(): CalibrationItemDto[] {
     const term = this.calibrationSearch.trim().toLowerCase();
     return this.calibrationItems.filter((item) => {
       if (this.calibrationSiteFilter && this.calibrationSiteKey(item) !== this.calibrationSiteFilter) return false;
-      if (
-        this.selectedCalibrationSchedule?.status === 'draft' &&
-        !this.matchesProgrammingView(item.programming_confirmed, this.calibrationProgrammingView)
-      ) {
-        return false;
-      }
       if (this.calibrationAreaFilter && item.area_name !== this.calibrationAreaFilter) return false;
       if (this.calibrationLocationFilter && item.location_name !== this.calibrationLocationFilter) return false;
-      if (
-        this.calibrationItemStatusFilter &&
-        this.calibrationItemStatusKey(item) !== this.calibrationItemStatusFilter
-      ) {
-        return false;
-      }
       if (!term) return true;
       return `${item.code ?? ''} ${item.name ?? ''} ${item.brand ?? ''} ${item.model ?? ''} ${item.serial ?? ''} ${item.site_name ?? ''} ${item.area_name ?? ''} ${item.location_name ?? ''}`
         .toLowerCase()
         .includes(term);
     });
+  }
+
+  get filteredCalibrationItems(): CalibrationItemDto[] {
+    return this.scopedCalibrationItems.filter((item) => {
+      if (this.calibrationItemStatusFilter && this.calibrationItemStatusKey(item) !== this.calibrationItemStatusFilter) return false;
+      if (this.selectedCalibrationSchedule?.status === 'draft') {
+        return this.matchesProgrammingView(item.programming_confirmed, this.calibrationProgrammingView);
+      }
+      return this.calibrationEvidenceView === 'all' ||
+        (this.calibrationEvidenceView === 'with' ? Boolean(item.pdf_path) : !item.pdf_path);
+    });
+  }
+
+  get calibrationEvidenceProgress(): { total: number; done: number; pending: number; percent: number; equipment: number } {
+    const items = this.scopedCalibrationItems;
+    const done = items.filter((item) => Boolean(item.pdf_path)).length;
+    return { total: items.length, done, pending: items.length - done,
+      percent: this.calibrationCompletionPercent(done, items.length), equipment: new Set(items.map((item) => item.asset_id)).size };
+  }
+
+  calibrationCompletionPercent(done: number, total: number): number {
+    return total ? Math.min(100, Math.floor(done * 100 / total)) : 0;
   }
 
   get filteredCalibrationGroups(): CalibrationItemGroup[] {
@@ -1826,7 +1871,7 @@ export class CronogramasComponent implements OnInit {
     for (const item of items) {
       const minDate = this.calibrationRangeMin(item);
       const maxDate = this.calibrationRangeMax(item);
-      const key = `${item.planned_date}:${maxDate}`;
+      const key = `${item.planned_date}:${item.deadline_date}:${maxDate}`;
       if (!map.has(key)) {
         map.set(key, { key, plannedDate: item.planned_date, minDate, maxDate, items: [] });
       }
@@ -1887,6 +1932,7 @@ export class CronogramasComponent implements OnInit {
     this.calibrationSnapshot = new Map(
       this.calibrationItems.map((item) => [item.id, item.planned_date])
     );
+    this.calibrationDeadlineSnapshot = new Map(this.calibrationItems.map((item) => [item.id, item.deadline_date]));
     this.calibrationProgrammingView = this.calibrationUnprogrammedCount ? 'pending' : 'programmed';
     this.calibrationEditing = true;
   }
@@ -1902,7 +1948,7 @@ export class CronogramasComponent implements OnInit {
 
   hasCalibrationChanges(): boolean {
     return this.calibrationItems.some(
-      (item) => item.planned_date !== (this.calibrationSnapshot.get(item.id) ?? item.planned_date)
+      (item) => this.calibrationItemHasChanges(item)
     );
   }
 
@@ -1929,8 +1975,13 @@ export class CronogramasComponent implements OnInit {
 
   calibrationSectionHasChanges(group: CalibrationItemGroup): boolean {
     return group.items.some(
-      (item) => item.planned_date !== (this.calibrationSnapshot.get(item.id) ?? item.planned_date)
+      (item) => this.calibrationItemHasChanges(item)
     );
+  }
+
+  private calibrationItemHasChanges(item: CalibrationItemDto): boolean {
+    return item.planned_date !== (this.calibrationSnapshot.get(item.id) ?? item.planned_date) ||
+      item.deadline_date !== (this.calibrationDeadlineSnapshot.get(item.id) ?? item.deadline_date);
   }
 
   calibrationSectionNeedsSave(group: CalibrationItemGroup): boolean {
@@ -1944,9 +1995,16 @@ export class CronogramasComponent implements OnInit {
     const normalized = this.normalizeEditableDate(value, dateGroup.minDate, dateGroup.maxDate);
     for (const item of dateGroup.items) {
       item.planned_date = normalized;
-      item.deadline_date = this.calibrationDeadline(normalized);
+      if (item.deadline_date < normalized) item.deadline_date = normalized;
     }
     dateGroup.plannedDate = normalized;
+  }
+
+  onCalibrationDeadlineGroupChange(dateGroup: CalibrationDateGroup, value: string): void {
+    const date = this.dateOnly(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < dateGroup.plannedDate ||
+      date > `${this.selectedCalibrationSchedule?.year || this.selectedYear}-12-31`) return;
+    for (const item of dateGroup.items) item.deadline_date = date;
   }
 
   onCalibrationItemDateChange(item: CalibrationItemDto, value: string): void {
@@ -1955,7 +2013,7 @@ export class CronogramasComponent implements OnInit {
       this.calibrationRangeMin(item),
       this.calibrationRangeMax(item)
     );
-    item.deadline_date = this.calibrationDeadline(item.planned_date);
+    if (item.deadline_date < item.planned_date) item.deadline_date = item.planned_date;
   }
 
   calibrationRangeMin(item: CalibrationItemDto): string {
@@ -1990,7 +2048,7 @@ export class CronogramasComponent implements OnInit {
       async () => {
         await this.calibration.updateScheduleItems(
           this.selectedCalibrationScheduleId,
-          group.items.map((item) => ({ id: item.id, plannedDate: item.planned_date }))
+          group.items.map((item) => ({ id: item.id, plannedDate: item.planned_date, deadlineDate: item.deadline_date }))
         );
         const programmedAt = new Date().toISOString();
         for (const item of group.items) {
@@ -2039,9 +2097,10 @@ export class CronogramasComponent implements OnInit {
   }
 
   requestDeleteCalibrationSchedule(schedule: CalibrationScheduleDto): void {
+    if (!this.canEditCalibration(schedule) || this.isBusy()) return;
     this.openConfirm(
       'Eliminar cronograma de calibración',
-      `Se eliminará definitivamente el cronograma ${schedule.year}.`,
+      `Se eliminará el borrador ${schedule.year} con sus fechas programadas. Las hojas de vida no se eliminarán.`,
       'Eliminar cronograma',
       true,
       async () => {
@@ -2074,7 +2133,7 @@ export class CronogramasComponent implements OnInit {
         await this.calibration.uploadPdf(item.id, file);
         await this.loadCalibrationSchedules(true);
       },
-      'Certificado de calibración cargado correctamente.'
+      'Acta de calibración cargada. El avance quedó actualizado.'
     );
     input.value = '';
   }
@@ -2103,19 +2162,17 @@ export class CronogramasComponent implements OnInit {
   }
 
   canUploadCalibration(item: CalibrationItemDto): boolean {
-    const status = this.calibrationItemStatusKey(item);
     return (
       this.auth.hasPermission('calibration:report:upload') &&
       this.selectedCalibrationSchedule?.status === 'approved' &&
-      (status === 'active' || status === 'expired') &&
       !item.pdf_path
     );
   }
 
   calibrationUploadBlockReason(item: CalibrationItemDto): string {
-    if (!this.auth.hasPermission('calibration:report:upload')) return 'Sin permiso para cargar certificados';
+    if (!this.auth.hasPermission('calibration:report:upload')) return 'Pendiente del ingeniero de calibración';
     if (this.selectedCalibrationSchedule?.status === 'draft') return 'Pendiente de aprobación';
-    return `Disponible desde ${this.formatDate(item.planned_date)}`;
+    return 'Cronograma cerrado';
   }
 
   requestSaveAllCalibration(): void {
@@ -2124,7 +2181,7 @@ export class CronogramasComponent implements OnInit {
       `Se guardarán las fechas de las ${this.calibrationItems.length} calibraciones del borrador, incluidas las ocultas por filtros.`,
       'Guardar todas', false, async () => {
         await this.calibration.updateScheduleItems(this.selectedCalibrationScheduleId,
-          this.calibrationItems.map((item) => ({ id: item.id, plannedDate: item.planned_date })));
+          this.calibrationItems.map((item) => ({ id: item.id, plannedDate: item.planned_date, deadlineDate: item.deadline_date })));
         await this.loadCalibrationSchedules(true);
         this.setNotice('success', 'Programación guardada. El cronograma está listo para aprobar.');
       });
@@ -2146,7 +2203,7 @@ export class CronogramasComponent implements OnInit {
     const site = this.calibrationSiteOptions.find((row) => row.id === payload.siteId)?.name || 'todas las sedes';
     const frequency = payload.frequency || 'la periodicidad actual de cada equipo';
     this.openConfirm('Reprogramar borrador de calibración',
-      `Se recalculará el año ${this.selectedYear} para ${site}, tomando ${this.formatDate(payload.startDate)} como referencia y ${frequency}. Cada ventana tendrá un mes, hasta el cierre del año. Solo estas calibraciones volverán a pendientes de revisión. Las hojas de vida no cambian.`,
+      `Se recalculará el año ${this.selectedYear} para ${site}, tomando ${this.formatDate(payload.startDate)} como referencia y ${frequency}. Se reemplazarán las ventanas actuales; podrás ajustar su inicio y finalización antes de guardar. Solo estas calibraciones volverán a pendientes de revisión. Las hojas de vida no cambian.`,
       'Reprogramar', false, async () => {
         await this.calibration.reprogramDraft(this.selectedCalibrationScheduleId, payload);
         await this.loadCalibrationSchedules(true);

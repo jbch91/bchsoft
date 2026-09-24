@@ -61,7 +61,9 @@ export async function listCalibrationSchedules(clientId, year) {
             (SELECT COUNT(*)::int FROM calibration_schedule_items item
              WHERE item.schedule_id = schedule.id) AS total_items,
             (SELECT COUNT(*)::int FROM calibration_schedule_items item
-             WHERE item.schedule_id = schedule.id AND item.programming_confirmed) AS programmed_items
+             WHERE item.schedule_id = schedule.id AND item.programming_confirmed) AS programmed_items,
+            (SELECT COUNT(*)::int FROM calibration_schedule_items item
+             WHERE item.schedule_id = schedule.id AND item.pdf_path IS NOT NULL) AS completed_items
      FROM calibration_schedules schedule
      WHERE ${where}
      ORDER BY schedule.year DESC, schedule.created_at DESC`,
@@ -104,8 +106,18 @@ export async function setCalibrationSchedulePdf(scheduleId, pdfPath) {
   await query('UPDATE calibration_schedules SET pdf_path = $1 WHERE id = $2', [pdfPath, scheduleId]);
 }
 
-export async function deleteCalibrationSchedule(scheduleId) {
-  await query('DELETE FROM calibration_schedules WHERE id = $1', [scheduleId]);
+export async function deleteCalibrationSchedule(scheduleId, clientId) {
+  return withTransaction(async (connection) => {
+    const { rows: [schedule] } = await connection.query(
+      'SELECT status FROM calibration_schedules WHERE id = $1 AND client_id = $2 FOR UPDATE', [scheduleId, clientId]);
+    if (!schedule || schedule.status !== 'draft') {
+      throw new ScheduleValidationError('Solo se pueden eliminar cronogramas en borrador del cliente.');
+    }
+    const { rows } = await connection.query(`SELECT id FROM calibration_schedule_items
+      WHERE schedule_id = $1 AND (pdf_path IS NOT NULL OR completed_at IS NOT NULL OR status = 'done') LIMIT 1`, [scheduleId]);
+    if (rows.length) throw new ScheduleValidationError('No se puede eliminar un cronograma con actas registradas.');
+    await connection.query('DELETE FROM calibration_schedules WHERE id = $1 AND client_id = $2', [scheduleId, clientId]);
+  });
 }
 
 export async function countCalibrationItems(scheduleId) {
@@ -253,13 +265,23 @@ export async function reprogramCalibrationDraft({ scheduleId, clientId, siteId, 
   });
 }
 
-export async function setCalibrationItemPdf(itemId, pdfPath) {
-  await query(
-    `UPDATE calibration_schedule_items
-     SET pdf_path = $1, status = 'done', completed_at = NOW()
-     WHERE id = $2`,
-    [pdfPath, itemId]
-  );
+export async function setCalibrationItemPdf(itemId, pdfPath, clientId) {
+  return withTransaction(async (connection) => {
+    // Serialize uploads against approval/deletion and concurrent completion of the last items.
+    const { rows: [schedule] } = await connection.query(`SELECT s.id, s.status FROM calibration_schedules s
+      JOIN calibration_schedule_items i ON i.schedule_id = s.id
+      WHERE i.id = $1 AND s.client_id = $2 FOR UPDATE OF s`, [itemId, clientId]);
+    if (!schedule || schedule.status !== 'approved') return false;
+    const result = await connection.query(`UPDATE calibration_schedule_items
+      SET pdf_path = $1, status = 'done', completed_at = NOW()
+      WHERE id = $2 AND pdf_path IS NULL RETURNING id`, [pdfPath, itemId]);
+    if (!result.rowCount) return false;
+    await connection.query(`UPDATE calibration_schedules s SET pdf_path = NULL,
+      status = CASE WHEN NOT EXISTS (SELECT 1 FROM calibration_schedule_items i
+        WHERE i.schedule_id = s.id AND i.pdf_path IS NULL) THEN 'closed' ELSE 'approved' END
+      WHERE s.id = $1`, [schedule.id]);
+    return true;
+  });
 }
 
 export async function clearCalibrationItemPdf(itemId) {
