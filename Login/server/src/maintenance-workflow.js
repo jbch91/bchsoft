@@ -40,7 +40,9 @@ export function maintenancePreventiveItemPhase(item = {}) {
   }
 
   const hasEngineerSignature = Boolean(item.has_engineer_signature);
-  const hasAcceptanceSignature = item.area_responsible_required
+  const hasAcceptanceSignature = item.acceptance_delegate_user_id
+    ? Boolean(item.has_delegate_signature)
+    : item.area_responsible_required
     ? Boolean(item.has_area_responsible_signature)
     : Boolean(item.has_acceptance_signature);
   if (item.correction_requested || item.request_status === 'correccion') {
@@ -145,6 +147,11 @@ export function isMaintenanceReportFullySigned(
   const hasEngineer = signatures.some((signature) => signature.role === 'ingeniero_biomedico');
   if (!hasEngineer) return false;
   if (report?.closure_kind === 'not_located') return true;
+
+  if (report?.acceptance_delegate_user_id) {
+    return signatures.some(signature => signature.user_id === report.acceptance_delegate_user_id
+      && signature.role === 'almacenista');
+  }
 
   if (report?.area_responsible_required) {
     return signatures.some((signature) => signature.role === 'responsable_area');

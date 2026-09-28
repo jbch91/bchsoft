@@ -137,6 +137,11 @@ export interface MaintenanceReportDto {
   signed_by_me?: boolean;
   is_fully_signed?: boolean;
   can_reopen_by_me?: boolean;
+  can_delegate_acceptance?: boolean;
+  acceptance_delegate_user_id?: string | null;
+  acceptance_delegate_name?: string | null;
+  acceptance_delegated_at?: string | null;
+  acceptance_delegation_reason?: string | null;
   correction_requested?: boolean;
   correction_reason?: string | null;
   correction_requested_at?: string | null;
@@ -366,6 +371,18 @@ export class MaintenanceService {
       this.http.post<MaintenanceSignatureResult>(`${this.apiBase}/maintenance/reports/${reportId}/sign`, {})
         .pipe(timeout({ first: 30000 }))
     );
+  }
+
+  async listAcceptanceDelegates(reportId: string): Promise<Array<{ id: string; name: string; hasSignature: boolean }>> {
+    return firstValueFrom(this.http.get<Array<{ id: string; name: string; hasSignature: boolean }>>(
+      `${this.apiBase}/maintenance/reports/${reportId}/acceptance-delegates`
+    ).pipe(timeout({ first: 20000 })));
+  }
+
+  async setAcceptanceDelegate(reportId: string, delegateUserId: string | null, reason: string): Promise<{ warnings: string[] }> {
+    return firstValueFrom(this.http.post<{ warnings: string[] }>(
+      `${this.apiBase}/maintenance/reports/${reportId}/acceptance-delegate`, { delegateUserId, reason }
+    ).pipe(timeout({ first: 20000 })));
   }
 
   async createVerbalAttention(payload: VerbalAttentionInput): Promise<VerbalAttentionResult> {

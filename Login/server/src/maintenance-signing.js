@@ -1,3 +1,5 @@
+import { maintenanceAcceptanceError } from './maintenance-acceptance-policy.js';
+
 export function createMaintenanceReportSignHandler(deps) {
   return async (req, res) => {
     let result;
@@ -21,19 +23,20 @@ export function createMaintenanceReportSignHandler(deps) {
       if (report.closure_kind === 'not_located') {
         return res.status(409).json({ message: 'La constancia ya está finalizada con la firma del ingeniero.' });
       }
-      if (report.area_responsible_required && !req.user.roles?.includes('responsable_area')) {
-        return res.status(403).json({ message: 'Este reporte requiere el aval de un responsable asignado al area.' });
-      }
+      const signatures = await deps.listReportSignatures(report.id);
+      const existing = signatures.find((signature) => signature.user_id === req.user.sub);
+      const acceptanceError = maintenanceAcceptanceError(report, req.user, { alreadySigned: Boolean(existing) });
+      if (acceptanceError) return res.status(403).json({ message: acceptanceError });
       if (deps.isAreaScopedOperationalUser(req.user)
+        && report.acceptance_delegate_user_id !== req.user.sub
         && !await deps.readerCanAccessAsset(report.client_id, req.user.sub, report.asset_id)) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
       }
       if (report.correction_requested) {
         return res.status(409).json({ message: 'Este reporte tiene una correccion pendiente y no puede firmarse todavia.' });
       }
-      const signatures = await deps.listReportSignatures(report.id);
-      const existing = signatures.find((signature) => signature.user_id === req.user.sub);
-      const role = deps.maintenanceAcceptanceRoleForUser(req.user);
+      const role = report.acceptance_delegate_user_id === req.user.sub
+        ? 'almacenista' : deps.maintenanceAcceptanceRoleForUser(req.user);
       if (existing) {
         // Reconcile an interrupted response without replacing the original signature.
         result = await deps.signMaintenanceReport({ reportId: report.id, userId: req.user.sub });

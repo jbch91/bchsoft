@@ -711,6 +711,70 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return this.auth.hasRole('responsable_area');
   }
 
+  get isStorekeeper(): boolean {
+    return this.auth.hasRole('almacenista') && !this.auth.hasRole(['ingeniero_biomedico', 'client_admin']);
+  }
+
+  get isSignatureReviewer(): boolean {
+    return this.isAreaResponsible || this.isStorekeeper;
+  }
+
+  acceptanceDelegateReport: MaintenanceReportDto | null = null;
+  acceptanceDelegates: Array<{ id: string; name: string; hasSignature: boolean }> = [];
+  acceptanceDelegateId = '';
+  acceptanceDelegateReason = '';
+  acceptanceDelegateLoading = false;
+  acceptanceDelegateSaving = false;
+  acceptanceDelegateError = '';
+
+  async openAcceptanceDelegate(report: MaintenanceReportDto): Promise<void> {
+    if (!report.can_delegate_acceptance) return;
+    this.reportDetail = null;
+    this.acceptanceDelegateReport = report;
+    this.acceptanceDelegateId = report.acceptance_delegate_user_id || '';
+    this.acceptanceDelegateReason = '';
+    this.acceptanceDelegateError = '';
+    this.acceptanceDelegates = [];
+    this.acceptanceDelegateLoading = true;
+    try {
+      const candidates = await this.maintenance.listAcceptanceDelegates(report.id);
+      if (this.acceptanceDelegateReport?.id === report.id) this.acceptanceDelegates = candidates;
+    } catch (error: any) {
+      this.acceptanceDelegateError = error?.error?.message || 'No se pudieron cargar los almacenistas.';
+    } finally {
+      this.acceptanceDelegateLoading = false;
+      this.refreshViewSoon();
+    }
+  }
+
+  closeAcceptanceDelegate(): void {
+    if (!this.acceptanceDelegateSaving) this.acceptanceDelegateReport = null;
+  }
+
+  async saveAcceptanceDelegate(restore = false): Promise<void> {
+    const report = this.acceptanceDelegateReport;
+    if (!report || this.acceptanceDelegateSaving) return;
+    const reason = this.acceptanceDelegateReason.replace(/\s+/g, ' ').trim();
+    if ((!restore && !this.acceptanceDelegateId) || reason.length < 10 || reason.length > 600) {
+      this.acceptanceDelegateError = 'Selecciona al firmante e indica un motivo de entre 10 y 600 caracteres.';
+      return;
+    }
+    this.acceptanceDelegateSaving = true;
+    this.acceptanceDelegateError = '';
+    try {
+      const result = await this.maintenance.setAcceptanceDelegate(report.id, restore ? null : this.acceptanceDelegateId, reason);
+      this.acceptanceDelegateReport = null;
+      await this.loadData();
+      this.successMessage = restore ? 'Se restableció el aval habitual del protocolo.' : 'Protocolo enviado a la bandeja de firmas del almacenista.';
+      if (result.warnings?.includes('notification')) this.successMessage += ' La asignación se guardó, pero no pudo enviarse la notificación.';
+    } catch (error: any) {
+      this.acceptanceDelegateError = error?.error?.message || 'No se pudo confirmar el envío. Actualiza el reporte antes de reintentar.';
+    } finally {
+      this.acceptanceDelegateSaving = false;
+      this.refreshViewSoon();
+    }
+  }
+
   get engineerReportsOnlyCorrectives(): boolean {
     return !this.isAreaResponsible
       && !this.auth.hasRole('superuser')
@@ -721,7 +785,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (this.canRefreshMaintenanceTemporaryPermissions) {
       await this.refreshCurrentPermissions(false);
     }
-    if (this.isAreaResponsible) {
+    if (this.isSignatureReviewer) {
       this.viewMode = 'reportes';
       this.reportSubView = 'pendientes_firma';
       this.areaResponsibleReportView = 'pending';
@@ -799,6 +863,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   async switchView(mode: MaintenanceViewMode): Promise<void> {
     if (this.isAreaResponsible && mode !== 'reportes') return;
+    if (this.isStorekeeper && (mode === 'preventivos' || mode === 'solicitudes')) return;
     if (mode === 'protocolos_fisicos' && !this.canPrintBlankProtocols) return;
     this.viewMode = mode;
     this.refreshViewSoon();
@@ -817,6 +882,12 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     const assetId = params.get('assetId') || this.route.snapshot.paramMap?.get('assetId');
     const assetCode = params.get('code');
     const clientId = params.get('clientId');
+
+    if (this.isStorekeeper && (view === 'solicitudes' || view === 'preventivos'
+      || (view === 'reportes' && requestId && !reportId))) {
+      this.viewMode = 'reportes';
+      return;
+    }
 
     if ((assetId || assetCode) && clientId && !this.auth.currentUser()?.clientId && this.selectedClientId !== clientId) {
       this.selectedClientId = clientId;
@@ -876,7 +947,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       }
       const report = this.reports.find((item) => item.id === reportId);
       if (report) {
-        if (this.isAreaResponsible) {
+        if (this.isSignatureReviewer) {
           this.areaResponsibleReportView = this.areaResponsibleViewForReport(report);
         }
         this.openReportDetail(report);
@@ -940,7 +1011,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
           assetCategory: this.assetCategory,
           order: 'desc'
         }),
-        this.isAreaResponsible ? Promise.resolve(null) : this.loadPreventiveProgress()
+        this.isSignatureReviewer ? Promise.resolve(null) : this.loadPreventiveProgress()
       ]);
       this.assets = assets.map((asset) => ({
         id: asset.id,
@@ -1257,7 +1328,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.requestAssetId = '';
       this.assetSearchTerm = '';
       await this.loadData();
-      this.viewMode = 'solicitudes';
+      this.viewMode = this.isStorekeeper ? 'reportes' : 'solicitudes';
       this.successMessage = 'Solicitud creada.';
     } catch (error: any) {
       console.error(error);
@@ -1609,7 +1680,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       await this.loadData();
       this.correctionDialogReport = null;
       this.correctionReason = '';
-      if (this.isAreaResponsible) {
+      if (this.isSignatureReviewer) {
         this.areaResponsibleReportView = 'correction';
         this.reportPage = 1;
       }
@@ -1620,6 +1691,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       this.showAlert(this.errorMessage, 'error');
     } finally {
       this.correctionSubmitting = false;
+      this.refreshViewSoon();
     }
   }
 
@@ -2709,7 +2781,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       return this.reportFilterCacheItems;
     }
 
-    const source = this.isAreaResponsible
+    const source = this.isSignatureReviewer
       ? this.areaResponsibleActiveReports
       : this.reportSubView === 'pendientes_firma'
         ? this.pendingSignatureReports
@@ -2900,17 +2972,17 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   get areaResponsiblePendingReports(): MaintenanceReportDto[] {
-    return this.reports.filter((report) => this.canSignReport(report));
+    return this.signatureInboxReports.filter((report) => this.canSignReport(report));
   }
 
   get areaResponsibleCorrectionReports(): MaintenanceReportDto[] {
-    return this.reports.filter((report) =>
+    return this.signatureInboxReports.filter((report) =>
       Boolean(report.correction_requested || report.request_status === 'correccion')
     );
   }
 
   get areaResponsibleCompletedReports(): MaintenanceReportDto[] {
-    return this.reports.filter((report) =>
+    return this.signatureInboxReports.filter((report) =>
       !report.correction_requested
       && Boolean(report.is_fully_signed || report.signed_by_me || report.request_status === 'firmado')
     );
@@ -2926,6 +2998,12 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     return this.areaResponsiblePendingReports;
   }
 
+  private get signatureInboxReports(): MaintenanceReportDto[] {
+    return this.isStorekeeper
+      ? this.reports.filter(report => report.acceptance_delegate_user_id === this.auth.currentUser()?.id || report.signed_by_me)
+      : this.reports;
+  }
+
   areaResponsibleViewForReport(report: MaintenanceReportDto): AreaResponsibleReportView {
     if (report.correction_requested || report.request_status === 'correccion') {
       return 'correction';
@@ -2937,7 +3015,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   get actionablePendingReportCount(): number {
-    return this.isAreaResponsible
+    return this.isSignatureReviewer
       ? this.areaResponsiblePendingReports.length
       : this.pendingSignatureReports.length;
   }
@@ -3102,6 +3180,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportSignedDate(report: MaintenanceReportDto): string {
     if (report.correction_requested) {
       return 'Corrección solicitada';
+    }
+    if (report.acceptance_delegate_user_id && !report.is_fully_signed) {
+      return this.isWaitingSpareReport(report) ? 'Firma almacén / repuesto pendiente' : 'Pendiente firma de almacén';
     }
     if (this.isWaitingSpareReport(report)) {
       return report.is_fully_signed ? 'Firmado / En espera de repuesto' : 'Pendiente firma / espera repuesto';
@@ -3606,9 +3687,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (report.signed_by_me) {
       return false;
     }
-    if (report.area_responsible_required && !this.isAreaResponsible) {
-      return false;
-    }
+    if (!this.isReceptionRecipient(report)) return false;
     return report.request_status !== 'firmado';
   }
 
@@ -3619,10 +3698,17 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     if (report.is_fully_signed || report.signed_by_me || report.correction_requested) {
       return false;
     }
-    if (report.area_responsible_required && !this.isAreaResponsible) {
-      return false;
-    }
+    if (!this.isReceptionRecipient(report)) return false;
     return report.request_status !== 'firmado';
+  }
+
+  private isReceptionRecipient(report: MaintenanceReportDto): boolean {
+    if (report.acceptance_delegate_user_id) {
+      return report.acceptance_delegate_user_id === this.auth.currentUser()?.id
+        && this.auth.hasRole('almacenista') && this.auth.hasPermission('maintenance:report:sign');
+    }
+    if (this.isStorekeeper && !this.isAreaResponsible) return false;
+    return !report.area_responsible_required || this.isAreaResponsible;
   }
 
   canReopenOwnPreventiveReport(report: MaintenanceReportDto): boolean {
@@ -3661,6 +3747,9 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   signConfirmationNotice(report: MaintenanceReportDto): string {
+    if (report.acceptance_delegate_user_id === this.auth.currentUser()?.id) {
+      return 'Firmas como almacenista autorizado, en sustitución del responsable de área. Tu recepción finaliza el protocolo; los repuestos pendientes continúan en seguimiento.';
+    }
     if (report.area_responsible_required && this.isAreaResponsible) {
       return 'Al confirmar, avalas que el mantenimiento fue recibido en el área. La firma quedará registrada con tu usuario, rol y fecha.';
     }

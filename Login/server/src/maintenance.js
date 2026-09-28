@@ -1,5 +1,6 @@
 import { query, withTransaction } from './db.js';
 import { normalizeAssetCategory } from './asset-category.js';
+import { maintenanceAcceptanceError } from './maintenance-acceptance-policy.js';
 import {
   isMaintenanceReportFullySigned,
   maintenanceReportEngineerReopenError,
@@ -153,6 +154,7 @@ export async function getPreventiveMaintenanceProgress(
             report.created_at AS report_created_at,
             report.pdf_path AS report_pdf_path,
             report.area_responsible_required,
+            report.acceptance_delegate_user_id,
             report.requires_spare_parts,
             report.spare_parts_status,
             report.spare_case_resolved,
@@ -168,6 +170,7 @@ export async function getPreventiveMaintenanceProgress(
             COALESCE(signatures.has_engineer_signature, FALSE) AS has_engineer_signature,
             COALESCE(signatures.has_area_responsible_signature, FALSE) AS has_area_responsible_signature,
             COALESCE(signatures.has_acceptance_signature, FALSE) AS has_acceptance_signature,
+            COALESCE(signatures.has_delegate_signature, FALSE) AS has_delegate_signature,
             item.deadline_date < (
               CURRENT_TIMESTAMP AT TIME ZONE 'America/Bogota'
             )::date AS is_overdue,
@@ -204,6 +207,7 @@ export async function getPreventiveMaintenanceProgress(
        SELECT maintenance_report.id,
               maintenance_report.closure_kind,
               maintenance_report.area_responsible_required,
+              maintenance_report.acceptance_delegate_user_id,
               maintenance_report.requires_spare_parts,
               maintenance_report.spare_parts_status,
               EXISTS (
@@ -229,7 +233,8 @@ export async function getPreventiveMaintenanceProgress(
               BOOL_OR(signature.role = 'responsable_area') AS has_area_responsible_signature,
               BOOL_OR(signature.role IN (
                 'almacenista', 'responsable_area', 'lector', 'viewer', 'visor', 'superuser'
-              )) AS has_acceptance_signature
+              )) AS has_acceptance_signature,
+              BOOL_OR(signature.role = 'almacenista' AND signature.user_id = report.acceptance_delegate_user_id) AS has_delegate_signature
        FROM report_signatures signature
        WHERE signature.report_id = report.id
      ) signatures ON TRUE
@@ -729,6 +734,15 @@ export async function signMaintenanceReport(payload) {
     let signature = signatures.find((item) => item.user_id === userId);
     const alreadySigned = Boolean(signature);
     if (!signature) {
+      if (isMaintenanceReportFullySigned(report, signatures) || report.request_status === 'firmado') {
+        throw Object.assign(new Error('El protocolo ya está finalizado.'), { status: 409 });
+      }
+      const engineerSignature = role === 'ingeniero_biomedico' && userId === report.created_by;
+      if (!engineerSignature && (report.acceptance_delegate_user_id || role === 'almacenista')) {
+        if (report.acceptance_delegate_user_id !== userId || role !== 'almacenista') {
+          throw Object.assign(new Error('El destinatario de firma cambió. Actualiza el reporte.'), { status: 403 });
+        }
+      }
       if (!signaturePath || !role || !signerName) {
         throw Object.assign(new Error('La firma del reporte cambio. Actualiza el reporte antes de firmar.'), { status: 409 });
       }
@@ -815,10 +829,16 @@ export async function updateMaintenanceReportSignatureSnapshot(payload) {
 
 export async function listMaintenanceReports(
   clientId,
-  { assetId, assetCategory = null, from, to, order = 'desc', limit, offset } = {}
+  { assetId, assetCategory = null, from, to, order = 'desc', limit, offset, storekeeperUserId } = {}
 ) {
   const clauses = ['r.client_id = $1', 'r.voided_at IS NULL'];
   const params = [clientId];
+  if (storekeeperUserId) {
+    params.push(storekeeperUserId);
+    clauses.push(`(r.acceptance_delegate_user_id=$2
+      OR EXISTS (SELECT 1 FROM report_signatures s WHERE s.report_id=r.id AND s.user_id=$2)
+      OR (r.requires_spare_parts AND r.spare_parts_status <> 'recibido' AND req.status='espera_repuesto'))`);
+  }
   let assetJoin = '';
   if (assetCategory) {
     const schema = await clientSchema(clientId);
@@ -1015,12 +1035,21 @@ export async function getMaintenanceReportById(reportId) {
 }
 
 export async function requestMaintenanceReportCorrection(payload) {
-  const { reportId, userId, reason } = payload;
+  const { reportId, userId, reason, actor } = payload;
   return withTransaction(async db => {
-    const context = (await db.query('SELECT request_id FROM maintenance_reports WHERE id=$1', [reportId])).rows[0];
-    if (context) await db.query('SELECT id FROM maintenance_requests WHERE id=$1 FOR UPDATE', [context.request_id]);
-    const report = (await db.query('SELECT request_id,voided_at FROM maintenance_reports WHERE id=$1 FOR UPDATE', [reportId])).rows[0];
+    const report = (await db.query(`SELECT r.* FROM maintenance_reports r
+      JOIN maintenance_requests req ON req.id=r.request_id WHERE r.id=$1 FOR UPDATE OF r, req`, [reportId])).rows[0];
     if (!report || report.voided_at) throw Object.assign(new Error('El reporte no está disponible para corrección.'), {status:409});
+    if (actor) {
+      const error = maintenanceAcceptanceError(report, actor);
+      if (error) throw Object.assign(new Error(error), { status: 403 });
+    }
+    const signatures = (await db.query('SELECT user_id,role FROM report_signatures WHERE report_id=$1', [reportId])).rows;
+    if (isMaintenanceReportFullySigned(report, signatures) || signatures.some(s => s.user_id === userId)) {
+      throw Object.assign(new Error('El protocolo ya recibió la firma y no puede devolverse.'), { status: 409 });
+    }
+    const pending = (await db.query('SELECT id FROM maintenance_report_corrections WHERE report_id=$1 AND resolved_at IS NULL', [reportId])).rows[0];
+    if (pending) return pending;
     const { rows } = await db.query(
       `INSERT INTO maintenance_report_corrections (report_id, requested_by, reason)
        VALUES ($1,$2,$3)

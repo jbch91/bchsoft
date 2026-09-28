@@ -13,6 +13,8 @@ import sharp from 'sharp';
 import { PDFDocument as PdfMergerDocument } from 'pdf-lib';
 import { query, withTransaction } from './db.js';
 import { createMaintenanceReportSignHandler } from './maintenance-signing.js';
+import { registerMaintenanceAcceptanceRoutes } from './maintenance-acceptance-routes.js';
+import { isStorekeeperWorkspace, maintenanceAcceptanceError } from './maintenance-acceptance-policy.js';
 import { createVerbalAttentionHandler, findVerbalAttention, saveVerbalAttention, verbalAttentionAccessError } from './maintenance-verbal.js';
 import { closeNotLocatedPreventive } from './maintenance-not-located.js';
 import { voidPreventiveForWarranty } from './maintenance-warranty-void.js';
@@ -1037,8 +1039,7 @@ async function listAreaResponsibleUsersForAsset(clientId, asset) {
 }
 
 async function listLegacyMaintenanceReportSigningUsers(clientId, asset, request) {
-  const storekeepers = await listUsersByRoleAndClient('almacenista', clientId);
-  const byId = new Map(storekeepers.map((user) => [user.id, user]));
+  const byId = new Map();
 
   let readers = [];
   if (asset?.area_id || asset?.location_id) {
@@ -1066,7 +1067,7 @@ async function listLegacyMaintenanceReportSigningUsers(clientId, asset, request)
 
   if (request?.type !== 'preventivo' && request?.requested_by) {
     const requester = await getUserById(request.requested_by);
-    if (requester?.id && !requester.roles?.includes('lector')) {
+    if (requester?.id && !requester.roles?.includes('lector') && !isStorekeeperWorkspace(requester)) {
       byId.set(requester.id, requester);
     }
   }
@@ -1074,7 +1075,12 @@ async function listLegacyMaintenanceReportSigningUsers(clientId, asset, request)
   return Array.from(byId.values());
 }
 
-async function buildMaintenanceReportSigningPlan(clientId, asset, request) {
+async function buildMaintenanceReportSigningPlan(clientId, asset, request, report) {
+  if (report?.acceptance_delegate_user_id) {
+    const users = await listUsersByRoleAndClient('almacenista', clientId);
+    return { areaResponsibleRequired: Boolean(report.area_responsible_required),
+      users: users.filter(user => user.id === report.acceptance_delegate_user_id) };
+  }
   const areaResponsibleUsers = await listAreaResponsibleUsersForAsset(clientId, asset);
   if (areaResponsibleUsers.length) {
     return {
@@ -11479,13 +11485,13 @@ app.get(
     }
     const parsedLimit = limit ? Math.min(Number(limit) || 0, 100) : undefined;
     const parsedOffset = offset ? Math.max(Number(offset) || 0, 0) : undefined;
-    if (isAreaScopedOperationalUser(req.user) && assetId) {
+    if (isAreaScopedOperationalUser(req.user) && !isStorekeeperWorkspace(req.user) && assetId) {
       const allowed = await readerCanAccessAsset(clientId, req.user.sub, assetId);
       if (!allowed) {
         return res.json([]);
       }
     }
-    const rows = isAreaScopedOperationalUser(req.user)
+    const rows = isAreaScopedOperationalUser(req.user) && !isStorekeeperWorkspace(req.user)
       ? await listMaintenanceReportsForReader(clientId, req.user.sub, {
           assetId,
           assetCategory,
@@ -11496,6 +11502,7 @@ app.get(
           offset: parsedOffset
         })
       : await listMaintenanceReports(clientId, {
+          storekeeperUserId: isStorekeeperWorkspace(req.user) ? req.user.sub : undefined,
           assetId,
           assetCategory,
           from,
@@ -11525,7 +11532,13 @@ app.get(
         ...report,
         signed_by_me: signedByMe,
         is_fully_signed: isFullySigned,
-        can_reopen_by_me: canReopenByMe
+        can_reopen_by_me: canReopenByMe,
+        can_delegate_acceptance: hasRole(req.user, 'ingeniero_biomedico')
+          && req.user.permissions?.includes('maintenance:report:create')
+          && report.created_by === req.user.sub && !report.correction_requested && !isFullySigned
+          && !report.voided_at && report.closure_kind !== 'not_located'
+          && ['reportado', 'espera_repuesto'].includes(report.request_status)
+          && !sigs.some(sig => sig.role !== 'ingeniero_biomedico' || sig.user_id !== report.created_by)
       };
     });
     return res.json(enriched);
@@ -11714,7 +11727,8 @@ app.post(
     const signingPlan = await buildMaintenanceReportSigningPlan(
       request.client_id,
       approvalAsset,
-      request
+      request,
+      correctionReport
     );
     const reportType = correctionReport?.type
       || (request.status === 'espera_repuesto' ? 'correctivo' : request.type);
@@ -11832,14 +11846,17 @@ app.post(
     }
 
     for (const signer of signingPlan.users) {
-      const title = reportType === 'preventivo'
+      const delegatedAcceptance = Boolean(correctionReport?.acceptance_delegate_user_id);
+      const title = delegatedAcceptance ? 'Protocolo corregido: firma de almacén pendiente' : reportType === 'preventivo'
         ? (signingPlan.areaResponsibleRequired
           ? 'Mantenimiento preventivo pendiente de aval'
           : 'Reporte preventivo pendiente de firma')
         : (signingPlan.areaResponsibleRequired
           ? 'Mantenimiento correctivo pendiente de aval'
           : 'Reporte correctivo pendiente de firma');
-      const message = requestStatusAfter === 'espera_repuesto'
+      const message = delegatedAcceptance
+        ? `El protocolo ${reportType} de ${assetLabel(reportAsset)} fue corregido y requiere tu firma de recepción para finalizarlo.${requestStatusAfter === 'espera_repuesto' ? ' El seguimiento del repuesto continuará abierto en paralelo.' : ''}`
+        : requestStatusAfter === 'espera_repuesto'
         ? `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)} y requiere ${signingPlan.areaResponsibleRequired ? 'tu aval como responsable del área' : 'firma'} para finalizar el protocolo. El caso de repuesto continuará abierto en paralelo: ${cleanSparePartsNeeded}.`
         : `Se generó el reporte ${reportType} de ${assetLabel(reportAsset)}. Debe recibir ${signingPlan.areaResponsibleRequired ? 'el aval del responsable del área' : 'la firma de aceptación'} para quedar validado.`;
       await createNotification({
@@ -12003,6 +12020,11 @@ app.post(
   }
 );
 
+registerMaintenanceAcceptanceRoutes(app, { requireAuth, requirePermission,
+  getMaintenanceReportById, listUsersByRoleAndClient, getCurrentSessionUser, resolveStoredFilePath,
+  getAssetById, getMaintenanceRequestById, buildMaintenanceReportSigningPlan,
+  createNotification, maintenanceRouteForAsset, assetLabel });
+
 app.post(
   '/maintenance/reports/:id/sign',
   requireAuth,
@@ -12037,13 +12059,10 @@ app.post(
     if (req.user.clientId && req.user.clientId !== report.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (report.area_responsible_required && !hasRole(req.user, AREA_RESPONSIBLE_ROLE)) {
-      return res.status(403).json({
-        message: 'Solo un responsable asignado al área puede solicitar corrección de este reporte.'
-      });
-    }
+    const acceptanceError = maintenanceAcceptanceError(report, req.user);
+    if (acceptanceError) return res.status(403).json({ message: acceptanceError });
     if (report.voided_at) return res.status(409).json({ message: 'El protocolo está anulado y no puede corregirse.' });
-    if (isAreaScopedOperationalUser(req.user)) {
+    if (isAreaScopedOperationalUser(req.user) && report.acceptance_delegate_user_id !== req.user.sub) {
       const allowed = await readerCanAccessAsset(report.client_id, req.user.sub, report.asset_id);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });
@@ -12061,11 +12080,13 @@ app.post(
       return res.status(409).json({ message: 'Ya firmaste este reporte; no puedes solicitar corrección después de firmar.' });
     }
 
-    const result = await requestMaintenanceReportCorrection({
-      reportId: report.id,
-      userId: req.user.sub,
-      reason
-    });
+    let result;
+    try {
+      result = await requestMaintenanceReportCorrection({ reportId: report.id, userId: req.user.sub, reason, actor: req.user });
+    } catch (error) {
+      if (!error.status) console.error('Report correction', error);
+      return res.status(error.status || 500).json({ message: error.status ? error.message : 'No se pudo solicitar la corrección.' });
+    }
     await markMaintenanceReportNotificationsResolved(report.id);
 
     const signedAsset = await getAssetById(report.client_id, report.asset_id);
@@ -12169,7 +12190,7 @@ app.get(
     if (req.user.clientId && req.user.clientId !== report.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
-    if (isAreaScopedOperationalUser(req.user)) {
+    if (isAreaScopedOperationalUser(req.user) && report.acceptance_delegate_user_id !== req.user.sub) {
       const allowed = await readerCanAccessAsset(report.client_id, req.user.sub, report.asset_id);
       if (!allowed) {
         return res.status(403).json({ message: 'Sin acceso al equipo.' });

@@ -1,4 +1,4 @@
-<section class="page" [class.corrective-workspace-active]="viewMode === 'reportes' && !isAreaResponsible">
+<section class="page" [class.corrective-workspace-active]="viewMode === 'reportes' && !isSignatureReviewer">
   <app-module-tabs></app-module-tabs>
 
   <div class="card filters-card" *ngIf="!auth.currentUser()?.clientId">
@@ -45,14 +45,14 @@
       >
         Nueva solicitud
       </button>
-      <button type="button" role="tab" class="tab" [class.active]="viewMode === 'solicitudes'" [attr.aria-selected]="viewMode === 'solicitudes'" (click)="switchView('solicitudes')">
+      <button *ngIf="!isStorekeeper" type="button" role="tab" class="tab" [class.active]="viewMode === 'solicitudes'" [attr.aria-selected]="viewMode === 'solicitudes'" (click)="switchView('solicitudes')">
         Solicitudes <strong>{{ manualRequests.length }}</strong>
       </button>
       <button
         type="button"
         class="tab"
         role="tab"
-        *ngIf="auth.hasPermission('maintenance:report:create')"
+        *ngIf="!isStorekeeper && auth.hasPermission('maintenance:report:create')"
         [class.active]="viewMode === 'preventivos'"
         [attr.aria-selected]="viewMode === 'preventivos'"
         (click)="switchView('preventivos')"
@@ -60,7 +60,7 @@
         Preventivos <strong>{{ preventiveNavigationCount }}</strong>
       </button>
       <button type="button" role="tab" class="tab" [class.active]="viewMode === 'reportes'" [attr.aria-selected]="viewMode === 'reportes'" (click)="switchView('reportes')">
-        Reportes <strong>{{ actionablePendingReportCount }}</strong>
+        {{ isStorekeeper ? 'Firmas solicitadas' : 'Reportes' }} <strong>{{ actionablePendingReportCount }}</strong>
       </button>
       <button
         type="button"
@@ -1332,10 +1332,10 @@
 
   <ng-container *ngIf="viewMode === 'reportes'">
 
-    <section class="area-approval-queue" *ngIf="isAreaResponsible" aria-label="Reportes de mantenimiento del área">
+    <section class="area-approval-queue" *ngIf="isSignatureReviewer" aria-label="Reportes de mantenimiento para revisión">
       <div class="area-approval-heading">
-        <h2>Mantenimiento</h2>
-        <app-activity-report-dialog [clientId]="selectedClientId" [category]="assetCategory"></app-activity-report-dialog>
+        <h2>{{ isStorekeeper ? 'Firmas solicitadas' : 'Mantenimiento' }}</h2>
+        <app-activity-report-dialog *ngIf="!isStorekeeper" [clientId]="selectedClientId" [category]="assetCategory"></app-activity-report-dialog>
         <div class="area-report-types" role="group" aria-label="Tipo de mantenimiento">
           <button type="button" [attr.aria-pressed]="reportTypeFilter === ''" (click)="setAreaResponsibleReportType('')">Todos</button>
           <button type="button" [attr.aria-pressed]="reportTypeFilter === 'preventivo'" (click)="setAreaResponsibleReportType('preventivo')">Preventivos</button>
@@ -1378,7 +1378,7 @@
           [attr.aria-pressed]="areaResponsibleReportView === 'completed'"
           (click)="setAreaResponsibleReportView('completed')"
         >
-          <span>Finalizados</span>
+          <span>{{ isStorekeeper ? 'Firmados por mí' : 'Finalizados' }}</span>
           <strong>{{ areaResponsibleReportCount('completed') }}</strong>
         </button>
       </div>
@@ -1524,7 +1524,7 @@
       </div>
     </section>
 
-    <section class="report-workspace" *ngIf="!isAreaResponsible" aria-label="Listado de reportes">
+    <section class="report-workspace" *ngIf="!isSignatureReviewer" aria-label="Listado de reportes">
       <div class="report-workspace-heading">
         <div class="report-workspace-title">
           <h2>{{ engineerReportsOnlyCorrectives ? 'Reportes correctivos' : 'Reportes' }}</h2>
@@ -2093,7 +2093,14 @@
         <span>{{ asset.locationName || 'Sin ubicación' }}</span>
       </div>
 
-      <div class="report-detail-callout approval" *ngIf="report.area_responsible_required">
+      <div class="report-detail-callout approval" *ngIf="report.acceptance_delegate_user_id">
+        <span>Recepción autorizada por almacén</span>
+        <strong>{{ report.acceptance_delegate_name }}</strong>
+        <small>{{ report.acceptance_delegation_reason }}</small>
+        <small>{{ report.is_fully_signed ? 'Protocolo firmado' : 'Pendiente de recepción' }}</small>
+      </div>
+
+      <div class="report-detail-callout approval" *ngIf="report.area_responsible_required && !report.acceptance_delegate_user_id">
         <span>Aval operativo</span>
         <strong>
           {{ report.is_fully_signed ? 'Avalado por responsable del área' : 'Pendiente de firma del responsable del área' }}
@@ -2170,6 +2177,9 @@
 
       <div class="modal-actions report-detail-actions">
         <button type="button" class="ghost" (click)="closeReportDetail()">Cerrar</button>
+        <button *ngIf="report.can_delegate_acceptance" type="button" class="ghost" (click)="openAcceptanceDelegate(report)">
+          {{ report.acceptance_delegate_user_id ? 'Cambiar destinatario' : 'Enviar a almacén' }}
+        </button>
         <button
           type="button"
           class="ghost"
@@ -2207,6 +2217,44 @@
         </button>
         <button *ngIf="auth.hasRole('superuser')" type="button" class="danger" (click)="deleteReport(report.id)">Eliminar</button>
       </div>
+    </article>
+  </div>
+
+  <div class="maintenance-modal-backdrop" *ngIf="acceptanceDelegateReport as report"
+    role="dialog" aria-modal="true" aria-labelledby="acceptance-delegate-title"
+    [attr.aria-busy]="acceptanceDelegateSaving" (click)="closeAcceptanceDelegate()" (keydown.escape)="closeAcceptanceDelegate()">
+    <article class="maintenance-modal acceptance-delegate-modal" (click)="$event.stopPropagation()">
+      <header class="modal-heading">
+        <div><span>Recepción del mantenimiento</span><h2 id="acceptance-delegate-title">Firma de almacén</h2></div>
+        <button type="button" class="icon-action ghost" aria-label="Cerrar solicitud de firma" title="Cerrar"
+          [disabled]="acceptanceDelegateSaving" (click)="closeAcceptanceDelegate()">×</button>
+      </header>
+      <strong class="acceptance-equipment">{{ assetLabel(report.asset_id) }}</strong>
+      <p class="modal-notice">La firma del almacenista sustituye el aval del responsable de área y finaliza este protocolo.</p>
+      <label>Almacenista
+        <select [(ngModel)]="acceptanceDelegateId" [disabled]="acceptanceDelegateLoading || acceptanceDelegateSaving">
+          <option value="">{{ acceptanceDelegateLoading ? 'Cargando...' : 'Seleccionar firmante' }}</option>
+          <option *ngFor="let user of acceptanceDelegates" [value]="user.id" [disabled]="!user.hasSignature">
+            {{ user.name }}{{ user.hasSignature ? '' : ' (sin firma registrada)' }}
+          </option>
+        </select>
+      </label>
+      <p *ngIf="!acceptanceDelegateLoading && !acceptanceDelegates.length" class="empty">
+        No hay almacenistas activos con permiso de firma en este cliente.
+      </p>
+      <label>Motivo de la sustitución o cambio
+        <textarea [(ngModel)]="acceptanceDelegateReason" rows="3" minlength="10" maxlength="600"
+          [disabled]="acceptanceDelegateSaving" placeholder="Indica por qué cambia el destinatario de recepción"></textarea>
+      </label>
+      <p class="sign-error" *ngIf="acceptanceDelegateError" role="alert">{{ acceptanceDelegateError }}</p>
+      <footer class="modal-actions">
+        <button type="button" class="ghost" [disabled]="acceptanceDelegateSaving" (click)="closeAcceptanceDelegate()">Cancelar</button>
+        <button *ngIf="report.acceptance_delegate_user_id" type="button" class="ghost"
+          [disabled]="acceptanceDelegateSaving || acceptanceDelegateReason.trim().length < 10"
+          (click)="saveAcceptanceDelegate(true)">Restaurar aval habitual</button>
+        <button type="button" [disabled]="acceptanceDelegateSaving || acceptanceDelegateLoading || !acceptanceDelegateId || acceptanceDelegateReason.trim().length < 10"
+          (click)="saveAcceptanceDelegate()">{{ acceptanceDelegateSaving ? 'Guardando...' : 'Enviar a firma' }}</button>
+      </footer>
     </article>
   </div>
 

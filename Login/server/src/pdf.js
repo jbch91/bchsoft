@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { isMaintenanceReportFullySigned } from './maintenance-workflow.js';
 
 const PDF_BRAND_50 = '#fff1f2';
 const PDF_BRAND_100 = '#ffe4e6';
@@ -108,14 +109,7 @@ function maintenanceSourceLabel(value) {
 function maintenanceDocumentStatusLabel(report, signatures) {
   const hasEngineer = signatures?.some((signature) => signature.role === 'ingeniero_biomedico');
   if (report.closure_kind === 'not_located') return hasEngineer ? 'CONSTANCIA FIRMADA' : 'PENDIENTE DE FIRMA';
-  const hasAcceptance = signatures?.some((signature) => [
-    'responsable_area',
-    'almacenista',
-    'lector',
-    'viewer',
-    'visor',
-    'superuser'
-  ].includes(signature.role));
+  const hasAcceptance = isMaintenanceReportFullySigned(report, signatures);
   if (report.correction_requested || report.request_status === 'correccion') {
     return 'CORRECCIÓN SOLICITADA';
   }
@@ -2223,7 +2217,7 @@ function maintenanceSignerCredential(signature) {
   return 'USUARIO AUTORIZADO DEL CLIENTE';
 }
 
-function drawMaintenanceSignatures(doc, signatures, { description } = {}) {
+function drawMaintenanceSignatures(doc, signatures, { description, acceptanceDelegateUserId } = {}) {
   if (!signatures?.length) {
     drawMaintenanceNarrativeBox(doc, 'ESTADO DE FIRMAS', 'SIN FIRMAS REGISTRADAS');
     return;
@@ -2274,7 +2268,9 @@ function drawMaintenanceSignatures(doc, signatures, { description } = {}) {
       .font('Helvetica')
       .fontSize(9)
       .fillColor(PDF_MUTED)
-      .text(description || maintenanceSignerDescription(signature.role), cursorX + 10, cursorY + 23, {
+      .text(description || (acceptanceDelegateUserId && signature.user_id === acceptanceDelegateUserId
+        ? 'RECEPCIÓN AUTORIZADA DEL MANTENIMIENTO'
+        : maintenanceSignerDescription(signature.role)), cursorX + 10, cursorY + 23, {
         width: signatureWidth - 20,
         height: 12,
         align: 'center',
@@ -2564,8 +2560,12 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
     );
   }
 
+  if (report.acceptance_delegate_user_id) {
+    drawMaintenanceNarrativeBox(doc, 'RECEPCIÓN AUTORIZADA POR ALMACÉN',
+      `${report.acceptance_delegate_name || 'ALMACENISTA'}. SUSTITUYE EL AVAL DEL RESPONSABLE DE ÁREA PARA ESTE PROTOCOLO. MOTIVO: ${report.acceptance_delegation_reason || 'NO REGISTRA'}`);
+  }
   drawMaintenanceSectionTitle(doc, 6, 'FIRMAS Y AVALES', 171);
-  drawMaintenanceSignatures(doc, signatureList);
+  drawMaintenanceSignatures(doc, signatureList, { acceptanceDelegateUserId: report.acceptance_delegate_user_id });
 
   addMaintenanceReportPageChrome(doc, { client, code: header.code });
 }

@@ -43,6 +43,31 @@ function setup({ existing = false, spare = false } = {}) {
   return { calls, deps, report, signature, req, res, run: () => createMaintenanceReportSignHandler(deps)(req, res) };
 }
 
+test('delegated storekeeper can sign without any assigned area using their real role', async () => {
+  const state = setup();
+  state.report.acceptance_delegate_user_id = 'chief-1';
+  state.req.user.roles = ['almacenista'];
+  state.req.user.permissions = ['maintenance:report:sign'];
+  state.deps.readerCanAccessAsset = async () => { throw Error('No area access should be required'); };
+  await state.run();
+  assert.equal(state.res.statusCode,200);
+  assert.equal(state.calls.find(([name]) => name === 'sign')[1].role,'almacenista');
+  assert.equal(state.res.body.is_fully_signed,true);
+});
+
+test('delegation blocks the original chief and a storekeeper whose permission was revoked', async () => {
+  const state = setup();
+  state.report.acceptance_delegate_user_id = 'other-store';
+  await state.run();
+  assert.equal(state.res.statusCode,403);
+  state.req.user.sub = 'other-store';
+  state.req.user.roles = ['almacenista'];
+  state.req.user.permissions = [];
+  await state.run();
+  assert.equal(state.res.statusCode,403);
+  assert.equal(state.calls.some(([name]) => name === 'sign'),false);
+});
+
 test('confirms the signature and notifies using the signed equipment, without an undefined variable', async () => {
   const state = setup();
   await state.run();
