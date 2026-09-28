@@ -8,6 +8,14 @@
       Búsqueda
       <input type="text" [(ngModel)]="searchTerm" placeholder="Código, equipo, marca o serie..." />
     </label>
+    <label *ngIf="!isLifeSheetMode">
+      Tipo de equipo
+      <select [(ngModel)]="filterCategory">
+        <option value="">Todos</option>
+        <option value="biomedical">Biomédicos</option>
+        <option value="industrial">Industriales</option>
+      </select>
+    </label>
     <label>
       Sede
       <select [(ngModel)]="filterSite">
@@ -128,6 +136,14 @@
             [disabled]="exportLoading"
             placeholder="Código, equipo, marca, modelo o serie"
           />
+        </label>
+        <label>
+          Tipo de equipo
+          <select [(ngModel)]="exportCategory" [disabled]="exportLoading">
+            <option value="">Todos</option>
+            <option value="biomedical">Biomédicos</option>
+            <option value="industrial">Industriales</option>
+          </select>
         </label>
         <label>
           Sede
@@ -303,7 +319,10 @@
 
       <div class="row inventory-row" *ngIf="!isLifeSheetMode">
         <span data-label="Código">{{ item.code }}</span>
-        <span data-label="Equipo">{{ item.name }}</span>
+        <span class="cell-stack" data-label="Equipo">
+          <strong>{{ item.name }}</strong>
+          <small>{{ assetCategoryLabel(item.assetCategory) }}</small>
+        </span>
         <span class="cell-stack" data-label="Identificación">
           <strong>{{ item.brand || '-' }} · {{ item.model || '-' }}</strong>
           <small>Serie {{ item.serial || '-' }}</small>

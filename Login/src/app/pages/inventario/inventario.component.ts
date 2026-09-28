@@ -234,9 +234,10 @@ export class InventarioComponent {
     this.loading = true;
     this.errorMessage = '';
     try {
-      const rows = await this.biomed.listAssets(this.selectedClientId);
+      const rows = await this.biomed.listAssets(this.selectedClientId, 'all');
       this.items = rows.map((row) => ({
         id: row.id,
+        assetCategory: row.asset_category,
         code: row.code,
         name: row.name,
         brand: row.brand,
@@ -333,7 +334,7 @@ export class InventarioComponent {
       await this.maintenance.createRequest({
         clientId: this.selectedClientId,
         assetId: item.id,
-        assetCategory: 'biomedical',
+        assetCategory: item.assetCategory || 'biomedical',
         type: 'correctivo',
         description
       });

@@ -111,10 +111,11 @@ function createQrComponent() {
 }
 
 describe('InventarioComponent area responsible flow', () => {
-  it('carga estados operativos y crea la solicitud correctiva desde el equipo', async () => {
+  it.each(['biomedical', 'industrial'] as const)('carga inventario mixto y solicita revisión de un equipo %s', async (assetCategory) => {
     const biomed = {
       listAssets: vi.fn().mockResolvedValue([{
         id: 'asset-1',
+        asset_category: assetCategory,
         code: 'EQ-001',
         name: 'MONITOR',
         brand: 'MARCA',
@@ -161,6 +162,8 @@ describe('InventarioComponent area responsible flow', () => {
     await component.init();
 
     expect(component.items).toHaveLength(1);
+    expect(biomed.listAssets).toHaveBeenCalledWith('client-1', 'all');
+    expect(component.items[0].assetCategory).toBe(assetCategory);
     expect(component.selectedClientInfo?.name).toBe('ESE CENTRO DE SALUD SAN JUAN DE DIOS');
     expect(component.canManageQr).toBe(false);
     expect(component.items[0]).toMatchObject({
@@ -176,7 +179,7 @@ describe('InventarioComponent area responsible flow', () => {
     expect(maintenance.createRequest).toHaveBeenCalledWith({
       clientId: 'client-1',
       assetId: 'asset-1',
-      assetCategory: 'biomedical',
+      assetCategory,
       type: 'correctivo',
       description: 'El equipo presenta una alarma intermitente durante el uso.'
     });

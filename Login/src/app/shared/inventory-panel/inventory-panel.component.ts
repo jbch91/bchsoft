@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
+  AssetCategory,
   AssetHistoryItemDto,
   AssetMovementDto,
   BiomedService,
@@ -23,6 +24,7 @@ import { QuickGuidesService } from '../../quick-guides/quick-guides.service';
 
 export interface InventoryPanelItem {
   id: string;
+  assetCategory?: AssetCategory;
   code: string;
   name: string;
   brand: string | null;
@@ -143,12 +145,14 @@ export class InventoryPanelComponent implements OnDestroy {
   filterLocation = '';
   filterStatus = '';
   filterCondition: LifeSheetCondition = '';
+  filterCategory: AssetCategory | '' = '';
   exportFormat: InventoryExportFormat = 'xlsx';
   exportSearchTerm = '';
   exportSite = '';
   exportArea = '';
   exportLocation = '';
   exportCondition: LifeSheetCondition = '';
+  exportCategory: AssetCategory | '' = '';
   exportModalOpen = false;
   exportLoading = false;
   exportError = '';
@@ -369,6 +373,7 @@ export class InventoryPanelComponent implements OnDestroy {
   get exportFilteredItems(): InventoryPanelItem[] {
     const term = this.normalize(this.exportSearchTerm);
     return this.exportSourceItems.filter((item) => {
+      if (this.exportCategory && (item.assetCategory || 'biomedical') !== this.exportCategory) return false;
       if (this.exportSite && item.siteName !== this.exportSite) return false;
       if (this.exportArea && item.areaName !== this.exportArea) return false;
       if (this.exportLocation && item.locationName !== this.exportLocation) return false;
@@ -399,6 +404,7 @@ export class InventoryPanelComponent implements OnDestroy {
       || this.exportArea
       || this.exportLocation
       || this.exportCondition
+      || this.exportCategory
     );
   }
 
@@ -443,6 +449,10 @@ export class InventoryPanelComponent implements OnDestroy {
     return labels[String(status || '').toLowerCase()] || status || 'Sin estado';
   }
 
+  assetCategoryLabel(category: AssetCategory | undefined): string {
+    return category === 'industrial' ? 'Industrial' : 'Biomédico';
+  }
+
   isUnderWarranty(item: InventoryPanelItem): boolean {
     const acquisitionDate = this.dateOnly(item.acquisitionDate);
     const warrantyYears = Number(item.warrantyYears);
@@ -467,6 +477,7 @@ export class InventoryPanelComponent implements OnDestroy {
 
   get activeFilters(): { key: string; label: string }[] {
     const filters: { key: string; label: string }[] = [];
+    if (this.filterCategory) filters.push({ key: 'category', label: `Tipo: ${this.assetCategoryLabel(this.filterCategory)}` });
     if (this.searchTerm.trim()) filters.push({ key: 'search', label: `Búsqueda: ${this.searchTerm.trim()}` });
     if (this.filterSite) filters.push({ key: 'site', label: `Sede: ${this.filterSite}` });
     if (this.filterArea) filters.push({ key: 'area', label: `Área: ${this.filterArea}` });
@@ -482,6 +493,7 @@ export class InventoryPanelComponent implements OnDestroy {
   }
 
   clearFilter(key: string): void {
+    if (key === 'category') this.filterCategory = '';
     if (key === 'search') this.searchTerm = '';
     if (key === 'site') this.filterSite = '';
     if (key === 'area') this.filterArea = '';
@@ -491,6 +503,7 @@ export class InventoryPanelComponent implements OnDestroy {
   }
 
   clearFilters(): void {
+    this.filterCategory = '';
     this.searchTerm = '';
     this.filterSite = '';
     this.filterArea = '';
@@ -511,6 +524,7 @@ export class InventoryPanelComponent implements OnDestroy {
   }
 
   clearExportFilters(): void {
+    this.exportCategory = '';
     this.exportSearchTerm = '';
     this.exportSite = '';
     this.exportArea = '';
@@ -519,6 +533,7 @@ export class InventoryPanelComponent implements OnDestroy {
   }
 
   private matchesBaseFilters(item: InventoryPanelItem): boolean {
+    if (this.filterCategory && (item.assetCategory || 'biomedical') !== this.filterCategory) return false;
     if (this.filterArea && item.areaName !== this.filterArea) return false;
     if (this.filterSite && item.siteName !== this.filterSite) return false;
     if (this.filterLocation && item.locationName !== this.filterLocation) return false;
@@ -579,6 +594,7 @@ export class InventoryPanelComponent implements OnDestroy {
     this.exportArea = this.filterArea;
     this.exportLocation = this.filterLocation;
     this.exportCondition = this.conditionFilterEnabled ? this.filterCondition : '';
+    this.exportCategory = this.filterCategory;
     this.onExportSiteChange();
     this.exportModalOpen = true;
     setTimeout(() => {
@@ -643,7 +659,8 @@ export class InventoryPanelComponent implements OnDestroy {
       'Ubicación',
       'Estado operativo',
       'Requiere calibración',
-      'Frecuencia calibración'
+      'Frecuencia calibración',
+      'Tipo de equipo'
     ];
     const rows = items.map((item) => [
       item.code,
@@ -658,7 +675,8 @@ export class InventoryPanelComponent implements OnDestroy {
       item.requiresCalibration ? 'SÍ' : 'NO',
       item.requiresCalibration
         ? String(item.calibrationFrequency || 'NO REGISTRA').toUpperCase()
-        : 'NO APLICA'
+        : 'NO APLICA',
+      this.assetCategoryLabel(item.assetCategory).toUpperCase()
     ]);
 
     if (this.exportFormat === 'csv') {
@@ -719,14 +737,14 @@ export class InventoryPanelComponent implements OnDestroy {
         ['SOFTWARE UTILIZADO', 'INBIHOSPITALARIO', '', '', '', '', '', '', '']
       ]);
       worksheet['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 10 } },
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } },
         { s: { r: 1, c: 1 }, e: { r: 1, c: 3 } },
-        { s: { r: 1, c: 7 }, e: { r: 1, c: 10 } },
+        { s: { r: 1, c: 7 }, e: { r: 1, c: 11 } },
         { s: { r: 2, c: 1 }, e: { r: 2, c: 3 } },
-        { s: { r: 2, c: 5 }, e: { r: 2, c: 10 } },
-        { s: { r: 3, c: 1 }, e: { r: 3, c: 10 } },
-        { s: { r: 4, c: 1 }, e: { r: 4, c: 10 } },
-        { s: { r: 8 + rows.length, c: 1 }, e: { r: 8 + rows.length, c: 10 } }
+        { s: { r: 2, c: 5 }, e: { r: 2, c: 11 } },
+        { s: { r: 3, c: 1 }, e: { r: 3, c: 11 } },
+        { s: { r: 4, c: 1 }, e: { r: 4, c: 11 } },
+        { s: { r: 8 + rows.length, c: 1 }, e: { r: 8 + rows.length, c: 11 } }
       ];
       worksheet['!cols'] = [
         { wch: 18 },
@@ -739,10 +757,11 @@ export class InventoryPanelComponent implements OnDestroy {
         { wch: 24 },
         { wch: 26 },
         { wch: 22 },
-        { wch: 24 }
+        { wch: 24 },
+        { wch: 18 }
       ];
       worksheet['!autofilter'] = {
-        ref: `A7:K${Math.max(7, 7 + rows.length)}`
+        ref: `A7:L${Math.max(7, 7 + rows.length)}`
       };
       const workbook = XLSX.utils.book_new();
       workbook.Props = {
@@ -752,7 +771,7 @@ export class InventoryPanelComponent implements OnDestroy {
         Company: context.clientName,
         CreatedDate: context.generatedDate
       };
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventario biomédico');
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventario');
       const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
       const blob = new Blob([content], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -787,7 +806,7 @@ export class InventoryPanelComponent implements OnDestroy {
       doc.setTextColor(255, 255, 255);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11.5);
-      doc.text('INVENTARIO BIOMÉDICO', 10, 9.5);
+      doc.text(context.title, 10, 9.5);
 
       doc.setTextColor(31, 41, 55);
       doc.setFontSize(7.5);
@@ -861,8 +880,10 @@ export class InventoryPanelComponent implements OnDestroy {
     const area = useModalFilters ? this.exportArea : this.filterArea;
     const location = useModalFilters ? this.exportLocation : this.filterLocation;
     const condition = useModalFilters ? this.exportCondition : this.filterCondition;
+    const category = useModalFilters ? this.exportCategory : this.filterCategory;
     const search = (useModalFilters ? this.exportSearchTerm : this.searchTerm).trim();
     const scopeParts = [
+      category ? `Tipo: ${this.assetCategoryLabel(category)}` : '',
       site ? `Sede: ${site}` : '',
       area ? `Área: ${area}` : '',
       location ? `Ubicación: ${location}` : '',
@@ -876,7 +897,7 @@ export class InventoryPanelComponent implements OnDestroy {
       || (condition ? this.lifeSheetConditionLabel(condition) : '')
       || (scopeParts.length ? 'filtrado' : 'completo');
     return {
-      title: 'INVENTARIO BIOMÉDICO',
+      title: category ? `INVENTARIO ${this.assetCategoryLabel(category).toUpperCase()}` : 'INVENTARIO DE EQUIPOS',
       clientName,
       clientNit: this.clientNit.trim() || 'NO REGISTRA',
       clientCity: this.clientCity.trim() || 'NO REGISTRA',
@@ -886,7 +907,7 @@ export class InventoryPanelComponent implements OnDestroy {
       scope,
       itemCount,
       filenameBase: [
-        'inventario-biomedico',
+        category === 'industrial' ? 'inventario-industrial' : category === 'biomedical' ? 'inventario-biomedico' : 'inventario-equipos',
         this.filenameToken(clientName),
         this.filenameToken(scopeToken),
         fileDate

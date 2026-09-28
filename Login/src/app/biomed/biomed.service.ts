@@ -319,7 +319,7 @@ export class BiomedService {
 
   constructor(private readonly http: HttpClient) {}
 
-  async listAssets(clientId: string, assetCategory: AssetCategory = 'biomedical'): Promise<AssetDto[]> {
+  async listAssets(clientId: string, assetCategory: AssetCategory | 'all' = 'biomedical'): Promise<AssetDto[]> {
     return firstValueFrom(
       this.http.get<AssetDto[]>(`${this.apiBase}/biomed/${clientId}/assets?category=${assetCategory}`)
     );

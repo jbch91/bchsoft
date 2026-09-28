@@ -8704,7 +8704,9 @@ app.get(
     }
 
     try {
-      const assetCategory = normalizeAssetCategory(req.query.category);
+      const assetCategory = req.query.category === 'all'
+        ? null
+        : normalizeAssetCategory(req.query.category);
       const assets = isAreaScopedOperationalUser(req.user)
         ? await listAssetsForReader(clientId, req.user.sub, { assetCategory })
         : await listAssets(clientId, { assetCategory });

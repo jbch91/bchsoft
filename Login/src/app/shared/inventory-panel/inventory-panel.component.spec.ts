@@ -106,6 +106,33 @@ describe('InventoryPanelComponent operational conditions', () => {
     expect(component.inventoryOutOfServiceCount).toBe(1);
   });
 
+  it('incluye ambas categorías, combina filtros y hereda el tipo al exportar', () => {
+    const component = createComponent();
+    component.items = [
+      items[0],
+      { ...items[1], id: 'industrial', assetCategory: 'industrial', name: 'NEVERA INDUSTRIAL' },
+      { ...items[1], id: 'retired', assetCategory: 'industrial', status: 'dado_de_baja' }
+    ];
+    expect(component.filteredCount).toBe(2);
+    component.filterCategory = 'industrial';
+    component.filterArea = 'UCI';
+    expect(component.filteredItems.map((item) => item.id)).toEqual(['industrial']);
+    expect(component.activeFilters).toContainEqual({ key: 'category', label: 'Tipo: Industrial' });
+    component.openExportModal();
+    expect(component.exportCategory).toBe('industrial');
+    expect(component.exportFilteredItems.map((item) => item.id)).toEqual(['industrial']);
+    expect(component.hasExportFilters).toBe(true);
+    component.exportCategory = 'biomedical';
+    expect(component.exportFilteredItems.map((item) => item.id)).toEqual(['operational']);
+    component.clearExportFilters();
+    expect(component.exportItemCount).toBe(2);
+    component.clearFilter('category');
+    expect(component.filteredCount).toBe(2);
+    component.filterCategory = 'industrial';
+    component.clearFilters();
+    expect(component.filterCategory).toBe('');
+  });
+
   it('filtra equipos que requieren calibración en la lista y en la exportación', () => {
     const component = createComponent();
     component.items = items;
@@ -261,7 +288,7 @@ describe('InventoryPanelComponent operational conditions', () => {
       expect(click).toHaveBeenCalledTimes(3);
       expect(downloads).toHaveLength(3);
       expect(downloads.every((name) => (
-        name.startsWith('inventario-biomedico-ese-centro-de-salud-san-juan-de-dios-uci-')
+        name.startsWith('inventario-equipos-ese-centro-de-salud-san-juan-de-dios-uci-')
       ))).toBe(true);
 
       const csv = await readBlobText(blobs[0]);
@@ -274,16 +301,29 @@ describe('InventoryPanelComponent operational conditions', () => {
       const xlsxModule = await import('xlsx');
       const XLSX = ((xlsxModule as any).utils ? xlsxModule : (xlsxModule as any).default) as typeof import('xlsx');
       const workbook = XLSX.read(await readBlobBuffer(blobs[1]), { type: 'array' });
-      const worksheet = workbook.Sheets['Inventario biomédico'];
-      expect(worksheet['A1'].v).toBe('INVENTARIO BIOMÉDICO');
+      const worksheet = workbook.Sheets['Inventario'];
+      expect(worksheet['A1'].v).toBe('INVENTARIO DE EQUIPOS');
       expect(worksheet['B2'].v).toBe('ESE CENTRO DE SALUD SAN JUAN DE DIOS');
       expect(worksheet['B4'].v).toContain('Área: UCI');
       expect(worksheet['J7'].v).toBe('Requiere calibración');
       expect(worksheet['J8'].v).toBe('SÍ');
       expect(worksheet['K8'].v).toBe('SEMESTRAL');
+      expect(worksheet['L7'].v).toBe('Tipo de equipo');
+      expect(worksheet['L8'].v).toBe('BIOMÉDICO');
+      expect(worksheet['!autofilter']?.ref).toBe('A7:L8');
       expect(worksheet['A10'].v).toBe('SOFTWARE UTILIZADO');
       expect(worksheet['B10'].v).toBe('INBIHOSPITALARIO');
       expect(blobs[2].type).toBe('application/pdf');
+
+      component.items = [{ ...items[0], assetCategory: 'industrial', name: 'NEVERA INDUSTRIAL' }];
+      component.exportCategory = 'industrial';
+      component.exportFormat = 'xlsx';
+      await component.exportSelectedInventory();
+      const industrialWorkbook = XLSX.read(await readBlobBuffer(blobs[3]), { type: 'array' });
+      const industrialSheet = industrialWorkbook.Sheets['Inventario'];
+      expect(industrialSheet['A1'].v).toBe('INVENTARIO INDUSTRIAL');
+      expect(industrialSheet['L8'].v).toBe('INDUSTRIAL');
+      expect(downloads[3]).toContain('inventario-industrial-');
     } finally {
       click.mockRestore();
       Object.defineProperty(URL, 'createObjectURL', {

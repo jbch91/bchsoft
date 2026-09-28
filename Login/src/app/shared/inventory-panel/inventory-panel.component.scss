@@ -11,8 +11,8 @@
 
 .filters-grid.inventory-filters {
   grid-template-columns:
-    minmax(190px, 1.35fr)
-    repeat(3, minmax(105px, 0.75fr))
+    minmax(170px, 1.35fr)
+    repeat(4, minmax(105px, 0.75fr))
     minmax(170px, 1.15fr)
     auto;
 }
@@ -1310,8 +1310,8 @@ button:disabled {
 @media (max-width: 1120px) {
   .filters-grid.inventory-filters {
     grid-template-columns:
-      minmax(180px, 1.35fr)
-      repeat(3, minmax(100px, 0.75fr))
+      minmax(160px, 1.35fr)
+      repeat(4, minmax(100px, 0.75fr))
       minmax(160px, 1fr);
   }
 
