@@ -2461,8 +2461,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   preventiveWindowLabel(item: MaintenanceRequestDto | PreventiveProgressItemDto): string {
     if (!item.planned_date && !item.deadline_date) return 'Ventana no registrada';
-    const planned = item.planned_date ? new Date(item.planned_date).toLocaleDateString('es-CO') : '-';
-    const deadline = item.deadline_date ? new Date(item.deadline_date).toLocaleDateString('es-CO') : '-';
+    const planned = item.planned_date ? new Date(item.planned_date).toLocaleDateString('es-CO', { timeZone: 'UTC' }) : '-';
+    const deadline = item.deadline_date ? new Date(item.deadline_date).toLocaleDateString('es-CO', { timeZone: 'UTC' }) : '-';
     return `${planned} - ${deadline}`;
   }
 
