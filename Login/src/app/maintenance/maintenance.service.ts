@@ -106,6 +106,7 @@ export interface AssetQrMaintenanceContextDto {
 }
 
 export interface MaintenanceReportDto {
+  request_description?: string | null;
   voided_at?: string | null;
   closure_kind?: 'maintenance' | 'not_located';
   id: string;
@@ -348,6 +349,7 @@ export class MaintenanceService {
   }
 
   async createReport(payload: {
+    requestDescription?: string;
     requestId: string;
     summary?: string;
     findings?: string;

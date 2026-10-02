@@ -18,6 +18,7 @@ test('storekeeper receipt delegation: isolated tenants, workflow, signatures and
 }, async t => {
   assert.ok(['localhost','127.0.0.1'].includes(process.env.DB_HOST),'Local database only');
   await query(await fs.readFile('sql/maintenance_acceptance_delegation.sql','utf8'));
+  await query(await fs.readFile('sql/maintenance_report_request_description.sql','utf8'));
   const tag = `qa_accept_${Date.now()}`;
   const tenants = [];
   let api;
@@ -154,6 +155,26 @@ test('storekeeper receipt delegation: isolated tenants, workflow, signatures and
           .catch(error => { throw new Error(`${error.message}\n${logs}`); });
       }
       const f=await fixture({type:'correctivo'});
+      const installation = await fixture({spare:true});
+      await query("UPDATE maintenance_requests SET description='Mantenimiento preventivo programado',planned_date='2026-08-01' WHERE id=$1",[installation.request]);
+      const original = (await query('SELECT * FROM maintenance_reports WHERE id=$1',[installation.report])).rows[0];
+      const originalSignatures = (await query('SELECT * FROM report_signatures WHERE report_id=$1',[installation.report])).rows;
+      const originalItem = (await query('SELECT * FROM maintenance_schedule_items WHERE id=$1',[installation.item])).rows[0];
+      const description = 'Atención correctiva para instalar BATERÍA en MONITOR QA. Pendiente del preventivo de agosto de 2026. Coordinar entrega con urgencias.';
+      const installationResponse = await call(engineer,'/maintenance/reports',{
+        requestId:installation.request,requestDescription:description,summary:'Instalación de batería QA',findings:'Batería agotada',actionsTaken:'Se instala batería y se comprueba el funcionamiento.',
+        maintenanceChecks:['revision_visual'],maintenanceActivities:['instalacion_repuesto'],maintenanceTests:['encendido_apagado'],assetStatusAfter:'operativo',requiresSpareParts:true,sparePartsNeeded:'BATERÍA'
+      });
+      assert.equal(installationResponse.status,201,await installationResponse.clone().text());
+      const installed = (await query("SELECT * FROM maintenance_reports WHERE request_id=$1 AND type='correctivo'",[installation.request])).rows[0];
+      assert.equal(installed.request_description,description);
+      assert.deepEqual((await query('SELECT * FROM maintenance_reports WHERE id=$1',[installation.report])).rows[0],original);
+      assert.deepEqual((await query('SELECT * FROM report_signatures WHERE report_id=$1',[installation.report])).rows,originalSignatures);
+      assert.deepEqual((await query('SELECT * FROM maintenance_schedule_items WHERE id=$1',[installation.item])).rows[0],originalItem);
+      assert.equal((await query('SELECT description FROM maintenance_requests WHERE id=$1',[installation.request])).rows[0].description,'Mantenimiento preventivo programado');
+      const installationPdf = await call(engineer,`/maintenance/reports/${installed.id}/pdf`);
+      assert.equal(installationPdf.status,200);
+      if(process.env.QA_SPARE_DESCRIPTION_PDF) await fs.writeFile(process.env.QA_SPARE_DESCRIPTION_PDF,Buffer.from(await installationPdf.arrayBuffer()));
       let response=await call(engineer,`/maintenance/reports/${f.report}/acceptance-delegates`);
       assert.equal(response.status,200,await response.clone().text());
       assert.ok((await response.json()).some(u=>u.id===store.sub && u.hasSignature));

@@ -898,9 +898,10 @@
                 <strong>{{ request.requester_name || '-' }}</strong>
               </div>
             </div>
-            <label class="readonly-field" *ngIf="!verbalAttentionMode">
+            <label [class.readonly-field]="!canEditSpareRequestDescription" *ngIf="!verbalAttentionMode">
               Descripción de la solicitud
-              <textarea [ngModel]="request.description || 'Sin descripción registrada.'" name="requestDescriptionReadonly" [rows]="isCorrectiveReportEditor ? 2 : 3" readonly></textarea>
+              <textarea *ngIf="canEditSpareRequestDescription; else originalRequestDescription" [(ngModel)]="reportRequestDescription" name="spareRequestDescription" rows="3" minlength="10" maxlength="2000" required></textarea>
+              <ng-template #originalRequestDescription><textarea [ngModel]="request.description || 'Sin descripción registrada.'" name="requestDescriptionReadonly" [rows]="isCorrectiveReportEditor ? 2 : 3" readonly></textarea></ng-template>
             </label>
           </div>
 
@@ -2058,6 +2059,11 @@
             <span>Serie: <b>{{ asset.serial || '-' }}</b></span>
           </div>
         </div>
+      </div>
+
+      <div class="report-detail-section" *ngIf="report.request_description">
+        <h3>Descripción de la solicitud</h3>
+        <p>{{ report.request_description }}</p>
       </div>
 
       <div class="report-detail-overview">

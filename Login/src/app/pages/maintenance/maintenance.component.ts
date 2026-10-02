@@ -516,6 +516,13 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   reportSparePartResolution: 'request_later' | 'installed_now' = 'request_later';
   reportFlowMode: 'normal' | 'install_spare' | 'retire_asset' = 'normal';
   reportFlowSource: MaintenanceReportDto | null = null;
+  reportRequestDescription = '';
+
+  get canEditSpareRequestDescription(): boolean {
+    return this.reportFlowMode === 'install_spare' || Boolean(this.reportCorrectionMode
+      && this.reportCorrectionReport?.type === 'correctivo'
+      && (this.reportCorrectionReport.request_description || this.reportCorrectionReport.spare_parts_status === 'recibido'));
+  }
   reportCorrectionMode = false;
   reportCorrectionType: MaintenanceReportDto['type'] | null = null;
   reportCorrectionReport: MaintenanceReportDto | null = null;
@@ -684,7 +691,8 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     await this.createReport();
     if (!this.isCorrectiveReportEditor || !this.reportFormActive || !this.errorMessage) return;
     if ((this.verbalAttentionMode && ['assetId', 'performedOn', 'reporterName', 'reporterRole', 'description', 'summary', 'findings'].includes(this.verbalErrorField))
-      || !this.reportSummary.trim() || !this.reportFindings.trim()) {
+      || !this.reportSummary.trim() || !this.reportFindings.trim()
+      || (this.canEditSpareRequestDescription && (this.reportRequestDescription.trim().length < 10 || this.reportRequestDescription.trim().length > 2000))) {
       this.setCorrectiveEditorSection('attention');
     } else if ((this.verbalAttentionMode && this.verbalErrorField === 'actions') || !this.reportActions.trim() || !this.reportMaintenanceChecks.length || !this.reportMaintenanceActivities.length
       || (this.reportAssetStatus !== 'fuera_de_servicio' && !this.reportMaintenanceTests.length)
@@ -1398,6 +1406,10 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
 
   async createReport(): Promise<void> {
     if (this.reportSaving) return;
+    if (this.canEditSpareRequestDescription && (this.reportRequestDescription.trim().length < 10 || this.reportRequestDescription.trim().length > 2000)) {
+      this.errorMessage = 'La descripción de la solicitud debe tener entre 10 y 2000 caracteres.';
+      return;
+    }
     if (this.verbalAttentionMode && !this.validateVerbalAttention()) return;
     if (!this.reportRequestId && !this.verbalAttentionMode) {
       this.errorMessage = 'Selecciona una solicitud.';
@@ -1487,6 +1499,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
       }
       await this.maintenance.createReport({
         requestId: this.reportRequestId,
+        ...(this.canEditSpareRequestDescription ? { requestDescription: this.reportRequestDescription.trim() } : {}),
         summary,
         findings,
         actionsTaken,
@@ -1753,6 +1766,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportCorrectionMode = true;
     this.reportCorrectionType = report.type;
     this.reportCorrectionReport = report;
+    this.reportRequestDescription = report.request_description || this.selectedReportRequest?.description || '';
     this.viewMode = 'reportes';
     this.reportSummary = report.summary || '';
     this.reportFindings = report.findings || '';
@@ -3374,6 +3388,16 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     }
   }
 
+  private spareInstallationRequestDescription(report: MaintenanceReportDto): string {
+    const request = this.selectedReportRequest;
+    const preventive = (report.type || request?.type) === 'preventivo';
+    const date = String(request?.planned_date || '').slice(0, 10);
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T12:00:00Z`) : null;
+    const month = preventive && parsed && Number.isFinite(parsed.getTime())
+      ? new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(parsed) : '';
+    return `Atención correctiva para instalar ${report.spare_parts_needed?.trim() || 'el repuesto pendiente'} en el equipo ${this.assetLabel(report.asset_id)}. La necesidad del repuesto fue identificada durante el mantenimiento ${preventive ? 'preventivo' : 'correctivo'}${month ? ` correspondiente a ${month}` : ' anterior'}.`;
+  }
+
   startSpareInstallation(report: MaintenanceReportDto): void {
     if (!this.canContinueSpareCase(report)) return;
     this.resetReportFields();
@@ -3393,6 +3417,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
     this.reportMaintenanceTests = ['encendido_apagado', 'prueba_modos_operacion', 'equipo_operativo_entregado'];
     this.reportFlowMode = 'install_spare';
     this.reportFlowSource = report;
+    this.reportRequestDescription = this.spareInstallationRequestDescription(report);
     this.successMessage = 'Cargué el antecedente preventivo. Completa el estado final para generar el reporte correctivo de instalación.';
     this.scrollToReportForm();
   }
@@ -3809,6 +3834,7 @@ export class MaintenanceComponent implements OnInit, OnDestroy {
   }
 
   private resetReportWorkflow(): void {
+    this.reportRequestDescription = '';
     this.warrantyVoidDialog = false;
     this.warrantyVoidReason = '';
     this.warrantyVoidConfirmed = false;

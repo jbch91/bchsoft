@@ -550,9 +550,9 @@ export async function createMaintenanceReport(payload, { queryRunner = query } =
        client_id, request_id, asset_id, type, summary, findings, actions_taken,
        failure_cause, maintenance_checks, maintenance_activities, maintenance_tests,
        asset_status_after, asset_status_observations, area_responsible_required,
-       requires_spare_parts, spare_parts_needed, spare_parts_status, created_by
+       requires_spare_parts, spare_parts_needed, spare_parts_status, created_by, request_description
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      RETURNING id`,
     [
       clientId,
@@ -572,7 +572,8 @@ export async function createMaintenanceReport(payload, { queryRunner = query } =
       Boolean(requiresSpareParts),
       sparePartsNeeded || null,
       sparePartsStatus || 'no_aplica',
-      createdBy
+      createdBy,
+      payload.requestDescription || null
     ]
   );
   await queryRunner(
@@ -653,6 +654,7 @@ export async function updateMaintenanceReport(reportId, payload, { queryRunner =
          spare_parts_needed = $14,
          spare_parts_status = $15,
          created_by = $16,
+         request_description = COALESCE($17, request_description),
          pdf_path = NULL
      WHERE id = $1`,
     [
@@ -671,7 +673,8 @@ export async function updateMaintenanceReport(reportId, payload, { queryRunner =
       Boolean(requiresSpareParts),
       sparePartsNeeded || null,
       sparePartsStatus || 'no_aplica',
-      createdBy
+      createdBy,
+      payload.requestDescription || null
     ]
   );
   await queryRunner(

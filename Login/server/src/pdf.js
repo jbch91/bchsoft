@@ -2483,7 +2483,7 @@ export function buildMaintenanceReportPdf(doc, { client, asset, request, report,
   drawMaintenanceNarrativeBox(
     doc,
     'SOLICITUD, NECESIDAD O FALLA REPORTADA',
-    request.description
+    report.request_description || request.description
   );
   if (request.late_execution_authorized_at) {
     drawMaintenanceNarrativeBox(

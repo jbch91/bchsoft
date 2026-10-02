@@ -124,6 +124,7 @@ const MIGRATIONS = [
   'maintenance_not_located.sql',
   'maintenance_acceptance_delegation.sql',
   'maintenance_report_voids.sql',
+  'maintenance_report_request_description.sql',
   'reader_read_only.sql',
   'asset_code_sequences.sql'
 ];

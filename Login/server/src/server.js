@@ -18,6 +18,7 @@ import { isStorekeeperWorkspace, maintenanceAcceptanceError } from './maintenanc
 import { createVerbalAttentionHandler, findVerbalAttention, saveVerbalAttention, verbalAttentionAccessError } from './maintenance-verbal.js';
 import { closeNotLocatedPreventive } from './maintenance-not-located.js';
 import { voidPreventiveForWarranty } from './maintenance-warranty-void.js';
+import { resolveSpareInstallationDescription } from './maintenance-spare-description.js';
 import { buildWarrantyVoidPdf } from './maintenance-warranty-void-pdf.js';
 import { createActivityReportRouter, isActivityReportReadExport } from './maintenance-activity-report-routes.js';
 import {
@@ -11682,8 +11683,9 @@ app.post(
     });
     cleanRequiresSpareParts = spareWorkflow.requiresSpareParts;
     cleanSparePartsStatus = spareWorkflow.sparePartsStatus;
+    let waitingSpareReport;
     if (request.status === 'espera_repuesto' && cleanLifecycleAction !== 'retire') {
-      const waitingSpareReport = await getLatestWaitingSpareReportByRequest(requestId);
+      waitingSpareReport = await getLatestWaitingSpareReportByRequest(requestId);
       cleanSparePartsNeeded = cleanSparePartsNeeded || waitingSpareReport?.spare_parts_needed || 'Repuesto instalado';
     }
     if (cleanRequiresSpareParts && !cleanSparePartsNeeded) {
@@ -11752,6 +11754,14 @@ app.post(
       requestStatusAfter,
       createdBy: req.user.sub
     };
+    try {
+      reportPayload.requestDescription = resolveSpareInstallationDescription({
+        value: req.body?.requestDescription, request, correctionReport,
+        sourceReport: waitingSpareReport, asset: approvalAsset, lifecycleAction: cleanLifecycleAction
+      });
+    } catch (error) {
+      return res.status(error.status || 400).json({ message: error.message });
+    }
     let result;
     try {
       result = correctionReport
@@ -11786,6 +11796,7 @@ app.post(
         requestId,
         maintenanceType: reportType,
         requestType: request.type,
+        requestDescription: reportPayload.requestDescription,
         summary: cleanSummary,
         findings: cleanFindings,
         actionsTaken: cleanActionsTaken,

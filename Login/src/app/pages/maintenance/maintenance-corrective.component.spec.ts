@@ -30,6 +30,38 @@ function fill(c: MaintenanceComponent) {
 afterEach(() => vi.restoreAllMocks());
 
 describe('shared corrective report editor', () => {
+  it('suggests a specific editable request description and saves edits only in the corrective', async () => {
+    const { component: c, maintenance } = setup();
+    Object.assign(c.requests[0], { type: 'preventivo', status: 'espera_repuesto', planned_date: '2026-08-01T00:00:00.000Z', description: 'Mantenimiento preventivo programado' });
+    vi.spyOn(c, 'canContinueSpareCase').mockReturnValue(true);
+    const report = { id: 'previous', request_id: 'request', asset_id: 'asset', type: 'preventivo', spare_parts_needed: 'BATERÍA' } as any;
+    c.startSpareInstallation(report);
+    expect(c.reportRequestDescription).toContain('Atención correctiva para instalar BATERÍA');
+    expect(c.reportRequestDescription).toContain('EQ001 - MONITOR');
+    expect(c.reportRequestDescription).toContain('agosto de 2026');
+    expect(c.canEditSpareRequestDescription).toBe(true);
+    c.reportRequestDescription += ' Coordinar la entrega con urgencias.';
+    const edited = c.reportRequestDescription;
+    await c.createReport();
+    expect(maintenance.createReport).toHaveBeenCalledWith(expect.objectContaining({ requestDescription: edited }));
+    expect(c.requests[0].description).toBe('Mantenimiento preventivo programado');
+    expect(report.request_description).toBeUndefined();
+    expect(c.reportRequestDescription).toBe('');
+  });
+
+  it('retains saved description during correction and rejects incomplete edits in Attention', async () => {
+    const { component: c, maintenance } = setup();
+    vi.spyOn(c, 'canCorrectReport').mockReturnValue(true);
+    c.startReportCorrection({ id: 'report', request_id: 'request', type: 'correctivo', spare_parts_status: 'recibido', request_description: 'Texto personalizado de la instalación.' } as any);
+    expect(c.reportRequestDescription).toBe('Texto personalizado de la instalación.');
+    expect(c.canEditSpareRequestDescription).toBe(true);
+    c.reportRequestDescription = ' '; c.correctiveEditorSection = 'closure';
+    await c.submitReportEditor();
+    expect(maintenance.createReport).not.toHaveBeenCalled();
+    expect(c.correctiveEditorSection).toBe('attention');
+    expect(c.errorMessage).toContain('10 y 2000');
+  });
+
   it('uses the corrective editor for normal, QR, verbal and spare follow-ups, without changing preventive editors', () => {
     const { component: c } = setup();
     expect(c.isCorrectiveReportEditor).toBe(true);
