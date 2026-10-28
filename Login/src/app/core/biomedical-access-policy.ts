@@ -6,6 +6,7 @@ export interface BiomedicalFeaturePolicy {
   route: string;
   moduleKey?: string;
   permissionsAny: readonly Permission[];
+  roles?: readonly Role[];
   excludedRoles?: readonly Role[];
 }
 
@@ -39,7 +40,7 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
   guias_rapidas: {
     label: 'Guías rápidas',
     route: '/guias-rapidas',
-    excludedRoles: ['lector'],
+    excludedRoles: ['lector', 'calibracion'],
     moduleKey: 'guias_rapidas',
     permissionsAny: [
       'quick_guides:view',
@@ -97,6 +98,14 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
     excludedRoles: ['lector'],
     moduleKey: 'calibraciones',
     permissionsAny: ['calibration:schedule:manage', 'calibration:report:upload', 'read:all']
+  },
+  actas_calibracion: {
+    label: 'Actas de calibración',
+    route: '/actas-calibracion',
+    roles: ['calibracion'],
+    excludedRoles: ['lector'],
+    moduleKey: 'calibraciones',
+    permissionsAny: ['calibration:report:upload']
   }
 } as const satisfies Record<string, BiomedicalFeaturePolicy>;
 
@@ -111,6 +120,9 @@ export function canOpenBiomedicalFeature(
   }
 ): boolean {
   const policy = BIOMEDICAL_FEATURE_POLICIES[featureKey] as BiomedicalFeaturePolicy;
+  if (policy.roles && !policy.roles.some((role) => context.roles.includes(role))) {
+    return false;
+  }
   if (policy.excludedRoles?.some((role) => context.roles.includes(role))) {
     return false;
   }

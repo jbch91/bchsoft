@@ -52,6 +52,53 @@ function calibrationItem(
 }
 
 describe('Calibraciones: programacion, sedes y aprobacion', () => {
+  function actasComponent(scheduleId = ''): CronogramasComponent {
+    return new CronogramasComponent({} as never, {} as never, {} as never, {} as never,
+      { currentUser: () => ({ clientId: 'client' }), hasPermission: () => true } as never,
+      { markForCheck: () => {} } as never,
+      { snapshot: { data: { calibrationOnly: true, calibrationActasPage: true },
+        queryParamMap: new Map([['year', '2026'], ['schedule', scheduleId]]) } } as never);
+  }
+
+  it('abre Actas como página y selecciona el cronograma aprobado sin modal', async () => {
+    const component = actasComponent();
+    component.selectedClientId = 'client';
+    const schedules = [
+      { id: 'draft', client_id: 'client', year: 2026, start_date: '2026-09-01', status: 'draft', created_at: '' },
+      { id: 'approved', client_id: 'client', year: 2026, start_date: '2026-09-01', status: 'approved', created_at: '' }
+    ];
+    Object.assign((component as any).calibration, { listSchedules: async () => schedules, listItems: async () => [] });
+    await component.loadCalibrationSchedules(false);
+    expect(component.scheduleModuleTitle).toBe('Actas de calibración');
+    expect(component.selectedYear).toBe(2026);
+    expect(component.selectedCalibrationScheduleId).toBe('approved');
+    expect(component.detailModalOpen).toBe(false);
+    expect(component.calibrationEvidenceSchedules.map((schedule) => schedule.id)).toEqual(['approved']);
+  });
+
+  it('conserva el cronograma elegido al actualizar y no habilita los borradores en Actas', async () => {
+    const component = actasComponent('closed');
+    component.selectedClientId = 'client';
+    const schedules = ['approved', 'closed', 'draft'].map((status) => ({ id: status, status, year: 2026,
+      client_id: 'client', start_date: '2026-09-01', created_at: '' }));
+    Object.assign((component as any).calibration, { listSchedules: async () => schedules, listItems: async () => [] });
+    await component.loadCalibrationSchedules(false);
+    expect(component.selectedCalibrationScheduleId).toBe('closed');
+    expect(component.calibrationEvidenceView).toBe('with');
+    await component.selectCalibrationSchedule('approved');
+    component.calibrationEvidenceView = 'all';
+    await component.loadCalibrationSchedules(true);
+    expect(component.selectedCalibrationScheduleId).toBe('approved');
+    expect(component.calibrationEvidenceView).toBe('all');
+    expect(component.detailModalOpen).toBe(false);
+    await component.selectCalibrationSchedule('draft');
+    expect(component.selectedCalibrationScheduleId).toBe('approved');
+    schedules.splice(0, 2);
+    await component.loadCalibrationSchedules(false);
+    expect(component.selectedCalibrationScheduleId).toBe('');
+    expect(component.calibrationItems).toEqual([]);
+  });
+
   function draftComponent(): CronogramasComponent {
     const component = createComponent();
     Object.assign(component.auth, { currentUser: () => ({ clientId: 'client' }), hasPermission: () => true });

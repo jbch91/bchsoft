@@ -186,6 +186,14 @@
       <h2>Calibraciones</h2>
       <p>Cronograma y certificados de calibración.</p>
     </a>
+    <a
+      routerLink="/actas-calibracion"
+      class="ui-card module-card"
+      *ngIf="canOpenBiomedFeature('actas_calibracion')"
+    >
+      <h2>Actas de calibración</h2>
+      <p>Actas, certificados y avance de los equipos programados.</p>
+    </a>
   </section>
 
   <section class="suite-placeholder" *ngIf="selectedSuiteKey === 'odontologico'">

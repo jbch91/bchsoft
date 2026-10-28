@@ -11,6 +11,7 @@ function biomedicalRouteData(featureKey: BiomedicalFeatureKey) {
     suiteKey: 'biomedico',
     moduleKey: 'moduleKey' in policy ? policy.moduleKey : undefined,
     permissionsAny: [...policy.permissionsAny],
+    roles: 'roles' in policy ? [...policy.roles] : undefined,
     excludedRoles: 'excludedRoles' in policy ? [...policy.excludedRoles] : undefined
   };
 }
@@ -165,6 +166,12 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/cronogramas/cronogramas.component').then((m) => m.CronogramasComponent),
     canActivate: [accessGuard],
     data: { ...biomedicalRouteData('calibraciones'), calibrationOnly: true }
+  },
+  {
+    path: 'actas-calibracion',
+    loadComponent: () => import('./pages/cronogramas/cronogramas.component').then((m) => m.CronogramasComponent),
+    canActivate: [accessGuard],
+    data: { ...biomedicalRouteData('actas_calibracion'), calibrationOnly: true, calibrationActasPage: true }
   },
   {
     path: 'odontologia',

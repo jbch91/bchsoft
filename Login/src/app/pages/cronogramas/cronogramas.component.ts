@@ -1,7 +1,7 @@
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AdminService } from '../../admin/admin.service';
 import { AuthService } from '../../auth/auth.service';
 import { BiomedService } from '../../biomed/biomed.service';
@@ -134,12 +134,13 @@ type ProgrammingView = 'pending' | 'programmed' | 'all';
 @Component({
   selector: 'app-cronogramas',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModuleTabsComponent],
+  imports: [CommonModule, FormsModule, ModuleTabsComponent, RouterLink],
   templateUrl: './cronogramas.component.html',
   styleUrl: './cronogramas.component.scss'
 })
 export class CronogramasComponent implements OnInit {
   readonly calibrationOnly: boolean;
+  readonly calibrationActasPage: boolean;
   readonly assetCategory: AssetCategory;
   readonly minimumYear = 1900;
   readonly maximumYear = 2200;
@@ -237,7 +238,14 @@ export class CronogramasComponent implements OnInit {
     private readonly route?: ActivatedRoute
   ) {
     this.calibrationOnly = this.route?.snapshot.data['calibrationOnly'] === true;
+    this.calibrationActasPage = this.route?.snapshot.data['calibrationActasPage'] === true;
     if (this.calibrationOnly) this.viewMode = 'calibration';
+    if (this.calibrationActasPage) {
+      const year = Number(this.route?.snapshot.queryParamMap?.get('year'));
+      if (Number.isInteger(year) && year >= this.minimumYear && year <= this.maximumYear) {
+        this.selectedYear = year;
+      }
+    }
     this.assetCategory = this.route?.snapshot.data['assetCategory'] === 'industrial'
       ? 'industrial'
       : 'biomedical';
@@ -249,6 +257,7 @@ export class CronogramasComponent implements OnInit {
   }
 
   get scheduleModuleTitle(): string {
+    if (this.calibrationActasPage) return 'Actas de calibración';
     if (this.calibrationOnly) return 'Calibraciones';
     return this.isIndustrialSchedule ? 'Cronogramas industriales' : 'Cronogramas';
   }
@@ -360,7 +369,7 @@ export class CronogramasComponent implements OnInit {
   async refreshActive(): Promise<void> {
     await this.runAction(
       'refresh',
-      async () => this.loadActiveView(this.detailModalOpen),
+      async () => this.loadActiveView(this.detailModalOpen || this.calibrationActasPage),
       'Información actualizada.'
     );
   }
@@ -1663,10 +1672,18 @@ export class CronogramasComponent implements OnInit {
         this.selectedClientId,
         this.selectedYear
       );
-      const previous = preserveSelection && this.detailModalOpen ? this.selectedCalibrationScheduleId : '';
-      this.selectedCalibrationScheduleId = this.calibrationSchedules.some((row) => row.id === previous)
-        ? previous
-        : '';
+      const previous = preserveSelection && (this.detailModalOpen || this.calibrationActasPage)
+        ? this.selectedCalibrationScheduleId : '';
+      const requested = previous || this.route?.snapshot.queryParamMap?.get('schedule') || '';
+      const selection = this.calibrationActasPage
+        ? this.calibrationEvidenceSchedules.find((row) => row.id === requested)
+          ?? this.calibrationEvidenceSchedules.find((row) => row.status === 'approved')
+          ?? this.calibrationEvidenceSchedules[0]
+        : this.calibrationSchedules.find((row) => row.id === previous);
+      if (this.selectedCalibrationScheduleId !== selection?.id) {
+        this.calibrationEvidenceView = selection?.status === 'closed' ? 'with' : 'without';
+      }
+      this.selectedCalibrationScheduleId = selection?.id ?? '';
       if (this.selectedCalibrationScheduleId) {
         await this.loadCalibrationItems(this.selectedCalibrationScheduleId);
       } else {
@@ -1681,10 +1698,17 @@ export class CronogramasComponent implements OnInit {
   }
 
   async selectCalibrationSchedule(scheduleId: string): Promise<void> {
+    if (this.calibrationActasPage && !this.calibrationEvidenceSchedules.some((row) => row.id === scheduleId)) return;
     this.showGenerator = false;
-    this.detailModalOpen = true;
+    this.detailModalOpen = !this.calibrationActasPage;
     if (this.selectedCalibrationScheduleId === scheduleId && this.calibrationItems.length) return;
     this.selectedCalibrationScheduleId = scheduleId;
+    this.calibrationSiteFilter = '';
+    this.calibrationAreaFilter = '';
+    this.calibrationLocationFilter = '';
+    this.calibrationItemStatusFilter = '';
+    this.calibrationSearch = '';
+    this.clearNotice();
     this.calibrationEvidenceView = this.selectedCalibrationSchedule?.status === 'closed' ? 'with' : 'without';
     this.calibrationItems = [];
     try {
@@ -1735,6 +1759,10 @@ export class CronogramasComponent implements OnInit {
 
   get selectedCalibrationSchedule(): CalibrationScheduleDto | null {
     return this.calibrationSchedules.find((schedule) => schedule.id === this.selectedCalibrationScheduleId) ?? null;
+  }
+
+  get calibrationEvidenceSchedules(): CalibrationScheduleDto[] {
+    return this.calibrationSchedules.filter((schedule) => ['approved', 'closed'].includes(schedule.status));
   }
 
   get filteredCalibrationSchedules(): CalibrationScheduleDto[] {

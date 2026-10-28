@@ -1,4 +1,4 @@
-<section class="page">
+<section class="page" [class.calibration-actas-page]="calibrationActasPage">
   <app-module-tabs></app-module-tabs>
 
   <header class="module-header">
@@ -1120,6 +1120,7 @@
     class="workspace-panel"
     role="tabpanel"
   >
+    <ng-container *ngIf="!calibrationActasPage">
     <div class="section-heading">
       <div>
         <h2>Cronogramas de calibración</h2>
@@ -1235,9 +1236,17 @@
             </td>
             <td data-label="Acciones">
               <div class="row-actions">
-                <button type="button" class="secondary compact" (click)="selectCalibrationSchedule(schedule.id)">
-                  Abrir detalle
-                </button>
+                <a *ngIf="auth.hasRole('calibracion'); else calibrationDetailButton"
+                  class="secondary compact calibration-actas-link"
+                  routerLink="/actas-calibracion"
+                  [queryParams]="{ year: selectedYear, schedule: schedule.id }">
+                  Ver actas
+                </a>
+                <ng-template #calibrationDetailButton>
+                  <button type="button" class="secondary compact" (click)="selectCalibrationSchedule(schedule.id)">
+                    Abrir detalle
+                  </button>
+                </ng-template>
                 <button
                   *ngIf="canEditCalibration(schedule)"
                   type="button"
@@ -1283,21 +1292,48 @@
     <ng-template #noCalibrationSchedules>
       <div class="empty-state">No hay cronogramas de calibración para este año y filtro.</div>
     </ng-template>
+    </ng-container>
+
+    <div *ngIf="calibrationActasPage" class="calibration-actas-selector">
+      <label *ngIf="calibrationEvidenceSchedules.length">
+        Cronograma
+        <select [ngModel]="selectedCalibrationScheduleId"
+          (ngModelChange)="selectCalibrationSchedule($event)"
+          [disabled]="loading || detailLoading || isBusy()">
+          <option *ngFor="let schedule of calibrationEvidenceSchedules; trackBy: trackById" [value]="schedule.id">
+            {{ schedule.year }} · {{ formatDate(schedule.start_date) }} · {{ statusLabel(schedule.status) }}
+          </option>
+        </select>
+      </label>
+      <button *ngIf="selectedCalibrationScheduleId" type="button" class="secondary compact"
+        [disabled]="loading || detailLoading || isBusy()"
+        (click)="openCalibrationSchedulePdf(selectedCalibrationScheduleId)">
+        {{ isBusy('calibration-schedule-pdf-' + selectedCalibrationScheduleId) ? 'Abriendo...' : 'PDF del cronograma' }}
+      </button>
+    </div>
+    <div *ngIf="calibrationActasPage && loading" class="empty-state" role="status">Cargando calibraciones...</div>
+    <div *ngIf="calibrationActasPage && !loading && !calibrationEvidenceSchedules.length" class="empty-state">
+      {{ calibrationSchedules.length ? 'El cronograma está en borrador. Las actas se habilitan cuando se apruebe.' : 'No hay cronogramas aprobados para esta vigencia.' }}
+    </div>
 
     <div
-      *ngIf="detailModalOpen && selectedCalibrationSchedule"
-      class="modal-backdrop"
-      (click)="closeDetailModal()"
+      *ngIf="(detailModalOpen || calibrationActasPage) && selectedCalibrationSchedule"
+      [class.modal-backdrop]="!calibrationActasPage"
+      (click)="!calibrationActasPage && closeDetailModal()"
     >
     <section
-      class="detail-panel schedule-modal schedule-detail-modal"
-      role="dialog"
-      aria-modal="true"
+      class="detail-panel"
+      [class.schedule-modal]="!calibrationActasPage"
+      [class.schedule-detail-modal]="!calibrationActasPage"
+      [class.calibration-actas-detail]="calibrationActasPage"
+      [attr.role]="calibrationActasPage ? 'region' : 'dialog'"
+      [attr.aria-modal]="calibrationActasPage ? null : 'true'"
       aria-labelledby="calibration-detail-title"
       [attr.aria-busy]="detailLoading"
       (click)="$event.stopPropagation()"
     >
       <button
+        *ngIf="!calibrationActasPage"
         type="button"
         class="modal-close"
         aria-label="Cerrar"
@@ -1309,7 +1345,7 @@
       </button>
       <div class="detail-heading">
         <div>
-          <p class="eyebrow">Cronograma seleccionado</p>
+          <p class="eyebrow">{{ calibrationActasPage ? 'Actas y certificados' : 'Cronograma seleccionado' }}</p>
           <h3 id="calibration-detail-title">Calibraciones {{ selectedCalibrationSchedule.year }}</h3>
           <span>{{ formatDate(selectedCalibrationSchedule.start_date) }} · {{ statusLabel(selectedCalibrationSchedule.status) }}</span>
         </div>
@@ -1379,6 +1415,8 @@
       </div>
 
       <div *ngIf="noticeMessage" class="notice" [ngClass]="noticeKind" role="status">{{ noticeMessage }}</div>
+
+      <div *ngIf="detailLoading" class="empty-state" role="status">Cargando equipos...</div>
 
       <div *ngIf="calibrationEditing" class="calibration-planning-fields">
         <label>
@@ -1718,7 +1756,7 @@
         </table>
       </div>
 
-      <div *ngIf="!filteredCalibrationItems.length" class="empty-state compact-empty">
+      <div *ngIf="!detailLoading && !filteredCalibrationItems.length" class="empty-state compact-empty">
         <ng-container *ngIf="selectedCalibrationSchedule.status === 'draft' && calibrationProgrammingView === 'pending' && calibrationUnprogrammedCount === 0; else noCalibrationFilterResults">
           Programación completa. Revisa las secciones guardadas y finaliza la aprobación.
         </ng-container>
