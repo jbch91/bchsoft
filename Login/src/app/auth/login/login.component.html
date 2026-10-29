@@ -6,8 +6,6 @@
     </div>
     <h1>LOGIN</h1>
 
-    <div class="alert session" *ngIf="sessionMessage" aria-live="polite">{{ sessionMessage }}</div>
-
     <form (ngSubmit)="onSubmit()">
       <label>
         Usuario
@@ -51,6 +49,10 @@
     <button type="button" class="link" (click)="openRecovery()">
       ¿Olvidaste tu contraseña?
     </button>
+  </div>
+
+  <div class="session-notification" role="status" aria-live="polite" aria-atomic="true">
+    <div class="session-toast" *ngIf="sessionMessage">{{ sessionMessage }}</div>
   </div>
 
   <div class="modal-backdrop" *ngIf="showRecovery" (click)="closeRecovery()">

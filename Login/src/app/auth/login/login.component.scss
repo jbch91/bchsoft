@@ -76,16 +76,27 @@
   font-size: 12px;
 }
 
-.alert.session {
-  background: color-mix(in srgb, var(--brand-100) 72%, #ffffff);
-  color: var(--brand-800);
-  border-color: color-mix(in srgb, var(--brand-600) 28%, #ffffff);
-  box-shadow: 0 10px 22px rgba(185, 28, 28, 0.09);
+.session-notification {
+  position: fixed;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(380px, calc(100% - 32px));
+  z-index: 2;
+  pointer-events: none;
 }
 
-.alert.session::before {
-  content: 'i';
-  background: var(--brand-600);
+.session-toast {
+  padding: 10px 14px;
+  border: 1px solid var(--brand-100);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 4px 16px rgba(30, 41, 59, 0.12);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  animation: alert-in 180ms ease-out;
 }
 
 @keyframes alert-in {

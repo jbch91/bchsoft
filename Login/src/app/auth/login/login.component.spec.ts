@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoginComponent } from './login.component';
 
 function createComponent(returnUrl: string | null, login = vi.fn()) {
   let currentReturnUrl = returnUrl;
+  let currentReason: string | null = null;
   let pendingRoute: string | null = null;
   const normalizeRoute = (value: string): string | null => {
     if (!value || !value.startsWith('/') || value.startsWith('//')) return null;
@@ -17,7 +18,7 @@ function createComponent(returnUrl: string | null, login = vi.fn()) {
     currentUser: () => ({ clientId: 'client-1' }),
     hasRole: () => false,
     hasPermission: () => false,
-    consumeLogoutReason: () => '',
+    consumeLogoutReason: vi.fn((): string | null => null),
     rememberPostLoginRoute: vi.fn((value: string) => {
       const normalized = normalizeRoute(value);
       if (normalized) pendingRoute = normalized;
@@ -31,7 +32,11 @@ function createComponent(returnUrl: string | null, login = vi.fn()) {
   const route = {
     snapshot: {
       queryParamMap: {
-        get: (key: string) => key === 'returnUrl' ? currentReturnUrl : null
+        get: (key: string) => {
+          if (key === 'returnUrl') return currentReturnUrl;
+          if (key === 'reason') return currentReason;
+          return null;
+        }
       }
     }
   };
@@ -48,7 +53,11 @@ function createComponent(returnUrl: string | null, login = vi.fn()) {
   return {
     component,
     auth,
+    route,
     router,
+    setReason: (value: string | null) => {
+      currentReason = value;
+    },
     setReturnUrl: (value: string | null) => {
       currentReturnUrl = value;
     }
@@ -57,7 +66,7 @@ function createComponent(returnUrl: string | null, login = vi.fn()) {
 
 describe('LoginComponent return URL', () => {
   it('conserva el equipo de un código QR después del inicio de sesión', () => {
-    const returnUrl = '/q/asset-1';
+    const returnUrl = '/mantenimiento?clientId=client-1&assetId=asset-1&source=qr';
     const { component } = createComponent(returnUrl);
 
     expect((component as any).postLoginRoute()).toBe(returnUrl);
@@ -87,6 +96,53 @@ describe('LoginComponent return URL', () => {
 
     expect(router.navigateByUrl).toHaveBeenCalledWith('/q/asset-1', { replaceUrl: true });
     expect(auth.clearPostLoginRoute).toHaveBeenCalledOnce();
+  });
+});
+
+describe('LoginComponent session notification', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('consume el aviso guardado y limpia el motivo de la URL conservando el destino QR', () => {
+    const { component, auth, route, router, setReason } = createComponent('/q/asset-1');
+    setReason('inactive');
+    auth.consumeLogoutReason.mockReturnValueOnce('inactive');
+
+    component.ngOnInit();
+
+    expect(auth.consumeLogoutReason).toHaveBeenCalledOnce();
+    expect(router.navigate).toHaveBeenCalledWith([], {
+      relativeTo: route,
+      queryParams: { reason: null },
+      queryParamsHandling: 'merge',
+      preserveFragment: true,
+      replaceUrl: true
+    });
+    expect(component.sessionMessage).toContain('inactividad');
+    expect(auth.pendingPostLoginRoute()).toBe('/q/asset-1');
+    component.ngOnDestroy();
+  });
+
+  it('retira el aviso de inactividad automáticamente después de cinco segundos', () => {
+    const { component, auth } = createComponent(null);
+    auth.consumeLogoutReason.mockReturnValueOnce('inactive');
+
+    component.ngOnInit();
+    vi.advanceTimersByTime(4999);
+    expect(component.sessionMessage).toContain('inactividad');
+
+    vi.advanceTimersByTime(1);
+    expect(component.sessionMessage).toBe('');
+  });
+
+  it('cancela el aviso pendiente al salir del login', () => {
+    const { component, auth } = createComponent(null);
+    auth.consumeLogoutReason.mockReturnValueOnce('inactive');
+    component.ngOnInit();
+
+    component.ngOnDestroy();
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

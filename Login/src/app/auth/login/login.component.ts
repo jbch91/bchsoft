@@ -28,6 +28,7 @@ export class LoginComponent implements OnInit, OnDestroy {
   isResettingPassword = false;
   sessionMessage = '';
   private closeRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private sessionMessageTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly auth: AuthService,
@@ -42,31 +43,43 @@ export class LoginComponent implements OnInit, OnDestroy {
       this.auth.rememberPostLoginRoute(requestedRoute);
     }
 
+    const storedReason = this.auth.consumeLogoutReason();
+    const urlReason = this.route.snapshot.queryParamMap.get('reason');
+    const reason = urlReason || storedReason;
+    if (urlReason !== null) {
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { reason: null },
+        queryParamsHandling: 'merge',
+        preserveFragment: true,
+        replaceUrl: true
+      });
+    }
+    if (reason === 'expired') {
+      this.showSessionMessage('Tu sesión expiró. Inicia sesión nuevamente.');
+    }
+    if (reason === 'inactive') {
+      this.showSessionMessage('Sesión cerrada por inactividad. Inicia sesión nuevamente.');
+    }
+    if (reason === 'replaced') {
+      this.showSessionMessage('Esta sesión dejó de estar activa. Puedes ingresar nuevamente.');
+    }
+
     if (this.auth.isAuthenticated()) {
       void this.auth.initializeSession().then((valid) => {
         if (valid) void this.navigateAfterLogin();
       });
     }
-
-    const reason = this.route.snapshot.queryParamMap.get('reason') || this.auth.consumeLogoutReason();
-    if (reason === 'expired') {
-      this.sessionMessage = 'Tu sesión expiró. Inicia sesión nuevamente para continuar.';
-    }
-    if (reason === 'inactive') {
-      this.sessionMessage = 'Tu sesión se cerró por inactividad. Inicia sesión nuevamente para continuar.';
-    }
-    if (reason === 'replaced') {
-      this.sessionMessage = 'Esta sesión dejó de estar activa. Puedes ingresar nuevamente si aún usas este dispositivo.';
-    }
   }
 
   ngOnDestroy(): void {
     this.clearCloseRecoveryTimer();
+    this.clearSessionMessage();
   }
 
   async onSubmit(): Promise<void> {
     this.errorMessage = '';
-    this.sessionMessage = '';
+    this.clearSessionMessage();
     this.isSubmitting = true;
     try {
       const result = await this.auth.login(this.username.trim(), this.password);
@@ -85,6 +98,7 @@ export class LoginComponent implements OnInit, OnDestroy {
   }
 
   openRecovery(): void {
+    this.clearSessionMessage();
     this.showRecovery = true;
     this.recoveryMessage = '';
     this.recoveryMessageType = 'info';
@@ -159,7 +173,7 @@ export class LoginComponent implements OnInit, OnDestroy {
         this.clearCloseRecoveryTimer();
         this.closeRecoveryTimer = setTimeout(() => {
           this.closeRecovery();
-          this.sessionMessage = 'Contraseña actualizada correctamente. Inicia sesión con tu nueva contraseña.';
+          this.showSessionMessage('Contraseña actualizada correctamente. Inicia sesión con tu nueva contraseña.');
           this.cdr.detectChanges();
         }, 1400);
         return;
@@ -185,6 +199,23 @@ export class LoginComponent implements OnInit, OnDestroy {
       clearTimeout(this.closeRecoveryTimer);
       this.closeRecoveryTimer = null;
     }
+  }
+
+  private showSessionMessage(message: string): void {
+    this.clearSessionMessage();
+    this.sessionMessage = message;
+    this.sessionMessageTimer = setTimeout(() => {
+      this.clearSessionMessage();
+      this.cdr.detectChanges();
+    }, 5000);
+  }
+
+  private clearSessionMessage(): void {
+    if (this.sessionMessageTimer !== null) {
+      clearTimeout(this.sessionMessageTimer);
+      this.sessionMessageTimer = null;
+    }
+    this.sessionMessage = '';
   }
 
   private postLoginRoute(): string {
