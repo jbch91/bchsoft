@@ -101,11 +101,10 @@ export const BIOMEDICAL_FEATURE_POLICIES = {
   },
   actas_calibracion: {
     label: 'Actas de calibración',
-    route: '/actas-calibracion',
-    roles: ['calibracion'],
+    route: '/calibraciones/actas',
     excludedRoles: ['lector'],
     moduleKey: 'calibraciones',
-    permissionsAny: ['calibration:report:upload']
+    permissionsAny: ['calibration:schedule:manage', 'calibration:report:upload', 'read:all']
   }
 } as const satisfies Record<string, BiomedicalFeaturePolicy>;
 

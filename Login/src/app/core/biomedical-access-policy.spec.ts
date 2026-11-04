@@ -15,8 +15,20 @@ describe('biomedical access policy', () => {
     expect(canOpenBiomedicalFeature('actas_calibracion', context)).toBe(true);
     expect(canOpenBiomedicalFeature('actas_calibracion', { ...context, enabledModules: new Set() })).toBe(false);
     expect(canOpenBiomedicalFeature('actas_calibracion', { ...context, permissions: ['hb:view'] })).toBe(false);
-    expect(canOpenBiomedicalFeature('actas_calibracion', { ...context, roles: ['ingeniero_biomedico'] })).toBe(false);
+    expect(canOpenBiomedicalFeature('actas_calibracion', { ...context, roles: ['ingeniero_biomedico'] })).toBe(true);
     expect(canOpenBiomedicalFeature('guias_rapidas', { ...context, roles: ['ingeniero_biomedico'] })).toBe(true);
+  });
+
+  it('permite al biomédico consultar actas con su permiso de calibraciones sin otorgarle cargue', () => {
+    const context = {
+      permissions: ['hb:view', 'calibration:schedule:manage'] as const,
+      roles: ['ingeniero_biomedico'] as const,
+      enabledModules: new Set(['calibraciones'])
+    };
+    expect(canOpenBiomedicalFeature('calibraciones', context)).toBe(true);
+    expect(canOpenBiomedicalFeature('actas_calibracion', context)).toBe(true);
+    expect(canOpenBiomedicalFeature('actas_calibracion', { ...context, permissions: ['hb:view'] })).toBe(false);
+    expect(canOpenBiomedicalFeature('actas_calibracion', { ...context, enabledModules: new Set() })).toBe(false);
   });
 
   it('el lector solo consulta hojas de vida e inventario, incluso con permisos heredados', () => {

@@ -4,7 +4,7 @@
       *ngFor="let tab of visibleTabs"
       [routerLink]="tab.route"
       routerLinkActive="active"
-      [routerLinkActiveOptions]="{ exact: true }"
+      [routerLinkActiveOptions]="{ exact: tab.route !== '/calibraciones' }"
     >
       {{ tab.label }}
     </a>

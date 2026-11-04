@@ -47,6 +47,20 @@
     </div>
   </header>
 
+  <nav *ngIf="calibrationOnly" class="view-switcher calibration-sections" aria-label="Secciones de calibración">
+    <div class="view-tabs">
+      <a routerLink="/calibraciones" [queryParams]="{ year: selectedYear }"
+        [class.active]="!calibrationActasPage" [attr.aria-current]="!calibrationActasPage ? 'page' : null">
+        Cronograma
+      </a>
+      <a routerLink="/calibraciones/actas"
+        [queryParams]="{ year: selectedYear, schedule: selectedCalibrationScheduleId || null }"
+        [class.active]="calibrationActasPage" [attr.aria-current]="calibrationActasPage ? 'page' : null">
+        Actas de calibración
+      </a>
+    </div>
+  </nav>
+
   <div
     *ngIf="noticeMessage"
     class="notice"
@@ -1236,9 +1250,9 @@
             </td>
             <td data-label="Acciones">
               <div class="row-actions">
-                <a *ngIf="auth.hasRole('calibracion'); else calibrationDetailButton"
+                <a *ngIf="schedule.status !== 'draft'; else calibrationDetailButton"
                   class="secondary compact calibration-actas-link"
-                  routerLink="/actas-calibracion"
+                  routerLink="/calibraciones/actas"
                   [queryParams]="{ year: selectedYear, schedule: schedule.id }">
                   Ver actas
                 </a>

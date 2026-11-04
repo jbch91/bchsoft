@@ -52,6 +52,20 @@ function calibrationItem(
 }
 
 describe('Calibraciones: programacion, sedes y aprobacion', () => {
+  it('conserva la vigencia al abrir Cronograma y permite consultar al biomédico sin cargar actas', () => {
+    const auth = { currentUser: () => ({ clientId: 'client', role: 'ingeniero_biomedico' }),
+      hasPermission: (permission: string) => permission === 'calibration:schedule:manage' };
+    const component = new CronogramasComponent({} as never, {} as never, {} as never, {} as never,
+      auth as never, { markForCheck: () => {} } as never,
+      { snapshot: { data: { calibrationOnly: true }, queryParamMap: new Map([['year', '2025']]) } } as never);
+    expect(component.selectedYear).toBe(2025);
+    expect(component.canAccessCalibrationModule()).toBe(true);
+    component.selectedCalibrationScheduleId = 'approved';
+    component.calibrationSchedules = [{ id: 'approved', client_id: 'client', year: 2025,
+      start_date: '2025-09-01', status: 'approved', created_at: '', total_items: 1, programmed_items: 1 }];
+    expect(component.canUploadCalibration(calibrationItem('1', 'URGENCIAS', 'SALA'))).toBe(false);
+  });
+
   function actasComponent(scheduleId = ''): CronogramasComponent {
     return new CronogramasComponent({} as never, {} as never, {} as never, {} as never,
       { currentUser: () => ({ clientId: 'client' }), hasPermission: () => true } as never,

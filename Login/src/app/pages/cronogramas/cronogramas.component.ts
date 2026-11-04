@@ -240,7 +240,7 @@ export class CronogramasComponent implements OnInit {
     this.calibrationOnly = this.route?.snapshot.data['calibrationOnly'] === true;
     this.calibrationActasPage = this.route?.snapshot.data['calibrationActasPage'] === true;
     if (this.calibrationOnly) this.viewMode = 'calibration';
-    if (this.calibrationActasPage) {
+    if (this.calibrationOnly) {
       const year = Number(this.route?.snapshot.queryParamMap?.get('year'));
       if (Number.isInteger(year) && year >= this.minimumYear && year <= this.maximumYear) {
         this.selectedYear = year;

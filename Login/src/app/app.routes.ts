@@ -2,17 +2,18 @@ import { Routes } from '@angular/router';
 import { accessGuard } from './auth/auth.guard';
 import {
   BIOMEDICAL_FEATURE_POLICIES,
+  BiomedicalFeaturePolicy,
   BiomedicalFeatureKey
 } from './core/biomedical-access-policy';
 
 function biomedicalRouteData(featureKey: BiomedicalFeatureKey) {
-  const policy = BIOMEDICAL_FEATURE_POLICIES[featureKey];
+  const policy: BiomedicalFeaturePolicy = BIOMEDICAL_FEATURE_POLICIES[featureKey];
   return {
     suiteKey: 'biomedico',
-    moduleKey: 'moduleKey' in policy ? policy.moduleKey : undefined,
+    moduleKey: policy.moduleKey,
     permissionsAny: [...policy.permissionsAny],
-    roles: 'roles' in policy ? [...policy.roles] : undefined,
-    excludedRoles: 'excludedRoles' in policy ? [...policy.excludedRoles] : undefined
+    roles: policy.roles ? [...policy.roles] : undefined,
+    excludedRoles: policy.excludedRoles ? [...policy.excludedRoles] : undefined
   };
 }
 
@@ -168,10 +169,15 @@ export const routes: Routes = [
     data: { ...biomedicalRouteData('calibraciones'), calibrationOnly: true }
   },
   {
-    path: 'actas-calibracion',
+    path: 'calibraciones/actas',
     loadComponent: () => import('./pages/cronogramas/cronogramas.component').then((m) => m.CronogramasComponent),
     canActivate: [accessGuard],
     data: { ...biomedicalRouteData('actas_calibracion'), calibrationOnly: true, calibrationActasPage: true }
+  },
+  {
+    path: 'actas-calibracion',
+    pathMatch: 'full',
+    redirectTo: 'calibraciones/actas'
   },
   {
     path: 'odontologia',

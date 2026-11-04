@@ -78,11 +78,13 @@ export class ModuleTabsComponent implements OnInit {
       permissionsAny: ['users:manage', 'audit:client:view', 'saas:audit:view'],
       platform: true
     },
-    ...Object.entries(BIOMEDICAL_FEATURE_POLICIES).map(([key, policy]) => ({
-      label: policy.label,
-      route: policy.route,
-      biomedicalFeature: key as BiomedicalFeatureKey
-    })),
+    ...Object.entries(BIOMEDICAL_FEATURE_POLICIES)
+      .filter(([key]) => key !== 'actas_calibracion')
+      .map(([key, policy]) => ({
+        label: policy.label,
+        route: policy.route,
+        biomedicalFeature: key as BiomedicalFeatureKey
+      })),
     {
       label: 'Odontología',
       route: '/odontologia',

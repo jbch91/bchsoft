@@ -145,7 +145,7 @@ export class App {
       title: 'Calibraciones',
       subtitle: 'Cronograma y certificados de calibración.'
     },
-    '/actas-calibracion': {
+    '/calibraciones/actas': {
       eyebrow: 'Biomédico',
       title: 'Actas de calibración',
       subtitle: 'Actas, certificados y avance de calibración.'
@@ -256,7 +256,7 @@ export class App {
       '/cronogramas',
       '/cronogramas-industriales',
       '/calibraciones',
-      '/actas-calibracion'
+      '/calibraciones/actas'
     ].includes(path)) {
       return 'Software biomédico';
     }
