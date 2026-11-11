@@ -329,6 +329,7 @@ import {
   listCalibrationReportsByAsset,
   countCalibrationItems,
   countUnprogrammedCalibrationItems,
+  syncCalibrationRequirements,
   refreshCalibrationScheduleStatus
 } from './calibration.js';
 import {
@@ -13690,7 +13691,7 @@ async function writeCalibrationSchedulePdf({ client, schedule, items }) {
   buildCalibrationSchedulePdf(doc, { client, schedule, items });
   doc.end();
   await new Promise((resolve) => stream.on('finish', resolve));
-  await setCalibrationSchedulePdf(schedule.id, publicPath);
+  await setCalibrationSchedulePdf(schedule.id, publicPath, { itemIds: items.map((item) => item.id) });
   return publicPath;
 }
 
@@ -13714,13 +13715,16 @@ app.get(
   requireAuth,
   requireAnyPermission(['calibration:schedule:manage', 'calibration:report:upload', 'read:all']),
   async (req, res) => {
-    const schedule = await getCalibrationScheduleById(req.params.id);
+    let schedule = await getCalibrationScheduleById(req.params.id);
     if (!schedule) {
       return res.status(404).json({ message: 'Cronograma no encontrado.' });
     }
     if (req.user.clientId && req.user.clientId !== schedule.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
     }
+    await syncCalibrationRequirements({ clientId: schedule.client_id, scheduleId: schedule.id,
+      actorUserId: req.user.sub });
+    schedule = await getCalibrationScheduleById(schedule.id);
     let publicPath = schedule.pdf_path;
     let pdfPath = publicPath
       ? path.join(process.cwd(), publicPath.replace(/^\//, ''))
@@ -14031,6 +14035,10 @@ app.post(
     }
     if (!req.user.clientId || req.user.clientId !== item.client_id) {
       return res.status(403).json({ message: 'Sin acceso al cliente.' });
+    }
+    const calibrationAsset = await getAssetById(item.client_id, item.asset_id);
+    if (!calibrationAsset?.requires_calibration) {
+      return res.status(409).json({ message: 'El equipo ya no requiere calibración según su hoja de vida. Actualiza el cronograma.' });
     }
     if (item.schedule_status !== 'approved') {
       return res.status(409).json({ message: 'Aprueba el cronograma antes de cargar el certificado.' });

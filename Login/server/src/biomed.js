@@ -1,5 +1,6 @@
 import { query, withTransaction } from './db.js';
 import { withAssetCode } from './asset-codes.js';
+import { syncCalibrationRequirements } from './calibration.js';
 import { canonicalizeCatalogValue, ensureEquipmentCatalogPath } from './equipment-catalog.js';
 import { assertBiomedicalRiskClassifications } from './biomedical-risk.js';
 import { normalizeAssetCategory } from './asset-category.js';
@@ -721,6 +722,7 @@ export async function updateAsset(clientId, assetId, payload) {
     submittedBy: catalogCreatedBy,
     submittedClientId: clientId
   });
+  let calibrationSync;
   const saved = await withAssetCode(clientId, { code, assetId }, async (db, assignedCode) => {
     await db.query(
       `UPDATE "${schema}".assets
@@ -779,9 +781,12 @@ export async function updateAsset(clientId, assetId, payload) {
         assetId
       ]
     );
+    calibrationSync = await syncCalibrationRequirements({ clientId, assetIds: [assetId], schema,
+      actorUserId: catalogCreatedBy || null, connection: db });
   });
   return {
     ...saved,
+    calibrationSync,
     catalogReview: {
       status: catalogPath.reviewStatus,
       pendingNodes: catalogPath.pendingNodes

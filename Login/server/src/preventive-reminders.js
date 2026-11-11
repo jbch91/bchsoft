@@ -248,7 +248,8 @@ export async function sendCalibrationRemindersForClient(clientId) {
      JOIN calibration_schedules s ON s.id = i.schedule_id
      JOIN "${schema}".assets a ON a.id = i.asset_id
      WHERE s.client_id = $1
-       AND i.status <> 'done'
+       AND i.status NOT IN ('done', 'not_required')
+       AND a.requires_calibration IS TRUE
        AND i.planned_date IN ($2, $3)`,
     [clientId, todayStr, weekStr]
   );

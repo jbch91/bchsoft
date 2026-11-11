@@ -9,7 +9,9 @@ import PDFDocument from 'pdfkit';
 import { pool, query } from './db.js';
 import { createClient } from './clients.js';
 import { authenticateUser } from './auth.js';
-import { reprogramCalibrationDraft, deleteCalibrationSchedule } from './calibration.js';
+import { reprogramCalibrationDraft, deleteCalibrationSchedule, syncCalibrationRequirements,
+  createCalibrationScheduleWithItems, setCalibrationItemPdf, setCalibrationSchedulePdf } from './calibration.js';
+import { updateAsset } from './biomed.js';
 
 test('calibration: draft, site isolation, approval and certificate workflow', {
   skip: process.env.RUN_CALIBRATION_INTEGRATION !== '1'
@@ -21,6 +23,7 @@ test('calibration: draft, site isolation, approval and certificate workflow', {
   let api;
   let uploaderHeaders;
   let engineerHeaders;
+  let secondaryTenant;
   try {
     const password = randomUUID();
     const { rows: [user] } = await query(`INSERT INTO users(username,password_hash,client_id,display_name,email)
@@ -180,12 +183,114 @@ test('calibration: draft, site isolation, approval and certificate workflow', {
       const response = await upload(futureItems[0].id);
       assert.equal(response.status, 200, await response.text());
     });
+    await t.test('HV corrections reconcile pending calibrations, cached PDFs and counts without removing evidence', async () => {
+      const year = new Date().getUTCFullYear() + 2;
+      const generated = await request(`/calibration/schedules/${clientId}/generate`, { year, startDate: `${year}-09-01` });
+      assert.equal(generated.status, 201, JSON.stringify(generated));
+      const correctedUrl = `/calibration/schedules/${generated.body.id}`;
+      const current = (await request(`${correctedUrl}/items`, undefined, 'GET')).body;
+      const updates = current.map((item) => ({ id: item.id, plannedDate: item.planned_date.slice(0, 10), deadlineDate: item.deadline_date.slice(0, 10) }));
+      assert.equal((await request(`${correctedUrl}/items`, { items: updates }, 'PATCH')).status, 200);
+      assert.equal((await request(`${correctedUrl}/approve`, {})).status, 200);
+      const [completed, edited, legacy] = current;
+      assert.equal((await upload(completed.id)).status, 200);
+      const evidenceBefore = (await query(`SELECT i.* FROM calibration_schedule_items i
+        JOIN calibration_schedules s ON s.id=i.schedule_id WHERE s.client_id=$1 AND i.pdf_path IS NOT NULL ORDER BY i.id`, [clientId])).rows;
+      assert.equal((await fetch(base + correctedUrl + '/pdf', { headers })).status, 200);
+      const { rows: [cached] } = await query('SELECT pdf_path FROM calibration_schedules WHERE id=$1', [generated.body.id]);
+      assert.ok(cached.pdf_path);
+
+      secondaryTenant = await createClient({ name: `${tag}_other`, nit: `${tag}_other`, city: 'QA', email: `${tag}_other@example.invalid` });
+      await query(`INSERT INTO "${secondaryTenant.schema_name}".assets(id,code,name,requires_calibration,calibration_frequency)
+        VALUES ($1,'OTHER','EQUIPO OTRO CLIENTE',true,'anual')`, [edited.asset_id]);
+      const other = await createCalibrationScheduleWithItems({ clientId: secondaryTenant.id, year,
+        startDate: `${year}-09-01`, createdBy: user.id, items: [{ assetId: edited.asset_id,
+          frequency: 'anual', plannedDate: `${year}-09-01`, deadlineDate: `${year}-10-01` }] });
+      const otherBefore = (await query('SELECT * FROM calibration_schedule_items WHERE schedule_id=$1', [other.id])).rows;
+      const editPayload = (requiresCalibration) => ({ code: edited.code, name: `${tag} EDITADO`, brand: 'QA', model: 'QA',
+        serial: 'QA', isMobile: false, assetCategory: 'biomedical', requiresSanitaryClassification: false, requiresElectricalClassification: false,
+        maintenanceFrequency: 'trimestral', requiresCalibration, calibrationFrequency: requiresCalibration ? 'anual' : null,
+        catalogCreatedBy: user.id });
+      const saved = await updateAsset(clientId, edited.asset_id, editPayload(false));
+      assert.ok(saved.calibrationSync.changes.some((item) => item.id === edited.id && item.status === 'not_required'));
+      const { rows: [excluded] } = await query('SELECT status,planned_date,deadline_date FROM calibration_schedule_items WHERE id=$1', [edited.id]);
+      assert.equal(excluded.status, 'not_required');
+      assert.equal(excluded.planned_date.toISOString().slice(0, 10), edited.planned_date.slice(0, 10));
+      assert.equal((await query('SELECT pdf_path FROM calibration_schedules WHERE id=$1', [generated.body.id])).rows[0].pdf_path, null);
+      assert.equal(await setCalibrationSchedulePdf(generated.body.id, '/stale.pdf', { itemIds: current.map((item) => item.id) }), false);
+      await assert.rejects(syncCalibrationRequirements({ clientId, schema: secondaryTenant.schema_name }));
+      assert.deepEqual((await query('SELECT * FROM calibration_schedule_items WHERE schedule_id=$1', [other.id])).rows, otherBefore);
+
+      // Simulate corrections made before this fix was installed, then open the PDF first.
+      await query(`UPDATE "${schema}".assets SET requires_calibration=false,calibration_frequency=NULL WHERE id=$1`, [legacy.asset_id]);
+      const regenerated = await fetch(base + correctedUrl + '/pdf', { headers });
+      assert.equal(regenerated.status, 200);
+      assert.equal(Buffer.from(await regenerated.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
+      const visible = (await request(`${correctedUrl}/items`, undefined, 'GET')).body;
+      assert.deepEqual(visible.map((item) => item.id), [completed.id]);
+      const [summary] = (await request(`/calibration/schedules/${clientId}?year=${year}`, undefined, 'GET')).body;
+      assert.equal(summary.total_items, 1); assert.equal(summary.completed_items, 1); assert.equal(summary.status, 'closed');
+      assert.equal((await query('SELECT id FROM calibration_schedule_items WHERE schedule_id=$1', [generated.body.id])).rowCount, 3);
+      assert.equal((await upload(legacy.id)).status, 409);
+      assert.equal(await setCalibrationItemPdf(legacy.id, '/must-not-be-saved.pdf', clientId), false);
+      await query(`UPDATE "${schema}".assets SET requires_calibration=false,calibration_frequency=NULL WHERE id=$1`, [completed.asset_id]);
+      await request(`/calibration/schedules/${clientId}?year=${year}`, undefined, 'GET');
+      assert.deepEqual((await query(`SELECT i.* FROM calibration_schedule_items i JOIN calibration_schedules s ON s.id=i.schedule_id
+        WHERE s.client_id=$1 AND i.pdf_path IS NOT NULL ORDER BY i.id`, [clientId])).rows, evidenceBefore);
+      assert.equal((await fetch(`${base}/calibration/items/${completed.id}/pdf`, { headers: engineerHeaders })).status, 200);
+      const auditCount = async () => (await query("SELECT COUNT(*)::int AS n FROM audit_logs WHERE details->>'clientId'=$1 AND action='CALIBRATION_REQUIREMENT_SYNC'", [clientId])).rows[0].n;
+      const audits = await auditCount();
+      await request(`${correctedUrl}/items`, undefined, 'GET');
+      await request(`/calibration/schedules/${clientId}?year=${year}`, undefined, 'GET');
+      assert.equal(await auditCount(), audits);
+
+      await updateAsset(clientId, edited.asset_id, editPayload(true));
+      const [restored] = (await request(`/calibration/schedules/${clientId}?year=${year}`, undefined, 'GET')).body;
+      assert.equal(restored.total_items, 2); assert.equal(restored.completed_items, 1); assert.equal(restored.status, 'approved');
+      const tx = await pool.connect();
+      let uploadPromise;
+      try {
+        await tx.query('BEGIN');
+        await tx.query(`UPDATE "${schema}".assets SET requires_calibration=false WHERE id=$1`, [edited.asset_id]);
+        uploadPromise = setCalibrationItemPdf(edited.id, '/must-not-be-saved.pdf', clientId);
+        await syncCalibrationRequirements({ clientId, assetIds: [edited.asset_id], actorUserId: user.id, connection: tx });
+        await tx.query('COMMIT');
+        assert.equal(await uploadPromise, false);
+      } finally {
+        await tx.query('ROLLBACK');
+        tx.release();
+        if (uploadPromise) await uploadPromise;
+      }
+      const { rows: [last] } = await query('SELECT status,pdf_path FROM calibration_schedule_items WHERE id=$1', [edited.id]);
+      assert.equal(last.status, 'not_required'); assert.equal(last.pdf_path, null);
+    });
+    await t.test('draft approval ignores excluded equipment and rejects an empty applicable schedule', async () => {
+      const year = new Date().getUTCFullYear() + 3;
+      const assets = (await query(`SELECT id FROM "${schema}".assets ORDER BY code`)).rows;
+      const draft = await createCalibrationScheduleWithItems({ clientId, year, startDate: `${year}-09-01`, createdBy: user.id,
+        items: assets.map((asset) => ({ assetId: asset.id, frequency: 'anual', plannedDate: `${year}-09-01`, deadlineDate: `${year}-10-01` })) });
+      const draftUrl = `/calibration/schedules/${draft.id}`;
+      assert.equal((await request(`${draftUrl}/approve`, {})).status, 400);
+      assert.equal((await query('SELECT status FROM calibration_schedules WHERE id=$1', [draft.id])).rows[0].status, 'draft');
+      await query(`UPDATE "${schema}".assets SET requires_calibration=true,calibration_frequency='anual' WHERE id=$1`, [assets[0].id]);
+      await query('UPDATE calibration_schedule_items SET programming_confirmed=true WHERE schedule_id=$1 AND asset_id=$2', [draft.id, assets[0].id]);
+      assert.equal((await request(`${draftUrl}/approve`, {})).status, 200);
+      const [summary] = (await request(`/calibration/schedules/${clientId}?year=${year}`, undefined, 'GET')).body;
+      assert.equal(summary.total_items, 1); assert.equal(summary.programmed_items, 1); assert.equal(summary.status, 'approved');
+    });
   } finally {
     if (api?.exitCode === null) { api.kill('SIGTERM'); await new Promise((r) => api.once('exit', r)); }
-    await query('DELETE FROM audit_logs WHERE actor_user_id IN (SELECT id FROM users WHERE client_id=$1)', [clientId]);
+    await query("DELETE FROM audit_logs WHERE actor_user_id IN (SELECT id FROM users WHERE client_id=$1) OR details->>'clientId'=$1::text", [clientId]);
+    await query('DELETE FROM biomedical_equipment_catalog WHERE name=$1 AND submitted_client_id=$2', [`${tag} EDITADO`.toUpperCase(), clientId]);
     await query('DELETE FROM users WHERE client_id=$1', [clientId]);
     await query('DELETE FROM clients WHERE id=$1', [clientId]);
     assert.ok(schema.startsWith('cliente_qa_calibration_')); await query(`DROP SCHEMA "${schema}" CASCADE`);
+    if (secondaryTenant) {
+      await query("DELETE FROM audit_logs WHERE details->>'clientId'=$1", [secondaryTenant.id]);
+      await query('DELETE FROM clients WHERE id=$1', [secondaryTenant.id]);
+      assert.ok(secondaryTenant.schema_name.startsWith('cliente_qa_calibration_'));
+      await query(`DROP SCHEMA "${secondaryTenant.schema_name}" CASCADE`);
+    }
     await fs.rm(`uploads/clients/${clientId}`, { recursive: true, force: true });
     await pool.end();
   }

@@ -1,5 +1,66 @@
 import { query, withTransaction } from './db.js';
+import { logAudit } from './audit.js';
 import { buildCalibrationDraftItems, normalizeUuidList, ScheduleValidationError } from './schedule-workflow.js';
+
+export async function syncCalibrationRequirements({ clientId, assetIds, scheduleId, schema,
+  actorUserId = null, connection } = {}) {
+  if (assetIds) normalizeUuidList(assetIds, 'Los equipos');
+  const synchronize = async (db) => {
+    const { rows: [tenant] } = await db.query('SELECT name, schema_name FROM clients WHERE id = $1', [clientId]);
+    if (!tenant || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tenant.schema_name)
+      || (schema && schema !== tenant.schema_name)) {
+      throw new ScheduleValidationError('Cliente no disponible para sincronizar calibraciones.');
+    }
+    const params = [clientId, assetIds || null, scheduleId || null];
+    const { rows: schedules } = await db.query(`SELECT s.id FROM calibration_schedules s
+      WHERE s.client_id = $1 AND ($3::uuid IS NULL OR s.id = $3::uuid)
+        AND EXISTS (
+          SELECT 1 FROM calibration_schedule_items i
+          JOIN "${tenant.schema_name}".assets a ON a.id = i.asset_id
+          WHERE i.schedule_id = s.id AND ($2::uuid[] IS NULL OR i.asset_id = ANY($2::uuid[]))
+            AND i.pdf_path IS NULL AND i.completed_at IS NULL AND i.status <> 'done'
+            AND ((a.requires_calibration IS NOT TRUE AND i.status <> 'not_required')
+              OR (a.requires_calibration IS TRUE AND i.status = 'not_required'))
+        ) ORDER BY s.id FOR UPDATE`, params);
+    const changes = [];
+    for (const schedule of schedules) {
+      // Keep the original windows and every completed record; only reconcile unexecuted work.
+      const { rows } = await db.query(`UPDATE calibration_schedule_items i
+        SET status = CASE WHEN a.requires_calibration IS TRUE THEN 'pending' ELSE 'not_required' END
+        FROM "${tenant.schema_name}".assets a
+        WHERE i.schedule_id = $1 AND a.id = i.asset_id
+          AND ($2::uuid[] IS NULL OR i.asset_id = ANY($2::uuid[]))
+          AND i.pdf_path IS NULL AND i.completed_at IS NULL AND i.status <> 'done'
+          AND ((a.requires_calibration IS NOT TRUE AND i.status <> 'not_required')
+            OR (a.requires_calibration IS TRUE AND i.status = 'not_required'))
+        RETURNING i.id, i.asset_id, i.status`, [schedule.id, assetIds || null]);
+      if (!rows.length) continue;
+      await db.query(`UPDATE calibration_schedules s SET pdf_path = NULL,
+        status = CASE
+          WHEN s.status = 'draft' THEN 'draft'
+          WHEN EXISTS (SELECT 1 FROM calibration_schedule_items i WHERE i.schedule_id = s.id AND i.status <> 'not_required')
+            AND NOT EXISTS (SELECT 1 FROM calibration_schedule_items i WHERE i.schedule_id = s.id
+              AND i.status NOT IN ('done', 'not_required') AND i.pdf_path IS NULL) THEN 'closed'
+          WHEN s.status = 'closed' AND EXISTS (SELECT 1 FROM calibration_schedule_items i
+            WHERE i.schedule_id = s.id AND i.status NOT IN ('done', 'not_required') AND i.pdf_path IS NULL) THEN 'approved'
+          ELSE s.status END
+        WHERE s.id = $1`, [schedule.id]);
+      await logAudit({ actorUserId, actorUsername: actorUserId ? null : 'sistema',
+        action: 'CALIBRATION_REQUIREMENT_SYNC', targetUserId: clientId, targetUsername: tenant.name,
+        details: { category: 'schedule', clientId, scheduleId: schedule.id,
+          reason: 'Cambio del requisito de calibración en la hoja de vida', items: rows } },
+      { queryRunner: db.query.bind(db) });
+      changes.push(...rows.map((item) => ({ ...item, scheduleId: schedule.id })));
+    }
+    return { changes };
+  };
+  return connection ? synchronize(connection) : withTransaction(synchronize);
+}
+
+async function syncCalibrationScheduleRequirements(scheduleId, schema) {
+  const schedule = await getCalibrationScheduleById(scheduleId);
+  if (schedule) await syncCalibrationRequirements({ clientId: schedule.client_id, scheduleId, schema });
+}
 
 export async function createCalibrationSchedule({ clientId, year, startDate, createdBy }) {
   const { rows } = await query(
@@ -49,6 +110,7 @@ export async function createCalibrationScheduleWithItems({ clientId, year, start
 }
 
 export async function listCalibrationSchedules(clientId, year) {
+  await syncCalibrationRequirements({ clientId });
   const params = [clientId];
   let where = 'schedule.client_id = $1';
   if (year) {
@@ -59,9 +121,9 @@ export async function listCalibrationSchedules(clientId, year) {
     `SELECT schedule.id, schedule.client_id, schedule.year, schedule.start_date,
             schedule.status, schedule.created_at, schedule.approved_at, schedule.pdf_path,
             (SELECT COUNT(*)::int FROM calibration_schedule_items item
-             WHERE item.schedule_id = schedule.id) AS total_items,
+             WHERE item.schedule_id = schedule.id AND item.status <> 'not_required') AS total_items,
             (SELECT COUNT(*)::int FROM calibration_schedule_items item
-             WHERE item.schedule_id = schedule.id AND item.programming_confirmed) AS programmed_items,
+             WHERE item.schedule_id = schedule.id AND item.status <> 'not_required' AND item.programming_confirmed) AS programmed_items,
             (SELECT COUNT(*)::int FROM calibration_schedule_items item
              WHERE item.schedule_id = schedule.id AND item.pdf_path IS NOT NULL) AS completed_items
      FROM calibration_schedules schedule
@@ -83,6 +145,7 @@ export async function getCalibrationScheduleById(scheduleId) {
 }
 
 export async function approveCalibrationSchedule(scheduleId) {
+  await syncCalibrationScheduleRequirements(scheduleId);
   return withTransaction(async (client) => {
     await client.query('SELECT id FROM calibration_schedules WHERE id = $1 FOR UPDATE', [scheduleId]);
     const { rows } = await client.query(
@@ -90,10 +153,10 @@ export async function approveCalibrationSchedule(scheduleId) {
      SET status = 'approved', approved_at = NOW(), pdf_path = NULL
      WHERE schedule.id = $1
        AND schedule.status = 'draft'
-       AND EXISTS (SELECT 1 FROM calibration_schedule_items item WHERE item.schedule_id = schedule.id)
+       AND EXISTS (SELECT 1 FROM calibration_schedule_items item WHERE item.schedule_id = schedule.id AND item.status <> 'not_required')
        AND NOT EXISTS (
          SELECT 1 FROM calibration_schedule_items item
-         WHERE item.schedule_id = schedule.id AND NOT item.programming_confirmed
+         WHERE item.schedule_id = schedule.id AND item.status <> 'not_required' AND NOT item.programming_confirmed
        )
      RETURNING schedule.id`,
     [scheduleId]
@@ -102,8 +165,17 @@ export async function approveCalibrationSchedule(scheduleId) {
   });
 }
 
-export async function setCalibrationSchedulePdf(scheduleId, pdfPath) {
+export async function setCalibrationSchedulePdf(scheduleId, pdfPath, { itemIds } = {}) {
+  if (pdfPath && itemIds) {
+    const result = await query(`UPDATE calibration_schedules SET pdf_path = $1 WHERE id = $2
+      AND (SELECT array_agg(i.id ORDER BY i.id) FROM calibration_schedule_items i
+        WHERE i.schedule_id = $2 AND i.status <> 'not_required')
+      IS NOT DISTINCT FROM (SELECT array_agg(data.id ORDER BY data.id) FROM UNNEST($3::uuid[]) AS data(id))`,
+    [pdfPath, scheduleId, itemIds]);
+    return result.rowCount > 0;
+  }
   await query('UPDATE calibration_schedules SET pdf_path = $1 WHERE id = $2', [pdfPath, scheduleId]);
+  return true;
 }
 
 export async function deleteCalibrationSchedule(scheduleId, clientId) {
@@ -121,8 +193,9 @@ export async function deleteCalibrationSchedule(scheduleId, clientId) {
 }
 
 export async function countCalibrationItems(scheduleId) {
+  await syncCalibrationScheduleRequirements(scheduleId);
   const { rows } = await query(
-    'SELECT COUNT(*)::int AS count FROM calibration_schedule_items WHERE schedule_id = $1',
+    "SELECT COUNT(*)::int AS count FROM calibration_schedule_items WHERE schedule_id = $1 AND status <> 'not_required'",
     [scheduleId]
   );
   return rows[0]?.count ?? 0;
@@ -132,7 +205,7 @@ export async function countUnprogrammedCalibrationItems(scheduleId) {
   const { rows } = await query(
     `SELECT COUNT(*)::int AS count
      FROM calibration_schedule_items
-     WHERE schedule_id = $1 AND NOT programming_confirmed`,
+     WHERE schedule_id = $1 AND status <> 'not_required' AND NOT programming_confirmed`,
     [scheduleId]
   );
   return rows[0]?.count ?? 0;
@@ -144,7 +217,7 @@ export async function refreshCalibrationScheduleStatus(scheduleId) {
      SET status = CASE
        WHEN NOT EXISTS (
          SELECT 1 FROM calibration_schedule_items item
-         WHERE item.schedule_id = schedule.id AND item.status <> 'done'
+         WHERE item.schedule_id = schedule.id AND item.status NOT IN ('done', 'not_required')
        ) THEN 'closed'
        WHEN schedule.status = 'closed' THEN 'approved'
        ELSE schedule.status
@@ -167,6 +240,7 @@ export async function insertCalibrationItems(items) {
 }
 
 export async function listCalibrationItemsWithSchema(scheduleId, schema) {
+  await syncCalibrationScheduleRequirements(scheduleId, schema);
   const { rows } = await query(
     `SELECT i.id, i.schedule_id, i.asset_id, i.frequency, i.planned_date, i.deadline_date, i.status, i.pdf_path,
             i.programming_confirmed, i.programmed_at, i.programmed_by,
@@ -177,7 +251,7 @@ export async function listCalibrationItemsWithSchema(scheduleId, schema) {
      LEFT JOIN "${schema}".areas ar ON ar.id = a.area_id
      LEFT JOIN "${schema}".sites s ON s.id = a.site_id
      LEFT JOIN "${schema}".locations lo ON lo.id = a.location_id
-     WHERE i.schedule_id = $1
+     WHERE i.schedule_id = $1 AND i.status <> 'not_required'
      ORDER BY i.planned_date ASC`,
     [scheduleId]
   );
@@ -207,7 +281,7 @@ export async function updateCalibrationItems(scheduleId, items, programmedBy) {
            programmed_by = $5::uuid
        FROM UNNEST($2::uuid[], $3::date[], $4::date[])
          AS data(id, planned_date, deadline_date)
-       WHERE target.schedule_id = $1 AND target.id = data.id
+       WHERE target.schedule_id = $1 AND target.id = data.id AND target.status <> 'not_required'
        RETURNING target.id`,
       [
         scheduleId,
@@ -223,7 +297,7 @@ export async function updateCalibrationItems(scheduleId, items, programmedBy) {
       throw error;
     }
     await client.query(`UPDATE calibration_schedules SET pdf_path = NULL,
-      start_date = (SELECT MIN(planned_date) FROM calibration_schedule_items WHERE schedule_id = $1)
+      start_date = (SELECT MIN(planned_date) FROM calibration_schedule_items WHERE schedule_id = $1 AND status <> 'not_required')
       WHERE id = $1`, [scheduleId]);
     return rows;
   });
@@ -231,6 +305,7 @@ export async function updateCalibrationItems(scheduleId, items, programmedBy) {
 
 export async function reprogramCalibrationDraft({ scheduleId, clientId, siteId, startDate, frequency }) {
   if (siteId) normalizeUuidList([siteId], 'La sede');
+  await syncCalibrationRequirements({ clientId, scheduleId });
   return withTransaction(async (connection) => {
     const { rows: [schedule] } = await connection.query(
       'SELECT * FROM calibration_schedules WHERE id = $1 AND client_id = $2 FOR UPDATE', [scheduleId, clientId]
@@ -242,7 +317,7 @@ export async function reprogramCalibrationDraft({ scheduleId, clientId, siteId, 
     if (!tenant || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tenant.schema_name)) throw new Error('Invalid tenant schema');
     const { rows: current } = await connection.query(`SELECT i.*, a.site_id FROM calibration_schedule_items i
       JOIN "${tenant.schema_name}".assets a ON a.id = i.asset_id
-      WHERE i.schedule_id = $1 AND ($2::uuid IS NULL OR a.site_id = $2::uuid)
+      WHERE i.schedule_id = $1 AND i.status <> 'not_required' AND ($2::uuid IS NULL OR a.site_id = $2::uuid)
       FOR UPDATE OF i`, [scheduleId, siteId || null]);
     if (!current.length) throw new ScheduleValidationError('No hay calibraciones en la sede seleccionada.');
     if (current.some((item) => item.pdf_path || item.completed_at || item.status === 'done')) {
@@ -259,7 +334,7 @@ export async function reprogramCalibrationDraft({ scheduleId, clientId, siteId, 
       [scheduleId, items.map((item) => item.assetId), items.map((item) => item.frequency),
         items.map((item) => item.plannedDate), items.map((item) => item.deadlineDate)]);
     await connection.query(`UPDATE calibration_schedules SET pdf_path = NULL,
-      start_date = (SELECT MIN(planned_date) FROM calibration_schedule_items WHERE schedule_id = $1)
+      start_date = (SELECT MIN(planned_date) FROM calibration_schedule_items WHERE schedule_id = $1 AND status <> 'not_required')
       WHERE id = $1`, [scheduleId]);
     return { assetCount: assets.length, previousItemCount: current.length, itemCount: items.length };
   });
@@ -267,6 +342,15 @@ export async function reprogramCalibrationDraft({ scheduleId, clientId, siteId, 
 
 export async function setCalibrationItemPdf(itemId, pdfPath, clientId) {
   return withTransaction(async (connection) => {
+    const { rows: [tenant] } = await connection.query('SELECT schema_name FROM clients WHERE id = $1', [clientId]);
+    if (!tenant || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tenant.schema_name)) return false;
+    // Asset edits take the asset lock first, then the schedule lock in the same transaction.
+    const { rows: [asset] } = await connection.query(`SELECT a.requires_calibration
+      FROM "${tenant.schema_name}".assets a
+      JOIN calibration_schedule_items i ON i.asset_id = a.id
+      JOIN calibration_schedules s ON s.id = i.schedule_id
+      WHERE i.id = $1 AND s.client_id = $2 FOR SHARE OF a`, [itemId, clientId]);
+    if (!asset?.requires_calibration) return false;
     // Serialize uploads against approval/deletion and concurrent completion of the last items.
     const { rows: [schedule] } = await connection.query(`SELECT s.id, s.status FROM calibration_schedules s
       JOIN calibration_schedule_items i ON i.schedule_id = s.id
@@ -274,11 +358,11 @@ export async function setCalibrationItemPdf(itemId, pdfPath, clientId) {
     if (!schedule || schedule.status !== 'approved') return false;
     const result = await connection.query(`UPDATE calibration_schedule_items
       SET pdf_path = $1, status = 'done', completed_at = NOW()
-      WHERE id = $2 AND pdf_path IS NULL RETURNING id`, [pdfPath, itemId]);
+      WHERE id = $2 AND pdf_path IS NULL AND status <> 'not_required' RETURNING id`, [pdfPath, itemId]);
     if (!result.rowCount) return false;
     await connection.query(`UPDATE calibration_schedules s SET pdf_path = NULL,
       status = CASE WHEN NOT EXISTS (SELECT 1 FROM calibration_schedule_items i
-        WHERE i.schedule_id = s.id AND i.pdf_path IS NULL) THEN 'closed' ELSE 'approved' END
+        WHERE i.schedule_id = s.id AND i.status <> 'not_required' AND i.pdf_path IS NULL) THEN 'closed' ELSE 'approved' END
       WHERE s.id = $1`, [schedule.id]);
     return true;
   });
