@@ -143,10 +143,26 @@
         <div class="edit-section">
           <h4>Datos principales</h4>
           <div class="edit-grid">
-            <label>
-              Usuario
-              <input type="text" name="username" [(ngModel)]="username" required />
+            <label *ngIf="isClientScopedRole(role)">
+              Usuario base
+              <input type="text" name="usernameBase" [ngModel]="usernameBase"
+                (ngModelChange)="onUsernameBaseChange($event)" placeholder="Ej: fisioterapia"
+                maxlength="80" autocomplete="off" [disabled]="creatingUser" />
             </label>
+            <div class="username-field">
+              <label for="create-username">Usuario de acceso</label>
+              <div class="username-control">
+                <input id="create-username" type="text" name="username" [ngModel]="username"
+                  (ngModelChange)="onUsernameChange($event)" required maxlength="80" autocomplete="off"
+                  [disabled]="creatingUser" aria-describedby="username-feedback"
+                  [attr.aria-invalid]="usernameStatus === 'unavailable' || usernameStatus === 'error' ? 'true' : null" />
+                <button *ngIf="isClientScopedRole(role)" type="button" class="username-generate"
+                  title="Generar usuario con el hospital" [disabled]="creatingUser || !usernameBase.trim()"
+                  (click)="generateHospitalUsername()">Generar</button>
+              </div>
+              <small id="username-feedback" class="username-feedback" [class.available]="usernameStatus === 'available'"
+                [class.invalid]="usernameStatus === 'unavailable' || usernameStatus === 'error'" role="status" aria-live="polite">{{ usernameMessage }}</small>
+            </div>
             <label>
               Nombre completo
               <input type="text" name="displayName" [(ngModel)]="displayName" placeholder="Nombres y apellidos" required />
@@ -157,7 +173,7 @@
             </label>
             <label>
               Rol
-              <select name="role" [(ngModel)]="role" (change)="onCreateRoleChange()">
+              <select name="role" [(ngModel)]="role" (change)="onCreateRoleChange()" [disabled]="creatingUser">
                 <option *ngFor="let roleOption of creatableRoles" [value]="roleOption">
                   {{ roleLabel(roleOption) }}
                 </option>
@@ -209,7 +225,7 @@
 
         <label *ngIf="isPlatformAdmin() && isClientScopedRole(role)">
           Cliente asignado
-          <select name="clientId" [(ngModel)]="clientId" (change)="onCreateClientChange()">
+          <select name="clientId" [(ngModel)]="clientId" (change)="onCreateClientChange()" [disabled]="creatingUser">
             <option *ngFor="let client of clients" [value]="client.id">{{ client.name }}</option>
           </select>
         </label>
@@ -254,7 +270,7 @@
         </div>
 
         <div class="edit-actions">
-          <button type="submit" class="save-edit" [disabled]="creatingUser">
+          <button type="submit" class="save-edit" [disabled]="creatingUser || !username.trim() || usernameStatus === 'checking' || usernameStatus === 'unavailable'">
             {{ creatingUser ? 'Creando...' : 'Crear usuario' }}
           </button>
           <button type="button" class="cancel-edit" [disabled]="creatingUser" (click)="closeCreateUserModal()">Cancelar</button>

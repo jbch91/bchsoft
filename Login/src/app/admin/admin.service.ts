@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout } from 'rxjs';
 import { Role } from '../auth/models';
 import { getApiBase } from '../core/api-base';
 
@@ -275,7 +275,7 @@ export class AdminService {
     invimaRegistration?: string | null;
     areaIds?: string[];
     locationIds?: string[];
-  }): Promise<{ id: string; invitation_sent: boolean }> {
+  }): Promise<{ id: string; username?: string; invitation_sent: boolean }> {
     if (payload.signatureFile) {
       const form = new FormData();
       form.append('username', payload.username);
@@ -298,12 +298,22 @@ export class AdminService {
       form.append('locationIds', JSON.stringify(payload.locationIds ?? []));
       form.append('signature', payload.signatureFile);
       return firstValueFrom(
-        this.http.post<{ id: string; invitation_sent: boolean }>(`${this.apiBase}/admin/users`, form)
+        this.http.post<{ id: string; username?: string; invitation_sent: boolean }>(`${this.apiBase}/admin/users`, form)
       );
     }
     const { signatureFile, ...rest } = payload;
     return firstValueFrom(
-      this.http.post<{ id: string; invitation_sent: boolean }>(`${this.apiBase}/admin/users`, rest)
+      this.http.post<{ id: string; username?: string; invitation_sent: boolean }>(`${this.apiBase}/admin/users`, rest)
+    );
+  }
+
+  async previewUsername(payload: { role: Role; clientId?: string; base?: string; username?: string }): Promise<{ username: string; available: boolean }> {
+    const params: Record<string, string> = { role: payload.role };
+    if (payload.clientId) params['clientId'] = payload.clientId;
+    if (payload.base !== undefined) params['base'] = payload.base;
+    if (payload.username !== undefined) params['username'] = payload.username;
+    return firstValueFrom(
+      this.http.get<{ username: string; available: boolean }>(`${this.apiBase}/admin/users/username-preview`, { params }).pipe(timeout(10000))
     );
   }
 

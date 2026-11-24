@@ -39,12 +39,13 @@ export async function sendResetCode({ to, code }) {
   });
 }
 
-export async function sendPasswordSetupCode({ to, code, clientName }) {
+export async function sendPasswordSetupCode({ to, code, clientName, username }) {
   const { transporter, user, fromName } = getTransporter();
   const from = `${fromName} <${user}>`;
   const subject = 'Activa tu cuenta en INBIHOSPITALARIO';
   const text = [
     `Se generó un acceso para tu cuenta${clientName ? ` de ${clientName}` : ''} en INBIHOSPITALARIO.`,
+    username ? `Tu usuario de acceso es: ${username}` : '',
     '',
     `Tu código para crear o actualizar tu contraseña es: ${code}.`,
     'Este código expira en 30 minutos.',

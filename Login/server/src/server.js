@@ -12,6 +12,7 @@ import multer from 'multer';
 import sharp from 'sharp';
 import { PDFDocument as PdfMergerDocument } from 'pdf-lib';
 import { query, withTransaction } from './db.js';
+import { previewUsername } from './usernames.js';
 import { createMaintenanceReportSignHandler } from './maintenance-signing.js';
 import { registerMaintenanceAcceptanceRoutes } from './maintenance-acceptance-routes.js';
 import { isStorekeeperWorkspace, maintenanceAcceptanceError } from './maintenance-acceptance-policy.js';
@@ -6983,6 +6984,26 @@ app.patch('/odontology/:clientId/patients/:patientId', requireAuth, async (req, 
   }
 });
 
+app.get('/admin/users/username-preview', requireAuth, requirePermission('users:manage'), async (req, res) => {
+  const { role, clientId, base, username } = req.query;
+  if (typeof role !== 'string' || (base !== undefined && typeof base !== 'string')
+    || (username !== undefined && typeof username !== 'string')
+    || (clientId !== undefined && typeof clientId !== 'string')
+    || (base === undefined && username === undefined) || String(base || '').length > 80) {
+    return res.status(400).json({ message: 'Indica el rol y el usuario que deseas comprobar.' });
+  }
+  if (req.user.clientId && clientId && clientId !== req.user.clientId) {
+    return res.status(403).json({ message: 'Sin acceso al cliente.' });
+  }
+  try {
+    const scope = await resolveManagedUserClientId(req, role, clientId || null);
+    if (scope.error) return res.status(403).json({ message: scope.error });
+    return res.json(await previewUsername({ base, username, clientId: scope.clientId }));
+  } catch (error) {
+    return res.status(error.status || 500).json({ message: error.status ? error.message : 'No se pudo comprobar el usuario.' });
+  }
+});
+
 app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.single('signature'), async (req, res) => {
   const {
     username,
@@ -7059,7 +7080,7 @@ app.post('/admin/users', requireAuth, requirePermission('users:manage'), upload.
       invimaRegistration: cleanInvimaRegistration
     });
     if (result?.error === 'DUPLICATE') {
-      return res.status(409).json({ message: createUserDuplicateMessage(result.fields) });
+      return res.status(409).json({ message: createUserDuplicateMessage(result.fields), fields: result.fields });
     }
     if (result?.error === 'ROLE_NOT_FOUND') {
       return res.status(400).json({
@@ -7257,6 +7278,7 @@ function createUserDuplicateMessage(fields = []) {
 function createUserFailureResponse(error) {
   const code = String(error?.code || '');
   const constraint = String(error?.constraint || '').toLowerCase();
+  if (code === 'INVALID_USERNAME') return { status: 400, message: error.message };
 
   if (code === '23505') {
     if (constraint.includes('username') && constraint.includes('email')) {

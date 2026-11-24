@@ -5,6 +5,36 @@
   margin-top: 24px;
 }
 
+.username-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.username-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.username-control input { min-width: 0; width: 100%; }
+.username-control .username-generate {
+  min-width: 0;
+  height: 38px;
+  padding: 6px 10px;
+  border: 1px solid #b9c4d1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+}
+
+.username-feedback { min-height: 18px; font-size: 12px; color: #526174; }
+.username-feedback.available { color: #21633b; }
+.username-feedback.invalid { color: #a4252b; }
+
 .tab-notices {
   display: grid;
   gap: 8px;

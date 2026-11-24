@@ -30,7 +30,7 @@ export async function requestPasswordSetup(email, { clientName } = {}) {
     return false;
   }
 
-  await sendPasswordSetupCode({ to: email, code: result.code, clientName });
+  await sendPasswordSetupCode({ to: email, code: result.code, clientName, username: result.user.username });
   return true;
 }
 

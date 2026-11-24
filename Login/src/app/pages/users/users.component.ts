@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -47,7 +47,7 @@ interface UserView {
   templateUrl: './users.component.html',
   styleUrl: './users.component.scss'
 })
-export class UsersComponent implements OnInit {
+export class UsersComponent implements OnInit, OnDestroy {
   roles: Role[] = [];
   roleIds = new Map<Role, number>();
   permissions: string[] = [];
@@ -95,6 +95,12 @@ export class UsersComponent implements OnInit {
   readonly lateMaintenanceMaxDays = 20;
 
   username = '';
+  usernameBase = '';
+  usernameStatus: 'idle' | 'checking' | 'available' | 'unavailable' | 'error' = 'idle';
+  usernameMessage = '';
+  private usernameManual = false;
+  private usernameRequest = 0;
+  private usernameTimer: ReturnType<typeof setTimeout> | undefined;
   displayName = '';
   email = '';
   role: Role = 'saas_admin';
@@ -503,6 +509,77 @@ export class UsersComponent implements OnInit {
     await this.load();
   }
 
+  ngOnDestroy(): void {
+    this.cancelUsernameCheck();
+  }
+
+  private cancelUsernameCheck(): void {
+    clearTimeout(this.usernameTimer);
+    this.usernameRequest++;
+  }
+
+  onUsernameBaseChange(value: string): void {
+    this.usernameBase = value;
+    this.usernameManual = false;
+    this.scheduleUsernameCheck();
+  }
+
+  onUsernameChange(value: string): void {
+    this.username = value;
+    this.usernameManual = true;
+    this.scheduleUsernameCheck();
+  }
+
+  generateHospitalUsername(): void {
+    if (this.creatingUser || !this.usernameBase.trim()) return;
+    this.usernameManual = false;
+    this.username = '';
+    this.cancelUsernameCheck();
+    void this.checkUsername(true);
+  }
+
+  private scheduleUsernameCheck(): void {
+    this.cancelUsernameCheck();
+    this.usernameStatus = 'idle';
+    this.usernameMessage = '';
+    if (!this.createUserModalOpen) return;
+    const generate = this.isClientScopedRole(this.role) && !this.usernameManual;
+    if (generate) this.username = '';
+    if (generate && !this.usernameBase.trim()) {
+      this.username = '';
+      return;
+    }
+    if (!generate && !this.username.trim()) return;
+    this.usernameStatus = 'checking';
+    this.usernameMessage = generate ? 'Generando usuario...' : 'Comprobando disponibilidad...';
+    this.usernameTimer = setTimeout(() => void this.checkUsername(generate), 350);
+  }
+
+  private async checkUsername(generate = false): Promise<boolean> {
+    const request = ++this.usernameRequest;
+    const username = this.username.trim();
+    const role = this.role;
+    const clientId = this.isClientScopedRole(role) ? this.clientId : undefined;
+    this.usernameStatus = 'checking';
+    this.usernameMessage = generate ? 'Generando usuario...' : 'Comprobando disponibilidad...';
+    try {
+      const result = await this.admin.previewUsername({ role, clientId,
+        ...(generate ? { base: this.usernameBase.trim() } : { username }) });
+      if (request !== this.usernameRequest || !this.createUserModalOpen) return false;
+      if (generate) this.username = result.username;
+      this.usernameStatus = result.available ? 'available' : 'unavailable';
+      this.usernameMessage = result.available ? 'Usuario disponible' : 'Este usuario ya está registrado.';
+      return result.available;
+    } catch (error) {
+      if (request !== this.usernameRequest || !this.createUserModalOpen) return false;
+      this.usernameStatus = 'error';
+      this.usernameMessage = this.readApiError(error, 'No se pudo comprobar el usuario. Intenta nuevamente.');
+      return false;
+    } finally {
+      if (request === this.usernameRequest && this.createUserModalOpen) this.cdr.detectChanges();
+    }
+  }
+
   async load(): Promise<void> {
     this.loading = true;
     this.errorMessage = '';
@@ -619,8 +696,14 @@ export class UsersComponent implements OnInit {
     this.errorMessage = '';
     this.successMessage = '';
     try {
+      this.cancelUsernameCheck();
+      if (!(await this.checkUsername())) {
+        this.errorMessage = this.usernameMessage;
+        return;
+      }
+      const submittedUsername = this.username.trim();
       const result = await this.admin.createUser({
-        username: this.username.trim(),
+        username: submittedUsername,
         displayName: this.displayName.trim(),
         email: this.email.trim(),
         role: this.role,
@@ -633,6 +716,10 @@ export class UsersComponent implements OnInit {
         locationIds: this.isAreaScopedRole(this.role) ? Array.from(this.createScopeLocationIds) : []
       });
       this.username = '';
+      this.usernameBase = '';
+      this.usernameManual = false;
+      this.usernameStatus = 'idle';
+      this.usernameMessage = '';
       this.displayName = '';
       this.email = '';
       this.role = this.creatableRoles[0] ?? this.assignableRoles[0] ?? 'saas_admin';
@@ -643,14 +730,18 @@ export class UsersComponent implements OnInit {
       this.invimaRegistration = '';
       this.resetCreateAreaScope();
       this.successMessage = result.invitation_sent
-        ? 'Usuario creado correctamente. Se envió el código para definir su contraseña.'
-        : 'Usuario creado correctamente, pero no se pudo enviar el código de contraseña. Usa “Enviar correo” desde el listado para reintentarlo.';
+        ? `Usuario creado correctamente: ${result.username || submittedUsername}. Se envió el código para definir su contraseña.`
+        : `Usuario creado correctamente: ${result.username || submittedUsername}. No se pudo enviar el código de contraseña. Usa “Enviar correo” desde el listado para reintentarlo.`;
       this.createUserModalOpen = false;
       this.activeUserTab = 'list';
       await this.load();
     } catch (error: any) {
       console.error(error);
       this.errorMessage = this.readApiError(error, 'No se pudo crear el usuario.');
+      if (error?.error?.fields?.includes('username')) {
+        this.usernameStatus = 'unavailable';
+        this.usernameMessage = 'Este usuario acaba de registrarse. Genera otro o edítalo.';
+      }
     } finally {
       this.creatingUser = false;
       this.cdr.detectChanges();
@@ -719,6 +810,7 @@ export class UsersComponent implements OnInit {
   }
 
   closeCreateUserModal(): void {
+    if (this.creatingUser) return;
     this.createUserModalOpen = false;
     this.creatingUser = false;
     this.resetCreateUserForm();
@@ -1263,7 +1355,12 @@ export class UsersComponent implements OnInit {
   }
 
   private resetCreateUserForm(): void {
+    this.cancelUsernameCheck();
     this.username = '';
+    this.usernameBase = '';
+    this.usernameManual = false;
+    this.usernameStatus = 'idle';
+    this.usernameMessage = '';
     this.displayName = '';
     this.email = '';
     this.role = this.creatableRoles[0] ?? this.assignableRoles[0] ?? 'saas_admin';
@@ -1276,6 +1373,7 @@ export class UsersComponent implements OnInit {
   }
 
   onCreateRoleChange(): void {
+    this.scheduleUsernameCheck();
     if (!this.requiresSignature(this.role)) this.signatureFile = null;
     this.resetCreateAreaScope();
     if (this.isAreaScopedRole(this.role) && this.clientId) {
@@ -1284,6 +1382,7 @@ export class UsersComponent implements OnInit {
   }
 
   onCreateClientChange(): void {
+    this.scheduleUsernameCheck();
     this.resetCreateAreaScope();
     if (this.isAreaScopedRole(this.role) && this.clientId) {
       void this.loadCreateAreaScope(this.clientId);

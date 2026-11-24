@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt';
 import { pool, query } from './db.js';
+import { validateNewUsername } from './usernames.js';
 import { TEMPORARY_ONLY_PERMISSIONS } from './permission-policy.js';
 import { restrictReaderPermissions } from './reader-policy.js';
 
@@ -482,24 +483,9 @@ export async function createUser({
   documentNumber,
   invimaRegistration
 }) {
-  const cleanUsername = String(username || '').trim();
+  const cleanUsername = validateNewUsername(username);
   const cleanDisplayName = String(displayName || '').trim();
   const cleanEmail = String(email || '').trim();
-
-  const { rows: existing } = await query(
-    'SELECT username, email FROM users WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)',
-    [cleanUsername, cleanEmail]
-  );
-  if (existing.length) {
-    const normalizedUsername = cleanUsername.toLowerCase();
-    const normalizedEmail = cleanEmail.toLowerCase();
-    const fields = new Set();
-    for (const row of existing) {
-      if (String(row.username || '').trim().toLowerCase() === normalizedUsername) fields.add('username');
-      if (String(row.email || '').trim().toLowerCase() === normalizedEmail) fields.add('email');
-    }
-    return { error: 'DUPLICATE', fields: Array.from(fields) };
-  }
 
   const { rows: roleRows } = await query('SELECT id FROM roles WHERE name = $1', [role]);
   if (!roleRows.length) {
@@ -511,11 +497,26 @@ export async function createUser({
   const dbClient = await pool.connect();
   try {
     await dbClient.query('BEGIN');
+    // Match login's case-insensitive lookup, including simultaneous user creation requests.
+    await dbClient.query("SELECT pg_advisory_xact_lock(hashtext('create-user-username'),hashtext(LOWER($1)))", [cleanUsername]);
+    await dbClient.query("SELECT pg_advisory_xact_lock(hashtext('create-user-email'),hashtext(LOWER($1)))", [cleanEmail]);
+    const { rows: existing } = await dbClient.query(
+      'SELECT username, email FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2)',
+      [cleanUsername, cleanEmail]);
+    if (existing.length) {
+      const fields = new Set();
+      for (const row of existing) {
+        if (row.username.toLowerCase() === cleanUsername.toLowerCase()) fields.add('username');
+        if (row.email.toLowerCase() === cleanEmail.toLowerCase()) fields.add('email');
+      }
+      await dbClient.query('ROLLBACK');
+      return { error: 'DUPLICATE', fields: [...fields] };
+    }
     const { rows } = await dbClient.query(
       `INSERT INTO users (
          username, display_name, email, password_hash, client_id,
          document_type, document_number, invima_registration
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, username`,
       [
         cleanUsername,
         cleanDisplayName,
@@ -534,7 +535,7 @@ export async function createUser({
       roleRows[0].id
     ]);
     await dbClient.query('COMMIT');
-    return { id: userId };
+    return { id: userId, username: rows[0].username };
   } catch (error) {
     try {
       await dbClient.query('ROLLBACK');

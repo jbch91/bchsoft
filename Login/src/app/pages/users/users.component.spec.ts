@@ -8,6 +8,7 @@ function buildComponent(createUser: ReturnType<typeof vi.fn>): {
   const requestActionConfirmation = vi.fn();
   const admin = {
     createUser,
+    previewUsername: vi.fn().mockImplementation(async ({ username }) => ({ username, available: true })),
     requestActionConfirmation
   };
   const auth = {
@@ -34,6 +35,44 @@ function buildComponent(createUser: ReturnType<typeof vi.fn>): {
 }
 
 describe('UsersComponent user creation', () => {
+  it('genera por hospital, permite editar y descarta una respuesta anterior', async () => {
+    const { component } = buildComponent(vi.fn());
+    const preview = vi.fn();
+    (component as any).admin.previewUsername = preview;
+    let completeFirst!: (value: unknown) => void;
+    preview.mockReturnValueOnce(new Promise(resolve => completeFirst = resolve));
+    component.usernameBase = 'fisioterapia';
+    component.generateHospitalUsername();
+    component.onUsernameChange('fisio.personal');
+    preview.mockResolvedValueOnce({ username: 'fisio.personal', available: true });
+    await (component as any).checkUsername();
+    completeFirst({ username: 'fisioterapia.hospital', available: true });
+    await Promise.resolve();
+    expect(component.username).toBe('fisio.personal');
+    expect(component.usernameStatus).toBe('available');
+    component.closeCreateUserModal();
+  });
+
+  it('bloquea el guardado cuando el usuario editado está repetido y conserva el modal', async () => {
+    const createUser = vi.fn();
+    const { component } = buildComponent(createUser);
+    (component as any).admin.previewUsername.mockResolvedValue({ username: component.username, available: false });
+    await component.onCreateUser();
+    expect(createUser).not.toHaveBeenCalled();
+    expect(component.createUserModalOpen).toBe(true);
+    expect(component.usernameStatus).toBe('unavailable');
+    expect(component.errorMessage).toContain('ya está registrado');
+  });
+
+  it('informa un error de verificación y no crea un usuario sin comprobarlo', async () => {
+    const createUser = vi.fn();
+    const { component } = buildComponent(createUser);
+    (component as any).admin.previewUsername.mockRejectedValue({ error: { message: 'Sin conexión.' } });
+    await component.onCreateUser();
+    expect(createUser).not.toHaveBeenCalled();
+    expect(component.usernameStatus).toBe('error');
+    expect(component.errorMessage).toBe('Sin conexión.');
+  });
   it('crea un lector sin firma y con las areas seleccionadas', async () => {
     const createUser = vi.fn().mockResolvedValue({ id: 'reader-1', invitation_sent: true });
     const { component } = buildComponent(createUser);
