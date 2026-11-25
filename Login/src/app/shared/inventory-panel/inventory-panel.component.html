@@ -307,7 +307,7 @@
         <span class="status-stack" data-label="Estado">
           <span class="status-pill" [attr.data-status]="item.status">{{ assetStatusLabel(item.status) }}</span>
           <span class="condition-pill spare" *ngIf="item.hasPendingSpare">Repuesto pendiente</span>
-          <span class="condition-pill calibration" *ngIf="item.requiresCalibration">Requiere calibración</span>
+          <span class="condition-pill calibration" *ngIf="item.requiresCalibration" [class.documented]="item.calibrationState === 'documented'">{{ item.calibrationState === 'documented' ? 'Calibración con acta' : 'Calibración pendiente' }}</span>
           <span class="condition-pill warranty" *ngIf="isUnderWarranty(item)">En garantía</span>
         </span>
         <span class="actions life-sheet-actions">
@@ -334,7 +334,7 @@
         <span class="status-stack" data-label="Estado operativo">
           <span class="status-pill" [attr.data-status]="item.status">{{ assetStatusLabel(item.status) }}</span>
           <span class="condition-pill spare" *ngIf="item.hasPendingSpare">Repuesto pendiente</span>
-          <span class="condition-pill calibration" *ngIf="item.requiresCalibration">Requiere calibración</span>
+          <span class="condition-pill calibration" *ngIf="item.requiresCalibration" [class.documented]="item.calibrationState === 'documented'">{{ item.calibrationState === 'documented' ? 'Calibración con acta' : 'Calibración pendiente' }}</span>
           <span class="condition-pill warranty" *ngIf="isUnderWarranty(item)">En garantía</span>
         </span>
         <span class="actions">

@@ -41,6 +41,7 @@ export interface InventoryPanelItem {
   warrantyYears?: number | null;
   hasPendingSpare?: boolean;
   requiresCalibration?: boolean | null;
+  calibrationState?: 'not_required' | 'pending' | 'documented';
   calibrationFrequency?: string | null;
 }
 
@@ -49,6 +50,8 @@ type LifeSheetCondition =
   | 'attention_required'
   | 'pending_spare'
   | 'requires_calibration'
+  | 'calibration_pending'
+  | 'calibration_documented'
   | 'does_not_require_calibration'
   | 'under_warranty'
   | 'operational'
@@ -107,6 +110,8 @@ export class InventoryPanelComponent implements OnDestroy {
     { value: 'attention_required', label: 'Requieren atención' },
     { value: 'pending_spare', label: 'Con repuesto pendiente' },
     { value: 'requires_calibration', label: 'Requieren calibración' },
+    { value: 'calibration_pending', label: 'Calibración pendiente' },
+    { value: 'calibration_documented', label: 'Con acta de calibración' },
     { value: 'does_not_require_calibration', label: 'No requieren calibración' },
     { value: 'under_warranty', label: 'En garantía' },
     { value: 'operational', label: 'Operativos' },
@@ -562,6 +567,8 @@ export class InventoryPanelComponent implements OnDestroy {
     const status = String(item.status || '').toLowerCase();
     if (condition === 'pending_spare') return Boolean(item.hasPendingSpare);
     if (condition === 'requires_calibration') return Boolean(item.requiresCalibration);
+    if (condition === 'calibration_pending') return Boolean(item.requiresCalibration) && item.calibrationState !== 'documented';
+    if (condition === 'calibration_documented') return Boolean(item.requiresCalibration) && item.calibrationState === 'documented';
     if (condition === 'does_not_require_calibration') return item.requiresCalibration === false;
     if (condition === 'under_warranty') return this.isUnderWarranty(item);
     if (condition === 'operational') return ['activo', 'operativo'].includes(status);

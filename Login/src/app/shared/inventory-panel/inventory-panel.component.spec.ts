@@ -34,6 +34,22 @@ function readBlobBuffer(blob: Blob): Promise<ArrayBuffer> {
 }
 
 describe('InventoryPanelComponent operational conditions', () => {
+  it('separa actas cargadas de pendientes sin perder el filtro de equipos que requieren calibración', () => {
+    const component = createComponent();
+    const base = { id: 'cal', code: 'CAL', name: 'Equipo', brand: null, model: null,
+      serial: null, status: 'operativo', requiresCalibration: true };
+    component.items = [{ ...base, id: 'loaded', calibrationState: 'documented' },
+      { ...base, id: 'pending', calibrationState: 'pending' }];
+    component.mode = 'life_sheets';
+    component.filterCondition = 'requires_calibration';
+    expect(component.filteredItems).toHaveLength(2);
+    component.filterCondition = 'calibration_pending';
+    expect(component.filteredItems.map(item => item.id)).toEqual(['pending']);
+    component.filterCondition = 'calibration_documented';
+    expect(component.filteredItems.map(item => item.id)).toEqual(['loaded']);
+    component.exportCondition = 'calibration_pending';
+    expect(component.exportItemCount).toBe(1);
+  });
   const items: InventoryPanelItem[] = [
     {
       id: 'operational',

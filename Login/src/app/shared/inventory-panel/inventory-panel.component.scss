@@ -636,6 +636,12 @@ input[type='file'].file-input:hover::file-selector-button {
   color: #1d4ed8;
 }
 
+.condition-pill.calibration.documented {
+  background: #f0fdf4;
+  border-color: #86c49b;
+  color: #21633b;
+}
+
 .row.header {
   background: var(--table-header-bg);
   color: #ffffff;

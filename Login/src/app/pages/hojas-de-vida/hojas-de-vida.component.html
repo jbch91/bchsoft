@@ -1303,7 +1303,7 @@
               <strong>PDF principal de hoja de vida</strong>
               <span>Documento maestro del equipo con los datos técnicos y ubicación actual.</span>
             </div>
-            <button type="button" class="primary" (click)="openSelectedAssetPdf()">Abrir PDF</button>
+            <button type="button" class="primary" [disabled]="assetPdfLoading" (click)="openSelectedAssetPdf()">{{ assetPdfLoading ? 'Preparando PDF...' : 'Abrir PDF' }}</button>
           </div>
           <div class="document-action" *ngIf="!isReader">
             <div>
@@ -1440,8 +1440,9 @@
 
         </div>
 
+        <p class="error" *ngIf="assetPdfError" role="alert">{{ assetPdfError }}</p>
         <div class="modal-actions">
-          <button type="button" class="primary" (click)="openSelectedAssetPdf()">Abrir PDF</button>
+          <button type="button" class="primary" [disabled]="assetPdfLoading" (click)="openSelectedAssetPdf()">{{ assetPdfLoading ? 'Preparando PDF...' : 'Abrir PDF' }}</button>
           <button type="button" class="ghost" *ngIf="canCreateAssets" (click)="editFromViewModal()">Editar</button>
         </div>
       </div>

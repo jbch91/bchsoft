@@ -49,6 +49,7 @@ interface AssetDto {
   humidity_max?: number | null;
   maintenance_frequency?: string | null;
   requires_calibration?: boolean | null;
+  calibration_state?: 'not_required' | 'pending' | 'documented';
   calibration_frequency?: string | null;
   created_at: string;
 }

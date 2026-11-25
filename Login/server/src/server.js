@@ -10,7 +10,7 @@ import { finished, pipeline } from 'stream/promises';
 import { promisify } from 'util';
 import multer from 'multer';
 import sharp from 'sharp';
-import { PDFDocument as PdfMergerDocument } from 'pdf-lib';
+import { mergeAssetHistoryPdf } from './asset-full-history-pdf.js';
 import { query, withTransaction } from './db.js';
 import { previewUsername } from './usernames.js';
 import { createMaintenanceReportSignHandler } from './maintenance-signing.js';
@@ -3146,41 +3146,17 @@ async function resolveAssetHistoryPdfFile(item) {
     const publicPath = await writeMaintenanceReportPdfFile(item.id);
     filePath = resolveStoredFilePath(publicPath);
   }
-  return filePath;
-}
-
-async function appendPdfFile(mergedPdf, filePath) {
-  const sourceBytes = await fs.promises.readFile(filePath);
-  const sourcePdf = await PdfMergerDocument.load(sourceBytes, {
-    ignoreEncryption: true,
-    updateMetadata: false
-  });
-  const pages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
-  for (const page of pages) {
-    mergedPdf.addPage(page);
-  }
+  const root = path.resolve(process.cwd(), 'uploads') + path.sep;
+  return filePath && path.resolve(filePath).startsWith(root) ? filePath : null;
 }
 
 async function buildAssetFullHistoryPdfBuffer({ client, asset, historyItems }) {
-  const mergedPdf = await PdfMergerDocument.create({ updateMetadata: false });
   const basePdfBuffer = await buildPdfKitBuffer((doc) => buildAssetPdf(doc, { client, asset }));
-  const basePdf = await PdfMergerDocument.load(basePdfBuffer, { updateMetadata: false });
-  const basePages = await mergedPdf.copyPages(basePdf, basePdf.getPageIndices());
-  for (const page of basePages) {
-    mergedPdf.addPage(page);
-  }
-
-  for (const item of historyItems) {
-    const filePath = await resolveAssetHistoryPdfFile(item);
-    if (!filePath) continue;
-    try {
-      await appendPdfFile(mergedPdf, filePath);
-    } catch (error) {
-      console.warn(`No se pudo anexar PDF histórico ${item.id}`, error.message);
-    }
-  }
-
-  return Buffer.from(await mergedPdf.save());
+  // Older form attachments have no document date; retain them after the dated history.
+  const documents = (asset.documents || []).map(item => ({ id: item.id,
+    item_type: 'asset_document', title: item.doc_type, pdf_path: item.file_path }));
+  return mergeAssetHistoryPdf({ basePdf: basePdfBuffer, historyItems: [...historyItems, ...documents],
+    resolveFile: resolveAssetHistoryPdfFile });
 }
 
 function drawClientLogoOrBadge(doc, client, { x, y, fit = [84, 42] }) {
@@ -10086,7 +10062,8 @@ app.get(
       return res.send(pdfBuffer);
     } catch (error) {
       console.error(error);
-      return res.status(500).json({ message: 'No se pudo generar la hoja de vida completa.' });
+      return res.status(error.status || 500).json({ code: error.code,
+        message: error.code === 'ASSET_HISTORY_PDF_UNAVAILABLE' ? error.message : 'No se pudo generar la hoja de vida completa.' });
     }
   }
 );

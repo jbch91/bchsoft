@@ -299,7 +299,30 @@ export async function listAssets(clientId, { assetCategory = null } = {}) {
      ORDER BY created_at DESC`,
     params
   );
-  return rows;
+  return withCalibrationState(clientId, schema, rows);
+}
+
+async function withCalibrationState(clientId, schema, assets) {
+  if (!assets.length) return assets;
+  const { rows } = await query(`WITH records AS (
+    SELECT i.asset_id, i.planned_date AS document_date, i.pdf_path,
+      i.completed_at AS recorded_at, i.id
+    FROM calibration_schedule_items i JOIN calibration_schedules s ON s.id=i.schedule_id
+    WHERE s.client_id=$1 AND s.status IN ('approved','closed')
+      AND i.asset_id=ANY($2::uuid[]) AND i.status <> 'not_required'
+      AND (i.planned_date <= (NOW() AT TIME ZONE 'America/Bogota')::date OR NULLIF(i.pdf_path,'') IS NOT NULL)
+    UNION ALL
+    SELECT asset_id, document_date, file_path, created_at, id
+    FROM "${schema}".asset_history_files
+    WHERE asset_id=ANY($2::uuid[]) AND document_type='calibration'
+  ) SELECT DISTINCT ON(asset_id) asset_id, document_date, NULLIF(pdf_path,'') IS NOT NULL AS documented
+    FROM records ORDER BY asset_id, document_date DESC, (NULLIF(pdf_path,'') IS NOT NULL) DESC,
+      recorded_at DESC NULLS LAST, id DESC`, [clientId, assets.map(asset => asset.id)]);
+  const latest = new Map(rows.map(row => [row.asset_id, row]));
+  return assets.map(asset => ({ ...asset,
+    calibration_state: !asset.requires_calibration ? 'not_required'
+      : latest.get(asset.id)?.documented ? 'documented' : 'pending'
+  }));
 }
 
 export async function listAssetsForBlankMaintenanceProtocols(
@@ -408,7 +431,7 @@ export async function listAssetsForReader(clientId, userId, { assetCategory = nu
      ORDER BY created_at DESC`,
     params
   );
-  return rows;
+  return withCalibrationState(clientId, schema, rows);
 }
 
 export async function readerCanAccessAsset(clientId, userId, assetId) {
@@ -1347,8 +1370,10 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
          AND (r.voided_at IS NOT NULL OR r.closure_kind = 'not_located' OR EXISTS (
            SELECT 1 FROM report_signatures s WHERE s.report_id = r.id
            AND (
-             (r.area_responsible_required AND s.role = 'responsable_area')
-             OR (NOT r.area_responsible_required AND (
+             (r.acceptance_delegate_user_id IS NOT NULL AND s.role = 'almacenista'
+               AND s.user_id = r.acceptance_delegate_user_id)
+             OR (r.acceptance_delegate_user_id IS NULL AND r.area_responsible_required AND s.role = 'responsable_area')
+             OR (r.acceptance_delegate_user_id IS NULL AND NOT r.area_responsible_required AND (
                s.role IN ('responsable_area', 'almacenista', 'lector', 'viewer', 'visor', 'superuser')
                OR (r.type <> 'preventivo' AND s.user_id = req.requested_by)
              ))
@@ -1409,7 +1434,7 @@ export async function listAssetHistory(clientId, assetId, { from, to, order = 'a
      SELECT *
      FROM history
      WHERE ${clauses.join(' AND ')}
-     ORDER BY event_date ${orderDir}, created_at ${orderDir}, title ASC
+     ORDER BY event_date ${orderDir}, created_at ${orderDir}, title ASC, id ${orderDir}, item_type ASC
      LIMIT $${limitParam} OFFSET $${offsetParam}`,
     params
   );

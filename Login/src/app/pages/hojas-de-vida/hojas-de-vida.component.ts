@@ -182,6 +182,8 @@ export class HojasDeVidaComponent implements OnDestroy {
   scheduleProgrammingError = '';
   private originalMaintenanceFrequency = '';
   assetModalMode: 'create' | 'edit' | 'view' | null = null;
+  assetPdfLoading = false;
+  assetPdfError = '';
   selectedAssetForModal: AssetView | null = null;
   assetDetailsLoading = false;
   detailModalTab: 'summary' | 'history' | 'documents' = 'summary';
@@ -994,6 +996,7 @@ export class HojasDeVidaComponent implements OnDestroy {
 
   async openViewModal(asset: InventoryPanelItem): Promise<void> {
     this.errorMessage = '';
+    this.assetPdfError = '';
     this.successMessage = '';
     this.selectedAssetForModal = this.assets.find((item) => item.id === asset.id) ?? (asset as AssetView);
     this.assetModalMode = 'view';
@@ -2139,6 +2142,7 @@ export class HojasDeVidaComponent implements OnDestroy {
         warrantyYears: row.warranty_years ?? null,
         hasPendingSpare: row.has_pending_spare ?? false,
         requiresCalibration: row.requires_calibration ?? false,
+        calibrationState: row.calibration_state,
         calibrationFrequency: row.calibration_frequency ?? null
       }));
     } catch (error) {
@@ -2877,9 +2881,34 @@ export class HojasDeVidaComponent implements OnDestroy {
   }
 
   async downloadPdf(asset: AssetView): Promise<void> {
-    if (!this.selectedClientId) return;
-    const blob = await this.biomed.downloadAssetFullPdf(this.selectedClientId, asset.id);
-    this.openBlob(blob);
+    if (!this.selectedClientId || this.assetPdfLoading) return;
+    this.assetPdfError = '';
+    const preview = window.open('about:blank', '_blank');
+    if (!preview) {
+      this.assetPdfError = 'Permite abrir nuevas pestañas para consultar el PDF completo.';
+      return;
+    }
+    preview.opener = null;
+    preview.document.title = 'Preparando hoja de vida completa';
+    this.assetPdfLoading = true;
+    try {
+      const blob = await this.biomed.downloadAssetFullPdf(this.selectedClientId, asset.id);
+      const url = URL.createObjectURL(blob);
+      preview.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error: any) {
+      preview.close();
+      let message = this.extractErrorMessage(error);
+      if (error?.error instanceof Blob) {
+        try { message = JSON.parse(await error.error.text()).message; } catch {}
+      }
+      if (this.selectedAssetForModal?.id === asset.id) {
+        this.assetPdfError = message || 'No se pudo abrir el PDF completo de la hoja de vida. Intenta nuevamente.';
+      }
+    } finally {
+      this.assetPdfLoading = false;
+      this.cdr.detectChanges();
+    }
   }
 
   private openBlob(blob: Blob): void {
